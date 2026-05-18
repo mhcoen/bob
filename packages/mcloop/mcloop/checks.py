@@ -6,7 +6,6 @@ import json
 import re
 import shlex
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -331,15 +330,21 @@ def run_checks(
             return False, f"TIMEOUT after {check_timeout}s"
         return result.returncode == 0, f"{result.stdout}{result.stderr}"
 
-    # Run checks in parallel; they're independent read-only operations.
-    # executor.map preserves submission order in the returned iterable
-    # so the "first failure" is reported relative to the original
-    # command list, not thread completion order.
-    with ThreadPoolExecutor(max_workers=len(commands)) as executor:
-        results = list(executor.map(_run_one, commands))
-
-    all_output = [f"$ {cmd}\n{output}" for cmd, (_, output) in zip(commands, results)]
-    for cmd, (passed, _) in zip(commands, results):
+    # Checks must short-circuit: the contract (and
+    # test_run_checks_stops_at_first_failure) requires that once a
+    # command fails, no subsequent command in the list is executed.
+    # An earlier implementation submitted every command to a thread
+    # pool eagerly and only *reported* the first failure; that ran
+    # every check to completion (side effects and all), violating the
+    # contract. Commands are run in list order and execution stops at
+    # the first failure. Checks are few and each spawns a subprocess,
+    # so the dominant cost is the subprocess itself, not scheduling;
+    # sequential ordered execution costs effectively nothing here and
+    # makes the short-circuit guarantee unconditional.
+    all_output: list[str] = []
+    for cmd in commands:
+        passed, output = _run_one(cmd)
+        all_output.append(f"$ {cmd}\n{output}")
         if not passed:
             return CheckResult(
                 passed=False,

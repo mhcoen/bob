@@ -1,9 +1,10 @@
 """Integration tests using real CLI backends (claude, codex).
 
-These tests make actual API calls and require a working CLI installation.
-They are skipped unless the MCLOOP_INTEGRATION environment variable is set.
+These tests make actual API calls and require working CLI authentication.
+They are skipped unless both MCLOOP_INTEGRATION and MCLOOP_REAL_CLI are set.
 
-Run with: MCLOOP_INTEGRATION=1 pytest -m integration tests/integration/test_real_cli.py
+Run with:
+  MCLOOP_INTEGRATION=1 MCLOOP_REAL_CLI=1 pytest -m integration tests/integration/test_real_cli.py
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ import pytest
 
 from mcloop.main import run_loop
 
-_SKIP_REASON = "Set MCLOOP_INTEGRATION=1 to run real CLI integration tests"
+_SKIP_REASON = "Set MCLOOP_INTEGRATION=1 and MCLOOP_REAL_CLI=1 to run real CLI integration tests"
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -52,7 +53,10 @@ def _setup_repo(
 
 
 @pytest.mark.integration
-@unittest.skipUnless(os.environ.get("MCLOOP_INTEGRATION"), _SKIP_REASON)
+@unittest.skipUnless(
+    os.environ.get("MCLOOP_INTEGRATION") and os.environ.get("MCLOOP_REAL_CLI"),
+    _SKIP_REASON,
+)
 def test_real_claude_creates_file_and_commits(tmp_path):
     """Real Claude Code: create hello.txt containing 'hello', check off, commit."""
     plan_md = _setup_repo(
@@ -87,7 +91,10 @@ def test_real_claude_creates_file_and_commits(tmp_path):
 
 
 @pytest.mark.integration
-@unittest.skipUnless(os.environ.get("MCLOOP_INTEGRATION"), _SKIP_REASON)
+@unittest.skipUnless(
+    os.environ.get("MCLOOP_INTEGRATION") and os.environ.get("MCLOOP_REAL_CLI"),
+    _SKIP_REASON,
+)
 def test_real_codex_creates_file_and_commits(tmp_path):
     """Real Codex: create hello.txt containing 'hello', check off, commit."""
     plan_md = _setup_repo(
@@ -122,7 +129,10 @@ def test_real_codex_creates_file_and_commits(tmp_path):
 
 
 @pytest.mark.integration
-@unittest.skipUnless(os.environ.get("MCLOOP_INTEGRATION"), _SKIP_REASON)
+@unittest.skipUnless(
+    os.environ.get("MCLOOP_INTEGRATION") and os.environ.get("MCLOOP_REAL_CLI"),
+    _SKIP_REASON,
+)
 def test_real_claude_check_failure_retries_and_fails(tmp_path):
     """Real Claude Code: task succeeds but check always fails → retries, marked [!]."""
     plan_md = _setup_repo(

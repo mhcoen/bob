@@ -2,7 +2,6 @@
 
 import json
 import subprocess
-import threading
 from unittest.mock import patch
 
 from mcloop.checks import (
@@ -219,7 +218,8 @@ def test_run_checks_falls_back_to_autodetect_when_no_config(mock_run, tmp_path):
     assert result.passed
     # run_checks is now side-effect-free: ruff check + ruff format --check, no autofix
     assert mock_run.call_count == 2
-    # Parallel execution means call order is non-deterministic; check as a set.
+    # Both commands run when all pass; assert as a set (order asserted
+    # separately by test_run_checks_runs_commands_in_order_until_failure).
     calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
     assert ("ruff", "check", ".") in calls
     assert ("ruff", "format", "--check", ".") in calls
@@ -301,59 +301,76 @@ def test_run_checks_timeout(mock_run, tmp_path):
 
 @patch("mcloop.checks.subprocess.run")
 def test_run_checks_second_command_fails(mock_run, tmp_path):
+    """An earlier failing command short-circuits later ones.
+
+    Configured order is: ruff check . -> ruff format --check . -> pytest.
+    The first command fails; run_checks must not invoke the later
+    commands at all (sequential fail-fast acceptance-gate contract).
+    """
     (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
 
-    # Parallel execution means we can't rely on call-order side_effect
-    # lists; key the result off the command itself.
-    def by_cmd(args, **kwargs):
-        if args[0] == "pytest":
-            return subprocess.CompletedProcess(
-                args=args, returncode=1, stdout="FAILED\n", stderr=""
-            )
+    invoked: list[tuple[str, ...]] = []
+
+    def record(args, **kwargs):
+        invoked.append(tuple(args))
+        # First command (ruff check .) fails.
+        if tuple(args[:2]) == ("ruff", "check"):
+            return subprocess.CompletedProcess(args=args, returncode=1, stdout="", stderr="E501\n")
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
 
-    mock_run.side_effect = by_cmd
+    mock_run.side_effect = record
     result = run_checks(tmp_path)
+
     assert not result.passed
-    assert result.command == "pytest"
+    assert result.command == "ruff check ."
+    # Short-circuit means only the first command was ever invoked.
+    assert invoked == [("ruff", "check", ".")]
+    assert not any(a[:1] == ("pytest",) for a in invoked)
 
 
 # --- _classify_run_command tests ---
 
 
-def test_run_checks_runs_commands_in_parallel(tmp_path):
-    """All check commands must start before any completes.
+def test_run_checks_runs_commands_in_order_until_failure(tmp_path):
+    """Commands run in listed order; a failure stops the rest.
 
-    Uses a barrier: each command enters subprocess.run, increments a
-    counter, then blocks until all three have arrived. Serial execution
-    would deadlock (command 2 can't start until command 1 returns, but
-    command 1 is waiting for command 3). A finite timeout on the barrier
-    surfaces that deadlock as a test failure rather than hanging.
+    run_checks is an acceptance gate: once a command fails, no later
+    command may start (no later side effects). This replaces an older
+    test that asserted concurrent launch -- an optimization stated as
+    a semantic requirement, incompatible with fail-fast side-effect
+    isolation. The contract under test here is order + short-circuit,
+    not the execution strategy.
     """
     (tmp_path / "mcloop.json").write_text(
         json.dumps({"checks": ["cmd-one", "cmd-two", "cmd-three"]})
     )
 
-    lock = threading.Lock()
-    started: list[str] = []
-    all_started = threading.Event()
+    # All commands pass, so every command runs in listed order.
+    order: list[str] = []
 
-    def fake_run(args, **kwargs):
-        with lock:
-            started.append(args[0])
-            if len(started) == 3:
-                all_started.set()
-        # Block until the other two commands have also started. If
-        # run_checks is serial, this wait will time out.
-        if not all_started.wait(timeout=3):
-            raise AssertionError("commands did not start concurrently")
+    def all_pass(args, **kwargs):
+        order.append(args[0])
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
 
-    with patch("mcloop.checks.subprocess.run", side_effect=fake_run):
+    with patch("mcloop.checks.subprocess.run", side_effect=all_pass):
         result = run_checks(tmp_path)
-
     assert result.passed
-    assert set(started) == {"cmd-one", "cmd-two", "cmd-three"}
+    assert order == ["cmd-one", "cmd-two", "cmd-three"]
+
+    # When cmd-two fails, cmd-one and cmd-two run and cmd-three never starts.
+    order.clear()
+
+    def fail_second(args, **kwargs):
+        order.append(args[0])
+        rc = 1 if args[0] == "cmd-two" else 0
+        return subprocess.CompletedProcess(args=args, returncode=rc, stdout="", stderr="")
+
+    with patch("mcloop.checks.subprocess.run", side_effect=fail_second):
+        result = run_checks(tmp_path)
+    assert not result.passed
+    assert result.command == "cmd-two"
+    assert order == ["cmd-one", "cmd-two"]
+    assert "cmd-three" not in order
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -390,7 +407,7 @@ def test_try_salvage_does_not_extend_noqa_like_comment(tmp_path):
     new_line = src.read_text()
     # Original "noqa-like" must remain intact in the comment.
     assert "noqa-like workaround" in new_line
-    # A fresh `# noqa: E501` pragma must have been appended.
+    # A fresh E501 noqa pragma must have been appended.
     assert "noqa: E501" in new_line
 
 
