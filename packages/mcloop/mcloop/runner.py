@@ -227,6 +227,7 @@ def _build_shared_parts(
     task_text: str,
     task_label: str,
     check_commands: list[str] | None,
+    task_id: str = "",
 ) -> list[str]:
     """Return prompt parts shared by both normal and bug-investigation variants."""
     parts = []
@@ -296,13 +297,14 @@ def _build_shared_parts(
         " changes to the entry point file, work around"
         " the marked block."
     )
+    _id_prefix = f"[{task_id}] " if task_id else ""
     parts.append(
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"
         " worth revisiting later, append a note to"
         " NOTES.md. Each entry should include the"
         " current date and reference the task:"
-        f" [{task_label}] {task_text}."
+        f" [{task_label}] {_id_prefix}{task_text}."
         " Do not create NOTES.md if you have nothing"
         " to note."
         " NOTES.md must use three sections:"
@@ -343,6 +345,7 @@ def _build_bug_task_prompt(
     session_context: str,
     check_commands: list[str] | None,
     eliminated: list[str] | None = None,
+    task_id: str = "",
 ) -> str:
     """Build prompt for a first-attempt bug task from BUGS.md.
 
@@ -367,12 +370,13 @@ def _build_bug_task_prompt(
     )
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    _id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {_id_prefix}{task_text}")
     parts.append(
         "Fix the bug with a targeted change. Write or update"
         " tests to cover the new behavior so it cannot regress."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     if eliminated:
         elim_text = "\n".join(eliminated)
         parts.append(
@@ -393,6 +397,7 @@ def _build_normal_prompt(
     session_context: str,
     check_commands: list[str] | None,
     eliminated: list[str] | None = None,
+    task_id: str = "",
 ) -> str:
     """Build prompt for a normal (first-attempt) task."""
     parts = []
@@ -400,7 +405,8 @@ def _build_normal_prompt(
         parts.append(f"Project context:\n{description}")
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    _id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {_id_prefix}{task_text}")
     parts.append(
         "Write unit tests only when the change introduces"
         " non-obvious behavior or a regression risk. Trivial"
@@ -418,7 +424,7 @@ def _build_normal_prompt(
         " round-trips cost 5-15 seconds each and will"
         " make the test suite unusably slow."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     if eliminated:
         elim_text = "\n".join(eliminated)
         parts.append(
@@ -440,6 +446,7 @@ def _build_bug_prompt(
     check_commands: list[str] | None,
     prior_errors: str,
     eliminated: list[str] | None,
+    task_id: str = "",
 ) -> str:
     """Build prompt for a bug-investigation task (prior_errors populated)."""
     parts = []
@@ -456,7 +463,8 @@ def _build_bug_prompt(
     parts.append(f"ERRORS FROM PREVIOUS ATTEMPT:\n{prior_errors}")
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    _id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {_id_prefix}{task_text}")
     parts.append(
         "When debugging crashes or unexpected"
         " behavior, always find and read the actual"
@@ -478,7 +486,7 @@ def _build_bug_prompt(
         " update tests to cover the failure case so"
         " it cannot regress."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     if eliminated:
         elim_text = "\n".join(eliminated)
         parts.append(
@@ -535,8 +543,16 @@ def run_task(
     eliminated: list[str] | None = None,
     timeout: int = DEFAULT_TASK_TIMEOUT,
     is_bug_task: bool = False,
+    task_id: str = "",
 ) -> RunResult:
-    """Launch a CLI session to perform a task. Returns RunResult."""
+    """Launch a CLI session to perform a task. Returns RunResult.
+
+    ``task_id`` is the canonical ``T-NNNNNN`` identifier of the task
+    (R4 = Option B). It is woven into the visible ``Task: …`` line of
+    the prompt and into the per-attempt log filename so the live
+    session output and the persisted log both surface the id alongside
+    the description. Empty string is the legacy/no-id default.
+    """
     project_dir = Path(project_dir)
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -569,6 +585,7 @@ def run_task(
             is_bug_task=is_bug_task,
             model=model,
             timeout=timeout,
+            task_id=task_id,
         )
         return RunResult(
             success=ce.success,
@@ -592,6 +609,7 @@ def run_task(
             check_commands,
             prior_errors,
             eliminated,
+            task_id=task_id,
         )
     elif is_bug_task:
         prompt = _build_bug_task_prompt(
@@ -601,6 +619,7 @@ def run_task(
             session_context,
             check_commands,
             eliminated,
+            task_id=task_id,
         )
     else:
         prompt = _build_normal_prompt(
@@ -610,6 +629,7 @@ def run_task(
             session_context,
             check_commands,
             eliminated,
+            task_id=task_id,
         )
     build_kwargs: dict = {"model": model}
     if allowed_tools:
@@ -628,6 +648,7 @@ def run_task(
         cmd,
         output,
         returncode,
+        task_id=task_id,
     )
 
     return RunResult(
@@ -1193,12 +1214,20 @@ def _slugify(text: str) -> str:
     return slug.strip("-")[:50]
 
 
-def _write_log(log_dir: Path, task_text: str, cmd: list[str], output: str, exit_code: int) -> Path:
+def _write_log(
+    log_dir: Path,
+    task_text: str,
+    cmd: list[str],
+    output: str,
+    exit_code: int,
+    task_id: str = "",
+) -> Path:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = _slugify(task_text)
     log_path = log_dir / f"{timestamp}_{slug}.log"
+    id_prefix = f"[{task_id}] " if task_id else ""
     log_path.write_text(
-        f"Task: {task_text}\n"
+        f"Task: {id_prefix}{task_text}\n"
         f"Command: {' '.join(cmd)}\n"
         f"Exit code: {exit_code}\n"
         f"{'=' * 60}\n"

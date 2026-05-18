@@ -62,6 +62,7 @@ from mcloop.errors import (
     _insert_bugs_section,
 )
 from mcloop.formatting import format_elapsed as _format_elapsed
+from mcloop.formatting import format_task_id
 from mcloop.git_ops import (
     _changed_files,
     _checkpoint,
@@ -465,7 +466,7 @@ def _run_batch(
     # Build combined prompt
     steps = []
     for i, child in enumerate(batch_children, 1):
-        steps.append(f"{i}. {child.text}")
+        steps.append(f"{i}. {format_task_id(child)}{child.text}")
     combined_text = "Do all of the following in order:\n" + "\n".join(steps)
 
     active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
@@ -494,6 +495,10 @@ def _run_batch(
     _lifecycle._current_phase = "task"
     _lifecycle._current_task_label = label_range
     _lifecycle._current_task_text = f"[BATCH] {n} subtasks"
+    # A batch covers multiple children, no single canonical task id;
+    # leave the interrupt-state task_id empty for batches. The label_range
+    # ("first-last") identifies the batch in the interrupt prompt.
+    _lifecycle._current_task_id = ""
     _lifecycle._phase_start_time = time.monotonic()
 
     # Collect eliminated from all children and parent
@@ -613,7 +618,7 @@ def _run_batch(
         for child in batch_children:
             check_off(checklist_path, child)
             lbl = _task_label(tasks, child)
-            completed.append(f"{lbl}) {child.text}")
+            completed.append(f"{lbl}) {format_task_id(child)}{child.text}")
         elapsed = _format_elapsed(time.monotonic() - task_start)
         print(
             formatting.task_complete(label_range, elapsed),
@@ -1124,13 +1129,13 @@ def run_loop(
         failed = _has_any_failed(bug_tasks) or _has_any_failed(plan_tasks)
         if failed:
             notify(
-                f"Fatal: previously failed task: {failed.text}",
+                f"Fatal: previously failed task: {format_task_id(failed)}{failed.text}",
                 level="error",
             )
             total = time.monotonic() - run_start
             _print_summary(
                 completed,
-                f"{failed.text}",
+                f"{format_task_id(failed)}{failed.text}",
                 "Task failed in a prior attempt",
                 bug_tasks + plan_tasks,
                 total,
@@ -1267,9 +1272,9 @@ def run_loop(
             action, args = parse_auto_task(task)
             response = _handle_auto_task(label, action, args)
             if _auto_response_failed(response):
-                failed_task = f"{label}) {task.text}"
+                failed_task = f"{label}) {format_task_id(task)}{task.text}"
                 failed_reason = response
-                terminal_failure = f"AUTO task failed: {task.text}"
+                terminal_failure = f"AUTO task failed: {format_task_id(task)}{task.text}"
                 print(
                     formatting.error_msg(terminal_failure),
                     flush=True,
@@ -1280,7 +1285,7 @@ def run_loop(
             check_off(active_file, task)
             if active_file == current_plan_path and active_phase_name:
                 acceptance_evidence_phases.add(active_phase_name)
-            completed.append(f"{label}) {task.text}")
+            completed.append(f"{label}) {format_task_id(task)}{task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[AUTO:{action}] {args[:60]}")
             continue
@@ -1290,6 +1295,7 @@ def run_loop(
             _lifecycle._current_phase = "user_prompt"
             _lifecycle._current_task_label = label
             _lifecycle._current_task_text = task.text
+            _lifecycle._current_task_id = task.task_id or ""
             _lifecycle._phase_start_time = time.monotonic()
             has_subtasks = find_parent(tasks, task) is not None
             ctx.update_group(label, has_subtasks)
@@ -1308,7 +1314,7 @@ def run_loop(
                 check_off(active_file, task)
                 if active_file == current_plan_path and active_phase_name:
                     acceptance_evidence_phases.add(active_phase_name)
-                completed.append(f"{label}) {task.text}")
+                completed.append(f"{label}) {format_task_id(task)}{task.text}")
                 ctx.add(label, task.text, "0s", response)
                 notify(f"[USER] {instructions[:80]}")
             else:
@@ -1325,10 +1331,13 @@ def run_loop(
                     formatting.system_msg("Bug filed from user observation -> BUGS.md"),
                     flush=True,
                 )
-                failed_task = f"{label}) {task.text}"
+                failed_task = f"{label}) {format_task_id(task)}{task.text}"
                 failed_reason = response
-                terminal_failure = f"User verification failed: {task.text}"
-                notify(f"[USER] FAILED: {task.text[:60]}", level="error")
+                terminal_failure = f"User verification failed: {format_task_id(task)}{task.text}"
+                notify(
+                    f"[USER] FAILED: {format_task_id(task)}{task.text[:60]}",
+                    level="error",
+                )
                 break
             continue
 
@@ -1410,15 +1419,16 @@ def run_loop(
                         elapsed=round(time.monotonic() - run_start, 2),
                         model=current_model or "",
                         attempts=max_retries,
+                        task_id=parent.task_id or "",
                     )
                 )
-                failed_task = f"{parent_label}) {parent.text}"
+                failed_task = f"{parent_label}) {format_task_id(parent)}{parent.text}"
                 failed_reason = batch_prior_errors
                 notify(
-                    f"Giving up on batch: {parent.text}",
+                    f"Giving up on batch: {format_task_id(parent)}{parent.text}",
                     level="error",
                 )
-                terminal_failure = f"Batch failed: {parent.text}"
+                terminal_failure = f"Batch failed: {format_task_id(parent)}{parent.text}"
                 break
 
         active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
@@ -1439,13 +1449,21 @@ def run_loop(
 
         _checkpoint(
             project_dir,
-            next_task=f"{label}) {task.text}",
+            next_task=f"{label}) {format_task_id(task)}{task.text}",
         )
-        print(formatting.task_header(label, task.text, active_cli), flush=True)
+        print(
+            formatting.task_header(
+                label,
+                f"{format_task_id(task)}{task.text}",
+                active_cli,
+            ),
+            flush=True,
+        )
 
         _lifecycle._current_phase = "task"
         _lifecycle._current_task_label = label
         _lifecycle._current_task_text = task.text
+        _lifecycle._current_task_id = task.task_id or ""
         _lifecycle._phase_start_time = time.monotonic()
 
         eliminated = get_eliminated(tasks, task)
@@ -1486,6 +1504,7 @@ def run_loop(
                     eliminated=eliminated,
                     timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
                     is_bug_task=(active_file == bugs_path),
+                    task_id=task.task_id or "",
                 )
 
                 if is_session_limited(
@@ -1530,11 +1549,11 @@ def run_loop(
                             commit_hashes=commit_hashes,
                             terminal_status="interrupted",
                             failure_detail="User interrupted during session limit wait",
-                            stuck=[task.text],
+                            stuck=[f"{format_task_id(task)}{task.text}"],
                         )
                         return RunStatus(
                             "interrupted",
-                            stuck=[task.text],
+                            stuck=[f"{format_task_id(task)}{task.text}"],
                             detail="User interrupted during session limit wait",
                         )
                     # Don't count as a real attempt
@@ -1620,7 +1639,7 @@ def run_loop(
                         check_off(active_file, task)
                         if active_file == current_plan_path and active_phase_name:
                             acceptance_evidence_phases.add(active_phase_name)
-                        completed.append(f"{label}) {task.text}")
+                        completed.append(f"{label}) {format_task_id(task)}{task.text}")
                         print(
                             formatting.system_msg(
                                 "Task is a read-only no-op by design; treating as"
@@ -1699,7 +1718,10 @@ def run_loop(
                         )
                         continue
                     try:
-                        task_hash = _commit(project_dir, task.text)
+                        task_hash = _commit(
+                            project_dir,
+                            f"{format_task_id(task)}{task.text}",
+                        )
                     except RuntimeError as exc:
                         print(
                             formatting.error_msg(str(exc)),
@@ -1717,9 +1739,10 @@ def run_loop(
                                 exit_code=result.exit_code,
                                 log_path=str(result.log_path) if result.log_path else "",
                                 changed_files=list(changed_files or []),
+                                task_id=task.task_id or "",
                             )
                         )
-                        failed_task = f"{label}) {task.text}"
+                        failed_task = f"{label}) {format_task_id(task)}{task.text}"
                         failed_reason = str(exc)
                         terminal_failure = f"Commit failed: {exc}"
                         _ledger_settle(
@@ -1759,9 +1782,10 @@ def run_loop(
                             exit_code=result.exit_code,
                             log_path=str(result.log_path) if result.log_path else "",
                             changed_files=list(changed_files or []),
+                            task_id=task.task_id or "",
                         )
                     )
-                    completed.append(f"{label}) {task.text}")
+                    completed.append(f"{label}) {format_task_id(task)}{task.text}")
                     print(
                         formatting.task_complete(label, elapsed),
                         flush=True,
@@ -1826,16 +1850,17 @@ def run_loop(
                         str(result.log_path) if result is not None and result.log_path else ""
                     ),
                     changed_files=list(changed_files),
+                    task_id=task.task_id or "",
                 )
             )
             mark_failed(active_file, task)
-            failed_task = f"{label}) {task.text} [{elapsed}]"
+            failed_task = f"{label}) {format_task_id(task)}{task.text} [{elapsed}]"
             failed_reason = last_error
             notify(
-                f"Giving up on: {task.text}",
+                f"Giving up on: {format_task_id(task)}{task.text}",
                 level="error",
             )
-            terminal_failure = f"Task failed: {task.text}"
+            terminal_failure = f"Task failed: {format_task_id(task)}{task.text}"
             _ledger_settle(
                 label,
                 TaskOutcome(
@@ -1940,7 +1965,7 @@ def run_loop(
             )
             return RunStatus("failure", detail=terminal_failure)
         stuck = [
-            t.text
+            f"{format_task_id(t)}{t.text}"
             for t in parse(bugs_path)
             if t.stage == "Bugs" and not t.checked and not t.failed
         ]
@@ -2116,7 +2141,11 @@ def run_loop(
     _summary_stop_reason = (
         "stop_after_stage" if stopped_early == "stage" and not terminal_failure else ""
     )
-    _stuck = [t.text for t in summary_remaining_tasks if not t.checked and not t.failed]
+    _stuck = [
+        f"{format_task_id(t)}{t.text}"
+        for t in summary_remaining_tasks
+        if not t.checked and not t.failed
+    ]
     _build_and_write_summary(
         project_dir,
         run_start_iso,

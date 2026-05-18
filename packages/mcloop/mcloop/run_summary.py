@@ -17,6 +17,11 @@ class TaskEntry:
     ``changed_files``) match the ``CodeEditResult`` shape produced by
     ``invoke_code_edit`` so the orchestra integration smoke test can
     compare backends by reading this entry directly.
+
+    ``task_id`` is the canonical ``T-NNNNNN`` identifier (R4 = Option B).
+    Stored as a separate field rather than fused into ``text`` so
+    downstream readers can use the structured id directly. Empty
+    string for legacy / id-less rows.
     """
 
     label: str
@@ -30,6 +35,7 @@ class TaskEntry:
     exit_code: int = 0
     log_path: str = ""
     changed_files: list[str] = field(default_factory=list)
+    task_id: str = ""
 
 
 @dataclass

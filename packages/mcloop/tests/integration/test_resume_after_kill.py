@@ -134,6 +134,8 @@ def test_resume_after_kill_picks_up_where_it_left_off(tmp_path):
     assert "Create alpha.txt" in log.stdout
     assert "Create beta.txt" in log.stdout
     assert "Create gamma.txt" in log.stdout
-    assert log.stdout.count("Complete: Create alpha.txt") == 1, (
+    # R4 = Option B: commit-message body carries the [T-NNNNNN] prefix
+    # the run_loop weaves into the _commit() call.
+    assert log.stdout.count("Complete: [T-000001] Create alpha.txt") == 1, (
         "task 1 should be completed exactly once"
     )

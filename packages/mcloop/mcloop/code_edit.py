@@ -182,11 +182,15 @@ def invoke_code_edit(
     is_bug_task: bool,
     model: str | None,
     timeout: int = DEFAULT_TASK_TIMEOUT,
+    task_id: str = "",
 ) -> CodeEditResult:
     """Perform one code-edit attempt and return a structured result.
 
     Mcloop owns the outer loop; this function owns one inner edit. It
     selects the backend per the project config and dispatches.
+
+    ``task_id`` is the R4 canonical task identifier woven into the
+    visible ``Task: …`` prompt line and the persisted log header.
     """
     project_dir = Path(project_dir)
     log_dir = Path(log_dir)
@@ -207,6 +211,7 @@ def invoke_code_edit(
             is_bug_task=is_bug_task,
             model=model,
             timeout=timeout,
+            task_id=task_id,
         )
     return _invoke_direct(
         instruction=instruction,
@@ -221,6 +226,7 @@ def invoke_code_edit(
         is_bug_task=is_bug_task,
         model=model,
         timeout=timeout,
+        task_id=task_id,
     )
 
 
@@ -284,6 +290,7 @@ def _invoke_direct(
     is_bug_task: bool,
     model: str | None,
     timeout: int,
+    task_id: str = "",
 ) -> CodeEditResult:
     if prior_errors:
         prompt = _runner._build_bug_prompt(
@@ -294,6 +301,7 @@ def _invoke_direct(
             check_commands,
             prior_errors,
             eliminated,
+            task_id=task_id,
         )
     elif is_bug_task:
         prompt = _runner._build_bug_task_prompt(
@@ -303,6 +311,7 @@ def _invoke_direct(
             context,
             check_commands,
             eliminated,
+            task_id=task_id,
         )
     else:
         prompt = _runner._build_normal_prompt(
@@ -312,6 +321,7 @@ def _invoke_direct(
             context,
             check_commands,
             eliminated,
+            task_id=task_id,
         )
     session_env = _runner._build_session_env(task_label=task_label, cli="claude")
     cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
@@ -327,6 +337,7 @@ def _invoke_direct(
         cmd,
         output,
         returncode,
+        task_id=task_id,
     )
     return CodeEditResult(
         success=returncode == 0,
@@ -435,6 +446,7 @@ def _invoke_orchestra(
     is_bug_task: bool,
     model: str | None,
     timeout: int,
+    task_id: str = "",
 ) -> CodeEditResult:
     from orchestra import run_workflow
     from orchestra.config import load_config
@@ -448,6 +460,7 @@ def _invoke_orchestra(
         "project_dir": str(project_dir),
         "description": description,
         "task_label": task_label,
+        "task_id": task_id,
         "check_commands": list(check_commands) if check_commands else [],
         "is_bug_task": bool(is_bug_task),
     }

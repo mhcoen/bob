@@ -4696,7 +4696,8 @@ def test_fallback_model_also_exhausted_notifies(tmp_path):
     # "Giving up" notification is sent with error level
     giving_up_calls = [c for c in mock_notify.call_args_list if "Giving up" in str(c)]
     assert len(giving_up_calls) == 1
-    assert giving_up_calls[0] == call("Giving up on: Do something", level="error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert giving_up_calls[0] == call("Giving up on: [T-000001] Do something", level="error")
 
 
 def test_no_fallback_retry_without_flag(tmp_path):

@@ -81,6 +81,7 @@ class ReviewRequest:
     task_label: str
     task_text: str
     file_contents: dict[str, str] | None = None  # path -> content
+    task_id: str = ""  # R4: canonical T-NNNNNN id; "" when absent
 
 
 def _load_config() -> dict[str, Any]:
@@ -125,7 +126,8 @@ def _parse_findings(raw: list) -> list[ReviewFinding]:
 
 def _build_user_message(request: ReviewRequest) -> str:
     """Compose the user-role message body shared by every backend."""
-    user_msg = f"## Task\n{request.task_label}: {request.task_text}\n\n"
+    id_prefix = f"[{request.task_id}] " if request.task_id else ""
+    user_msg = f"## Task\n{request.task_label}: {id_prefix}{request.task_text}\n\n"
     user_msg += f"## Project\n{request.project_description}\n\n"
     user_msg += f"## Diff (commit {request.commit_hash})\n"
     user_msg += f"```diff\n{request.diff_text}\n```"

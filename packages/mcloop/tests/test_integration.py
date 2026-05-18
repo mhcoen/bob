@@ -194,7 +194,8 @@ def test_max_retries_exhausted_stops_loop(
     # Only "giving up" after all retries exhausted — no per-retry notifications
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: Hopeless task", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] Hopeless task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -317,7 +318,8 @@ def test_noop_task_checks_fail_treated_as_failure(
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: Already done task", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] Already done task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -345,7 +347,8 @@ def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: Already done task", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] Already done task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -383,7 +386,8 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: Fix the thing", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] Fix the thing", "error")
 
 
 @patch("mcloop.main.notify")
@@ -436,7 +440,8 @@ def test_noop_then_checks_fail_is_terminal(
 
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: Retry task", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] Retry task", "error")
 
 
 @patch("mcloop.main.notify")
@@ -463,7 +468,8 @@ def test_noop_with_max_retries_one(
     # Only "giving up" — no per-retry notifications
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("Giving up on: One-shot task", "error")
+    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
+    assert calls[0] == ("Giving up on: [T-000001] One-shot task", "error")
 
 
 # --- _commit unit tests ---

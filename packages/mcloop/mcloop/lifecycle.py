@@ -24,6 +24,7 @@ from mcloop.formatting import format_elapsed
 _current_phase = ""  # task, checks, audit, user_prompt
 _current_task_label = ""
 _current_task_text = ""
+_current_task_id = ""  # R4: canonical T-NNNNNN id; "" when absent
 _phase_start_time = 0.0
 _project_dir: Path | None = None
 
@@ -45,6 +46,7 @@ def _save_interrupt_state() -> None:
     state = {
         "task_label": _current_task_label,
         "task_text": _current_task_text,
+        "task_id": _current_task_id,
         "phase": _current_phase,
         "elapsed_seconds": round(elapsed, 1),
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),

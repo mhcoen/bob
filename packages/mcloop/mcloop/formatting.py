@@ -112,6 +112,21 @@ def task_header(label: str, text: str, cli: str) -> str:
         return f"\n>>> Task {label}) {text} (using {cli})"
 
 
+def format_task_id(task: object) -> str:
+    """Return ``"[T-NNNNNN] "`` when the task carries a canonical id, else ``""``.
+
+    Centralizes the R4 = Option B surfacing convention so every user-facing
+    site that prints ``task.text`` can prepend the structured id without
+    fusing it into the description. The ``None`` branch keeps the call
+    safe when the helper is exercised from unit-test fixtures that
+    construct Task instances positionally without a task_id; production
+    callers (post-R2 parser + the canonical-form precondition gate) only
+    feed Tasks where ``task_id`` is populated.
+    """
+    task_id = getattr(task, "task_id", None)
+    return f"[{task_id}] " if task_id else ""
+
+
 def task_complete(label: str, elapsed: str) -> str:
     """Format a task completion message."""
     color = _use_color()
