@@ -13,6 +13,10 @@ from pathlib import Path
 
 import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
+from mcloop._planfile_precondition import (
+    PlanNotCanonicalError,
+    enforce_canonical,
+)
 from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
     PlanCorruptionError,
@@ -205,6 +209,46 @@ _READONLY_TASK_PHRASES: tuple[str, ...] = (
 )
 
 
+def _enforce_canonical_inputs(
+    master_path: Path,
+    current_plan_path: Path,
+    bugs_path: Path,
+) -> None:
+    """B3 increment-3 wire-in: canonical-plan precondition gate.
+
+    Runs at ``run_loop`` entry, before any of the three pre-loop mutation
+    sites enumerated in ``.scratch/B3_INCREMENT2_PATH_ENUM.md``:
+
+      * the ``--retry`` ``clear_failed_markers`` calls (main.py ~700)
+      * the ``_check_interrupted`` skip / describe mutation
+        (lifecycle.py ~178, 217-261)
+      * the ``ensure_current_plan`` split-plan write
+        (plan_split.py ~204)
+
+    Validates each plan-bearing file that exists on disk at the moment
+    of the gate. ``current_plan_path`` is checked only if it already
+    exists; the master is the source of truth for split-plan
+    extraction, so a missing CURRENT_PLAN.md is not a precondition
+    failure here — it is handled normally by
+    ``ensure_current_plan`` later in the loop. ``bugs_path`` is checked
+    only if it exists (``ensure_bugs_file`` creates it later with a
+    canonical ``## Bugs`` header on first run).
+
+    Raises ``PlanNotCanonicalError`` on the first non-canonical input,
+    which the top-level ``main()`` handler catches and translates to
+    exit code 3 (distinct from 1 = terminal failure, 2 = parser
+    corruption, 5 = Plan-Ledger pause).
+    """
+    from bob_tools.planfile import parse_plan as _bt_parse_plan
+
+    for path in (master_path, bugs_path, current_plan_path):
+        if not path.exists():
+            continue
+        text = path.read_text()
+        plan = _bt_parse_plan(text, source_path=path)
+        enforce_canonical(text, plan, source_path=path)
+
+
 def _is_readonly_task(task_text: str) -> bool:
     """Return True iff the task description signals it's a deliberate
     no-op. Used by the no-op-with-failing-checks branch in the task
@@ -285,6 +329,14 @@ def main() -> None:
         except OSError:
             pass  # Logging is best-effort; never let it mask the real error.
         sys.exit(2)
+    except PlanNotCanonicalError as exc:
+        # B3 increment 3: canonical-plan precondition rejected the
+        # input. Exit code 3 is reserved for this class so callers
+        # (CI, scripts) can distinguish "PLAN.md not migrated yet"
+        # from a generic run failure (1), a parser corruption (2),
+        # or a Plan-Ledger pause (5).
+        print(f"\n!!! {exc}\n", file=sys.stderr)
+        sys.exit(3)
 
 
 def _main() -> None:
@@ -690,6 +742,16 @@ def run_loop(
     master_path = checklist_path  # PLAN.md (the full roadmap)
     current_plan_path = project_dir / CURRENT_PLAN
     bugs_path = project_dir / BUGS_FILE
+
+    # B3 increment 3: canonical-plan precondition gate. Runs before
+    # parse_description, --retry's clear_failed_markers, the interrupt
+    # check, and ensure_current_plan — i.e. before every pre-loop
+    # mutation site enumerated in
+    # .scratch/B3_INCREMENT2_PATH_ENUM.md. Raises PlanNotCanonicalError
+    # on non-canonical input; main()'s handler translates that to
+    # exit 3.
+    _enforce_canonical_inputs(master_path, current_plan_path, bugs_path)
+
     description = parse_description(master_path)
 
     # --retry: flip every [!] back to [ ] in the active files so
