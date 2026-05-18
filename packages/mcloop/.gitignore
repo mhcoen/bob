@@ -21,3 +21,4 @@ local
 AGENTS.md
 .DS_Store
 .scratch/
+*.lock
