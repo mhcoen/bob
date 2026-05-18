@@ -7,6 +7,7 @@ from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
 from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
+from tests.plan_fixtures import canonical_plan_text
 
 
 def _make_project(tmp_path, checklist_text):
@@ -18,8 +19,8 @@ def _make_project(tmp_path, checklist_text):
     check-offs and failure markers directly.
     """
     md = tmp_path / "PLAN.md"
-    md.write_text(checklist_text)
-    (tmp_path / "CURRENT_PLAN.md").write_text(checklist_text)
+    md.write_text(canonical_plan_text(checklist_text))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text(checklist_text))
     (tmp_path / "logs").mkdir()
     return md
 
@@ -363,7 +364,7 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
     checks happen to pass on the unchanged tree.
     """
     md = _make_project(tmp_path, "- [x] Already done plan task\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n\n- [ ] Fix the thing\n")
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n\n- [ ] Fix the thing\n"))
     mock_run.return_value = _ok_run_result()
 
     result = run_loop(md, max_retries=3)

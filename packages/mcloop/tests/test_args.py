@@ -80,6 +80,7 @@ from mcloop.review_integration import (
     _terminate_reviewers,
 )
 from mcloop.session_context import SessionContext
+from tests.plan_fixtures import canonical_plan_text
 
 
 def _parse(*argv):
@@ -2081,9 +2082,9 @@ def test_run_audit_fix_cycle_no_bugs_md(tmp_path):
 def test_run_loop_no_audit_skips_audit(tmp_path):
     """When no_audit=True, _run_audit_fix_cycle is not called."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\n## Phase 1: Only\n- [ ] task\n")
+    plan.write_text(canonical_plan_text("# Project\n\n## Phase 1: Only\n- [ ] task\n"))
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("## Phase 1: Only\n- [ ] task\n")
+    current.write_text(canonical_plan_text("## Phase 1: Only\n- [ ] task\n"))
 
     def fake_transition(master_path, current_plan_path):
         current_plan_path.unlink(missing_ok=True)
@@ -2113,9 +2114,9 @@ def test_run_loop_no_audit_skips_audit(tmp_path):
 def test_run_loop_audit_called_by_default(tmp_path):
     """By default, _run_audit_fix_cycle is called after all phases complete."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\n## Phase 1: Only\n- [ ] task\n")
+    plan.write_text(canonical_plan_text("# Project\n\n## Phase 1: Only\n- [ ] task\n"))
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("## Phase 1: Only\n- [ ] task\n")
+    current.write_text(canonical_plan_text("## Phase 1: Only\n- [ ] task\n"))
 
     def fake_transition(master_path, current_plan_path):
         current_plan_path.unlink(missing_ok=True)
@@ -3136,10 +3137,10 @@ def test_investigate_verification_passes_calls_merge(tmp_path, capsys):
 def test_investigate_verification_fails_then_passes(tmp_path, capsys):
     """Verification fails first round, passes second — merges."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n- [ ] Fix bug\n")
+    plan.write_text(canonical_plan_text("# Project\n- [ ] Fix bug\n"))
     wt_path = tmp_path / "worktree"
     wt_path.mkdir()
-    (wt_path / "PLAN.md").write_text("# Project\n- [ ] Fix bug\n")
+    (wt_path / "PLAN.md").write_text(canonical_plan_text("# Project\n- [ ] Fix bug\n"))
 
     from mcloop.investigator import BugContext
 
@@ -3178,10 +3179,10 @@ def test_investigate_verification_fails_then_passes(tmp_path, capsys):
 def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
     """Verification fails all rounds — _investigation_failed is called."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n- [ ] Fix bug\n")
+    plan.write_text(canonical_plan_text("# Project\n- [ ] Fix bug\n"))
     wt_path = tmp_path / "worktree"
     wt_path.mkdir()
-    (wt_path / "PLAN.md").write_text("# Project\n- [ ] Fix bug\n")
+    (wt_path / "PLAN.md").write_text(canonical_plan_text("# Project\n- [ ] Fix bug\n"))
 
     from mcloop.investigate_cmd import MAX_VERIFICATION_ROUNDS
     from mcloop.investigator import BugContext
@@ -3810,11 +3811,13 @@ def test_investigation_failed_with_notes_and_plan(tmp_path, capsys):
 
     (wt_path / "NOTES.md").write_text("## Observations\n- The crash is in parser.py\n")
     (wt_path / "PLAN.md").write_text(
-        "# Investigation Plan\n\n"
-        "- [x] Reproduce the crash\n"
-        "- [!] Fix the parser\n"
-        "- [ ] Add regression test\n"
-        "- [ ] Clean up\n"
+        canonical_plan_text(
+            "# Investigation Plan\n\n"
+            "- [x] Reproduce the crash\n"
+            "- [!] Fix the parser\n"
+            "- [ ] Add regression test\n"
+            "- [ ] Clean up\n"
+        )
     )
 
     _investigation_failed(wt_path, "investigate-crash")
@@ -3839,7 +3842,7 @@ def test_investigation_failed_no_notes(tmp_path, capsys):
     wt_path = tmp_path / "worktree"
     wt_path.mkdir()
 
-    (wt_path / "PLAN.md").write_text("# Plan\n\n- [ ] First task\n")
+    (wt_path / "PLAN.md").write_text(canonical_plan_text("# Plan\n\n- [ ] First task\n"))
 
     _investigation_failed(wt_path, "investigate-bug")
 
@@ -3917,7 +3920,9 @@ def test_run_loop_user_task_skips_claude(tmp_path):
     """[USER] tasks pause for input and skip Claude Code session."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        "- [ ] [USER] Launch the app and verify the window appears\n- [ ] Fix the bug\n"
+        canonical_plan_text(
+            "- [ ] [USER] Launch the app and verify the window appears\n- [ ] Fix the bug\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -4042,7 +4047,7 @@ def test_session_context_user_input_interleaved():
 def test_run_loop_picks_up_user_input(tmp_path):
     """User input typed between tasks is passed to session context."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] First task\n- [ ] Second task\n")
+    plan.write_text(canonical_plan_text("- [ ] First task\n- [ ] Second task\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4265,7 +4270,9 @@ def test_dispatch_unknown_action():
 def test_run_loop_auto_task_skips_claude(tmp_path):
     """[AUTO] tasks execute automatically and skip Claude Code session."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    plan.write_text(
+        canonical_plan_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    )
     (tmp_path / ".git").mkdir()
 
     with (
@@ -4315,7 +4322,9 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
 def test_run_loop_auto_task_nonzero_fails_and_leaves_task_unchecked(tmp_path):
     """Defect B regression: a nonzero AUTO run_cli result fails the run."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    plan.write_text(
+        canonical_plan_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+    )
     (tmp_path / ".git").mkdir()
 
     with (
@@ -4366,7 +4375,7 @@ def test_fallback_model_with_model():
 def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
     """When rate-limited with fallback_model set, switches model."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4426,7 +4435,7 @@ def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
 def test_run_loop_no_fallback_without_flag(tmp_path):
     """Without fallback_model, rate limit does not change model."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4483,7 +4492,7 @@ def test_run_loop_no_fallback_without_flag(tmp_path):
 def test_fallback_model_retry_on_exhaustion(tmp_path):
     """When all retries fail on primary, retries with fallback model."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4551,7 +4560,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
 def test_fallback_model_prints_message(tmp_path, capsys):
     """Prints 'Primary model failed, retrying with <model>' on fallback."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4608,7 +4617,7 @@ def test_fallback_model_prints_message(tmp_path, capsys):
 def test_fallback_model_also_exhausted(tmp_path):
     """When both primary and fallback exhaust retries, task fails."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     def fake_run_task(*args, **kwargs):
@@ -4655,7 +4664,7 @@ def test_fallback_model_also_exhausted(tmp_path):
 def test_fallback_model_also_exhausted_notifies(tmp_path):
     """When both models exhaust retries, sends a 'giving up' notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     def fake_run_task(*args, **kwargs):
@@ -4693,7 +4702,7 @@ def test_fallback_model_also_exhausted_notifies(tmp_path):
 def test_no_fallback_retry_without_flag(tmp_path):
     """Without fallback_model, exhausted retries just fail."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     def fake_run_task(*args, **kwargs):
@@ -4736,7 +4745,7 @@ def test_no_fallback_retry_without_flag(tmp_path):
 def test_fallback_same_as_primary_skips_fallback(tmp_path):
     """When fallback_model equals primary model, no extra retry round."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     def fake_run_task(*args, **kwargs):
@@ -4780,7 +4789,7 @@ def test_fallback_same_as_primary_skips_fallback(tmp_path):
 def test_fallback_gets_fresh_retries(tmp_path):
     """Fallback model gets its own full set of retries (not shared)."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -4853,7 +4862,7 @@ def test_fallback_gets_fresh_retries(tmp_path):
 def test_fallback_resets_per_task(tmp_path):
     """Each task starts with the primary model, even after a prior fallback."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task one\n- [ ] Task two\n")
+    plan.write_text(canonical_plan_text("- [ ] Task one\n- [ ] Task two\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = 0
@@ -5016,7 +5025,7 @@ def test_auto_wrap_push_failure(tmp_path, capsys):
 def test_run_loop_calls_auto_wrap_after_commit(tmp_path):
     """run_loop calls _maybe_auto_wrap after each successful commit."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -5221,7 +5230,7 @@ def test_reinject_push_failure_prints_error(tmp_path, capsys):
 def test_run_loop_calls_reinject_after_commit(tmp_path):
     """run_loop calls _reinject_wrappers after each successful commit."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -5941,9 +5950,11 @@ def test_insert_bugs_section_appends_to_end(tmp_path):
 def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
     """Bug-only mode: fixes bugs, skips audit and stage transitions."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Add feature\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("## Stage 1: Core\n- [ ] Add feature\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("## Stage 1: Core\n- [ ] Add feature\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(
+        canonical_plan_text("## Stage 1: Core\n- [ ] Add feature\n")
+    )
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -5988,9 +5999,9 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
 def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
     """Bug-only mode: returns failure when fix fails."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
 
     mock_result = MagicMock()
@@ -6019,9 +6030,9 @@ def test_run_loop_bug_only_returns_stuck_bugs(tmp_path):
 def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
     """Bug-only mode: launches app verification after all bugs fixed."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -6058,9 +6069,9 @@ def test_run_loop_bug_only_verifies_app(tmp_path, capsys):
 def test_run_loop_bug_only_clears_errors_json(tmp_path):
     """Bug-only mode: clears errors.json after all bugs fixed and verified."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -6103,9 +6114,9 @@ def test_run_loop_bug_only_clears_errors_json(tmp_path):
 def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
     """Bug-only mode: keeps errors.json when verification fails."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -6148,9 +6159,9 @@ def test_run_loop_bug_only_keeps_errors_json_on_failure(tmp_path):
 def test_run_loop_bug_only_failed_verification_returns_failure(tmp_path):
     """Bug-only mode: failed app verification produces RunStatus("failure")."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -6190,9 +6201,9 @@ def test_run_loop_bug_only_failed_verification_returns_failure(tmp_path):
 def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):
     """Bug-only mode: keeps errors.json when bugs could not be fixed."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
     mcloop_dir = tmp_path / ".mcloop"
     mcloop_dir.mkdir()
@@ -6225,8 +6236,10 @@ def test_run_loop_bug_only_keeps_errors_json_on_stuck(tmp_path):
 def test_run_loop_no_bugs_runs_normally(tmp_path):
     """Without ## Bugs, run_loop does not activate bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n## Phase 1: Only\n- [ ] task\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("## Phase 1: Only\n- [ ] task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n## Phase 1: Only\n- [ ] task\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(
+        canonical_plan_text("## Phase 1: Only\n- [ ] task\n")
+    )
 
     def fake_transition(master_path, current_plan_path):
         current_plan_path.unlink(missing_ok=True)
@@ -6371,7 +6384,7 @@ def test_save_interrupt_state_handles_write_oserror(tmp_path):
 def test_check_interrupted_no_file(tmp_path):
     """Returns None when no interrupted.json exists."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task\n")
+    plan.write_text(canonical_plan_text("- [ ] Task\n"))
     result = _check_interrupted(tmp_path, plan)
     assert result is None
 
@@ -6390,7 +6403,7 @@ def test_check_interrupted_user_prompt_auto_retry(tmp_path):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] test\n")
+    plan.write_text(canonical_plan_text("- [ ] test\n"))
 
     result = _check_interrupted(tmp_path, plan)
     assert result == "retry"
@@ -6403,7 +6416,7 @@ def test_check_interrupted_corrupt_json(tmp_path):
     mcloop_dir.mkdir()
     (mcloop_dir / "interrupted.json").write_text("{bad json")
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] test\n")
+    plan.write_text(canonical_plan_text("- [ ] test\n"))
 
     result = _check_interrupted(tmp_path, plan)
     assert result is None
@@ -6424,7 +6437,7 @@ def test_check_interrupted_retry_on_r(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] test\n")
+    plan.write_text(canonical_plan_text("- [ ] test\n"))
 
     monkeypatch.setattr("builtins.input", lambda _="": "r")
     result = _check_interrupted(tmp_path, plan)
@@ -6445,7 +6458,7 @@ def test_check_interrupted_skip_marks_failed(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Fix something\n- [ ] Other\n")
+    plan.write_text(canonical_plan_text("- [ ] Fix something\n- [ ] Other\n"))
 
     monkeypatch.setattr("builtins.input", lambda _="": "s")
     result = _check_interrupted(tmp_path, plan)
@@ -6467,7 +6480,7 @@ def test_check_interrupted_audit_prompt(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] audit\n")
+    plan.write_text(canonical_plan_text("- [ ] audit\n"))
 
     captured = []
     orig_print = print
@@ -6497,7 +6510,7 @@ def test_check_interrupted_d_writes_ruledout(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] Fix crash\n"))
 
     inputs = iter(["d", "tried restarting", ""])
     monkeypatch.setattr("builtins.input", lambda _="": next(inputs))
@@ -6842,6 +6855,7 @@ def test_run_loop_batch_detection(tmp_path):
         "  - [ ] Add feature A\n"
         "  - [ ] Add feature B\n"
     )
+    md = canonical_plan_text(md)
     plan = tmp_path / "PLAN.md"
     plan.write_text(md)
     current = tmp_path / "CURRENT_PLAN.md"
@@ -6919,6 +6933,7 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
         "  - [ ] Add feature A\n"
         "  - [ ] Add feature B\n"
     )
+    md = canonical_plan_text(md)
     plan = tmp_path / "PLAN.md"
     plan.write_text(md)
     current = tmp_path / "CURRENT_PLAN.md"
@@ -7072,7 +7087,7 @@ def test_worktree_status_reordered_lines_not_treated_as_change(tmp_path):
     of lines so reordering alone does not trigger a false positive.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -7134,7 +7149,7 @@ def test_empty_pre_check_status_not_false_positive(tmp_path):
     positive. The fix handles empty status specially.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -7194,7 +7209,7 @@ def test_checker_introduced_changes_to_filtered_file_detected(tmp_path):
     which would miss changes to PLAN.md, logs/, and .mcloop/ files.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -7318,7 +7333,7 @@ def test_individual_task_autofix_metadata_only_retries(tmp_path):
     changes to PLAN.md would be invisible without _has_uncommitted_changes.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -7983,7 +7998,7 @@ def test_collect_review_findings_inserts_bugs(tmp_path):
     reviews_dir = tmp_path / ".mcloop" / "reviews"
     reviews_dir.mkdir(parents=True)
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Test\n\n- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("# Test\n\n- [ ] Do something\n"))
     findings = [
         {
             "file": f"f{i}.py",
@@ -8071,8 +8086,8 @@ def test_run_loop_prints_reviewer_status(tmp_path):
 def test_run_loop_spawns_reviewer_after_commit(tmp_path):
     """run_loop spawns a reviewer after a successful commit."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\n- [ ] Fix bug\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] Fix bug\n")
+    plan.write_text(canonical_plan_text("# Project\n\n- [ ] Fix bug\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] Fix bug\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8126,8 +8141,8 @@ def test_run_loop_spawns_reviewer_after_commit(tmp_path):
 def test_run_loop_no_reviewer_when_not_configured(tmp_path):
     """run_loop does not spawn reviewer when config is None."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Project\n\n- [ ] Fix bug\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] Fix bug\n")
+    plan.write_text(canonical_plan_text("# Project\n\n- [ ] Fix bug\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] Fix bug\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8182,7 +8197,7 @@ def test_run_loop_no_reviewer_when_not_configured(tmp_path):
 def test_run_loop_commits_then_defers_claude_md_sync(tmp_path):
     """run_loop commits code first, then calls handle_sync for CLAUDE.md."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8222,7 +8237,7 @@ def test_run_loop_commits_then_defers_claude_md_sync(tmp_path):
 def test_run_loop_claude_md_freshness_passes(tmp_path):
     """run_loop commits when CLAUDE.md freshness check passes."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8268,7 +8283,7 @@ def test_run_loop_claude_md_freshness_passes(tmp_path):
 def test_run_loop_claude_md_sync_failure_does_not_block_commit(tmp_path):
     """CLAUDE.md sync failure no longer blocks or retries the task commit."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8311,11 +8326,13 @@ def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, c
     plan = tmp_path / "PLAN.md"
     # Stage 1 has one task (will be completed), Stage 2 has another (won't run)
     plan.write_text(
-        "# Plan\n\n"
-        "## Stage 1: Setup\n\n"
-        "- [ ] Init project\n\n"
-        "## Stage 2: Build\n\n"
-        "- [ ] Build app\n"
+        canonical_plan_text(
+            "# Plan\n\n"
+            "## Stage 1: Setup\n\n"
+            "- [ ] Init project\n\n"
+            "## Stage 2: Build\n\n"
+            "- [ ] Build app\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -8378,7 +8395,7 @@ def test_full_suite_failure_at_stage_boundary_skips_build_and_notify(tmp_path, c
 def test_full_suite_failure_at_end_of_run_skips_build_audit_notify(tmp_path, capsys):
     """Full suite failure at end of run skips _run_build, audit, and all-done notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8445,11 +8462,13 @@ def test_full_suite_pass_at_stage_boundary_proceeds_normally(tmp_path, capsys):
     """
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        "# Plan\n\n"
-        "## Stage 1: Setup\n\n"
-        "- [ ] Init project\n\n"
-        "## Stage 2: Build\n\n"
-        "- [ ] Build app\n"
+        canonical_plan_text(
+            "# Plan\n\n"
+            "## Stage 1: Setup\n\n"
+            "- [ ] Init project\n\n"
+            "## Stage 2: Build\n\n"
+            "- [ ] Build app\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -8527,13 +8546,15 @@ def test_default_mode_advances_across_phases_without_exiting(tmp_path, capsys):
     returns None (all phases done)."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        "# Plan\n\n"
-        "## Stage 1: First\n\n"
-        "- [ ] Task one\n\n"
-        "## Stage 2: Second\n\n"
-        "- [ ] Task two\n\n"
-        "## Stage 3: Third\n\n"
-        "- [ ] Task three\n"
+        canonical_plan_text(
+            "# Plan\n\n"
+            "## Stage 1: First\n\n"
+            "- [ ] Task one\n\n"
+            "## Stage 2: Second\n\n"
+            "- [ ] Task two\n\n"
+            "## Stage 3: Third\n\n"
+            "- [ ] Task three\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -8586,7 +8607,7 @@ def test_default_mode_advances_across_phases_without_exiting(tmp_path, capsys):
 def test_full_suite_pass_at_end_of_run_proceeds_normally(tmp_path, capsys):
     """Full suite pass at end of run runs build, audit, and sends all-done notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8649,11 +8670,13 @@ def test_build_failure_at_stage_boundary_returns_failure(tmp_path, capsys):
     """Build failure at stage boundary sends error notification and returns failure."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        "# Plan\n\n"
-        "## Stage 1: Setup\n\n"
-        "- [ ] Init project\n\n"
-        "## Stage 2: Build\n\n"
-        "- [ ] Build app\n"
+        canonical_plan_text(
+            "# Plan\n\n"
+            "## Stage 1: Setup\n\n"
+            "- [ ] Init project\n\n"
+            "## Stage 2: Build\n\n"
+            "- [ ] Build app\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -8708,7 +8731,7 @@ def test_build_failure_at_stage_boundary_returns_failure(tmp_path, capsys):
 def test_build_failure_at_end_of_run_returns_failure(tmp_path, capsys):
     """Build failure at end of run sends error notification and returns failure."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -8838,7 +8861,7 @@ def test_run_status_with_stuck_and_detail():
 def test_main_exits_nonzero_on_failure(tmp_path):
     """_main() calls sys.exit(1) when run_loop returns failure."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task\n")
+    plan.write_text(canonical_plan_text("- [ ] Task\n"))
 
     failure = RunStatus("failure", detail="Task failed")
     with (
@@ -8866,7 +8889,7 @@ def test_main_exits_nonzero_on_failure(tmp_path):
 def test_main_exits_zero_on_success(tmp_path):
     """_main() does not call sys.exit when run_loop returns success."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task\n")
+    plan.write_text(canonical_plan_text("- [ ] Task\n"))
 
     success = RunStatus("success")
     with (
@@ -8893,7 +8916,7 @@ def test_main_exits_zero_on_success(tmp_path):
 def test_run_loop_failure_returns_failure_status(tmp_path):
     """run_loop returns failure status when a task exhausts retries."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Do something\n")
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
 
     mock_result = MagicMock()
@@ -8946,7 +8969,7 @@ def test_run_loop_success_returns_success_status(tmp_path):
 def test_main_exits_nonzero_on_interrupted(tmp_path):
     """_main() calls sys.exit(1) when run_loop returns interrupted status."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task\n")
+    plan.write_text(canonical_plan_text("- [ ] Task\n"))
 
     interrupted = RunStatus("interrupted", detail="User interrupted")
     with (
@@ -8974,7 +8997,7 @@ def test_main_exits_nonzero_on_interrupted(tmp_path):
 def test_main_exits_nonzero_on_failure_with_stuck_tasks(tmp_path):
     """_main() exits nonzero when run_loop returns failure with stuck tasks."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task A\n- [ ] Task B\n")
+    plan.write_text(canonical_plan_text("- [ ] Task A\n- [ ] Task B\n"))
 
     failure = RunStatus(
         "failure",
@@ -9091,7 +9114,7 @@ def _notify_messages(mock_notify):
 def test_terminal_failure_commit_failure_skips_success(tmp_path):
     """Commit failure sets terminal_failure, skips build/audit/all-done notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     status, mock_notify = _run_loop_with_patches(
@@ -9113,7 +9136,7 @@ def test_terminal_failure_commit_failure_skips_success(tmp_path):
 def test_terminal_failure_commit_failure_skips_build(tmp_path):
     """Commit failure should not run _run_build."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -9161,7 +9184,7 @@ def test_terminal_failure_commit_failure_skips_build(tmp_path):
 def test_terminal_failure_task_exhausted_skips_success(tmp_path):
     """Task exhausting retries sets terminal_failure, skips all-done notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Hopeless task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Hopeless task\n"))
     (tmp_path / ".git").mkdir()
 
     fail_result = MagicMock()
@@ -9194,7 +9217,7 @@ def test_terminal_failure_task_exhausted_skips_success(tmp_path):
 def test_terminal_failure_task_exhausted_skips_build(tmp_path):
     """Task failure should not run _run_build or audit."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Hopeless task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Hopeless task\n"))
     (tmp_path / ".git").mkdir()
 
     fail_result = MagicMock()
@@ -9230,7 +9253,7 @@ def test_terminal_failure_task_exhausted_skips_build(tmp_path):
 def test_terminal_failure_audit_failure_skips_build_and_success(tmp_path):
     """Audit failure sets terminal_failure, skips build and all-done notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     ok_build = BuildResult(ran=True, passed=True, command="make")
@@ -9261,7 +9284,7 @@ def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
     completion notification.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -9312,7 +9335,7 @@ def test_terminal_failure_audit_failure_skips_build_call(tmp_path):
 def test_terminal_failure_full_suite_end_of_run_distinct_notification(tmp_path):
     """Full suite failure at end of run produces distinct notification, skips success."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     result = MagicMock()
@@ -9353,7 +9376,7 @@ def test_terminal_failure_full_suite_end_of_run_distinct_notification(tmp_path):
 def test_terminal_failure_build_end_of_run_distinct_notification(tmp_path):
     """Build failure at end of run produces distinct notification, skips success."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     failed_build = BuildResult(ran=True, passed=False, command="swift build")
@@ -9499,7 +9522,7 @@ def test_failed_task_summary_does_not_inherit_prior_changed_files(tmp_path):
     list.
     """
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] First task\n- [ ] Second task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] First task\n- [ ] Second task\n"))
     (tmp_path / ".git").mkdir()
 
     call_count = {"run_task": 0}
@@ -9613,7 +9636,7 @@ def test_task_entry_carries_parity_fields(tmp_path):
 def test_run_summary_successful_run(tmp_path):
     """Successful run_loop produces a run summary with success status."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -9639,7 +9662,7 @@ def test_run_summary_successful_run(tmp_path):
 def test_run_summary_failed_run(tmp_path):
     """Failed run produces a summary with failure detail."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -9672,7 +9695,7 @@ def test_run_summary_failed_run(tmp_path):
 def test_run_summary_interrupted_run(tmp_path):
     """Interrupted run still produces a summary."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n\n- [ ] Do task\n")
+    plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -9773,11 +9796,11 @@ def test_parse_args_retry_default_false():
 def test_run_loop_retry_resets_failed_markers(tmp_path):
     """run_loop(retry=True) flips [!] back to [ ] in active files before picking tasks."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] unrelated master task\n")
+    plan.write_text(canonical_plan_text("# Plan\n- [ ] unrelated master task\n"))
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("# Plan\n- [!] failed feature\n- [ ] next feature\n")
+    current.write_text(canonical_plan_text("# Plan\n- [!] failed feature\n- [ ] next feature\n"))
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("- [!] failed bug\n")
+    bugs.write_text("## Bugs\n- [!] failed bug\n")
     (tmp_path / ".git").mkdir()
 
     with (
@@ -9790,6 +9813,8 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._commit", return_value=""),
         patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["bugfix.txt"]),
+        patch("mcloop.main._worktree_status", return_value=" M bugfix.txt"),
         patch("mcloop.main.get_check_commands", return_value=[]),
         patch("mcloop.main.detect_build", return_value=None),
         patch("mcloop.main.detect_run", return_value=None),
@@ -9798,6 +9823,7 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
         mock_checks.return_value = MagicMock(passed=True)
 
         def runner_side_effect(*a, **kw):
+            (tmp_path / "bugfix.txt").write_text("done")
             content = bugs.read_text()
             content = content.replace("- [ ] failed bug", "- [x] failed bug", 1)
             bugs.write_text(content)
@@ -9815,11 +9841,11 @@ def test_run_loop_retry_resets_failed_markers(tmp_path):
 def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
     """Without --retry, failed markers remain intact."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] unrelated master task\n")
+    plan.write_text(canonical_plan_text("# Plan\n- [ ] unrelated master task\n"))
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("# Plan\n- [!] failed feature\n- [ ] next feature\n")
+    current.write_text(canonical_plan_text("# Plan\n- [!] failed feature\n- [ ] next feature\n"))
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("- [!] failed bug\n")
+    bugs.write_text("## Bugs\n- [!] failed bug\n")
     (tmp_path / ".git").mkdir()
 
     with (
@@ -9857,7 +9883,7 @@ def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
 def test_stop_after_one_exits_after_single_task(tmp_path):
     """--stop-after-one runs one task then exits with success."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] First task\n- [ ] Second task\n")
+    plan.write_text(canonical_plan_text("# Plan\n- [ ] First task\n- [ ] Second task\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9902,7 +9928,9 @@ def test_stop_after_one_exits_after_single_task(tmp_path):
 def test_stop_after_one_bypasses_batch(tmp_path):
     """--stop-after-one skips batching and runs a single task."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [ ] Child B\n")
+    plan.write_text(
+        canonical_plan_text("# Plan\n- [ ] [BATCH] Parent\n  - [ ] Child A\n  - [ ] Child B\n")
+    )
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9950,9 +9978,9 @@ def test_stop_after_one_bypasses_batch(tmp_path):
 def test_stop_after_one_works_in_bug_only_mode(tmp_path):
     """--stop-after-one works in bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -9997,9 +10025,9 @@ def test_stop_after_one_works_in_bug_only_mode(tmp_path):
 def test_stop_after_stage_warns_in_bug_only_mode(tmp_path, capsys):
     """--stop-after-stage prints warning and is ignored in bug-only mode."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Fix crash\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Fix crash\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10038,7 +10066,9 @@ def test_stop_after_stage_warns_in_bug_only_mode(tmp_path, capsys):
 def test_stop_after_stage_distinct_notification(tmp_path):
     """--stop-after-stage produces a distinct success notification."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    plan.write_text(
+        canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    )
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10078,7 +10108,7 @@ def test_stop_after_stage_distinct_notification(tmp_path):
 def test_stop_after_one_no_post_loop_processing(tmp_path):
     """--stop-after-one skips full-suite check, audit, and build."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n")
+    plan.write_text(canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10120,7 +10150,7 @@ def test_stop_after_one_no_post_loop_processing(tmp_path):
 def test_main_passes_stop_flags_to_run_loop(tmp_path):
     """_main() forwards --stop-after-stage and --stop-after-one to run_loop."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] Task\n")
+    plan.write_text(canonical_plan_text("- [ ] Task\n"))
 
     with (
         patch("mcloop.main._parse_args") as mock_args,
@@ -10151,7 +10181,7 @@ def test_main_passes_stop_flags_to_run_loop(tmp_path):
 def test_stop_after_one_prints_stop_reason(tmp_path, capsys):
     """--stop-after-one prints stop reason in terminal summary (not patched)."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n")
+    plan.write_text(canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n- [ ] Task B\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10188,9 +10218,9 @@ def test_stop_after_one_prints_stop_reason(tmp_path, capsys):
 def test_stop_after_one_bug_only_prints_stop_reason(tmp_path, capsys):
     """--stop-after-one in bug-only mode prints stop reason in terminal summary."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10227,7 +10257,9 @@ def test_stop_after_one_bug_only_prints_stop_reason(tmp_path, capsys):
 def test_stop_after_stage_prints_stop_reason(tmp_path, capsys):
     """--stop-after-stage prints distinct stop reason in terminal summary."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    plan.write_text(
+        canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    )
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10272,7 +10304,9 @@ def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
     default mode the run processes all stages and ends with
     "All tasks completed!"."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    plan.write_text(
+        canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    )
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()
@@ -10314,7 +10348,7 @@ def test_normal_stage_complete_no_stop_reason(tmp_path, capsys):
 def test_run_summary_stop_after_one_terminal_status(tmp_path):
     """--stop-after-one sets terminal_status='stopped' and stop_reason='stop_after_one'."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] First task\n- [ ] Second task\n")
+    plan.write_text(canonical_plan_text("# Plan\n- [ ] First task\n- [ ] Second task\n"))
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -10359,9 +10393,9 @@ def test_run_summary_stop_after_one_terminal_status(tmp_path):
 def test_run_summary_stop_after_one_bug_only_terminal_status(tmp_path):
     """--stop-after-one in bug-only mode sets stopped status."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("- [ ] placeholder\n")
-    (tmp_path / "CURRENT_PLAN.md").write_text("- [ ] placeholder\n")
-    (tmp_path / "BUGS.md").write_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n")
+    plan.write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text("- [ ] placeholder\n"))
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n- [ ] Bug A\n- [ ] Bug B\n"))
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -10406,7 +10440,9 @@ def test_run_summary_stop_after_one_bug_only_terminal_status(tmp_path):
 def test_run_summary_stop_after_stage_terminal_status(tmp_path):
     """--stop-after-stage sets terminal_status='stopped' and stop_reason='stop_after_stage'."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    plan.write_text(
+        canonical_plan_text("## Stage 1: Core\n- [ ] Task A\n## Stage 2: Extra\n- [ ] Task B\n")
+    )
     (tmp_path / ".git").mkdir()
 
     captured = {}
@@ -10493,7 +10529,7 @@ def test_run_summary_normal_success_no_stop_reason(tmp_path):
         captured.update(kwargs)
 
     plan = tmp_path / "PLAN.md"
-    plan.write_text("# Plan\n- [ ] Only task\n")
+    plan.write_text(canonical_plan_text("# Plan\n- [ ] Only task\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()

@@ -17,6 +17,7 @@ from unittest.mock import patch
 import pytest
 
 from mcloop.main import run_loop
+from tests.plan_fixtures import canonical_plan_text
 
 STUB_CLI = str(Path(__file__).resolve().parent.parent / "stubs" / "stub_cli.py")
 
@@ -40,7 +41,7 @@ def _setup_repo(
     _git(["git", "config", "user.name", "McLoop Test"], tmp_path)
 
     plan_md = tmp_path / "PLAN.md"
-    plan_md.write_text(plan_content)
+    plan_md.write_text(canonical_plan_text(plan_content))
 
     # Trivial check command so run_checks always passes
     if mcloop_json is None:

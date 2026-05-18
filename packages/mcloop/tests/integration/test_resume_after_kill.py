@@ -9,6 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
+from tests.plan_fixtures import canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
@@ -22,7 +23,11 @@ def _setup_repo(tmp_path: Path) -> Path:
     _git(["git", "config", "user.name", "McLoop Test"], tmp_path)
 
     plan_md = tmp_path / "PLAN.md"
-    plan_md.write_text("- [ ] Create alpha.txt\n- [ ] Create beta.txt\n- [ ] Create gamma.txt\n")
+    plan_md.write_text(
+        canonical_plan_text(
+            "- [ ] Create alpha.txt\n- [ ] Create beta.txt\n- [ ] Create gamma.txt\n"
+        )
+    )
     (tmp_path / "mcloop.json").write_text(
         f'{{"checks": ["{sys.executable} -c \\"print(\'ok\')\\""]}}\\n'
     )
