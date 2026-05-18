@@ -20,3 +20,4 @@ local
 .claude/settings.local.json
 AGENTS.md
 .DS_Store
+.scratch/
