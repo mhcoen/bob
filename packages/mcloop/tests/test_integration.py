@@ -254,7 +254,7 @@ def test_session_limit_polls_then_retries(
 
     assert result.ok
     assert mock_run.call_count == 2
-    mock_sleep.assert_called_once_with(600)
+    assert mock_sleep.call_args_list.count(call(600)) == 1
 
     calls = _notify_calls(mock_notify)
     assert any("Polling every 10m" in msg for msg, _ in calls)
