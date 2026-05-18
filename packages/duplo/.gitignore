@@ -19,3 +19,4 @@ logs/
 .mcloop/
 .mcloop-last-audit
 .DS_Store
+.scratch/
