@@ -21,3 +21,4 @@ logs/
 .orchestra/
 .DS_Store
 .scratch/
+*.lock
