@@ -10,7 +10,6 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
 from bob_tools.planfile import (
@@ -27,27 +26,11 @@ from bob_tools.planfile import (
 )
 from bob_tools.planfile import Task as PlanTask
 
+from mcloop.checklist import Task
+
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 _UPDATE_RETRIES = 2
-
-
-@dataclass
-class Task:
-    """Checklist-compatible task value translated from ``planfile.Task``."""
-
-    text: str
-    checked: bool
-    failed: bool
-    line_number: int
-    indent_level: int
-    stage: str = ""
-    children: list[Task] = field(default_factory=list)
-    eliminated: list[str] = field(default_factory=list)
-    body: str = ""
-    task_id: str | None = None
-    flag_tags: tuple[str, ...] = ()
-    action_tag: tuple[str, str] | None = None
 
 
 def _stage_name(keyword: str, ordinal: int, title: str) -> str:

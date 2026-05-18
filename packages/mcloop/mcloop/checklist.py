@@ -53,6 +53,9 @@ class Task:
     children: list[Task] = field(default_factory=list)
     eliminated: list[str] = field(default_factory=list)
     body: str = ""
+    task_id: str | None = None
+    flag_tags: tuple[str, ...] = ()
+    action_tag: tuple[str, str] | None = None
 
 
 def count_unchecked(tasks: list[Task]) -> int:
