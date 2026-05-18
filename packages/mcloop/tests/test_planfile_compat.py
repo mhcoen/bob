@@ -179,26 +179,31 @@ def test_clear_failed_markers_matches_checklist_on_real_plan_copy(tmp_path: Path
     assert _status_by_text(shim.parse(shim_path)) == _status_by_text(checklist.parse(legacy_path))
 
 
+def _uncheck_first(text: str, task_body: str) -> str:
+    """Flip the first ``- [x] <task_body>`` line to ``- [ ] <task_body>``.
+
+    Tolerates an optional ``T-NNNNNN: `` prefix between the checkbox and
+    the task body so the substitution survives B1 canonicalization
+    (which adds canonical task ids to every task line in the real
+    PLAN.md). Without this tolerance, ``str.replace`` against the
+    pre-canonical literal silently no-ops on the post-canonical file
+    and the downstream parser sees nothing unchecked.
+    """
+    pattern = re.compile(
+        r"^(?P<indent>\s*)- \[x\] (?P<id>T-\d{6}: )?" + re.escape(task_body),
+        re.MULTILINE,
+    )
+    return pattern.sub(r"\g<indent>- [ ] \g<id>" + task_body, text, count=1)
+
+
 def test_batch_children_match_on_real_batch_block(tmp_path: Path) -> None:
     legacy_path = _copy_plan(tmp_path, ROOT / "PLAN.md", "legacy-batch.md")
     shim_path = _copy_plan(tmp_path, ROOT / "PLAN.md", "shim-batch.md")
     for path in (legacy_path, shim_path):
         text = path.read_text()
-        text = text.replace(
-            "- [x] [BATCH] Add reviewer module",
-            "- [ ] [BATCH] Add reviewer module",
-            1,
-        )
-        text = text.replace(
-            "   - [x] Create `ReviewFinding`",
-            "   - [ ] Create `ReviewFinding`",
-            1,
-        )
-        text = text.replace(
-            "   - [x] Create `ReviewRequest`",
-            "   - [ ] Create `ReviewRequest`",
-            1,
-        )
+        text = _uncheck_first(text, "[BATCH] Add reviewer module")
+        text = _uncheck_first(text, "Create `ReviewFinding`")
+        text = _uncheck_first(text, "Create `ReviewRequest`")
         path.write_text(text)
 
     legacy_parent = next(
