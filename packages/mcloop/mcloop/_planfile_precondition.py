@@ -1,8 +1,9 @@
 """Canonical-form precondition check for mcloop PLAN.md inputs.
 
-INCREMENT 1 of B3 Stage B3.1 — the R1 (grammar-narrowing) discriminator only.
-Not wired into ``mcloop/main.py`` in this increment. The R2 (ID-less task)
-predicate and run_loop wire-in arrive in later increments of B3.1.
+Canonicality is enforced by distinct predicates. R1 rejects grammar
+narrowing where the canonical parser would silently drop incomplete
+checkboxes. R2 rejects parsed tasks without stable ``T-NNNNNN`` ids
+before mcloop routes mutations through the planfile shim.
 
 Why a precondition exists at all
 --------------------------------
@@ -55,6 +56,7 @@ from bob_tools.planfile import Task as PlanTask
 _INCOMPLETE_RE = re.compile(r"^\s*- \[ \] .+$", re.MULTILINE)
 
 R1Verdict = Literal["ALLOW", "REJECT_GRAMMAR_NARROWED"]
+R2Verdict = Literal["ALLOW", "REJECT_ID_LESS_TASKS"]
 
 
 class PlanNotCanonicalError(Exception):
@@ -90,6 +92,25 @@ def _count_incomplete_tasks(plan: Plan) -> int:
     return total
 
 
+def _iter_tasks(plan: Plan) -> list[PlanTask]:
+    """Return every task in phase, subsection, and bugs trees."""
+
+    tasks: list[PlanTask] = []
+
+    def walk(children: tuple[PlanTask, ...]) -> None:
+        for task in children:
+            tasks.append(task)
+            walk(task.children)
+
+    for phase in plan.phases:
+        walk(phase.tasks)
+        for subsection in phase.subsections:
+            walk(subsection.tasks)
+    if plan.bugs is not None:
+        walk(plan.bugs.tasks)
+    return tasks
+
+
 def discriminate_r1(source_text: str, plan: Plan) -> tuple[R1Verdict, str]:
     """Classify a plan input on the R1 (grammar-narrowing) axis.
 
@@ -117,15 +138,27 @@ def discriminate_r1(source_text: str, plan: Plan) -> tuple[R1Verdict, str]:
     )
 
 
+def discriminate_r2(plan: Plan) -> tuple[R2Verdict, str]:
+    """Classify a parsed plan on the R2 (ID-less task) axis."""
+    id_less_lines = [task.line_number for task in _iter_tasks(plan) if task.task_id is None]
+    if id_less_lines:
+        locs = ", ".join(f"line {line}" for line in id_less_lines[:10])
+        extra = "" if len(id_less_lines) <= 10 else f", plus {len(id_less_lines) - 10} more"
+        return (
+            "REJECT_ID_LESS_TASKS",
+            f"canonical parser surfaced {len(id_less_lines)} task(s) without "
+            f"stable T-NNNNNN ids ({locs}{extra})",
+        )
+    return ("ALLOW", "all parsed tasks carry stable T-NNNNNN ids")
+
+
 def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None = None) -> None:
     """Raise ``PlanNotCanonicalError`` if ``plan`` fails the precondition.
 
-    This increment implements the R1 (grammar-narrowing) discriminator
-    only. R2 (ID-less tasks under a phase) is a separate predicate to
-    be added in a later increment of Stage B3.1 of the B3 re-plan; this
-    function will be extended at that time. Both ``source_text`` and
-    ``plan`` are required arguments — the precondition cannot be
-    decided from ``plan`` alone (see module docstring).
+    Enforces R1 (grammar narrowing) and R2 (ID-less parsed tasks) as
+    distinct predicates. Both ``source_text`` and ``plan`` are required
+    arguments — R1 cannot be decided from ``plan`` alone (see module
+    docstring), while R2 is a parsed-plan predicate.
     """
     verdict, reason = discriminate_r1(source_text, plan)
     if verdict == "REJECT_GRAMMAR_NARROWED":
@@ -133,6 +166,17 @@ def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None 
         raise PlanNotCanonicalError(
             f"PLAN.md{path_hint} is not in canonical bob-tools planfile form.\n"
             f"  {reason}.\n"
+            f"  Run: bob-plan migrate <path>\n"
+            f"  Migration is deterministic; bob-plan fmt produces the same "
+            f"output each time, so this is reversible.",
+            source_path=source_path,
+        )
+    r2_verdict, r2_reason = discriminate_r2(plan)
+    if r2_verdict == "REJECT_ID_LESS_TASKS":
+        path_hint = f" {source_path}" if source_path is not None else ""
+        raise PlanNotCanonicalError(
+            f"PLAN.md{path_hint} is not in canonical bob-tools planfile form.\n"
+            f"  {r2_reason}.\n"
             f"  Run: bob-plan migrate <path>\n"
             f"  Migration is deterministic; bob-plan fmt produces the same "
             f"output each time, so this is reversible.",
