@@ -1,9 +1,5 @@
-## Stage 6: File I/O
+## Stage 11: Phase C Increment 2 - validate_plan constructed extension
+<!-- phase_id: phase_011 -->
 
-- [!] [BATCH] Implement load, save, and update
-   - [!] `load(path: Path) -> Plan`: read file, call `parse_plan(text, source_path=path)`. Errors propagate.
-   - [!] `save(path: Path, plan: Plan) -> None`: render to text, write atomically (write to a tempfile in the same directory, fsync, rename). Acquire an advisory file lock (`fcntl.flock` with LOCK_EX) for the duration of the write. Release after rename.
-   - [!] `update(path: Path, operation: Callable[[Plan], Plan]) -> Plan`: load, lock, re-parse to detect concurrent edits, apply operation, save, release lock. Returns the new Plan. This is the safe-mutation entry point for tools that race with humans.
-   - [!] Tests: atomic write does not leave half-written files on simulated crash (use a tempdir and a side-channel that simulates failure between write and rename); locking serializes two concurrent `update` calls; `update` detects mid-flight external edits and raises.
-
-- [ ] Verify Stage 6 leaves the repo green.
+- [ ] T-000171: Extend validate_plan to the signature validate_plan(plan, *, constructed=False) per v4 Contract 4. constructed=False preserves today's task-centric behavior exactly (existing callers unchanged). constructed=True additionally enforces: magic_version == 1; phase ordinals unique and contiguous 1..N; keyword in {Phase, Stage}; every phase has phase_id and phase_id_source != none; every task has a T-NNNNNN id; no duplicate phase ids; no trailing_lines on construction-API tasks; and semantic field-stability over every task plus the non-task scalars defined in the v4 non-task oracle section. Reuse the Stage 10 normalizer and round-trip harness; do not duplicate them.
+- [ ] T-000172: Verify Stage 11 gate: existing validate_plan tests pass unchanged at the default; new constructed-mode tests cover each added check including a failing fixture per check; ruff, ruff format, mypy strict, full pytest all green.
