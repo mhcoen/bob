@@ -5,3 +5,7 @@ __pycache__/
 logs/
 .scratch/
 *.lock
+
+# claude CLI auto-installer staging (never commit)
+claude/
+/2.[0-9]*.[0-9]*

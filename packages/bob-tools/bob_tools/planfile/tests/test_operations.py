@@ -493,6 +493,307 @@ class TestValidatePlan:
         ]
 
 
+class TestValidatePlanConstructed:
+    """Tests for ``validate_plan(plan, constructed=True)`` per v4 Contract 4.
+
+    ``constructed=False`` is the default and preserves today's
+    task-centric checks (covered by :class:`TestValidatePlan`); the
+    ``constructed=True`` mode adds the construction-API invariants and
+    semantic field-stability per the v4 R3 oracle. Each test pins one
+    failing condition and one matching error message so a regression in
+    any single check surfaces independently.
+    """
+
+    def _ctask(
+        self,
+        *,
+        task_id: str | None = "T-000001",
+        text: str = "do thing",
+        trailing_lines: tuple[str, ...] = (),
+        children: tuple[Task, ...] = (),
+        deps: tuple[str, ...] = (),
+    ) -> Task:
+        return Task(
+            task_id=task_id,
+            text=text,
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=deps,
+            children=children,
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+            trailing_lines=trailing_lines,
+        )
+
+    def _cphase(
+        self,
+        *,
+        tasks: tuple[Task, ...] = (),
+        subsections: tuple[Subsection, ...] = (),
+        phase_id: str | None = "phase_001",
+        phase_id_source: str = "explicit_comment",
+        ordinal: int = 1,
+        keyword: str = "Phase",
+        title: str = "Stage",
+        prose: str = "",
+    ) -> Phase:
+        return Phase(
+            phase_id=phase_id,
+            phase_id_source=phase_id_source,
+            ordinal=ordinal,
+            keyword=keyword,
+            title=title,
+            prose=prose,
+            subsections=subsections,
+            tasks=tasks,
+            line_number=0,
+        )
+
+    def _cplan(
+        self,
+        *,
+        magic_version: int | None = 1,
+        project_title: str = "Project",
+        preamble: str = "",
+        phases: tuple[Phase, ...] | None = None,
+        bugs: BugsSection | None = None,
+    ) -> Plan:
+        if phases is None:
+            phases = (self._cphase(tasks=(self._ctask(),)),)
+        return Plan(
+            magic_version=magic_version,
+            project_title=project_title,
+            preamble=preamble,
+            phases=phases,
+            bugs=bugs,
+            source_path=None,
+        )
+
+    def test_minimal_constructed_plan_validates(self) -> None:
+        validate_plan(self._cplan(), constructed=True)
+
+    def test_default_mode_unchanged_with_legacy_inputs(self) -> None:
+        # A plan with magic_version=None, ordinal mismatch, no phase_id,
+        # and trailing_lines passes the default validator unchanged —
+        # the constructed-only checks must not leak into compat mode.
+        plan = Plan(
+            magic_version=None,
+            project_title="Legacy",
+            preamble="multi\nline\nallowed",
+            phases=(
+                self._cphase(
+                    phase_id=None,
+                    phase_id_source="none",
+                    ordinal=7,
+                    tasks=(self._ctask(task_id=None, trailing_lines=("",)),),
+                ),
+            ),
+            bugs=None,
+            source_path=None,
+        )
+        validate_plan(plan)
+
+    def test_magic_version_must_be_one(self) -> None:
+        plan = self._cplan(magic_version=None)
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any("plan.magic_version must be 1" in m for m in exc_info.value.messages)
+
+    def test_ordinals_must_be_contiguous(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    ordinal=1,
+                    phase_id="phase_001",
+                    tasks=(self._ctask(task_id="T-000001"),),
+                ),
+                self._cphase(
+                    ordinal=3,
+                    phase_id="phase_003",
+                    tasks=(self._ctask(task_id="T-000002"),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phase ordinals must be contiguous" in m for m in exc_info.value.messages
+        )
+
+    def test_keyword_must_be_phase_or_stage(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    keyword="Step",
+                    tasks=(self._ctask(),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "keyword must be 'Phase' or 'Stage'" in m for m in exc_info.value.messages
+        )
+
+    def test_phase_must_have_phase_id(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    phase_id=None,
+                    phase_id_source="none",
+                    tasks=(self._ctask(),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any("missing phase_id" in m for m in exc_info.value.messages)
+
+    def test_duplicate_phase_ids_rejected(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    ordinal=1,
+                    phase_id="phase_dup",
+                    tasks=(self._ctask(task_id="T-000001"),),
+                ),
+                self._cphase(
+                    ordinal=2,
+                    phase_id="phase_dup",
+                    tasks=(self._ctask(task_id="T-000002"),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any("duplicate phase_id phase_dup" in m for m in exc_info.value.messages)
+
+    def test_every_task_must_have_id(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(self._ctask(task_id=None),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "task_id is missing on constructed task" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_nested_child_must_have_id(self) -> None:
+        # The per-node check descends into children: a missing id on a
+        # nested task must surface with the child-path-qualified label
+        # so a fixer can locate the offending node.
+        child = self._ctask(task_id=None, text="child")
+        parent = self._ctask(task_id="T-000001", children=(child,))
+        plan = self._cplan(phases=(self._cphase(tasks=(parent,)),))
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        messages = exc_info.value.messages
+        assert any(
+            "children[0].task_id is missing on constructed task" in m for m in messages
+        )
+
+    def test_trailing_lines_rejected_on_constructed_task(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(self._ctask(trailing_lines=("# stash",)),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "trailing_lines must be empty on constructed tasks" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_project_title_newline_rejected(self) -> None:
+        plan = self._cplan(project_title="line\nbreak")
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "project_title contains an embedded newline" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_preamble_newline_rejected(self) -> None:
+        # Multi-line preamble is legal for parsed legacy plans but the
+        # constructed oracle has no multi-line exception per v4 R3.
+        plan = self._cplan(preamble="first\nsecond")
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "preamble contains an embedded newline" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_phase_title_round_trip_collision_rejected(self) -> None:
+        # A phase title that re-parses as a different structure (here a
+        # phase-id comment fragment) fails the v4 R3 round-trip oracle.
+        # The colliding sequence is the literal phase-id comment opener;
+        # placed inside a title it would be misread by the parser.
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    title="legit\rcarriage",
+                    tasks=(self._ctask(),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any("phases[0].title" in m for m in exc_info.value.messages)
+
+    def test_task_text_grammar_collision_rejected(self) -> None:
+        # The Stage 10 task harness catches text that re-parses as an
+        # annotation; validate_plan(constructed=True) must surface that
+        # failure with the task's plan-location label prepended.
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(self._ctask(text="title [fix: leaked]"),),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        messages = exc_info.value.messages
+        assert any(
+            "phases[0].tasks[0]:" in m and "text" in m and "failed to round-trip" in m
+            for m in messages
+        )
+
+    def test_subsection_title_field_stability(self) -> None:
+        sub = Subsection(
+            title="Manual\nverification",
+            prose="",
+            tasks=(self._ctask(task_id="T-000002"),),
+            line_number=0,
+        )
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(self._ctask(task_id="T-000001"),),
+                    subsections=(sub,),
+                ),
+            ),
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].subsections[0].title contains an embedded newline" in m
+            for m in exc_info.value.messages
+        )
+
+
 class TestBugCount:
     """``bug_count`` disambiguates the three Bugs-section states.
 

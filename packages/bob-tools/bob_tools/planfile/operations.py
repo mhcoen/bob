@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any, Protocol
 
 from bob_tools.planfile.model import (
@@ -504,7 +504,7 @@ def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
     errors.append(f"task {_task_ref(task)} has malformed annotation [{content}]")
 
 
-def validate_plan(plan: Plan) -> None:
+def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
     """Validate structural and referential integrity of ``plan``.
 
     Raises :class:`PlanValidationError` carrying one message per problem
@@ -537,6 +537,19 @@ def validate_plan(plan: Plan) -> None:
     Parse-time concerns (syntax, structure of headings) are not
     re-checked here; the parser raises :class:`PlanSyntaxError` for
     those.
+
+    When ``constructed=True`` (per v4 Contract 4), additionally enforces
+    the construction-API invariants: ``magic_version == 1``; phase
+    ordinals unique and contiguous ``1..N``; ``keyword`` in ``{"Phase",
+    "Stage"}``; every phase has ``phase_id`` and ``phase_id_source !=
+    "none"``; every task carries a ``T-NNNNNN`` id; no duplicate phase
+    ids; no ``trailing_lines`` on any task; and semantic field-stability
+    over every task plus the non-task scalars (``project_title``,
+    ``preamble``, each ``Phase.title`` / ``Phase.prose``, each
+    ``Subsection.title`` / ``Subsection.prose``) per the v4 R3 oracle.
+    ``constructed=False`` preserves the task-centric behavior above
+    exactly; the Stage 10 task field-stability harness is reused
+    for the per-task check rather than duplicated here.
     """
     errors: list[str] = []
 
@@ -562,8 +575,327 @@ def validate_plan(plan: Plan) -> None:
             if dep not in known_ids:
                 errors.append(f"task {_task_ref(task)} references unknown dep {dep}")
 
+    if constructed:
+        _check_constructed_invariants(plan, errors)
+
     if errors:
         raise PlanValidationError(errors)
+
+
+def _plan_phase_path(phase_index: int) -> str:
+    return f"phases[{phase_index}]"
+
+
+def _plan_subsection_path(phase_index: int, sub_index: int) -> str:
+    return f"phases[{phase_index}].subsections[{sub_index}]"
+
+
+def _iter_plan_top_level_tasks_with_label(
+    plan: Plan,
+) -> Iterator[tuple[str, Task]]:
+    """Yield ``(label, task)`` for each top-level task in the plan.
+
+    ``label`` locates the task within the plan structure
+    (``phases[i].tasks[j]``, ``phases[i].subsections[j].tasks[k]``, or
+    ``bugs.tasks[i]``) so validator messages can identify which task's
+    round-trip failed without descending into children. Child tasks are
+    not yielded: field-stability is checked per-tree, since the Stage 10
+    harness recurses through children when invoked on the root task.
+    """
+    for phase_index, phase in enumerate(plan.phases):
+        for task_index, task in enumerate(phase.tasks):
+            yield f"{_plan_phase_path(phase_index)}.tasks[{task_index}]", task
+        for sub_index, sub in enumerate(phase.subsections):
+            for task_index, task in enumerate(sub.tasks):
+                yield (
+                    f"{_plan_subsection_path(phase_index, sub_index)}"
+                    f".tasks[{task_index}]",
+                    task,
+                )
+    if plan.bugs is not None:
+        for task_index, task in enumerate(plan.bugs.tasks):
+            yield f"bugs.tasks[{task_index}]", task
+
+
+def _iter_plan_tasks_with_label(
+    plan: Plan,
+) -> Iterator[tuple[str, Task]]:
+    """Yield ``(label, task)`` for every task in the plan, including children.
+
+    Labels follow :func:`_iter_plan_top_level_tasks_with_label` with the
+    child path appended (``...children[i]...``). Used by the
+    constructed-mode checks that operate per-node (``task_id`` presence
+    and ``trailing_lines`` shape) rather than per-tree.
+    """
+    for label, root_task in _iter_plan_top_level_tasks_with_label(plan):
+        for path, node in _iter_task_tree_with_paths(root_task):
+            yield label + _child_path_suffix(path), node
+
+
+def _child_path_suffix(path: tuple[int, ...]) -> str:
+    return "".join(f".children[{index}]" for index in path)
+
+
+def _check_constructed_invariants(plan: Plan, errors: list[str]) -> None:
+    """Add v4 Contract 4 ``constructed=True`` violations to ``errors``.
+
+    Order matches the contract text so error output is stable across
+    runs: magic_version, phase ordinals, per-phase keyword and
+    phase_id, duplicate phase ids, per-task id and trailing_lines,
+    non-task scalar field-stability oracles (v4 R3), then per-task
+    field-stability via the Stage 10 harness.
+    """
+    if plan.magic_version != 1:
+        errors.append(
+            f"plan.magic_version must be 1 on constructed plans, "
+            f"got {plan.magic_version!r}"
+        )
+
+    expected_ordinals = list(range(1, len(plan.phases) + 1))
+    actual_ordinals = [phase.ordinal for phase in plan.phases]
+    if actual_ordinals != expected_ordinals:
+        errors.append(
+            f"phase ordinals must be contiguous 1..{len(plan.phases)}, "
+            f"got {actual_ordinals}"
+        )
+
+    phase_id_positions: dict[str, list[int]] = {}
+    for phase_index, phase in enumerate(plan.phases):
+        if phase.keyword not in ("Phase", "Stage"):
+            errors.append(
+                f"{_plan_phase_path(phase_index)}.keyword must be "
+                f"'Phase' or 'Stage', got {phase.keyword!r}"
+            )
+        if phase.phase_id is None or phase.phase_id_source == "none":
+            errors.append(
+                f"{_plan_phase_path(phase_index)} missing phase_id "
+                f"(source {phase.phase_id_source!r})"
+            )
+        if phase.phase_id is not None:
+            phase_id_positions.setdefault(phase.phase_id, []).append(phase_index)
+
+    for phase_id, positions in phase_id_positions.items():
+        if len(positions) > 1:
+            errors.append(f"duplicate phase_id {phase_id} at phases {positions}")
+
+    for label, task in _iter_plan_tasks_with_label(plan):
+        if task.task_id is None:
+            errors.append(f"{label}.task_id is missing on constructed task")
+        elif _TASK_REF_RE.fullmatch(task.task_id) is None:
+            errors.append(
+                f"{label}.task_id is malformed on constructed task: {task.task_id!r}"
+            )
+        if task.trailing_lines:
+            errors.append(f"{label}.trailing_lines must be empty on constructed tasks")
+
+    _check_non_task_scalar_field_stability(plan, errors)
+    _check_each_task_field_stability(plan, errors)
+
+
+def _construction_sentinel_task() -> Task:
+    return Task(
+        task_id="T-000001",
+        text="t",
+        status=TaskStatus.TODO,
+        flag_tags=(),
+        action_tag=None,
+        annotations=(),
+        deps=(),
+        children=(),
+        ruled_out=(),
+        indent_level=0,
+        line_number=0,
+        trailing_lines=(),
+    )
+
+
+def _construction_sentinel_phase(
+    *,
+    title: str = "P",
+    prose: str = "",
+    subsections: tuple[Subsection, ...] = (),
+    tasks: tuple[Task, ...] | None = None,
+) -> Phase:
+    phase_tasks = (_construction_sentinel_task(),) if tasks is None else tasks
+    return Phase(
+        phase_id="phase_001",
+        phase_id_source="explicit_comment",
+        ordinal=1,
+        keyword="Phase",
+        title=title,
+        prose=prose,
+        subsections=subsections,
+        tasks=phase_tasks,
+        line_number=0,
+    )
+
+
+def _construction_sentinel_plan(
+    *,
+    project_title: str = "Project",
+    preamble: str = "",
+    phase: Phase | None = None,
+) -> Plan:
+    return Plan(
+        magic_version=1,
+        project_title=project_title,
+        preamble=preamble,
+        phases=(phase if phase is not None else _construction_sentinel_phase(),),
+        bugs=None,
+        source_path=None,
+    )
+
+
+def _round_trip_scalar(
+    plan: Plan,
+    extract: Callable[[Plan], str],
+    candidate: str,
+    field: str,
+    errors: list[str],
+) -> None:
+    parsed = parse_plan(render_plan(plan))
+    try:
+        parsed_value = extract(parsed)
+    except (IndexError, AttributeError):
+        errors.append(
+            f"{field} failed to round-trip: intended {candidate!r}, "
+            f"parsed structure changed"
+        )
+        return
+    if parsed_value != candidate:
+        errors.append(
+            f"{field} failed to round-trip: intended {candidate!r}, "
+            f"parsed {parsed_value!r}"
+        )
+
+
+def _check_non_task_scalar_field_stability(plan: Plan, errors: list[str]) -> None:
+    """Run the v4 R3 oracles for each non-task scalar in ``plan``.
+
+    Pre-filters reject embedded ``\\n``/``\\r`` unconditionally — there
+    is no multi-line prose exception (v4 R3). Each value is rendered
+    inside a minimal canonical plan, the result re-parsed, and the
+    parsed scalar required to equal the candidate; inequality surfaces
+    a ``...failed to round-trip`` message naming the offending field
+    so a rephrase loop can target it.
+    """
+    if _contains_newline(plan.project_title):
+        errors.append("project_title contains an embedded newline")
+    else:
+        _round_trip_scalar(
+            _construction_sentinel_plan(project_title=plan.project_title),
+            lambda parsed: parsed.project_title,
+            plan.project_title,
+            "project_title",
+            errors,
+        )
+
+    if _contains_newline(plan.preamble):
+        errors.append("preamble contains an embedded newline")
+    else:
+        _round_trip_scalar(
+            _construction_sentinel_plan(preamble=plan.preamble),
+            lambda parsed: parsed.preamble,
+            plan.preamble,
+            "preamble",
+            errors,
+        )
+
+    for phase_index, phase in enumerate(plan.phases):
+        title_field = f"{_plan_phase_path(phase_index)}.title"
+        if _contains_newline(phase.title):
+            errors.append(f"{title_field} contains an embedded newline")
+        else:
+            _round_trip_scalar(
+                _construction_sentinel_plan(
+                    phase=_construction_sentinel_phase(title=phase.title)
+                ),
+                lambda parsed: parsed.phases[0].title,
+                phase.title,
+                title_field,
+                errors,
+            )
+
+        prose_field = f"{_plan_phase_path(phase_index)}.prose"
+        if _contains_newline(phase.prose):
+            errors.append(f"{prose_field} contains an embedded newline")
+        else:
+            _round_trip_scalar(
+                _construction_sentinel_plan(
+                    phase=_construction_sentinel_phase(prose=phase.prose)
+                ),
+                lambda parsed: parsed.phases[0].prose,
+                phase.prose,
+                prose_field,
+                errors,
+            )
+
+        for sub_index, sub in enumerate(phase.subsections):
+            sub_title_field = f"{_plan_subsection_path(phase_index, sub_index)}.title"
+            if _contains_newline(sub.title):
+                errors.append(f"{sub_title_field} contains an embedded newline")
+            else:
+                _round_trip_scalar(
+                    _construction_sentinel_plan(
+                        phase=_construction_sentinel_phase(
+                            tasks=(),
+                            subsections=(
+                                Subsection(
+                                    title=sub.title,
+                                    prose="",
+                                    tasks=(_construction_sentinel_task(),),
+                                    line_number=0,
+                                ),
+                            ),
+                        )
+                    ),
+                    lambda parsed: parsed.phases[0].subsections[0].title,
+                    sub.title,
+                    sub_title_field,
+                    errors,
+                )
+
+            sub_prose_field = f"{_plan_subsection_path(phase_index, sub_index)}.prose"
+            if _contains_newline(sub.prose):
+                errors.append(f"{sub_prose_field} contains an embedded newline")
+            else:
+                _round_trip_scalar(
+                    _construction_sentinel_plan(
+                        phase=_construction_sentinel_phase(
+                            tasks=(),
+                            subsections=(
+                                Subsection(
+                                    title="S",
+                                    prose=sub.prose,
+                                    tasks=(_construction_sentinel_task(),),
+                                    line_number=0,
+                                ),
+                            ),
+                        )
+                    ),
+                    lambda parsed: parsed.phases[0].subsections[0].prose,
+                    sub.prose,
+                    sub_prose_field,
+                    errors,
+                )
+
+
+def _check_each_task_field_stability(plan: Plan, errors: list[str]) -> None:
+    """Run the Stage 10 per-task harness for every top-level task in ``plan``.
+
+    The Stage 10 harness (:func:`_assert_task_field_stability`) recurses
+    through ``children``, so iterating only the top-level tasks is
+    sufficient. Per-task harness failures are re-prefixed with the
+    task's plan-location label so the user knows which task in the
+    full plan failed to round-trip without losing the per-field
+    diagnostic the harness already produced.
+    """
+    for label, task in _iter_plan_top_level_tasks_with_label(plan):
+        try:
+            _assert_task_field_stability(task)
+        except PlanValidationError as exc:
+            for message in exc.messages:
+                errors.append(f"{label}: {message}")
 
 
 def _task_matches_label(task: Task, ref: str) -> bool:
