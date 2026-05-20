@@ -148,9 +148,7 @@ def invoke_code_edit_direct(
         model=model,
     )
     output, exit_code = run_session(cmd, project_dir, env=env, timeout=timeout)
-    log_path = write_log(
-        log_dir, str(inputs.get("instruction", "task")), cmd, output, exit_code
-    )
+    log_path = write_log(log_dir, str(inputs.get("instruction", "task")), cmd, output, exit_code)
     changed = _direct_detect_changed_files(project_dir)
     return CodeEditResult(
         success=exit_code == 0,
@@ -200,9 +198,7 @@ def invoke_code_edit_orchestra(
     )
     summary = result.summary
     output = summary.get("output", "")
-    exit_code = int(
-        summary.get("exit_code", 1 if result.terminal != "done" else 0)
-    )
+    exit_code = int(summary.get("exit_code", 1 if result.terminal != "done" else 0))
     changed_files = list(summary.get("changed_files") or [])
     adapter_log = summary.get("adapter_log")
     log_path = Path(adapter_log) if adapter_log else result.log_path
@@ -355,6 +351,7 @@ def _representative_inputs(project_dir: Path) -> dict[str, Any]:
         "project_dir": str(project_dir),
         "description": "Test project",
         "task_label": "Task 1",
+        "task_id": "T-123456",
         "check_commands": ["pytest -q"],
         "is_bug_task": False,
     }
@@ -411,9 +408,21 @@ def patched_failing_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------
 
 
-def test_parity_code_edit_single(
-    tmp_path: Path, patched_subprocess: None
+def test_code_edit_prompt_includes_task_id_in_task_line_and_notes(
+    tmp_path: Path,
 ) -> None:
+    inputs = _representative_inputs(tmp_path)
+
+    prompt = build_code_edit_prompt(inputs)
+
+    assert "Task: [T-123456] Add a dataclass to src/example.py" in prompt
+    assert (
+        "current date and reference the task: [Task 1] [T-123456] "
+        "Add a dataclass to src/example.py."
+    ) in prompt
+
+
+def test_parity_code_edit_single(tmp_path: Path, patched_subprocess: None) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     direct_log_dir = tmp_path / "direct_logs"
@@ -464,20 +473,25 @@ def test_parity_code_edit_single(
     # instead of placing it in argv. The mcloop direct path still
     # places the prompt as a positional argument (claude -p
     # <prompt>). Equivalence now means: the two paths feed the same
-    # prompt bytes to the inner CLI, and their command shapes match
-    # apart from the prompt position.
+    # prompt bytes to the inner CLI. The orchestra path additionally
+    # pins Claude's stdin interpretation to text mode so the piped
+    # prompt is consumed as the user prompt rather than relying on CLI
+    # defaults.
     direct_prompt = direct_call.cmd[2]
+    assert "Task: [T-123456] Add a dataclass to src/example.py" in direct_prompt
     assert orch_call.stdin_buffer is not None
     orch_prompt = orch_call.stdin_buffer.captured
     assert direct_prompt == orch_prompt, (
         "both paths must build the same prompt from the same inputs"
     )
-    direct_cmd_no_prompt = (
-        direct_call.cmd[:2] + direct_call.cmd[3:]
-    )
-    assert direct_cmd_no_prompt == orch_call.cmd, (
-        "command shape must match apart from the prompt position; "
-        "the orchestra path now feeds the prompt via stdin"
+    direct_cmd_no_prompt = direct_call.cmd[:2] + direct_call.cmd[3:]
+    orch_cmd_without_input_format = list(orch_call.cmd)
+    input_format_at = orch_cmd_without_input_format.index("--input-format")
+    assert orch_cmd_without_input_format[input_format_at + 1] == "text"
+    del orch_cmd_without_input_format[input_format_at : input_format_at + 2]
+    assert direct_cmd_no_prompt == orch_cmd_without_input_format, (
+        "command shape must match apart from the prompt position and "
+        "orchestra's explicit stdin input format"
     )
     assert direct_call.cwd == orch_call.cwd
 
@@ -584,9 +598,7 @@ def test_parity_code_edit_provider_env(
         )
         return None
 
-    monkeypatch.setattr(
-        orch_sp, "load_role_config", _stub_load_role_config
-    )
+    monkeypatch.setattr(orch_sp, "load_role_config", _stub_load_role_config)
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -631,15 +643,10 @@ def test_parity_code_edit_provider_env(
         "ANTHROPIC_API_KEY",
     ]
     for key in keys_to_match:
-        assert key in direct_env, (
-            f"direct env missing {key!r}: {sorted(direct_env)}"
-        )
-        assert key in orch_env, (
-            f"orchestra env missing {key!r}: {sorted(orch_env)}"
-        )
+        assert key in direct_env, f"direct env missing {key!r}: {sorted(direct_env)}"
+        assert key in orch_env, f"orchestra env missing {key!r}: {sorted(orch_env)}"
         assert direct_env[key] == orch_env[key], (
-            f"{key} differs: direct={direct_env[key]!r} "
-            f"orchestra={orch_env[key]!r}"
+            f"{key} differs: direct={direct_env[key]!r} orchestra={orch_env[key]!r}"
         )
 
     # Provider routing must have actually fired: BASE_URL points at

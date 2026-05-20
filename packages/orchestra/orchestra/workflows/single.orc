@@ -9,6 +9,7 @@ workflow single
   external_input project_dir text
   external_input description text
   external_input task_label text
+  external_input task_id text
   external_input check_commands json
   external_input is_bug_task boolean
   external_input final_prompt text
@@ -30,7 +31,7 @@ workflow single
   state edit
     actor agent editor_agent
     role editor
-    reads instruction, context, prior_errors, eliminated, project_dir, description, task_label, check_commands, is_bug_task, final_prompt
+    reads instruction, context, prior_errors, eliminated, project_dir, description, task_label, task_id, check_commands, is_bug_task, final_prompt
     writes editor_output text
     on complete => done
     on error => stop

@@ -9,6 +9,7 @@ workflow draft_then_adjudicate
   external_input project_dir text
   external_input description text
   external_input task_label text
+  external_input task_id text
   external_input check_commands json
   external_input is_bug_task boolean
   external_input final_prompt text

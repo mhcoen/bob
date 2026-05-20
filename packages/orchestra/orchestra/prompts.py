@@ -7,7 +7,7 @@ previous attempt left ``prior_errors``. All three call into a shared
 ``_build_shared_parts`` that injects safety rules, check-command rules,
 the NOTES.md guidance, and the wrap-marker preservation rule.
 
-The api computes the right variant from the same nine inputs mcloop's
+The api computes the right variant from the same ten inputs mcloop's
 ``run_task`` receives, then injects the result into the workflow run as
 a synthetic external input named ``final_prompt``. The packaged
 templates substitute ``{final_prompt}`` directly. This keeps the
@@ -29,15 +29,14 @@ def _build_shared_parts(
     task_text: str,
     task_label: str,
     check_commands: list[str] | None,
+    task_id: str = "",
 ) -> list[str]:
     """Return prompt parts shared by all variants.
 
     Lifted from mcloop ``_build_shared_parts``.
     """
     parts: list[str] = []
-    parts.append(
-        "Do not chain shell commands with && or ;. Use separate Bash calls instead."
-    )
+    parts.append("Do not chain shell commands with && or ;. Use separate Bash calls instead.")
     parts.append(
         "Never set, unset, or override environment variables"
         " in Bash commands. Do not use VAR=value command,"
@@ -96,13 +95,14 @@ def _build_shared_parts(
         " changes to the entry point file, work around"
         " the marked block."
     )
+    id_prefix = f"[{task_id}] " if task_id else ""
     parts.append(
         "If you notice edge cases, design decisions,"
         " assumptions, potential issues, or anything"
         " worth revisiting later, append a note to"
         " NOTES.md. Each entry should include the"
         " current date and reference the task:"
-        f" [{task_label}] {task_text}."
+        f" [{task_label}] {id_prefix}{task_text}."
         " Do not create NOTES.md if you have nothing"
         " to note."
         " NOTES.md must use three sections:"
@@ -156,6 +156,7 @@ def build_normal_prompt(
     session_context: str,
     check_commands: list[str] | None,
     eliminated: list[str] | None = None,
+    task_id: str = "",
 ) -> str:
     """Prompt for a fresh task. Lifted from mcloop ``_build_normal_prompt``."""
     parts: list[str] = []
@@ -163,7 +164,8 @@ def build_normal_prompt(
         parts.append(f"Project context:\n{description}")
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "Write unit tests only when the change introduces"
         " non-obvious behavior or a regression risk. Trivial"
@@ -181,7 +183,7 @@ def build_normal_prompt(
         " round-trips cost 5-15 seconds each and will"
         " make the test suite unusably slow."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     ruled = _ruled_out_section(eliminated)
     if ruled:
         parts.append(ruled)
@@ -195,6 +197,7 @@ def build_bug_task_prompt(
     session_context: str,
     check_commands: list[str] | None,
     eliminated: list[str] | None = None,
+    task_id: str = "",
 ) -> str:
     """First-attempt bug-task prompt. Lifted from mcloop
     ``_build_bug_task_prompt``."""
@@ -214,12 +217,13 @@ def build_bug_task_prompt(
     )
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "Fix the bug with a targeted change. Write or update"
         " tests to cover the new behavior so it cannot regress."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     ruled = _ruled_out_section(eliminated)
     if ruled:
         parts.append(ruled)
@@ -234,6 +238,7 @@ def build_bug_prompt(
     check_commands: list[str] | None,
     prior_errors: str,
     eliminated: list[str] | None,
+    task_id: str = "",
 ) -> str:
     """Bug-investigation prompt with prior errors. Lifted from mcloop
     ``_build_bug_prompt``."""
@@ -250,7 +255,8 @@ def build_bug_prompt(
     parts.append(f"ERRORS FROM PREVIOUS ATTEMPT:\n{prior_errors}")
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
-    parts.append(f"Task: {task_text}")
+    id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "When debugging crashes or unexpected"
         " behavior, always find and read the actual"
@@ -272,7 +278,7 @@ def build_bug_prompt(
         " update tests to cover the failure case so"
         " it cannot regress."
     )
-    parts.extend(_build_shared_parts(task_text, task_label, check_commands))
+    parts.extend(_build_shared_parts(task_text, task_label, check_commands, task_id))
     ruled = _ruled_out_section(eliminated)
     if ruled:
         parts.append(ruled)
@@ -292,21 +298,16 @@ def build_code_edit_prompt(inputs: dict[str, Any]) -> str:
     instruction = str(inputs.get("instruction", ""))
     description = str(inputs.get("description", ""))
     task_label = str(inputs.get("task_label", ""))
+    task_id = str(inputs.get("task_id", ""))
     session_context = str(inputs.get("context", ""))
     prior_errors = str(inputs.get("prior_errors", ""))
     is_bug_task = bool(inputs.get("is_bug_task", False))
     check_commands_raw = inputs.get("check_commands")
     check_commands = (
-        [str(c) for c in check_commands_raw]
-        if isinstance(check_commands_raw, list)
-        else None
+        [str(c) for c in check_commands_raw] if isinstance(check_commands_raw, list) else None
     )
     eliminated_raw = inputs.get("eliminated")
-    eliminated = (
-        [str(e) for e in eliminated_raw]
-        if isinstance(eliminated_raw, list)
-        else None
-    )
+    eliminated = [str(e) for e in eliminated_raw] if isinstance(eliminated_raw, list) else None
 
     if prior_errors:
         return build_bug_prompt(
@@ -317,6 +318,7 @@ def build_code_edit_prompt(inputs: dict[str, Any]) -> str:
             check_commands,
             prior_errors,
             eliminated,
+            task_id,
         )
     if is_bug_task:
         return build_bug_task_prompt(
@@ -326,6 +328,7 @@ def build_code_edit_prompt(inputs: dict[str, Any]) -> str:
             session_context,
             check_commands,
             eliminated,
+            task_id,
         )
     return build_normal_prompt(
         instruction,
@@ -334,4 +337,5 @@ def build_code_edit_prompt(inputs: dict[str, Any]) -> str:
         session_context,
         check_commands,
         eliminated,
+        task_id,
     )
