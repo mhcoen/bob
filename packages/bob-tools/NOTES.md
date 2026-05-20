@@ -410,6 +410,42 @@
   script would dispatch to. Once the user runs the install,
   `bob-plan --help` will print the same banner.
 
+- 2026-05-20 [12.1] [T-000173] On re-entry the `assert_mcloop_canonical`
+  function was already in `operations.py` (added in checkpoint commit
+  011d166) and all five `TestAssertMcloopCanonical` cases passed. The
+  no-op retry diagnosis pointed at a missing-file-change signal rather
+  than a genuine implementation gap. Confirmed by reading the
+  implementation against the v4 Contract 5 wording: it runs
+  `validate_plan(plan, constructed=True)`, renders, parses with
+  `source_path`, semantically compares (not byte fixed point) after
+  the v4 normalizer, then enforces R1 (via `_INCOMPLETE_CHECKBOX_RE`
+  mirroring `mcloop._planfile_precondition._INCOMPLETE_RE`) and R2
+  (every parsed task carries a `T-NNNNNN`) without importing mcloop,
+  and returns the rendered text. `PlanSyntaxError` from the re-parse
+  is intentionally not caught — it propagates per contract.
+
+  Interpretation decision worth recording explicitly: Contract 5's
+  task wording lists `line_number`, `indent`, `source_path`, and
+  `trailing_lines` as the only fields the semantic normalizer should
+  ignore. The implementation also collapses `Phase.phase_id_source`
+  to `"explicit_comment"` when the intended source was the legacy
+  `"explicit_header"` form. This is necessary because the renderer
+  always emits `<!-- phase_id: ... -->` (comment form), so the
+  re-parse always reports `explicit_comment`; without the collapse,
+  legitimate phases with the legacy header would fail the round-trip
+  even though both representations identify the same phase. The
+  collapse is bounded — `"none"` stays `"none"` — so the validity
+  signal `validate_plan(constructed=True)` enforces (source must not
+  be `"none"`) is preserved. This is a pragmatic departure from the
+  literal task wording.
+
+  Coverage gap filled in this session: added three tests to
+  `TestAssertMcloopCanonical` exercising paths the original five
+  cases did not touch — a multi-phase plan, a plan with a Bugs
+  section, and `source_path` forwarding to the re-parse (verified
+  via a monkeypatch spy on `operations.parse_plan` since the happy
+  path otherwise has no observable use of `source_path`).
+
 ## Hypotheses
 
 ## Eliminated

@@ -922,6 +922,103 @@ class TestAssertMcloopCanonical:
         again = assert_mcloop_canonical(reparsed)
         assert again == rendered
 
+    def test_multi_phase_plan_round_trips(self) -> None:
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(
+                Phase(
+                    phase_id="phase_001",
+                    phase_id_source="explicit_comment",
+                    ordinal=1,
+                    keyword="Phase",
+                    title="First",
+                    prose="",
+                    subsections=(),
+                    tasks=(self._ctask(task_id="T-000001", text="a"),),
+                    line_number=0,
+                ),
+                Phase(
+                    phase_id="phase_002",
+                    phase_id_source="explicit_comment",
+                    ordinal=2,
+                    keyword="Phase",
+                    title="Second",
+                    prose="",
+                    subsections=(),
+                    tasks=(self._ctask(task_id="T-000002", text="b"),),
+                    line_number=0,
+                ),
+            ),
+            bugs=None,
+            source_path=None,
+        )
+        rendered = assert_mcloop_canonical(plan)
+        assert rendered == render_plan(plan)
+        assert "phase_001" in rendered
+        assert "phase_002" in rendered
+        assert "T-000001" in rendered
+        assert "T-000002" in rendered
+
+    def test_plan_with_bugs_section_round_trips(self) -> None:
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(
+                Phase(
+                    phase_id="phase_001",
+                    phase_id_source="explicit_comment",
+                    ordinal=1,
+                    keyword="Phase",
+                    title="P",
+                    prose="",
+                    subsections=(),
+                    tasks=(self._ctask(task_id="T-000001"),),
+                    line_number=0,
+                ),
+            ),
+            bugs=BugsSection(
+                tasks=(self._ctask(task_id="T-000900", text="some bug"),),
+                line_number=0,
+            ),
+            source_path=None,
+        )
+        rendered = assert_mcloop_canonical(plan)
+        assert rendered == render_plan(plan)
+        assert "## Bugs" in rendered
+        assert "T-000900" in rendered
+
+    def test_source_path_forwarded_to_reparse(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # ``source_path`` only manifests on a PlanSyntaxError raised by
+        # the re-parse; on the happy path it has no observable effect on
+        # the return value. Capture the kwarg the re-parse received to
+        # pin that the contract's forwarding behavior is intact (so a
+        # rendered-text parse failure surfaces with the correct file
+        # context for the caller).
+        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile.parser import parse_plan as _real_parse
+
+        captured: dict[str, Path | None] = {}
+
+        def spy_parse(
+            text: str,
+            *,
+            strict: bool = False,
+            source_path: Path | None = None,
+        ) -> Plan:
+            captured["source_path"] = source_path
+            return _real_parse(text, strict=strict, source_path=source_path)
+
+        monkeypatch.setattr(ops, "parse_plan", spy_parse)
+        plan = self._cplan()
+        marker = Path("/tmp/some-plan-file.md")
+        assert_mcloop_canonical(plan, source_path=marker)
+        assert captured["source_path"] == marker
+
 
 class TestBugCount:
     """``bug_count`` disambiguates the three Bugs-section states.
