@@ -535,3 +535,5 @@ a52ac94: Added a task context resolver to replace substring-based phase lookups.
 ecdf99d: Added a Stage 7 verification script for the bob-plan CLI that performs an end-to-end test. The script validates, formats, re-validates, and fetches the next task from a plan file, ensuring the formatting diff is additive-only. It also documents two pre-existing issues: a missing CLI tool installation and non-additive formatting changes in certain edge cases.
 
 adf7278: Added a verification script to ensure `bob-plan fmt` only makes additive changes to duplo-generated plan files. The script copies a real plan, runs the formatter, and compares parsed structures to detect any semantic changes beyond allowed formatting adjustments. If divergences are found, it logs them to a bugs file and fails.
+
+28c9dda: Added a new `add_bug_task` function to manage bug tasks with deduplication and reopen-in-place semantics. It appends new bugs, reopens closed ones if they match, or leaves unchanged if already open. Includes dedup key matching via explicit keys, fix annotations, and normalized text. Comprehensive tests verify behavior for various scenarios.
