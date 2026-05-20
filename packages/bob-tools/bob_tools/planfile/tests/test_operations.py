@@ -1019,6 +1019,80 @@ class TestAssertMcloopCanonical:
         assert_mcloop_canonical(plan, source_path=marker)
         assert captured["source_path"] == marker
 
+    def test_v3_leak_class_byte_fixed_point_semantic_divergence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The v3 leak class: rendered bytes round-trip through parser, but
+        # the parsed plan is semantically different from the intended one.
+        # Contract 5's byte-fixed-point check alone would miss this; the
+        # semantic compare must catch it. Simulate by intercepting
+        # ``parse_plan`` to return a plan that differs from the intended
+        # plan in a field the renderer would have preserved (here:
+        # ``text``). Discriminate from the internal field-stability
+        # parse calls via ``source_path``: the Contract 5 reparse is the
+        # only call that forwards a non-None ``source_path``, so a test
+        # marker is unambiguous here.
+        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile.parser import parse_plan as _real_parse
+
+        plan = self._cplan()
+        marker = Path("/tmp/v3-leak-marker.md")
+
+        def divergent_parse(
+            text: str,
+            *,
+            strict: bool = False,
+            source_path: Path | None = None,
+        ) -> Plan:
+            parsed = _real_parse(text, strict=strict, source_path=source_path)
+            if source_path != marker:
+                return parsed
+            mutated_task = dataclasses.replace(
+                parsed.phases[0].tasks[0], text="something else entirely"
+            )
+            mutated_phase = dataclasses.replace(parsed.phases[0], tasks=(mutated_task,))
+            return dataclasses.replace(parsed, phases=(mutated_phase,))
+
+        monkeypatch.setattr(ops, "parse_plan", divergent_parse)
+        with pytest.raises(PlanValidationError) as exc_info:
+            assert_mcloop_canonical(plan, source_path=marker)
+        assert any("failed semantic round-trip" in m for m in exc_info.value.messages)
+
+    def test_r1_shape_fixture_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # R1 (grammar-narrowing equivalent): every ``- [ ]`` line in the
+        # rendered text must surface as a parsed TODO task. The canonical
+        # R1-shape leak is a parse that silently drops a checkbox the
+        # renderer emitted. Simulate by intercepting Contract 5's reparse
+        # to drop all tasks (phases keep their structure so the semantic
+        # compare also fires; either message satisfies the gate, but R1
+        # is the specific contract under test here). Discriminate from
+        # the internal field-stability parse calls via ``source_path``
+        # exactly as the v3-leak test does.
+        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile.parser import parse_plan as _real_parse
+
+        plan = self._cplan()
+        marker = Path("/tmp/r1-leak-marker.md")
+
+        def dropping_parse(
+            text: str,
+            *,
+            strict: bool = False,
+            source_path: Path | None = None,
+        ) -> Plan:
+            parsed = _real_parse(text, strict=strict, source_path=source_path)
+            if source_path != marker:
+                return parsed
+            stripped_phases = tuple(
+                dataclasses.replace(phase, tasks=()) for phase in parsed.phases
+            )
+            return dataclasses.replace(parsed, phases=stripped_phases)
+
+        monkeypatch.setattr(ops, "parse_plan", dropping_parse)
+        with pytest.raises(PlanValidationError) as exc_info:
+            assert_mcloop_canonical(plan, source_path=marker)
+        assert any("silently dropped" in m for m in exc_info.value.messages)
+
 
 class TestBugCount:
     """``bug_count`` disambiguates the three Bugs-section states.

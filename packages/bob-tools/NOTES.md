@@ -446,6 +446,26 @@
   via a monkeypatch spy on `operations.parse_plan` since the happy
   path otherwise has no observable use of `source_path`).
 
+- 2026-05-20 [12.2] [T-000174] The Stage 12 gate verification needs
+  two specific failure-mode tests that the implementation step
+  (12.1) did not include: a v3-leak-class fixture (parsed plan
+  byte-fixed-points but semantically diverges from the intended
+  plan) and an R1-shape fixture (rendered text contains an
+  incomplete checkbox line that the parser does not recover as a
+  TODO task). Neither is constructible organically through the
+  public Plan/Task model — `validate_plan(constructed=True)`'s
+  field-stability harness would catch any divergence at scalar
+  granularity before Contract 5 ever runs, and the renderer never
+  emits checkbox lines the parser would not recover. Both new tests
+  therefore monkeypatch `operations.parse_plan` to inject a
+  divergent or task-stripped reparse result, discriminating the
+  Contract 5 reparse from `validate_plan`'s internal field-stability
+  parses via the `source_path` kwarg: the Contract 5 call is the
+  only one that forwards a non-None `source_path`, so passing a
+  test marker makes the divergence trigger unambiguous without
+  fragile call-counting or content-matching. The same marker
+  approach is reused for both tests.
+
 ## Hypotheses
 
 ## Eliminated
