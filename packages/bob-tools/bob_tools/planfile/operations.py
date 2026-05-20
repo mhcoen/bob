@@ -2191,6 +2191,126 @@ def add_task(
     return dataclasses.replace(plan, phases=tuple(new_phases))
 
 
+def _normalize_bug_text(text: str) -> str:
+    """Return ``text`` normalized for bug-dedup comparison.
+
+    Strips leading/trailing whitespace and collapses every run of
+    interior whitespace into a single space. The normalization is
+    deliberately conservative: it absorbs incidental whitespace
+    differences (a model re-emit with an extra space; copy-paste that
+    introduced a leading newline) without merging tasks whose text
+    differs in any non-whitespace character. ``"a b"``, ``"a  b"``,
+    and ``"\\ta b\\n"`` all normalize to the same key; ``"a B"`` does
+    not.
+    """
+    return " ".join(text.split())
+
+
+def _bug_dedup_keys(task: Task, *, explicit: tuple[str, ...] = ()) -> set[str]:
+    """Return the dedup-key set for ``task`` per v4 Contract 2.
+
+    The set is the union of three sources, in the order the spec
+    lists them: caller-supplied ``explicit`` keys, the value of every
+    ``fix`` annotation on the task, then the task's text after
+    :func:`_normalize_bug_text`. The ``fix`` annotation is the one
+    Duplo's investigator emits so a regenerated bug task whose text
+    drifted slightly still collapses against the same underlying
+    issue (saver.py:1291 in duplo).
+    """
+    keys: set[str] = set(explicit)
+    for key, value in task.annotations:
+        if key == "fix":
+            keys.add(value)
+    keys.add(_normalize_bug_text(task.text))
+    return keys
+
+
+def add_bug_task(
+    plan: Plan,
+    task: Task,
+    *,
+    dedup_keys: tuple[str, ...] = (),
+) -> tuple[Plan, str]:
+    """Append ``task`` to the Bugs section with reopen-in-place semantics.
+
+    Per v4 Contract 2. Returns ``(new_plan, outcome)`` where ``outcome``
+    is one of ``"appended"``, ``"reopened"``, or ``"unchanged"``.
+
+    ``task`` must already satisfy Stage 10 task field-stability
+    (typically constructed via :func:`make_task`); the harness runs
+    here too so a hand-built :class:`Task` cannot bypass the grammar
+    contract. Failure raises :class:`PlanValidationError` naming the
+    field that did not round-trip. Per the contract,
+    :class:`PlanValidationError` is the only exception this function
+    raises.
+
+    Behavior:
+
+    * **Bugs section creation.** When ``plan.bugs is None`` and the
+      task is appended (no match found), a fresh :class:`BugsSection`
+      with this one task is attached to the plan. An existing empty
+      :class:`BugsSection` (parsed but with no tasks) is preserved
+      and the task is appended to it.
+    * **Root bug tasks only.** The supplied task is inserted at the
+      Bugs root level. Any ``children`` on the task are preserved
+      unchanged, but the task itself is never nested under an existing
+      bug.
+    * **Dedup match.** The incoming task's dedup-key set
+      (:func:`_bug_dedup_keys` with the caller's ``dedup_keys``) is
+      compared against each existing root bug task's dedup-key set
+      (no explicit keys; just ``fix`` annotations and normalized
+      text). The first existing task whose key set intersects the
+      incoming key set is the match; subsequent matches are ignored
+      (the "earliest match" rule).
+    * **Outcome by match status:**
+
+      - Match is TODO → return ``"unchanged"``. The plan is returned
+        as-is; no field on any task changes. The incoming task is
+        discarded — the bug is already open.
+      - Match is DONE or FAILED → reopen the earliest match in place:
+        flip ``status`` to TODO. ``task_id``, ``children``,
+        ``annotations``, ``deps``, ``ruled_out``, and the task's
+        position in ``plan.bugs.tasks`` are preserved. Return
+        ``"reopened"``.
+      - No match → append. ``status`` is forced to TODO regardless of
+        the incoming task's status (an incoming DONE/FAILED was
+        meaningless for a newly-tracked bug). When ``task.task_id is
+        None`` the next globally-unique ``T-NNNNNN`` id is assigned
+        via :func:`_next_task_id`; a caller-supplied id is honored
+        verbatim (collision checking belongs to
+        :func:`validate_plan`). Return ``"appended"``.
+    """
+    _assert_task_field_stability(task)
+
+    incoming_keys = _bug_dedup_keys(task, explicit=dedup_keys)
+    existing_bugs: tuple[Task, ...] = plan.bugs.tasks if plan.bugs is not None else ()
+
+    for index, existing in enumerate(existing_bugs):
+        if not (incoming_keys & _bug_dedup_keys(existing)):
+            continue
+        if existing.status == TaskStatus.TODO:
+            return plan, "unchanged"
+        reopened = dataclasses.replace(existing, status=TaskStatus.TODO)
+        new_tasks = (
+            *existing_bugs[:index],
+            reopened,
+            *existing_bugs[index + 1 :],
+        )
+        # ``existing_bugs`` is non-empty here, so ``plan.bugs`` is set;
+        # narrow for the type checker.
+        assert plan.bugs is not None
+        new_bugs = dataclasses.replace(plan.bugs, tasks=new_tasks)
+        return dataclasses.replace(plan, bugs=new_bugs), "reopened"
+
+    assigned_id = task.task_id if task.task_id is not None else _next_task_id(plan)
+    appended = dataclasses.replace(task, task_id=assigned_id, status=TaskStatus.TODO)
+    if plan.bugs is None:
+        new_bugs = BugsSection(tasks=(appended,), line_number=0)
+    else:
+        new_bugs = dataclasses.replace(plan.bugs, tasks=(*plan.bugs.tasks, appended))
+    return dataclasses.replace(plan, bugs=new_bugs), "appended"
+
+
 class _LedgerEvent(Protocol):
     """Structural type for events accepted by :func:`check_consistency`.
 

@@ -33,6 +33,7 @@ from bob_tools.planfile.model import (
     Plan,
     PlanInconsistencyError,
     PlanValidationError,
+    RuledOut,
     Settlement,
     Subsection,
     Task,
@@ -41,6 +42,7 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.operations import (
     _find_task_by_id,
+    add_bug_task,
     add_task,
     assert_mcloop_canonical,
     bug_count,
@@ -48,6 +50,7 @@ from bob_tools.planfile.operations import (
     clear_failed,
     complete_task,
     fail_task,
+    make_task,
     next_tasks,
     replace_phase,
     reset_task,
@@ -2868,3 +2871,313 @@ class TestCheckConsistency:
             "task T-000010 checkbox is DONE but most recent "
             "lifecycle event is test_failed",
         ]
+
+
+class TestAddBugTask:
+    """Tests for ``add_bug_task`` per v4 Contract 2.
+
+    Pins the three outcome strings (``appended`` / ``reopened`` /
+    ``unchanged``), Bugs-section creation, dedup-key matching across
+    each source (explicit, ``fix`` annotation, normalized text),
+    id assignment, status forcing, and the field-stability rejection
+    that gates the input.
+    """
+
+    def _plan_no_bugs(self, phases: tuple[Phase, ...] = ()) -> Plan:
+        return Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=phases,
+            bugs=None,
+            source_path=None,
+        )
+
+    def _plan_with_bugs(self, *bugs: Task, phases: tuple[Phase, ...] = ()) -> Plan:
+        return Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=phases,
+            bugs=BugsSection(tasks=bugs, line_number=0),
+            source_path=None,
+        )
+
+    def test_creates_bugs_section_when_absent(self) -> None:
+        plan = self._plan_no_bugs()
+        task = make_task("Login form rejects unicode")
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert len(new_plan.bugs.tasks) == 1
+        assert new_plan.bugs.tasks[0].text == "Login form rejects unicode"
+        assert new_plan.bugs.tasks[0].task_id == "T-000001"
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_appends_to_existing_empty_bugs_section(self) -> None:
+        # An empty parsed BugsSection is preserved, not re-created;
+        # the task is appended into it.
+        plan = self._plan_with_bugs()
+        task = make_task("first bug")
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert len(new_plan.bugs.tasks) == 1
+
+    def test_appends_after_existing_bug_tasks(self) -> None:
+        existing = make_task("first bug", task_id="T-000900")
+        plan = self._plan_with_bugs(existing)
+        task = make_task("second bug")
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert [t.text for t in new_plan.bugs.tasks] == ["first bug", "second bug"]
+        # Position preserved: existing first, new second.
+        assert new_plan.bugs.tasks[0].task_id == "T-000900"
+
+    def test_id_assignment_uses_global_max_plus_one(self) -> None:
+        # The new id starts at max+1 across the whole plan, including
+        # phase tasks, so a bug never collides with a phase task id.
+        existing_phase_task = Task(
+            task_id="T-000050",
+            text="phase task",
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=(),
+            children=(),
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+        )
+        phase = Phase(
+            phase_id="phase_001",
+            phase_id_source="explicit_comment",
+            ordinal=1,
+            keyword="Stage",
+            title="S",
+            prose="",
+            subsections=(),
+            tasks=(existing_phase_task,),
+            line_number=0,
+        )
+        plan = self._plan_no_bugs(phases=(phase,))
+        new_plan, _ = add_bug_task(plan, make_task("a new bug"))
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].task_id == "T-000051"
+
+    def test_caller_supplied_task_id_is_honored(self) -> None:
+        plan = self._plan_no_bugs()
+        task = make_task("a bug", task_id="T-000777")
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].task_id == "T-000777"
+
+    def test_append_forces_status_to_todo(self) -> None:
+        # An incoming task whose status is DONE (a meaningless state
+        # for a brand-new bug) must be coerced to TODO before insertion.
+        plan = self._plan_no_bugs()
+        task = make_task("done in advance", status=TaskStatus.DONE)
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_todo_match_returns_unchanged(self) -> None:
+        existing = make_task("repeated bug", task_id="T-000900")
+        plan = self._plan_with_bugs(existing)
+        task = make_task("repeated bug")
+        new_plan, outcome = add_bug_task(plan, task)
+        assert outcome == "unchanged"
+        assert new_plan is plan
+
+    def test_done_match_reopens_in_place(self) -> None:
+        existing = make_task(
+            "regression came back",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+        )
+        plan = self._plan_with_bugs(existing)
+        new_plan, outcome = add_bug_task(plan, make_task("regression came back"))
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        reopened = new_plan.bugs.tasks[0]
+        # Same id, same position; status flipped to TODO.
+        assert reopened.task_id == "T-000900"
+        assert reopened.status == TaskStatus.TODO
+
+    def test_failed_match_reopens_in_place(self) -> None:
+        existing = make_task(
+            "flaky bug",
+            task_id="T-000900",
+            status=TaskStatus.FAILED,
+        )
+        plan = self._plan_with_bugs(existing)
+        new_plan, outcome = add_bug_task(plan, make_task("flaky bug"))
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_reopen_preserves_children_annotations_deps_ruled_out(self) -> None:
+        # Children, annotations, deps, ruled_out, id, and position must
+        # be preserved when reopening — the incoming task contributes
+        # only its dedup keys, not its content.
+        child = make_task("nested step", task_id="T-000901")
+        ruled = RuledOut(text="approach A", line_number=0)
+        existing = make_task(
+            "rich bug",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+            annotations=(("fix", "issue-42"),),
+            deps=("T-000901",),
+            children=(child,),
+            ruled_out=(ruled,),
+        )
+        # The reopen target sits in position 1 so position preservation
+        # is observable (it must not move to position 0 or end).
+        other = make_task("unrelated bug", task_id="T-000910")
+        plan = self._plan_with_bugs(other, existing)
+        new_plan, outcome = add_bug_task(plan, make_task("rich bug"))
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        kept = new_plan.bugs.tasks[1]
+        assert kept.task_id == "T-000900"
+        assert kept.status == TaskStatus.TODO
+        assert kept.annotations == (("fix", "issue-42"),)
+        assert kept.deps == ("T-000901",)
+        assert kept.children == (child,)
+        assert kept.ruled_out == (ruled,)
+        # The unrelated bug at position 0 is untouched.
+        assert new_plan.bugs.tasks[0].task_id == "T-000910"
+
+    def test_reopens_earliest_match(self) -> None:
+        # Two existing bugs share the same dedup key. The reopen must
+        # land on the earlier one; the second match stays untouched.
+        first = make_task(
+            "same text",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+        )
+        second = make_task(
+            "same text",
+            task_id="T-000901",
+            status=TaskStatus.DONE,
+        )
+        plan = self._plan_with_bugs(first, second)
+        new_plan, outcome = add_bug_task(plan, make_task("same text"))
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+        assert new_plan.bugs.tasks[1].status == TaskStatus.DONE
+
+    def test_explicit_dedup_key_matches_against_fix_annotation(self) -> None:
+        existing = make_task(
+            "old phrasing",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+            annotations=(("fix", "issue-42"),),
+        )
+        plan = self._plan_with_bugs(existing)
+        # The caller knows this is the same issue but the text drifted;
+        # the explicit dedup_keys keeps them collapsed.
+        new_plan, outcome = add_bug_task(
+            plan,
+            make_task("entirely new phrasing"),
+            dedup_keys=("issue-42",),
+        )
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_fix_annotation_value_matches_normalized_text(self) -> None:
+        # The fix-annotation value on the incoming task matches the
+        # normalized text on an existing entry — cross-source dedup.
+        existing = make_task(
+            "issue-42",
+            task_id="T-000900",
+            status=TaskStatus.FAILED,
+        )
+        plan = self._plan_with_bugs(existing)
+        incoming = make_task(
+            "something completely different",
+            annotations=(("fix", "issue-42"),),
+        )
+        new_plan, outcome = add_bug_task(plan, incoming)
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_normalized_text_dedup_absorbs_whitespace_differences(self) -> None:
+        existing = make_task(
+            "trim   me",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+        )
+        plan = self._plan_with_bugs(existing)
+        # Different internal spacing — same normalized text.
+        new_plan, outcome = add_bug_task(plan, make_task("trim me"))
+        assert outcome == "reopened"
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].status == TaskStatus.TODO
+
+    def test_no_match_when_dedup_keys_disjoint(self) -> None:
+        existing = make_task(
+            "first",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+            annotations=(("fix", "issue-A"),),
+        )
+        plan = self._plan_with_bugs(existing)
+        incoming = make_task(
+            "second",
+            annotations=(("fix", "issue-B"),),
+        )
+        new_plan, outcome = add_bug_task(plan, incoming, dedup_keys=("issue-C",))
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert [t.task_id for t in new_plan.bugs.tasks] == ["T-000900", "T-000901"]
+        # The existing DONE bug is untouched.
+        assert new_plan.bugs.tasks[0].status == TaskStatus.DONE
+
+    def test_non_fix_annotations_do_not_seed_dedup_keys(self) -> None:
+        # Only the ``fix`` annotation contributes; a ``note`` annotation
+        # with the same value must not collapse two distinct bugs.
+        existing = make_task(
+            "alpha",
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+            annotations=(("note", "shared-value"),),
+        )
+        plan = self._plan_with_bugs(existing)
+        incoming = make_task(
+            "beta",
+            annotations=(("note", "shared-value"),),
+        )
+        new_plan, outcome = add_bug_task(plan, incoming)
+        assert outcome == "appended"
+        assert new_plan.bugs is not None
+        assert len(new_plan.bugs.tasks) == 2
+
+    def test_field_stability_rejection_for_hand_built_task(self) -> None:
+        # A Task hand-built with nonempty trailing_lines violates the
+        # Stage 10 constructed-task contract; add_bug_task must reject
+        # it before any plan mutation.
+        bad = Task(
+            task_id=None,
+            text="bug body",
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=(),
+            children=(),
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+            trailing_lines=("oops",),
+        )
+        plan = self._plan_no_bugs()
+        with pytest.raises(PlanValidationError):
+            add_bug_task(plan, bad)
