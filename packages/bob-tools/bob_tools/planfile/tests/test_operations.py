@@ -19,6 +19,7 @@ events, and the other operation surfaces:
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,6 +42,7 @@ from bob_tools.planfile.model import (
 from bob_tools.planfile.operations import (
     _find_task_by_id,
     add_task,
+    assert_mcloop_canonical,
     bug_count,
     check_consistency,
     clear_failed,
@@ -52,6 +54,7 @@ from bob_tools.planfile.operations import (
     resolve_task_context,
     validate_plan,
 )
+from bob_tools.planfile.renderer import render_plan
 
 
 def _task(
@@ -792,6 +795,132 @@ class TestValidatePlanConstructed:
             "phases[0].subsections[0].title contains an embedded newline" in m
             for m in exc_info.value.messages
         )
+
+
+class TestAssertMcloopCanonical:
+    """Tests for ``assert_mcloop_canonical`` per v4 Contract 5.
+
+    The function validates a constructed plan, renders it, re-parses,
+    requires semantic equality (NOT byte fixed point) under the v4
+    normalizer, and runs the R1/R2 equivalents without importing
+    mcloop. On success it returns the rendered text so the caller can
+    persist exactly what was checked.
+    """
+
+    def _ctask(
+        self,
+        *,
+        task_id: str = "T-000001",
+        text: str = "do thing",
+        children: tuple[Task, ...] = (),
+    ) -> Task:
+        return Task(
+            task_id=task_id,
+            text=text,
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=(),
+            children=children,
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+            trailing_lines=(),
+        )
+
+    def _cplan(self, *, tasks: tuple[Task, ...] | None = None) -> Plan:
+        phase_tasks = (self._ctask(),) if tasks is None else tasks
+        return Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(
+                Phase(
+                    phase_id="phase_001",
+                    phase_id_source="explicit_comment",
+                    ordinal=1,
+                    keyword="Phase",
+                    title="P",
+                    prose="",
+                    subsections=(),
+                    tasks=phase_tasks,
+                    line_number=0,
+                ),
+            ),
+            bugs=None,
+            source_path=None,
+        )
+
+    def test_valid_plan_returns_rendered_text(self) -> None:
+        plan = self._cplan()
+        rendered = assert_mcloop_canonical(plan)
+        # The returned text is exactly what render_plan produced — the
+        # caller must persist this string verbatim to preserve the
+        # validation guarantee.
+        assert rendered == render_plan(plan)
+        assert rendered.endswith("\n")
+        assert "<!-- bob-plan-format: 1 -->" in rendered
+        assert "T-000001" in rendered
+
+    def test_constructed_validation_failure_is_raised(self) -> None:
+        # missing magic_version is one of the constructed=True checks;
+        # assert_mcloop_canonical must surface that error before the
+        # render/re-parse step ever runs.
+        plan = dataclasses.replace(self._cplan(), magic_version=None)
+        with pytest.raises(PlanValidationError) as exc_info:
+            assert_mcloop_canonical(plan)
+        assert any("plan.magic_version must be 1" in m for m in exc_info.value.messages)
+
+    def test_constructed_validation_catches_d1_text_leak(self) -> None:
+        # The Stage 10 per-task field-stability harness catches a task
+        # whose ``text`` scalar would re-parse as an annotation. The
+        # v3 leak class (byte fixed point but semantically divergent)
+        # is rejected here before Contract 5's own round-trip even runs.
+        leaky = self._ctask(text="title [fix: leaked]")
+        plan = self._cplan(tasks=(leaky,))
+        with pytest.raises(PlanValidationError) as exc_info:
+            assert_mcloop_canonical(plan)
+        assert any("failed to round-trip" in m for m in exc_info.value.messages)
+
+    def test_missing_id_rejected(self) -> None:
+        # constructed=True requires every task to have a T-NNNNNN id;
+        # the parse step would also reject id-less tasks in strict
+        # mode, but assert_mcloop_canonical surfaces the friendlier
+        # validate_plan message.
+        bare = Task(
+            task_id=None,
+            text="x",
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=(),
+            children=(),
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+            trailing_lines=(),
+        )
+        plan = self._cplan(tasks=(bare,))
+        with pytest.raises(PlanValidationError) as exc_info:
+            assert_mcloop_canonical(plan)
+        assert any(
+            "task_id is missing on constructed task" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_returned_text_round_trips_through_parse(self) -> None:
+        # The text returned must itself satisfy the canonical contract
+        # so a downstream save can re-validate without surprise. This
+        # pins idempotence on the rendered byte stream.
+        from bob_tools.planfile.parser import parse_plan as _parse
+
+        plan = self._cplan()
+        rendered = assert_mcloop_canonical(plan)
+        reparsed = _parse(rendered)
+        again = assert_mcloop_canonical(reparsed)
+        assert again == rendered
 
 
 class TestBugCount:

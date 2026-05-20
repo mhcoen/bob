@@ -34,6 +34,7 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.operations import (
     add_task,
+    assert_mcloop_canonical,
     bug_count,
     check_consistency,
     clear_failed,
@@ -69,6 +70,7 @@ __all__ = [
     "TaskContext",
     "TaskStatus",
     "add_task",
+    "assert_mcloop_canonical",
     "bug_count",
     "canonicalize",
     "check_consistency",

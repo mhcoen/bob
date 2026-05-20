@@ -5,9 +5,11 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from pathlib import Path
 from typing import Any, Protocol
 
 from bob_tools.planfile.model import (
+    BugsSection,
     Outcome,
     Phase,
     Plan,
@@ -896,6 +898,327 @@ def _check_each_task_field_stability(plan: Plan, errors: list[str]) -> None:
         except PlanValidationError as exc:
             for message in exc.messages:
                 errors.append(f"{label}: {message}")
+
+
+# Mirrors mcloop._planfile_precondition._INCOMPLETE_RE
+# (mcloop/_planfile_precondition.py:56). Identical pattern so the
+# R1-equivalent below decides the same way as mcloop's real
+# ``enforce_canonical`` would on the same rendered text; the cross-repo
+# parity test (Stage 17) pins that equivalence.
+_INCOMPLETE_CHECKBOX_RE = re.compile(r"^\s*- \[ \] .+$", re.MULTILINE)
+
+
+def _normalize_plan_for_semantic_compare(plan: Plan) -> Plan:
+    """Return ``plan`` with non-semantic position fields normalized.
+
+    Per v4 Contract 5: line numbers, ``Task.indent_level``,
+    ``Plan.source_path``, ``Task.trailing_lines``, and the
+    ``explicit_header`` / ``explicit_comment`` equivalence are the only
+    differences allowed between a constructed plan and its
+    render→parse image. Every other field participates in equality.
+    The renderer's :func:`bob_tools.planfile.renderer.normalize_positions`
+    does most of this but leaves ``source_path`` and ``trailing_lines``
+    untouched (renderer.py:269; intentional for compat-mode use), so
+    Contract 5 needs a dedicated normalizer.
+    """
+    return dataclasses.replace(
+        plan,
+        source_path=None,
+        phases=tuple(_normalize_phase_for_semantic_compare(p) for p in plan.phases),
+        bugs=(
+            _normalize_bugs_for_semantic_compare(plan.bugs)
+            if plan.bugs is not None
+            else None
+        ),
+    )
+
+
+def _normalize_phase_for_semantic_compare(phase: Phase) -> Phase:
+    canonical_source = "explicit_comment" if phase.phase_id_source != "none" else "none"
+    return dataclasses.replace(
+        phase,
+        line_number=0,
+        phase_id_source=canonical_source,
+        subsections=tuple(
+            _normalize_subsection_for_semantic_compare(s) for s in phase.subsections
+        ),
+        tasks=tuple(_normalize_task_for_position(t, depth=0) for t in phase.tasks),
+    )
+
+
+def _normalize_subsection_for_semantic_compare(sub: Subsection) -> Subsection:
+    return dataclasses.replace(
+        sub,
+        line_number=0,
+        tasks=tuple(_normalize_task_for_position(t, depth=0) for t in sub.tasks),
+    )
+
+
+def _normalize_bugs_for_semantic_compare(bugs: BugsSection) -> BugsSection:
+    return dataclasses.replace(
+        bugs,
+        line_number=0,
+        tasks=tuple(_normalize_task_for_position(t, depth=0) for t in bugs.tasks),
+    )
+
+
+def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
+    """Clear position fields and ``trailing_lines`` on ``task`` and its tree.
+
+    The Stage 10 task-only normalizer rejects nonempty ``trailing_lines``
+    rather than clearing them, because at construction time any opaque
+    retained markdown is precisely the escape hatch Path 1 forbids. By
+    the time :func:`assert_mcloop_canonical` reaches this code, however,
+    :func:`validate_plan` with ``constructed=True`` has already rejected
+    intended-side ``trailing_lines``. The parsed-side image may pick up
+    ``trailing_lines`` only if the rendered text contained content the
+    parser captured as opaque tail (which would itself be a leak); the
+    R1-equivalent count check below catches the meaningful subset of
+    that case — checkbox lines that did not surface as tasks — so the
+    semantic comparison can safely normalize ``trailing_lines`` to ``()``
+    on both sides.
+    """
+    return dataclasses.replace(
+        task,
+        line_number=0,
+        indent_level=depth * 2,
+        trailing_lines=(),
+        children=tuple(
+            _normalize_task_for_position(c, depth=depth + 1) for c in task.children
+        ),
+        ruled_out=tuple(dataclasses.replace(r, line_number=0) for r in task.ruled_out),
+    )
+
+
+def _collect_plan_semantic_diff(
+    intended: Plan, parsed: Plan, errors: list[str]
+) -> None:
+    for field in ("magic_version", "project_title", "preamble"):
+        intended_value = getattr(intended, field)
+        parsed_value = getattr(parsed, field)
+        if intended_value != parsed_value:
+            errors.append(
+                f"plan.{field} failed semantic round-trip: "
+                f"intended {intended_value!r}, parsed {parsed_value!r}"
+            )
+    if len(intended.phases) != len(parsed.phases):
+        errors.append(
+            f"plan.phases count failed semantic round-trip: "
+            f"intended {len(intended.phases)}, parsed {len(parsed.phases)}"
+        )
+    else:
+        for index, (intended_phase, parsed_phase) in enumerate(
+            zip(intended.phases, parsed.phases, strict=True)
+        ):
+            _collect_phase_semantic_diff(
+                intended_phase, parsed_phase, f"phases[{index}]", errors
+            )
+    if (intended.bugs is None) != (parsed.bugs is None):
+        intended_state = "present" if intended.bugs is not None else "absent"
+        parsed_state = "present" if parsed.bugs is not None else "absent"
+        errors.append(
+            f"plan.bugs presence failed semantic round-trip: "
+            f"intended {intended_state}, parsed {parsed_state}"
+        )
+    elif intended.bugs is not None and parsed.bugs is not None:
+        _collect_bugs_semantic_diff(intended.bugs, parsed.bugs, errors)
+
+
+def _collect_phase_semantic_diff(
+    intended: Phase, parsed: Phase, label: str, errors: list[str]
+) -> None:
+    for field in (
+        "phase_id",
+        "phase_id_source",
+        "ordinal",
+        "keyword",
+        "title",
+        "prose",
+    ):
+        intended_value = getattr(intended, field)
+        parsed_value = getattr(parsed, field)
+        if intended_value != parsed_value:
+            errors.append(
+                f"{label}.{field} failed semantic round-trip: "
+                f"intended {intended_value!r}, parsed {parsed_value!r}"
+            )
+    if len(intended.tasks) != len(parsed.tasks):
+        errors.append(
+            f"{label}.tasks count failed semantic round-trip: "
+            f"intended {len(intended.tasks)}, parsed {len(parsed.tasks)}"
+        )
+    else:
+        for index, (ta, tb) in enumerate(
+            zip(intended.tasks, parsed.tasks, strict=True)
+        ):
+            _collect_task_semantic_diff(ta, tb, f"{label}.tasks[{index}]", errors)
+    if len(intended.subsections) != len(parsed.subsections):
+        errors.append(
+            f"{label}.subsections count failed semantic round-trip: "
+            f"intended {len(intended.subsections)}, parsed {len(parsed.subsections)}"
+        )
+    else:
+        for index, (sa, sb) in enumerate(
+            zip(intended.subsections, parsed.subsections, strict=True)
+        ):
+            _collect_subsection_semantic_diff(
+                sa, sb, f"{label}.subsections[{index}]", errors
+            )
+
+
+def _collect_subsection_semantic_diff(
+    intended: Subsection, parsed: Subsection, label: str, errors: list[str]
+) -> None:
+    for field in ("title", "prose"):
+        intended_value = getattr(intended, field)
+        parsed_value = getattr(parsed, field)
+        if intended_value != parsed_value:
+            errors.append(
+                f"{label}.{field} failed semantic round-trip: "
+                f"intended {intended_value!r}, parsed {parsed_value!r}"
+            )
+    if len(intended.tasks) != len(parsed.tasks):
+        errors.append(
+            f"{label}.tasks count failed semantic round-trip: "
+            f"intended {len(intended.tasks)}, parsed {len(parsed.tasks)}"
+        )
+    else:
+        for index, (ta, tb) in enumerate(
+            zip(intended.tasks, parsed.tasks, strict=True)
+        ):
+            _collect_task_semantic_diff(ta, tb, f"{label}.tasks[{index}]", errors)
+
+
+def _collect_bugs_semantic_diff(
+    intended: BugsSection, parsed: BugsSection, errors: list[str]
+) -> None:
+    if len(intended.tasks) != len(parsed.tasks):
+        errors.append(
+            f"bugs.tasks count failed semantic round-trip: "
+            f"intended {len(intended.tasks)}, parsed {len(parsed.tasks)}"
+        )
+        return
+    for index, (ta, tb) in enumerate(zip(intended.tasks, parsed.tasks, strict=True)):
+        _collect_task_semantic_diff(ta, tb, f"bugs.tasks[{index}]", errors)
+
+
+def _collect_task_semantic_diff(
+    intended: Task, parsed: Task, label: str, errors: list[str]
+) -> None:
+    for field in (
+        "task_id",
+        "text",
+        "status",
+        "flag_tags",
+        "action_tag",
+        "annotations",
+        "deps",
+    ):
+        intended_value = getattr(intended, field)
+        parsed_value = getattr(parsed, field)
+        if intended_value != parsed_value:
+            errors.append(
+                f"{label}.{field} failed semantic round-trip: "
+                f"intended {intended_value!r}, parsed {parsed_value!r}"
+            )
+    if len(intended.ruled_out) != len(parsed.ruled_out):
+        errors.append(
+            f"{label}.ruled_out count failed semantic round-trip: "
+            f"intended {len(intended.ruled_out)}, parsed {len(parsed.ruled_out)}"
+        )
+    else:
+        for index, (ra, rb) in enumerate(
+            zip(intended.ruled_out, parsed.ruled_out, strict=True)
+        ):
+            if ra.text != rb.text:
+                errors.append(
+                    f"{label}.ruled_out[{index}].text failed semantic round-trip: "
+                    f"intended {ra.text!r}, parsed {rb.text!r}"
+                )
+    if len(intended.children) != len(parsed.children):
+        errors.append(
+            f"{label}.children count failed semantic round-trip: "
+            f"intended {len(intended.children)}, parsed {len(parsed.children)}"
+        )
+        return
+    for index, (ca, cb) in enumerate(
+        zip(intended.children, parsed.children, strict=True)
+    ):
+        _collect_task_semantic_diff(ca, cb, f"{label}.children[{index}]", errors)
+
+
+def _count_todo_tasks(plan: Plan) -> int:
+    return sum(1 for task in _iter_plan_tasks(plan) if task.status is TaskStatus.TODO)
+
+
+def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> str:
+    """Validate ``plan`` to mcloop's canonical-input contract; return rendered text.
+
+    Per v4 Contract 5: runs :func:`validate_plan` with
+    ``constructed=True``; renders the plan; re-parses the rendered text;
+    requires SEMANTIC equality of parsed-vs-intended after normalizing
+    only ``line_number``, ``Task.indent_level``, ``Plan.source_path``,
+    and ``Task.trailing_lines`` (NOT a byte fixed point — the v3 leak
+    class can byte-fixed-point while semantically diverging); then
+    enforces the R1/R2 equivalents independently, so mcloop is not
+    imported:
+
+    * **R1 (grammar-narrowing equivalent).** Every ``- [ ]`` line in
+      the rendered text must surface as a parsed ``TaskStatus.TODO``
+      task. Pattern lifted from
+      ``mcloop._planfile_precondition._INCOMPLETE_RE`` so the predicate
+      decides the same way as mcloop's real ``enforce_canonical`` on
+      the same text; the cross-repo parity test pins that equivalence.
+    * **R2 (id-less equivalent).** Every parsed task must carry a
+      ``T-NNNNNN`` id.
+
+    Returns the validated rendered text so the caller persists exactly
+    what was checked. Raises :class:`PlanValidationError` on any
+    violation; :class:`bob_tools.planfile.PlanSyntaxError` from the
+    re-parse propagates unchanged (a re-parse failure on rendered
+    output is a library bug, not user input error).
+
+    ``source_path`` is forwarded to the re-parse so a re-parse syntax
+    error surfaces with the correct file context for the caller.
+    """
+    validate_plan(plan, constructed=True)
+    rendered = render_plan(plan)
+    reparsed = parse_plan(rendered, source_path=source_path)
+
+    errors: list[str] = []
+
+    intended_normalized = _normalize_plan_for_semantic_compare(plan)
+    parsed_normalized = _normalize_plan_for_semantic_compare(reparsed)
+    _collect_plan_semantic_diff(intended_normalized, parsed_normalized, errors)
+
+    src_incomplete = len(_INCOMPLETE_CHECKBOX_RE.findall(rendered))
+    plan_incomplete = _count_todo_tasks(reparsed)
+    if src_incomplete > plan_incomplete:
+        dropped = src_incomplete - plan_incomplete
+        errors.append(
+            f"rendered text contains {src_incomplete} incomplete checkbox "
+            f"line(s) but parsed plan surfaced only {plan_incomplete} "
+            f"TODO task(s); {dropped} task(s) silently dropped"
+        )
+
+    idless_lines = [
+        task.line_number for task in _iter_plan_tasks(reparsed) if task.task_id is None
+    ]
+    if idless_lines:
+        shown = idless_lines[:10]
+        locs = ", ".join(f"line {n}" for n in shown)
+        more = (
+            "" if len(idless_lines) <= 10 else f", plus {len(idless_lines) - 10} more"
+        )
+        errors.append(
+            f"parsed plan has {len(idless_lines)} task(s) without "
+            f"stable T-NNNNNN id(s) ({locs}{more})"
+        )
+
+    if errors:
+        raise PlanValidationError(errors)
+
+    return rendered
 
 
 def _task_matches_label(task: Task, ref: str) -> bool:
