@@ -1481,7 +1481,13 @@ def test_run_task_uses_normal_prompt_without_prior_errors(tmp_path):
         )
         cmd = mock_session.call_args[0][0]
         prompt = cmd[2]
-        assert "Task: Add a feature" in prompt
+        assert (
+            "Execute the following task now. Treat the Task line as the"
+            " work order for this session, not as background context."
+            " Make the required repository changes unless the task is"
+            " explicitly read-only; do not ask what to work on.\n\n"
+            "Task: Add a feature"
+        ) in prompt
         # Test-writing guidance softened 2026-04-15 (was "Write unit
         # tests where they make sense").
         assert "Write unit tests only when the change introduces" in prompt
@@ -1609,6 +1615,13 @@ def test_bug_prompt_errors_before_task(tmp_path):
         errors_pos = prompt.index("ERRORS FROM PREVIOUS ATTEMPT")
         task_pos = prompt.index("Task: Fix the parser")
         assert errors_pos < task_pos
+        assert (
+            "Execute the following task now. Treat the Task line as the"
+            " work order for this session, not as background context."
+            " Make the required repository changes unless the task is"
+            " explicitly read-only; do not ask what to work on.\n\n"
+            "Task: Fix the parser"
+        ) in prompt
 
 
 def test_bug_prompt_includes_shared_instructions(tmp_path):
@@ -1678,6 +1691,13 @@ def test_check_commands_included_when_provided(tmp_path):
         prompt = mock_session.call_args[0][0][2]
     assert "CHECK COMMANDS (mandatory, strict rules):" in prompt
     assert "ruff check ." in prompt
+    assert (
+        "Execute the following task now. Treat the Task line as the"
+        " work order for this session, not as background context."
+        " Make the required repository changes unless the task is"
+        " explicitly read-only; do not ask what to work on.\n\n"
+        "Task: Fix the known bug"
+    ) in prompt
 
     # Bug-investigation prompt (prior_errors set)
     with patch("mcloop.runner._run_session") as mock_session:
