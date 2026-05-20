@@ -149,6 +149,15 @@ def _ruled_out_section(eliminated: list[str] | None) -> str | None:
     )
 
 
+def _task_execution_directive() -> str:
+    return (
+        "Execute the following task now. Treat the Task line as the"
+        " work order for this session, not as background context."
+        " Make the required repository changes unless the task is"
+        " explicitly read-only; do not ask what to work on."
+    )
+
+
 def build_normal_prompt(
     task_text: str,
     description: str,
@@ -165,6 +174,7 @@ def build_normal_prompt(
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
     id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(_task_execution_directive())
     parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "Write unit tests only when the change introduces"
@@ -218,6 +228,7 @@ def build_bug_task_prompt(
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
     id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(_task_execution_directive())
     parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "Fix the bug with a targeted change. Write or update"
@@ -256,6 +267,7 @@ def build_bug_prompt(
     if session_context:
         parts.append(f"Recent session history:\n{session_context}")
     id_prefix = f"[{task_id}] " if task_id else ""
+    parts.append(_task_execution_directive())
     parts.append(f"Task: {id_prefix}{task_text}")
     parts.append(
         "When debugging crashes or unexpected"

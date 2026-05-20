@@ -415,7 +415,13 @@ def test_code_edit_prompt_includes_task_id_in_task_line_and_notes(
 
     prompt = build_code_edit_prompt(inputs)
 
-    assert "Task: [T-123456] Add a dataclass to src/example.py" in prompt
+    assert (
+        "Execute the following task now. Treat the Task line as the"
+        " work order for this session, not as background context."
+        " Make the required repository changes unless the task is"
+        " explicitly read-only; do not ask what to work on.\n\n"
+        "Task: [T-123456] Add a dataclass to src/example.py"
+    ) in prompt
     assert (
         "current date and reference the task: [Task 1] [T-123456] "
         "Add a dataclass to src/example.py."
@@ -707,3 +713,10 @@ def test_parity_code_edit_bug_task_branches_prompt(
     orch_prompt = orch_call.stdin_buffer.captured
     assert direct_prompt == orch_prompt
     assert "BUG FIX (MANDATORY CODE CHANGE)" in direct_prompt
+    assert (
+        "Execute the following task now. Treat the Task line as the"
+        " work order for this session, not as background context."
+        " Make the required repository changes unless the task is"
+        " explicitly read-only; do not ask what to work on.\n\n"
+        "Task: [T-123456] Add a dataclass to src/example.py"
+    ) in direct_prompt
