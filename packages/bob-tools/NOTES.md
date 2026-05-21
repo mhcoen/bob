@@ -2,6 +2,28 @@
 
 ## Observations
 
+- 2026-05-20 [13.2] [T-000176] Stage 13 gate verification: all four
+  checks pass. `ruff check .` clean, `ruff format --check .` reports
+  40 files already formatted, `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest`
+  reports 626 passed / 2 skipped, `mypy .` (run as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` because bare `mypy`
+  is not on PATH) reports "Success: no issues found in 40 source
+  files". The `TestAddBugTask` class in `test_operations.py` covers
+  every gate condition listed in T-000176: absent section
+  (`test_creates_bugs_section_when_absent`), append
+  (`test_appends_after_existing_bug_tasks`), unchanged-TODO
+  (`test_todo_match_returns_unchanged`), reopen-DONE
+  (`test_done_match_reopens_in_place`), reopen-FAILED
+  (`test_failed_match_reopens_in_place`), fix-key dedup
+  (`test_explicit_dedup_key_matches_against_fix_annotation`,
+  `test_fix_annotation_value_matches_normalized_text`), text-key
+  dedup (`test_normalized_text_dedup_absorbs_whitespace_differences`),
+  id assignment
+  (`test_id_assignment_uses_global_max_plus_one`,
+  `test_caller_supplied_task_id_is_honored`), children preserved
+  (`test_reopen_preserves_children_annotations_deps_ruled_out`), and
+  field-stability rejection
+  (`test_field_stability_rejection_for_hand_built_task`).
 - 2026-05-16 [7.2] The Stage 7 verification helper expects
   `/Users/mhcoen/proj/bob-tools/.venv/bin/bob-plan` to exist, but the
   bob-tools package is not installed in the venv (only its
