@@ -1,7 +1,7 @@
-## Stage 17: Phase C Increment 8 - mcloop and bob-tools R1/R2 cross-repo parity
-<!-- phase_id: phase_017 -->
+## Stage 18: Phase C Increment 9 - migrate duplo fresh and initial phase generation, and council
+<!-- phase_id: phase_018 -->
 
-mcloop delegation is explicitly out of scope for Phase C and recorded as a tracked follow-on; the mandatory parity test below is the Path 1 mitigation for R1/R2 drift.
+Stages 18-22 modify the duplo repo, not bob-tools. Each stage commits and pushes in /Users/mhcoen/proj/duplo with scoped commits. The bob-tools repo must remain green throughout.
 
-- [x] T-000184: Add a required cross-repo parity test: a shared fixture corpus run through bob_tools.planfile assert_mcloop_canonical and through mcloop's real mcloop._planfile_precondition.enforce_canonical, asserting identical accept or reject on every fixture. The test must fail loudly if the two predicates disagree. Place the corpus and test in bob-tools; the test imports mcloop's precondition module by path.
-- [ ] T-000185: Verify Stage 17 gate: parity test green across the corpus including canonical-pass, R1-drop, and R2-idless fixtures; ruff, ruff format, mypy strict, full pytest all green.
+- [ ] T-000186: In duplo, replace fresh and initial PLAN.md generation so the model returns structured task data, not PLAN.md markdown. Build a typed bob_tools.planfile Plan, validate with validate_plan constructed=True, persist only via bob_tools.planfile save. Migrate council.author_phase_plan to return structured data and delete council._validate_canonical_plan_markdown (replaced wholesale by constructed validation and assert_mcloop_canonical). Remove the model-instruction prompt text that tells the model to emit PLAN.md markdown. No markdown write_text of plan content may remain on this path.
+- [ ] T-000187: Verify Stage 18 gate: a representative duplo fresh-generation run produces a PLAN.md equal to assert_mcloop_canonical output that passes mcloop's real enforce_canonical in an integration test; duplo tests that asserted old markdown behavior rewritten to assert typed behavior, not deleted; duplo ruff and pytest green; bob-tools still green.
