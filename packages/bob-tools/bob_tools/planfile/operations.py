@@ -2191,6 +2191,127 @@ def add_task(
     return dataclasses.replace(plan, phases=tuple(new_phases))
 
 
+def add_phase_task(
+    plan: Plan,
+    phase_id: str,
+    task: Task,
+    *,
+    parent_id: str | None = None,
+    subsection_title: str | None = None,
+) -> tuple[Plan, str]:
+    """Append a Stage-10 field-stable task into ``phase_id``.
+
+    Per v4 Contract 6. Returns ``(new_plan, assigned_id)`` where
+    ``assigned_id`` is the ``T-NNNNNN`` carried by the appended task
+    (the caller-supplied id when ``task.task_id`` is non-None, otherwise
+    the next globally-unique sequential id assigned by
+    :func:`_next_task_id`).
+
+    Placement is selected by the keyword arguments:
+
+    * Both ``parent_id`` and ``subsection_title`` ``None`` (default) —
+      the task is appended to ``phase.tasks`` at the root of the named
+      phase.
+    * ``parent_id`` set — the task is nested under the task whose
+      ``task_id`` equals ``parent_id``. Searches the phase's root tasks
+      first, then each subsection's tasks (recursing through children),
+      matching the convention :func:`add_task` already uses; the first
+      match wins. The look-up is scoped to the named phase so a stray
+      id elsewhere in the plan does not silently capture the insert.
+    * ``subsection_title`` set — the task is appended at the root of
+      the subsection whose ``title`` equals ``subsection_title``
+      within the named phase.
+
+    ``parent_id`` and ``subsection_title`` are mutually exclusive
+    (Contract 6 enumerates the three placements as alternatives, not
+    combinations); passing both raises :class:`PlanValidationError`.
+
+    Validation is layered to surface the same diagnostics callers see
+    elsewhere in the library. First the supplied ``task`` is run
+    through the Stage 10 field-stability harness
+    (:func:`_assert_task_field_stability`) so hand-constructed tasks
+    cannot bypass the grammar contract that :func:`make_task` enforces.
+    Then the placement keywords are resolved, the new task is spliced
+    in with its id (assigned or honored), and the resulting plan is
+    passed through :func:`validate_plan` with ``constructed=True``,
+    which catches duplicate task ids and unknown ``@deps`` references.
+    :class:`PlanValidationError` is the only exception this function
+    raises; callers do not need to catch :class:`ValueError`.
+    """
+    _assert_task_field_stability(task)
+
+    if parent_id is not None and subsection_title is not None:
+        raise PlanValidationError(
+            ["parent_id and subsection_title are mutually exclusive"]
+        )
+
+    phase_index = -1
+    for index, phase in enumerate(plan.phases):
+        if phase.phase_id == phase_id:
+            phase_index = index
+            break
+    if phase_index == -1:
+        raise PlanValidationError([f"phase {phase_id!r} not found in plan"])
+
+    target_phase = plan.phases[phase_index]
+
+    assigned_id = task.task_id if task.task_id is not None else _next_task_id(plan)
+    appended = dataclasses.replace(task, task_id=assigned_id)
+
+    if parent_id is not None:
+        updated_root, root_added = _try_add_under_parent(
+            target_phase.tasks, parent_id, appended
+        )
+        if root_added:
+            new_phase = dataclasses.replace(target_phase, tasks=updated_root)
+        else:
+            new_subs: list[Subsection] = []
+            sub_added = False
+            for sub in target_phase.subsections:
+                if sub_added:
+                    new_subs.append(sub)
+                    continue
+                sub_tasks, this_added = _try_add_under_parent(
+                    sub.tasks, parent_id, appended
+                )
+                if this_added:
+                    sub_added = True
+                    new_subs.append(dataclasses.replace(sub, tasks=sub_tasks))
+                else:
+                    new_subs.append(sub)
+            if not sub_added:
+                raise PlanValidationError(
+                    [f"parent task {parent_id!r} not found in phase {phase_id!r}"]
+                )
+            new_phase = dataclasses.replace(target_phase, subsections=tuple(new_subs))
+    elif subsection_title is not None:
+        new_subs = []
+        sub_found = False
+        for sub in target_phase.subsections:
+            if not sub_found and sub.title == subsection_title:
+                sub_found = True
+                new_subs.append(dataclasses.replace(sub, tasks=(*sub.tasks, appended)))
+            else:
+                new_subs.append(sub)
+        if not sub_found:
+            raise PlanValidationError(
+                [f"subsection {subsection_title!r} not found in phase {phase_id!r}"]
+            )
+        new_phase = dataclasses.replace(target_phase, subsections=tuple(new_subs))
+    else:
+        new_phase = dataclasses.replace(
+            target_phase, tasks=(*target_phase.tasks, appended)
+        )
+
+    new_phases = list(plan.phases)
+    new_phases[phase_index] = new_phase
+    new_plan = dataclasses.replace(plan, phases=tuple(new_phases))
+
+    validate_plan(new_plan, constructed=True)
+
+    return new_plan, assigned_id
+
+
 def _normalize_bug_text(text: str) -> str:
     """Return ``text`` normalized for bug-dedup comparison.
 

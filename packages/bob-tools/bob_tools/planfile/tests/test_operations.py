@@ -43,6 +43,7 @@ from bob_tools.planfile.model import (
 from bob_tools.planfile.operations import (
     _find_task_by_id,
     add_bug_task,
+    add_phase_task,
     add_task,
     assert_mcloop_canonical,
     bug_count,
@@ -2487,6 +2488,194 @@ class TestAddTask:
         plan = _plan(phases=(_phase_with_tasks(tasks=(dep,)),))
         new_plan = add_task(plan, "phase_001", text="next", deps=("T-000001",))
         assert new_plan.phases[0].tasks[-1].deps == ("T-000001",)
+
+
+class TestAddPhaseTask:
+    """``add_phase_task`` per v4 Contract 6.
+
+    Pins root append, parent-id nesting (including subsection parents),
+    subsection-title append, sequential id assignment, caller-supplied
+    id honoring, the ``(plan, assigned_id)`` return shape, and the
+    PlanValidationError surface (unknown phase, parent, or subsection;
+    invalid task; duplicate id; unknown deps; mutually exclusive
+    placement keywords).
+    """
+
+    def _plan_constructed(self, *phases: Phase) -> Plan:
+        return Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=phases,
+            bugs=None,
+            source_path=None,
+        )
+
+    def test_appends_to_phase_root_when_no_placement_given(self) -> None:
+        existing = make_task("first", task_id="T-000001")
+        plan = self._plan_constructed(_phase_with_tasks(tasks=(existing,)))
+        new_plan, assigned_id = add_phase_task(plan, "phase_001", make_task("second"))
+        assert assigned_id == "T-000002"
+        assert [t.text for t in new_plan.phases[0].tasks] == ["first", "second"]
+        assert new_plan.phases[0].tasks[1].task_id == "T-000002"
+
+    def test_nests_under_parent_id_in_phase_root(self) -> None:
+        parent = make_task("parent", task_id="T-000001")
+        plan = self._plan_constructed(_phase_with_tasks(tasks=(parent,)))
+        new_plan, assigned_id = add_phase_task(
+            plan, "phase_001", make_task("child"), parent_id="T-000001"
+        )
+        assert assigned_id == "T-000002"
+        nested = new_plan.phases[0].tasks[0].children
+        assert len(nested) == 1
+        assert nested[0].text == "child"
+        assert nested[0].task_id == "T-000002"
+
+    def test_nests_under_parent_id_in_subsection(self) -> None:
+        # parent_id resolution must fall through to subsection tasks
+        # after exhausting phase root tasks.
+        sub_parent = make_task("sub parent", task_id="T-000010")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_parent,), line_number=0)
+        phase = _phase_with_tasks(
+            tasks=(make_task("root", task_id="T-000001"),),
+            subsections=(sub,),
+        )
+        plan = self._plan_constructed(phase)
+        new_plan, assigned_id = add_phase_task(
+            plan, "phase_001", make_task("manual step"), parent_id="T-000010"
+        )
+        assert assigned_id == "T-000011"
+        sub_after = new_plan.phases[0].subsections[0]
+        assert sub_after.tasks[0].children[-1].text == "manual step"
+        assert sub_after.tasks[0].children[-1].task_id == "T-000011"
+
+    def test_appends_to_named_subsection_root(self) -> None:
+        sub_existing = make_task("sub first", task_id="T-000010")
+        sub = Subsection(title="Manual", prose="", tasks=(sub_existing,), line_number=0)
+        phase = _phase_with_tasks(
+            tasks=(make_task("root", task_id="T-000001"),),
+            subsections=(sub,),
+        )
+        plan = self._plan_constructed(phase)
+        new_plan, assigned_id = add_phase_task(
+            plan,
+            "phase_001",
+            make_task("sub second"),
+            subsection_title="Manual",
+        )
+        assert assigned_id == "T-000011"
+        sub_after = new_plan.phases[0].subsections[0]
+        assert [t.text for t in sub_after.tasks] == ["sub first", "sub second"]
+        assert sub_after.tasks[-1].task_id == "T-000011"
+        # Phase root tasks untouched.
+        assert [t.text for t in new_plan.phases[0].tasks] == ["root"]
+
+    def test_returns_tuple_of_new_plan_and_assigned_id(self) -> None:
+        plan = self._plan_constructed(_phase_with_tasks(tasks=()))
+        result = add_phase_task(plan, "phase_001", make_task("only"))
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+        new_plan, assigned_id = result
+        assert isinstance(new_plan, Plan)
+        assert isinstance(assigned_id, str)
+        assert new_plan is not plan
+
+    def test_assigns_id_based_on_global_max_plus_one(self) -> None:
+        a = make_task("a", task_id="T-000003")
+        b = make_task("b", task_id="T-000007")
+        plan = self._plan_constructed(_phase_with_tasks(tasks=(a, b)))
+        _, assigned_id = add_phase_task(plan, "phase_001", make_task("c"))
+        assert assigned_id == "T-000008"
+
+    def test_caller_supplied_task_id_is_honored(self) -> None:
+        plan = self._plan_constructed(_phase_with_tasks(tasks=()))
+        task = make_task("explicit", task_id="T-000777")
+        new_plan, assigned_id = add_phase_task(plan, "phase_001", task)
+        assert assigned_id == "T-000777"
+        assert new_plan.phases[0].tasks[0].task_id == "T-000777"
+
+    def test_unknown_phase_raises_validation_error(self) -> None:
+        plan = self._plan_constructed(_phase_with_tasks(tasks=()))
+        with pytest.raises(PlanValidationError) as exc_info:
+            add_phase_task(plan, "phase_999", make_task("x"))
+        assert any("phase_999" in m for m in exc_info.value.messages)
+
+    def test_unknown_parent_id_raises_validation_error(self) -> None:
+        plan = self._plan_constructed(
+            _phase_with_tasks(tasks=(make_task("only", task_id="T-000001"),))
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            add_phase_task(plan, "phase_001", make_task("orphan"), parent_id="T-000999")
+        assert any("T-000999" in m for m in exc_info.value.messages)
+
+    def test_unknown_subsection_raises_validation_error(self) -> None:
+        plan = self._plan_constructed(_phase_with_tasks(tasks=()))
+        with pytest.raises(PlanValidationError) as exc_info:
+            add_phase_task(
+                plan,
+                "phase_001",
+                make_task("x"),
+                subsection_title="No Such Section",
+            )
+        assert any("No Such Section" in m for m in exc_info.value.messages)
+
+    def test_parent_id_and_subsection_title_mutually_exclusive(self) -> None:
+        sub = Subsection(
+            title="Manual",
+            prose="",
+            tasks=(make_task("inside", task_id="T-000010"),),
+            line_number=0,
+        )
+        phase = _phase_with_tasks(
+            tasks=(make_task("root", task_id="T-000001"),),
+            subsections=(sub,),
+        )
+        plan = self._plan_constructed(phase)
+        with pytest.raises(PlanValidationError):
+            add_phase_task(
+                plan,
+                "phase_001",
+                make_task("x"),
+                parent_id="T-000010",
+                subsection_title="Manual",
+            )
+
+    def test_caller_supplied_duplicate_id_raises_validation_error(self) -> None:
+        plan = self._plan_constructed(
+            _phase_with_tasks(tasks=(make_task("first", task_id="T-000001"),))
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            add_phase_task(plan, "phase_001", make_task("dup", task_id="T-000001"))
+        assert any("T-000001" in m for m in exc_info.value.messages)
+
+    def test_unknown_dep_raises_validation_error(self) -> None:
+        plan = self._plan_constructed(
+            _phase_with_tasks(tasks=(make_task("first", task_id="T-000001"),))
+        )
+        bad = make_task("with dep", deps=("T-009999",))
+        with pytest.raises(PlanValidationError) as exc_info:
+            add_phase_task(plan, "phase_001", bad)
+        assert any("T-009999" in m for m in exc_info.value.messages)
+
+    def test_invalid_task_raises_validation_error(self) -> None:
+        # A task hand-built with an embedded newline in its text breaks
+        # Stage 10 field-stability; add_phase_task must reject it.
+        bad = Task(
+            task_id=None,
+            text="bad\ntext",
+            status=TaskStatus.TODO,
+            flag_tags=(),
+            action_tag=None,
+            annotations=(),
+            deps=(),
+            children=(),
+            ruled_out=(),
+            indent_level=0,
+            line_number=0,
+        )
+        plan = self._plan_constructed(_phase_with_tasks(tasks=()))
+        with pytest.raises(PlanValidationError):
+            add_phase_task(plan, "phase_001", bad)
 
 
 class TestReplacePhase:
