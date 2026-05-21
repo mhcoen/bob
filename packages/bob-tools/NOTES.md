@@ -2,6 +2,27 @@
 
 ## Observations
 
+- 2026-05-21 [19.2] [T-000189] Stage 19 gate verified: duplo
+  `saver.append_to_bugs_section` and `investigator.investigation_to_fix_tasks`
+  are removed; duplo's saver has no remaining PLAN.md/BUGS.md markdown
+  writes (only `.duplo/*.json`, `.duplo/examples/*.json`,
+  `.duplo/raw_pages/*.html`, and CLAUDE.md remain as `path.write_text`
+  call sites). `pipeline._fix_mode` and `pipeline._add_bug_tasks_to_plan`
+  now route bug appends through `bob_tools.planfile.update` plus
+  `add_bug_task` with `validation="unchecked"`. Bug-handling semantics
+  (append, unchanged-TODO, reopen-DONE, reopen-FAILED, fix-key dedup,
+  text-key dedup) are covered by `TestAddBugTask` in
+  `bob_tools/planfile/tests/test_operations.py`; duplo pipeline tests
+  in `TestFixMode`/`TestFixModeDiagnosis` cover the wire-up (single
+  bug, multiple bugs, diagnosed and undiagnosed fallback, preservation
+  of existing plan content). Verification commands: `ruff check .`
+  clean for both repos; `ruff format --check .` reports 41 files
+  already formatted in bob-tools; bob-tools pytest reports
+  670 passed / 2 skipped; bob-tools `mypy .` (run as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`) reports
+  "Success: no issues found in 41 source files"; duplo pytest
+  reports 3288 passed / 60 skipped.
+
 - 2026-05-20 [14.1] [T-000177] `replace_phase_validated` design
   decisions made to resolve ambiguity in the v4 Contract 3 wording:
   (a) `assign_missing_ids=False` rejects BOTH a missing `phase_id`
@@ -539,6 +560,20 @@
   bare task lines.
 
 ## Hypotheses
+
+- 2026-05-21 [19.2] [T-000189] The duplo-level test suite does not
+  exercise reopen-DONE/FAILED or skip-duplicate-TODO through the
+  `duplo fix` and `duplo investigate` paths directly; coverage is
+  delegated to `bob_tools.planfile.add_bug_task` and its unit tests.
+  If a future regression hides between duplo's `_add_bug_tasks_to_plan`
+  wrapper and `add_bug_task` (e.g., the wrapper double-counts writes
+  on a reopen, or omits annotations needed for fix-key dedup), the
+  current duplo tests would not catch it. Worth adding a pipeline-
+  level test that runs `duplo fix` twice against the same diagnosed
+  symptom (second run should report `0` writes — the unchanged-TODO
+  path) and a test that marks a bug DONE then re-runs `duplo fix`
+  (second run should reopen it). Flagging for a follow-up rather
+  than adding here, since the gate task is verification-only.
 
 ## Eliminated
 
