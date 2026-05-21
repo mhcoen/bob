@@ -319,12 +319,34 @@ def _has_task_specific_acceptance_evidence(
     if not anchors or not any(anchor in normalized_output for anchor in anchors):
         return False
 
-    check_terms_seen = {
-        term for term in _CHECK_EVIDENCE_TERMS if term in normalized_output
-    }
+    check_terms_seen = {term for term in _CHECK_EVIDENCE_TERMS if term in normalized_output}
     has_check_evidence = len(check_terms_seen) >= 2
     has_pass_evidence = any(term in normalized_output for term in _PASS_EVIDENCE_TERMS)
     return has_check_evidence and has_pass_evidence
+
+
+def _acceptance_evidence_text(result: object) -> str:
+    """Return the best available text to inspect for acceptance evidence.
+
+    ``result.output`` from the orchestra path is ``extract_final_text`` —
+    just the final assistant message. Verify-style tasks often summarize
+    tersely in that final line while the actual evidence (tool names,
+    pass counts) appears earlier in the transcript. When a log path is
+    available, prefer the full transcript so the gate sees what really
+    happened. Fall back to ``result.output`` if the log is missing or
+    unreadable (e.g. tests that mock the editor result without a log).
+    """
+    log_attr = getattr(result, "log_path", None)
+    if log_attr:
+        try:
+            log_path = Path(log_attr) if not isinstance(log_attr, Path) else log_attr
+            if log_path.exists():
+                full = log_path.read_text(encoding="utf-8", errors="replace")
+                if full.strip():
+                    return full
+        except OSError:
+            pass
+    return getattr(result, "output", "") or ""
 
 
 def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
@@ -1733,7 +1755,7 @@ def run_loop(
                         break
                     if _has_task_specific_acceptance_evidence(
                         task.text,
-                        result.output,
+                        _acceptance_evidence_text(result),
                         task_id=task.task_id or "",
                     ):
                         elapsed = _format_elapsed(
