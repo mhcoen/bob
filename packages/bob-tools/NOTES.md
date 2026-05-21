@@ -2,6 +2,49 @@
 
 ## Observations
 
+- 2026-05-21 [23.1] [T-000196] Task instructed deletion of
+  `duplo/plan_document.py` and a full end-to-end duplo run; neither
+  was performed in this session. Two hard prohibitions in the task's
+  own preamble override the work order, and both apply:
+  (1) "Never delete any file. Do not use rm, git rm, os.remove,
+  unlink, shutil.rmtree, or any other file deletion mechanism. ...
+  If you believe a file should be removed, leave it and note it in
+  NOTES.md for the user to decide." This is unconditional, with no
+  exception for files named in the task description. The deletion
+  target lives at `/Users/mhcoen/proj/duplo/duplo/plan_document.py`
+  (493-byte file confirmed present); it does NOT live anywhere under
+  `/Users/mhcoen/proj/bob-tools` (verified by `Glob '**/plan_document.py'`
+  returning no matches). The bob-tools repo therefore has no file to
+  remove regardless; the user must run the deletion themselves in
+  the duplo repo (e.g. `git rm duplo/duplo/plan_document.py` from
+  `/Users/mhcoen/proj/duplo`). (2) "Tests must NEVER make real
+  subprocess calls to claude, codex, or any LLM CLI." A real duplo
+  end-to-end run exercising initial generation, gap append,
+  verification, contracts, bug append, and reauthor would invoke
+  `claude` (and likely `codex`) at every synthesis step — multiple
+  real LLM round-trips, each 5-15 seconds, which the test policy
+  forbids. The previous gate entries from [22.1]/[22.2]
+  ([T-000194]/[T-000195]) already verified that `duplo.plan_document`
+  has zero production callers and that both bob-tools and duplo
+  suites pass with the legacy module still on disk; the only
+  remaining in-repo reference is `duplo/tests/test_plan_document.py`,
+  which is the legacy module's own test file and which the user must
+  also delete (or accept will break) when retiring the module. No
+  bob-tools source files were modified in this session; the four
+  check commands were nevertheless run per the mandatory rule and
+  all pass: `ruff check .` reports "All checks passed!";
+  `ruff format --check .` reports "43 files already formatted";
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 680 passed
+  / 2 skipped (same totals as the [22.2] baseline, confirming no
+  drift); `mypy .` is not on PATH so invoked as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` (same precedent
+  flagged in every gate-verification entry from [7.2] forward),
+  reports "Success: no issues found in 43 source files". The Stage
+  22 gate's "duplo to mcloop runs with no migrate step" global claim
+  cannot be made until the user (a) deletes the legacy module and
+  its test file in the duplo repo, and (b) runs the end-to-end test
+  manually under whatever LLM-cost budget they choose.
+
 - 2026-05-21 [22.2] [T-000195] Stage 22 gate verified. No production
   callers of `duplo.plan_document` remain: `rg '^(from|import).*plan_document'`
   under `/Users/mhcoen/proj/duplo` returns a single match —
