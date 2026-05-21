@@ -2,6 +2,72 @@
 
 ## Observations
 
+- 2026-05-21 [21.1] [T-000192] Duplo reauthor path migrated to
+  `bob_tools.planfile`. `duplo.reauthor.reauthor_plan` now parses the
+  prior PLAN.md via `bob_tools.planfile.parse_plan` (replacing
+  `duplo.plan_document.parse_plan`), rebuilds the synthesizer's body
+  into constructed-mode `Phase` values via
+  `duplo.reauthor_assemble.rebuild_phase_constructed`, substitutes
+  1:1 supersedes via `bob_tools.planfile.replace_phase_validated`
+  (composing split/merge/new/abandoned around it by tuple
+  manipulation), gates the assembled plan through
+  `assert_mcloop_canonical`, and persists via
+  `bob_tools.planfile.save` — no raw `path.write_text` writes remain
+  on the success path. Lineage and ledger emission stay in duplo
+  (`compute_lineage_diff`, `_emit_lifecycle_events`,
+  `_emit_plan_reauthored`).
+
+  Two non-obvious shifts worth recording:
+
+  (a) `validate_lineage` now runs BEFORE assembly with the
+  normalized lineage's own seen ids as `new_plan_ids`, in addition
+  to the existing post-assembly call. The OLD assembly tolerated
+  duplicate `phase_id`s (it just produced a plan with two phases
+  carrying the same id and let `validate_lineage` raise on the
+  contradiction). The NEW assembly composes around
+  `replace_phase_validated`, which calls
+  `validate_plan(constructed=True)` after every substitution and
+  fails fast with a `PlanValidationError` ("duplicate phase_id ...")
+  the moment a contradictory supersede attempts to replace a second
+  prior with an already-emitted new id. The pre-flight call lets
+  `LineageValidationError` surface the contradiction with its named
+  message ("preserved phase id(s) also appear in a 'from' list" /
+  "prior id ... is consumed by multiple entries") before assembly
+  is attempted; the post-flight call retains the
+  header-vs-phases mismatch check that only the assembled plan can
+  surface. This matters because `test_contradictory_lineage_still_raises_after_normalization`
+  pins `LineageValidationError` as the contract.
+
+  (b) The bob_tools.planfile parser's `_STAGE_RE` matches `#+\s+.*?\bphase\s+\d+\b`,
+  so an H1 like `# proj — Phase 0: env` is interpreted as a phase
+  heading (with title `env`) rather than as a plain H1. This is the
+  same behavior `_check_structural_sanity` documents at parser.py:516
+  ("a single-hash `# Phase 1: Bootstrapping` is matched by both
+  `_STAGE_RE` and `_H1_RE`"). The OLD `duplo.plan_document` parser
+  treated this H1 form as a `PhaseUnit.h1_envelope`, but the bob_tools
+  parser sees it as a separate phase. Five inline test fixtures in
+  `tests/test_reauthor.py` (the LedgerSliceShape pair plus the
+  trailing-fence canonical-shape fixture) and the `_wrap_synth_plan`
+  / `_write_old_plan` helpers were updated to use a plain `# proj`
+  H1; the helpers' docstrings explicitly call out that this is the
+  bob_tools.planfile-canonical form. The two duplo tests at
+  test_reauthor.py:1047 and :1075 keep the legacy H1 because they
+  raise before reaching `parse_plan` (missing-event and
+  wrong-event-type cases). The remaining `# proj — Phase 0: env`
+  literals in `plan_artifact_value` fixtures (e.g.,
+  test_reauthor_rejects_when_extracted_verdict_disagrees) also work
+  because those tests trip earlier-pipeline rejections
+  (`plan_artifact_verdict_mismatch`) before the plan body is parsed
+  via `parse_plan`.
+
+  Verification commands (run from bob-tools): `ruff check .` clean,
+  `ruff format --check .` reports 41 files already formatted,
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 670 passed
+  / 2 skipped, `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`
+  reports "Success: no issues found in 41 source files". Duplo's
+  own pytest (run via duplo's venv) reports 3280 passed / 60
+  skipped.
+
 - 2026-05-21 [20.2] [T-000191] Stage 20 gate verified. Confirmed the
   three duplo helpers each return `list[bob_tools.planfile.Task]`
   built via `make_task` with no markdown strings:
