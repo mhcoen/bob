@@ -371,7 +371,12 @@ def _iter_plan_tasks(plan: Plan) -> list[PlanTask]:
     return tasks
 
 
-def _update_with_retry(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
+def _update_with_retry(
+    path: Path,
+    operation: Callable[[Plan], Plan],
+    *,
+    validation: str = "canonical",
+) -> Plan:
     """Apply ``operation`` with a bounded retry on concurrent edits (§2(g)).
 
     Two retries gives three total attempts. Each retry re-loads current bytes
@@ -382,7 +387,7 @@ def _update_with_retry(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
     last_exc: ConcurrentUpdateError | None = None
     for _attempt in range(_UPDATE_RETRIES + 1):
         try:
-            return update(path, operation)
+            return update(path, operation, validation=validation)
         except ConcurrentUpdateError as exc:
             last_exc = exc
     assert last_exc is not None
@@ -443,5 +448,7 @@ def purge_completed_bugs(path: str | Path) -> None:
 
     Delete-vs-retain history is intentionally out of scope here; this preserves
     the current live-queue semantics and moves only the write primitive.
+    Standalone BUGS.md remains a loose bug queue, not a canonical PLAN.md, so
+    id-less bug entries must not be rejected by PLAN.md canonical validation.
     """
-    _update_with_retry(Path(path), _drop_done_bug_tasks)
+    _update_with_retry(Path(path), _drop_done_bug_tasks, validation="unchecked")
