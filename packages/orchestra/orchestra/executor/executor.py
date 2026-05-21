@@ -92,6 +92,30 @@ from orchestra.transforms import (
 from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
+ACTOR_PROGRESS_INTERVAL_SECONDS = 15.0
+FAN_OUT_PROGRESS_INTERVAL_SECONDS = 30.0
+ProgressWatchdogFactory = Callable[[float, Callable[[], None]], Callable[[], None]]
+
+
+def _default_progress_watchdog_factory(
+    interval_seconds: float,
+    emit_progress: Callable[[], None],
+) -> Callable[[], None]:
+    stop = threading.Event()
+
+    def _run() -> None:
+        while not stop.wait(interval_seconds):
+            if stop.is_set():
+                return
+            emit_progress()
+
+    thread = threading.Thread(
+        target=_run,
+        name="orchestra-progress-watchdog",
+        daemon=True,
+    )
+    thread.start()
+    return stop.set
 
 
 def _coerce_to_text(value: Any) -> str:
@@ -269,19 +293,23 @@ class Executor:
         # set_visibility_index().
         visibility_index: VisibilityIndex | None = None,
         # Optional progress hook. Fires once per ``state_enter`` and
-        # once per ``state_exit`` for sequential states, plus once
-        # per ``fan_out_start`` and once per ``fan_out_end`` for
-        # parallel groups. The callback receives
+        # once per ``state_exit`` for sequential states, plus periodic
+        # ``actor_progress`` heartbeats while an actor invocation is
+        # in flight. For parallel groups it fires once per
+        # ``fan_out_start``, periodic ``fan_out_progress`` heartbeats
+        # while the group is open, and once per ``fan_out_end``. The
+        # callback receives
         # ``(kind, state_name, role, index, total, elapsed_seconds,
         # children)`` where ``children`` is a tuple of
         # ``(child_state_name, child_role)`` pairs on
         # ``fan_out_start`` and ``None`` otherwise. ``index`` is the
         # 1-based ordinal of the state's first entry (retries reuse
-        # the same index); for ``fan_out_start`` it is the index of
-        # the first child in the dispatch range. ``total`` is the
-        # count of declared states in the workflow.
-        # ``elapsed_seconds`` is ``None`` for the start events and a
-        # float duration for the exit events. The api wraps the
+        # the same index); for ``fan_out_start`` and
+        # ``fan_out_progress`` it is the index of the first child in
+        # the dispatch range. ``total`` is the count of declared
+        # states in the workflow. ``elapsed_seconds`` is ``None`` for
+        # the start events, a float duration for the exit events, and
+        # elapsed watchdog time for progress events. The api wraps the
         # user-facing ``progress_callback`` to enrich with adapter
         # and model from the resolved role bindings; the executor
         # itself only knows the role name.
@@ -306,6 +334,11 @@ class Executor:
         criteria: tuple[CriterionDecl, ...] = (),
         decision_consistency_mode: DecisionConsistencyMode = (
             DecisionConsistencyMode.ACCEPT_ONLY
+        ),
+        progress_watchdog_factory: ProgressWatchdogFactory | None = None,
+        actor_progress_interval_seconds: float = ACTOR_PROGRESS_INTERVAL_SECONDS,
+        fan_out_progress_interval_seconds: float = (
+            FAN_OUT_PROGRESS_INTERVAL_SECONDS
         ),
     ) -> None:
         self._wf = workflow
@@ -349,8 +382,18 @@ class Executor:
         # index so the [N/M] counter does not jump on a retry.
         self._progress_callback = progress_callback
         self._progress_state_indices: dict[str, int] = {}
+        self._progress_fan_out_range_starts: dict[str, int] = {}
         self._progress_total: int = len(workflow.states)
         self._progress_lock: threading.Lock = threading.Lock()
+        self._progress_watchdog_factory = (
+            progress_watchdog_factory
+            if progress_watchdog_factory is not None
+            else _default_progress_watchdog_factory
+        )
+        self._actor_progress_interval_seconds = actor_progress_interval_seconds
+        self._fan_out_progress_interval_seconds = (
+            fan_out_progress_interval_seconds
+        )
         # F2.5a decision-consistency invariant configuration.
         self._criteria: tuple[CriterionDecl, ...] = criteria
         self._decision_consistency_mode: DecisionConsistencyMode = (
@@ -520,8 +563,12 @@ class Executor:
                 fields={"actor_binding": actor_binding},
             )
             try:
-                payload = self._invoke_with_timeout(
-                    adapter, prepared, timeout_ms
+                payload = self._invoke_actor_with_progress(
+                    state,
+                    adapter,
+                    prepared,
+                    timeout_ms,
+                    emit_actor_progress=True,
                 )
             except _TimeoutSignal:
                 error_record = ErrorRecord(
@@ -756,6 +803,11 @@ class Executor:
                 # Report the child range start as the event index so
                 # the reporter can render [child_start-child_end/total].
                 index = child_start
+                self._progress_fan_out_range_starts[state.name] = child_start
+            elif kind == "fan_out_progress":
+                index = self._progress_fan_out_range_starts.get(
+                    state.name, index
+                )
         try:
             self._progress_callback(
                 kind,
@@ -770,6 +822,45 @@ class Executor:
             # The progress callback is for UX only. A misbehaving
             # reporter must never abort an in-flight run.
             pass
+
+    def _start_progress_watchdog(
+        self,
+        kind: str,
+        state: StateDecl,
+        interval_seconds: float,
+    ) -> Callable[[], None]:
+        if self._progress_callback is None or interval_seconds <= 0:
+            return lambda: None
+        started_perf = time.perf_counter()
+
+        def _emit() -> None:
+            elapsed = max(0.0, time.perf_counter() - started_perf)
+            self._emit_progress(kind, state, elapsed_seconds=elapsed)
+
+        return self._progress_watchdog_factory(interval_seconds, _emit)
+
+    def _invoke_actor_with_progress(
+        self,
+        state: StateDecl,
+        adapter: Adapter,
+        prepared: PreparedInvocation,
+        timeout_ms: int | None,
+        *,
+        emit_actor_progress: bool,
+    ) -> dict[str, Any]:
+        stop_watchdog = (
+            self._start_progress_watchdog(
+                "actor_progress",
+                state,
+                self._actor_progress_interval_seconds,
+            )
+            if emit_actor_progress
+            else (lambda: None)
+        )
+        try:
+            return self._invoke_with_timeout(adapter, prepared, timeout_ms)
+        finally:
+            stop_watchdog()
 
     def _build_actor_binding(self, state: StateDecl) -> dict[str, Any]:
         binding: dict[str, Any] = {"kind": state.actor.kind}
@@ -1895,6 +1986,11 @@ class Executor:
             max_workers=max(1, len(transition.fan_out)),
             thread_name_prefix="orchestra-fan-out",
         )
+        stop_fan_out_watchdog = self._start_progress_watchdog(
+            "fan_out_progress",
+            parent_state,
+            self._fan_out_progress_interval_seconds,
+        )
         try:
             for child_name in transition.fan_out:
                 fut = executor.submit(
@@ -1955,6 +2051,7 @@ class Executor:
                     registry.request_cancel_all(futures)
         finally:
             executor.shutdown(wait=True)
+            stop_fan_out_watchdog()
 
         # Aggregate outcome.
         aggregate: Literal["success", "error"] = (
@@ -2369,6 +2466,7 @@ class Executor:
             envelope = self._execute_state_body(
                 child_name,
                 snapshot=snapshot,
+                suppress_actor_progress=True,
             )
             registry.mark_done(child_name)
             return envelope
@@ -2397,6 +2495,7 @@ class Executor:
                 snapshot=snapshot,
                 on_prepared=_on_prepared,
                 is_cancelled_after_register=_is_cancelled_after_register,
+                suppress_actor_progress=True,
             )
             # Pass-5 fix #3: route the child outcome through the same
             # first-match selection the linear path uses, then retry
@@ -2498,6 +2597,7 @@ class Executor:
             Callable[[PreparedInvocation, str], None] | None
         ) = None,
         is_cancelled_after_register: Callable[[], bool] | None = None,
+        suppress_actor_progress: bool = False,
     ) -> Envelope:
         """Run steps 1-9 of the per-state sequence for ``state_name``.
 
@@ -2632,8 +2732,12 @@ class Executor:
                 fields={"actor_binding": actor_binding},
             )
             try:
-                payload = self._invoke_with_timeout(
-                    adapter, prepared, timeout_ms
+                payload = self._invoke_actor_with_progress(
+                    state,
+                    adapter,
+                    prepared,
+                    timeout_ms,
+                    emit_actor_progress=not suppress_actor_progress,
                 )
             except _TimeoutSignal:
                 error_record = ErrorRecord(

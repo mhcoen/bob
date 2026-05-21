@@ -2,7 +2,8 @@
 the library API.
 
 The executor surfaces ``state_enter``, ``state_exit``,
-``fan_out_start``, and ``fan_out_end`` events to a
+``actor_progress``, ``fan_out_start``, ``fan_out_progress``, and
+``fan_out_end`` events to a
 ``ProgressCallback`` whenever one is supplied via
 ``run_workflow(progress_callback=...)``. Library callers get the same
 default-on stderr reporting as the CLI: ``run_workflow`` installs
@@ -13,6 +14,7 @@ opting in to a custom reporter).
 Sequential states render one line per phase:
 
     [1/7] framer (claude_code_text:opus) ... starting
+    [1/7] framer (claude_code_text:opus) ... still running, 15.0s elapsed
     [1/7] framer (claude_code_text:opus) ... done in 3.2s
 
 Parallel groups (fan-out) render a header listing every child binding
@@ -29,6 +31,7 @@ sum:
        executor_lens (claude_code_text:opus)
     [2-6/7] contrarian done in 4.1s
     [2-6/7] expansionist done in 4.8s
+    [2-6/7] all 5 still running, 30.0s elapsed
     ...
     [2-6/7] all 5 done, parallel wall-clock 6.3s
 
@@ -66,17 +69,20 @@ class ProgressEvent:
     """One progress notification surfaced by the executor.
 
     ``kind`` is one of ``"state_enter"``, ``"state_exit"``,
-    ``"fan_out_start"``, or ``"fan_out_end"``. For sequential states
-    ``index`` is the 1-based ordinal of the state's first entry
-    (retries reuse the same index) and ``total`` is the count of
-    declared states in the workflow. For ``fan_out_start`` the
+    ``"actor_progress"``, ``"fan_out_start"``,
+    ``"fan_out_progress"``, or ``"fan_out_end"``. For sequential
+    states ``index`` is the 1-based ordinal of the state's first
+    entry (retries reuse the same index) and ``total`` is the count
+    of declared states in the workflow. For ``fan_out_start`` the
     ``index`` is the 1-based start of the child range and
     ``children`` lists every child in dispatch order with adapter
     and model resolved. ``elapsed_seconds`` is ``None`` for
     ``state_enter`` and ``fan_out_start``, the per-state wall-clock
-    duration for ``state_exit``, and ``None`` for ``fan_out_end``
-    (the reporter computes the parallel wall-clock from accumulated
-    child durations).
+    duration for ``state_exit``, elapsed actor-invoke time for
+    ``actor_progress``, elapsed parallel-block time for
+    ``fan_out_progress``, and ``None`` for ``fan_out_end`` (the
+    reporter computes the parallel wall-clock from accumulated child
+    durations).
     """
 
     kind: str
@@ -128,6 +134,12 @@ def format_event(event: ProgressEvent) -> str:
         if event.elapsed_seconds is None:
             return f"{head} done"
         return f"{head} done in {event.elapsed_seconds:.1f}s"
+    if event.kind == "actor_progress":
+        elapsed = event.elapsed_seconds or 0.0
+        return f"{head} still running, {elapsed:.1f}s elapsed"
+    if event.kind == "fan_out_progress":
+        elapsed = event.elapsed_seconds or 0.0
+        return f"{head} fan-out still running, {elapsed:.1f}s elapsed"
     return f"{head} {event.kind}"
 
 
@@ -157,10 +169,14 @@ class _StatefulStderrReporter:
                 self._handle_fan_out_start(event)
             elif event.kind == "fan_out_end":
                 self._handle_fan_out_end(event)
+            elif event.kind == "fan_out_progress":
+                self._handle_fan_out_progress(event)
             elif event.kind == "state_enter":
                 self._handle_state_enter(event)
             elif event.kind == "state_exit":
                 self._handle_state_exit(event)
+            elif event.kind == "actor_progress":
+                self._handle_actor_progress(event)
 
     # ----- handlers --------------------------------------------------
 
@@ -216,6 +232,20 @@ class _StatefulStderrReporter:
         self._parallel_count = 0
         self._parallel_max_elapsed = 0.0
 
+    def _handle_fan_out_progress(self, event: ProgressEvent) -> None:
+        elapsed = event.elapsed_seconds or 0.0
+        if not self._parallel_active:
+            self._print(
+                f"[?/{event.total}] fan_out_progress without open block "
+                f"for {event.state_name!r}, {elapsed:.1f}s elapsed"
+            )
+            return
+        self._print(
+            f"[{self._parallel_start}-{self._parallel_end}/"
+            f"{self._parallel_total}] all {self._parallel_count} "
+            f"still running, {elapsed:.1f}s elapsed"
+        )
+
     def _handle_state_enter(self, event: ProgressEvent) -> None:
         if self._parallel_active:
             # Per-child "starting" lines are suppressed; the
@@ -251,6 +281,20 @@ class _StatefulStderrReporter:
         self._print(
             f"[{event.index}/{event.total}] {label} ({backing}) "
             f"... done in {event.elapsed_seconds:.1f}s"
+        )
+
+    def _handle_actor_progress(self, event: ProgressEvent) -> None:
+        if self._parallel_active:
+            # Fan-out children are expected to be suppressed by the
+            # executor. Keep the reporter defensive so one stray child
+            # event cannot corrupt the parallel block format.
+            return
+        backing = _format_backing(event.adapter, event.model)
+        label = event.role or event.state_name
+        elapsed = event.elapsed_seconds or 0.0
+        self._print(
+            f"[{event.index}/{event.total}] {label} ({backing}) "
+            f"... still running, {elapsed:.1f}s elapsed"
         )
 
     # ----- io --------------------------------------------------------

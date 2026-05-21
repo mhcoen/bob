@@ -9,6 +9,7 @@ bindings, and the CLI's progress callback wiring.
 from __future__ import annotations
 
 import io
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +27,14 @@ from orchestra.progress import (
     silent_reporter,
     stderr_reporter,
 )
+from orchestra.registry import ProfileRegistry
 from orchestra.spine import (
     NO_INITIAL,
+    ActorBinding,
     InvocationRequest,
     PreparedInvocation,
+    StateDecl,
+    Transition,
     Workflow,
 )
 from orchestra.store import ArtifactStore
@@ -105,6 +110,23 @@ def test_format_event_state_exit_with_no_elapsed() -> None:
     assert format_event(event) == "[1/1] x (a:m) ... done"
 
 
+def test_format_event_actor_progress_includes_elapsed() -> None:
+    event = ProgressEvent(
+        kind="actor_progress",
+        state_name="work",
+        role="editor",
+        adapter="code_agent",
+        model="opus",
+        index=1,
+        total=1,
+        elapsed_seconds=15.25,
+    )
+    assert (
+        format_event(event)
+        == "[1/1] editor (code_agent:opus) ... still running, 15.2s elapsed"
+    )
+
+
 # --------------------------------------------------------------------
 # stderr_reporter and silent_reporter
 # --------------------------------------------------------------------
@@ -144,21 +166,46 @@ def test_stderr_reporter_writes_one_line_per_event() -> None:
     ]
 
 
+def test_stderr_reporter_renders_actor_progress() -> None:
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf)
+    reporter(
+        ProgressEvent(
+            kind="actor_progress",
+            state_name="frame",
+            role="framer",
+            adapter="claude_code_text",
+            model="opus",
+            index=1,
+            total=7,
+            elapsed_seconds=15.0,
+        )
+    )
+    assert buf.getvalue().splitlines() == [
+        "[1/7] framer (claude_code_text:opus) ... still running, 15.0s elapsed"
+    ]
+
+
 def test_silent_reporter_drops_every_event() -> None:
     reporter = silent_reporter()
     # Should not raise, should produce no observable side effect.
-    reporter(
-        ProgressEvent(
-            kind="state_enter",
-            state_name="x",
-            role="x",
-            adapter="a",
-            model="m",
-            index=1,
-            total=1,
-            elapsed_seconds=None,
+    for kind, elapsed in (
+        ("state_enter", None),
+        ("actor_progress", 15.0),
+        ("fan_out_progress", 30.0),
+    ):
+        reporter(
+            ProgressEvent(
+                kind=kind,
+                state_name="x",
+                role="x",
+                adapter="a",
+                model="m",
+                index=1,
+                total=1,
+                elapsed_seconds=elapsed,
+            )
         )
-    )
 
 
 # --------------------------------------------------------------------
@@ -233,8 +280,13 @@ def test_wrap_progress_callback_swallows_user_exceptions() -> None:
 class _RecordingModelAdapter:
     backing = "model"
 
-    def __init__(self, responses: dict[str, str]) -> None:
+    def __init__(
+        self,
+        responses: dict[str, str],
+        on_invoke: Any = None,
+    ) -> None:
         self._responses = dict(responses)
+        self._on_invoke = on_invoke
 
     def prepare(self, request: InvocationRequest) -> PreparedInvocation:
         return PreparedInvocation(
@@ -244,7 +296,10 @@ class _RecordingModelAdapter:
         )
 
     def invoke(self, prepared: PreparedInvocation) -> dict[str, Any]:
-        text = self._responses[prepared.inner["state_id"]]
+        state_id = prepared.inner["state_id"]
+        if self._on_invoke is not None:
+            self._on_invoke(state_id)
+        text = self._responses[state_id]
         return {
             "output": text,
             "verdict": None,
@@ -281,6 +336,198 @@ _COUNCIL_RESPONSES = {
     "executor_lens_advise": "EPSILON",
     "synthesize": "VERDICT",
 }
+
+
+class _ManualWatchdog:
+    def __init__(self, interval: float, emit: Any) -> None:
+        self.interval = interval
+        self._emit = emit
+        self._active = True
+        self._lock = threading.Lock()
+
+    def stop(self) -> None:
+        with self._lock:
+            self._active = False
+
+    def tick(self) -> None:
+        with self._lock:
+            active = self._active
+        if active:
+            self._emit()
+
+
+class _ManualWatchdogs:
+    def __init__(self) -> None:
+        self.started: list[_ManualWatchdog] = []
+        self._lock = threading.Lock()
+
+    def __call__(self, interval: float, emit: Any) -> Any:
+        watchdog = _ManualWatchdog(interval, emit)
+        with self._lock:
+            self.started.append(watchdog)
+        return watchdog.stop
+
+    def tick_all(self) -> None:
+        with self._lock:
+            watchdogs = list(self.started)
+        for watchdog in watchdogs:
+            watchdog.tick()
+
+
+def _single_state_workflow(tmp_path: Path) -> Workflow:
+    return Workflow(
+        spec_version="test",
+        name="single",
+        max_total_steps=5,
+        states=(
+            StateDecl(
+                name="work",
+                actor=ActorBinding(kind="model", ref=None),
+                role="worker",
+                transitions=(Transition(outcome="complete", target="done"),),
+            ),
+        ),
+        source_dir=str(tmp_path),
+    )
+
+
+def _run_executor(
+    *,
+    tmp_path: Path,
+    workflow: Workflow,
+    adapter: _RecordingModelAdapter,
+    progress_callback: Any,
+    watchdog_factory: Any,
+) -> str:
+    registry = ProfileRegistry()
+    registry.actor_backings["model"] = lambda: adapter
+
+    rid = new_run_id()
+    run_dir = tmp_path / f"run_{rid}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", rid)
+    log.write("run_start", fields={"workflow_path": "<test>"})
+    try:
+        executor = Executor(
+            workflow=workflow,
+            registry=registry,
+            store=store,
+            log=log,
+            run_dir=run_dir,
+            run_id=rid,
+            external_inputs={},
+            progress_callback=progress_callback,
+            progress_watchdog_factory=watchdog_factory,
+        )
+        return executor.run_to_completion()
+    finally:
+        log.close()
+        store.close()
+
+
+def test_executor_emits_actor_progress_during_actor_invoke(
+    tmp_path: Path,
+) -> None:
+    watchdogs = _ManualWatchdogs()
+    events: list[tuple[str, str, float | None]] = []
+
+    def _cb(
+        kind: str,
+        state_name: str,
+        role: str | None,
+        index: int,
+        total: int,
+        elapsed: float | None,
+        children: tuple[tuple[str, str | None], ...] | None = None,
+    ) -> None:
+        events.append((kind, state_name, elapsed))
+
+    adapter = _RecordingModelAdapter(
+        {"work": "DONE"},
+        on_invoke=lambda _state_id: watchdogs.tick_all(),
+    )
+    terminal = _run_executor(
+        tmp_path=tmp_path,
+        workflow=_single_state_workflow(tmp_path),
+        adapter=adapter,
+        progress_callback=_cb,
+        watchdog_factory=watchdogs,
+    )
+
+    assert terminal == "done"
+    actor_events = [e for e in events if e[0] == "actor_progress"]
+    assert len(actor_events) == 1
+    assert actor_events[0][1] == "work"
+    assert actor_events[0][2] is not None
+
+
+def test_executor_stops_actor_progress_after_invoke(
+    tmp_path: Path,
+) -> None:
+    watchdogs = _ManualWatchdogs()
+    events: list[str] = []
+
+    def _cb(
+        kind: str,
+        state_name: str,
+        role: str | None,
+        index: int,
+        total: int,
+        elapsed: float | None,
+        children: tuple[tuple[str, str | None], ...] | None = None,
+    ) -> None:
+        events.append(kind)
+
+    adapter = _RecordingModelAdapter(
+        {"work": "DONE"},
+        on_invoke=lambda _state_id: watchdogs.tick_all(),
+    )
+    _run_executor(
+        tmp_path=tmp_path,
+        workflow=_single_state_workflow(tmp_path),
+        adapter=adapter,
+        progress_callback=_cb,
+        watchdog_factory=watchdogs,
+    )
+    count_after_run = events.count("actor_progress")
+
+    watchdogs.tick_all()
+
+    assert events.count("actor_progress") == count_after_run
+
+
+def test_progress_callback_exceptions_remain_non_fatal(
+    tmp_path: Path,
+) -> None:
+    watchdogs = _ManualWatchdogs()
+
+    def _cb(
+        kind: str,
+        state_name: str,
+        role: str | None,
+        index: int,
+        total: int,
+        elapsed: float | None,
+        children: tuple[tuple[str, str | None], ...] | None = None,
+    ) -> None:
+        if kind == "actor_progress":
+            raise RuntimeError("progress failed")
+
+    adapter = _RecordingModelAdapter(
+        {"work": "DONE"},
+        on_invoke=lambda _state_id: watchdogs.tick_all(),
+    )
+
+    terminal = _run_executor(
+        tmp_path=tmp_path,
+        workflow=_single_state_workflow(tmp_path),
+        adapter=adapter,
+        progress_callback=_cb,
+        watchdog_factory=watchdogs,
+    )
+
+    assert terminal == "done"
 
 
 def test_executor_fires_callback_once_per_state_enter_and_exit(
@@ -688,6 +935,47 @@ def test_stateful_reporter_suppresses_per_child_starting_lines() -> None:
     assert lines[-1] == "[1-2/4] all 2 done, parallel wall-clock 2.0s"
 
 
+def test_stateful_reporter_renders_fan_out_progress() -> None:
+    from orchestra.progress import ChildBinding as CB
+
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf)
+    children = (
+        CB(state_name="c1", role="r1", adapter="a", model="m"),
+        CB(state_name="c2", role="r2", adapter="a", model="m"),
+    )
+    _emit(
+        reporter,
+        "fan_out_start",
+        state_name="parent",
+        role="parent_role",
+        index=2,
+        total=4,
+        children=children,
+    )
+    _emit(
+        reporter,
+        "fan_out_progress",
+        state_name="parent",
+        role="parent_role",
+        index=2,
+        total=4,
+        elapsed_seconds=30.0,
+    )
+    _emit(
+        reporter,
+        "fan_out_end",
+        state_name="parent",
+        role="parent_role",
+        index=2,
+        total=4,
+    )
+
+    lines = buf.getvalue().splitlines()
+    assert "[2-3/4] all 2 still running, 30.0s elapsed" in lines
+    assert lines[-1] == "[2-3/4] all 2 done, parallel wall-clock 0.0s"
+
+
 def test_stateful_reporter_resumes_sequential_after_parallel_block() -> None:
     """Sequential states before and after a parallel block use the
     normal [N/total] counter format. The chairman state below is
@@ -1039,3 +1327,73 @@ def test_executor_emits_fan_out_start_and_fan_out_end(
         "outsider_advise",
         "executor_lens_advise",
     }
+
+
+def test_executor_emits_fan_out_progress_without_child_actor_progress(
+    tmp_path: Path,
+) -> None:
+    path = resolve_workflow_path("ask_council", project_dir=None)
+    registry = _pre_load_registry()
+    workflow = load_workflow(path, registry)
+    watchdogs = _ManualWatchdogs()
+    adapter = _RecordingModelAdapter(
+        _COUNCIL_RESPONSES,
+        on_invoke=lambda _state_id: watchdogs.tick_all(),
+    )
+    registry.actor_backings["model"] = lambda: adapter
+    registry._adapter_cache.pop("model", None)
+
+    events: list[
+        tuple[str, str, str | None, int, int, float | None, Any]
+    ] = []
+
+    def _cb(
+        kind: str,
+        state_name: str,
+        role: str | None,
+        index: int,
+        total: int,
+        elapsed: float | None,
+        children: tuple[tuple[str, str | None], ...] | None = None,
+    ) -> None:
+        events.append((kind, state_name, role, index, total, elapsed, children))
+
+    rid = new_run_id()
+    run_dir = tmp_path / f"run_{rid}"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", rid)
+    log.write("run_start", fields={"workflow_path": str(path)})
+    try:
+        executor = Executor(
+            workflow=workflow,
+            registry=registry,
+            store=store,
+            log=log,
+            run_dir=run_dir,
+            run_id=rid,
+            external_inputs={"query": "q", "history": "h"},
+            progress_callback=_cb,
+            progress_watchdog_factory=watchdogs,
+        )
+        executor.run_to_completion()
+    finally:
+        log.close()
+        store.close()
+
+    child_states = {
+        "contrarian_advise",
+        "first_principles_advise",
+        "expansionist_advise",
+        "outsider_advise",
+        "executor_lens_advise",
+    }
+    assert any(e[0] == "fan_out_progress" for e in events)
+    assert not any(
+        e[0] == "actor_progress" and e[1] in child_states for e in events
+    )
+    count_after_run = len([e for e in events if e[0] == "fan_out_progress"])
+
+    watchdogs.tick_all()
+
+    assert len([e for e in events if e[0] == "fan_out_progress"]) == count_after_run
