@@ -19,6 +19,20 @@ the unlocked load and the lock acquisition), applies the caller's
 ``operation``, saves while holding the same lock, and returns the new
 Plan.
 
+Per v4 Decision 4, both ``save`` and ``update`` take a keyword-only
+``validation`` argument whose literal value is either ``"canonical"``
+(the default) or ``"unchecked"``. ``canonical`` runs
+:func:`bob_tools.planfile.operations.assert_mcloop_canonical` against
+the plan and writes the exact rendered text the validator approved,
+so a non-canonical plan cannot reach disk through the default path.
+``unchecked`` falls back to a plain :func:`render_plan` and is
+intended only for low-level tests of atomic-write, lock, and crash
+behavior — call sites outside ``bob_tools.planfile.tests`` are gated
+by CI grep (see PLAN.md T-000183). The in-lock save inside
+:func:`update` honors the same mode; the underlying atomic-write
+helper takes already-validated text and is therefore not a validation
+bypass.
+
 The lock is a separate sidecar file (``<path>.lock``) opened
 ``O_CREAT|O_RDWR`` so locking works whether or not the target file
 exists yet and survives the ``os.replace`` that swaps a freshly
@@ -36,10 +50,14 @@ import os
 import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import Literal
 
 from bob_tools.planfile.model import Plan
+from bob_tools.planfile.operations import assert_mcloop_canonical
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import render_plan
+
+ValidationMode = Literal["canonical", "unchecked"]
 
 
 class ConcurrentUpdateError(Exception):
@@ -106,15 +124,49 @@ def _acquire_exclusive_lock(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
-def _save_unlocked(path: Path, plan: Plan) -> None:
-    """Atomically write ``plan`` to ``path`` without acquiring the lock.
+def _render_for_validation(
+    plan: Plan, validation: ValidationMode, path: Path | None
+) -> str:
+    """Return the bytes to commit for ``plan`` under the given ``validation``.
 
-    Internal helper so :func:`update` can save while still holding
-    the lock it already acquired, without double-locking the same
-    fd. Public callers go through :func:`save` which wraps this in
-    the advisory lock.
+    Per v4 Decision 4: ``canonical`` delegates to
+    :func:`assert_mcloop_canonical`, which validates the plan against
+    the mcloop canonical-input contract and returns the exact rendered
+    text it inspected — so the bytes on disk equal the bytes the
+    validator approved. ``unchecked`` skips validation and returns a
+    plain :func:`render_plan` of the input. ``path`` is forwarded to
+    the validator so a re-parse syntax error names the file.
+
+    Centralizing the choice here keeps :func:`save` and the in-lock
+    save inside :func:`update` honoring the same mode without
+    duplicating the branch.
     """
-    text = render_plan(plan)
+    if validation == "canonical":
+        return assert_mcloop_canonical(plan, source_path=path)
+    if validation == "unchecked":
+        return render_plan(plan)
+    raise ValueError(
+        f"validation must be 'canonical' or 'unchecked', got {validation!r}"
+    )
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Atomically write ``text`` to ``path`` without acquiring the lock.
+
+    Write-only helper: takes already-rendered (and, for canonical
+    callers, already-validated) text and commits it to disk. Replaces
+    the previous ``_save_unlocked`` helper, which accepted a Plan and
+    therefore could be (mis)used to bypass validation. By splitting
+    the validate-and-render step out, the atomic-write path no longer
+    knows about Plans at all, so there is no in-process path that
+    writes a Plan without going through :func:`_render_for_validation`.
+
+    Writes to a sibling tempfile, ``fsync``s the descriptor, then
+    ``os.replace``s the tempfile over ``path``; the tempfile is
+    unlinked on any pre-rename failure so failed writes do not litter
+    the directory. Used by :func:`save` (under the lock it acquires)
+    and by :func:`update` (under the lock it already holds).
+    """
     directory = path.parent if path.parent != Path("") else Path(".")
     fd, tmp_name = tempfile.mkstemp(
         prefix=path.name + ".",
@@ -135,25 +187,48 @@ def _save_unlocked(path: Path, plan: Plan) -> None:
         raise
 
 
-def save(path: Path, plan: Plan) -> None:
+def save(
+    path: Path,
+    plan: Plan,
+    *,
+    validation: ValidationMode = "canonical",
+) -> None:
     """Atomically write ``plan`` to ``path`` under an exclusive lock.
 
-    Renders the plan, writes the bytes to a tempfile in the same
-    directory, ``fsync``s the file descriptor, then ``os.replace``s the
-    tempfile over ``path``. A crash between the write and the rename
-    leaves the original file intact; a crash after the rename leaves
-    the new file intact. The tempfile is removed on any pre-rename
-    failure so failed writes do not litter the directory.
+    Per v4 Decision 4, ``validation`` selects how the bytes-to-commit
+    are produced:
 
-    The whole write is performed under an exclusive advisory lock on
-    the sidecar ``<path>.lock`` file, so a concurrent :func:`save` or
-    :func:`update` blocks rather than interleaving.
+    * ``"canonical"`` (default) — run
+      :func:`assert_mcloop_canonical` against ``plan`` and write the
+      exact rendered text the validator returned. A plan that fails
+      the mcloop canonical-input contract raises
+      :class:`PlanValidationError` and never reaches disk.
+    * ``"unchecked"`` — render with :func:`render_plan` and write the
+      result without validation. Reserved for low-level tests of
+      atomic-write, lock, and crash behavior; non-test call sites are
+      gated by CI grep.
+
+    Validation runs outside the lock (it is pure on ``plan``) so a
+    rejected plan never causes lock contention. The atomic write then
+    happens under an exclusive advisory lock on the sidecar
+    ``<path>.lock`` file: bytes are written to a sibling tempfile,
+    ``fsync``'d, and ``os.replace``'d over ``path``. A crash between
+    the write and the rename leaves the original file intact; a crash
+    after the rename leaves the new file intact. The tempfile is
+    removed on any pre-rename failure so failed writes do not litter
+    the directory.
     """
+    text = _render_for_validation(plan, validation, path)
     with _acquire_exclusive_lock(path):
-        _save_unlocked(path, plan)
+        _atomic_write_text(path, text)
 
 
-def update(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
+def update(
+    path: Path,
+    operation: Callable[[Plan], Plan],
+    *,
+    validation: ValidationMode = "canonical",
+) -> Plan:
     """Safe-mutation entry point: load, lock, re-parse, apply, save.
 
     The sequence (per design doc Stage 6 spec):
@@ -168,14 +243,23 @@ def update(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
        lock), and we raise :class:`ConcurrentUpdateError` so the
        caller can decide what to do rather than silently clobbering.
     4. Parse the current bytes, apply ``operation`` to the resulting
-       :class:`Plan`, and write the returned Plan atomically via
-       :func:`_save_unlocked` while still holding the lock.
+       :class:`Plan`, render the returned Plan via
+       :func:`_render_for_validation` under the same ``validation``
+       mode as :func:`save`, and atomically commit those bytes via
+       :func:`_atomic_write_text` while still holding the lock.
     5. Release the lock and return the new Plan.
 
     ``operation`` is invoked with the freshly parsed Plan; it must
     return a Plan (typically a ``dataclasses.replace`` of the input).
     Mutating the input Plan in place has no effect — the typed model
     is frozen — so callers always produce a new value.
+
+    ``validation`` defaults to ``"canonical"`` per v4 Decision 4 and
+    behaves identically to :func:`save`'s parameter; the in-lock save
+    honors the same mode so a non-canonical mutation cannot reach
+    disk through the default path. Validation runs inside the lock
+    because the input plan is the re-parsed on-disk state at that
+    moment.
     """
     pre_text = path.read_text()
     with _acquire_exclusive_lock(path):
@@ -184,5 +268,6 @@ def update(path: Path, operation: Callable[[Plan], Plan]) -> Plan:
             raise ConcurrentUpdateError(path)
         plan = parse_plan(post_text, source_path=path)
         new_plan = operation(plan)
-        _save_unlocked(path, new_plan)
+        text = _render_for_validation(new_plan, validation, path)
+        _atomic_write_text(path, text)
         return new_plan

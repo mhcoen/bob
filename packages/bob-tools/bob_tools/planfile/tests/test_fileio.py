@@ -36,7 +36,35 @@ from bob_tools.planfile import (
     update,
 )
 
+# Non-canonical fixture: missing the v1 magic preamble and the
+# <!-- phase_id: ... --> comment, so it does not satisfy
+# assert_mcloop_canonical. Used by tests whose purpose is atomic-write,
+# lock, or crash behavior — those exercise the I/O path itself and
+# must opt out of canonical validation (per T-000181) by passing
+# validation="unchecked", otherwise the fixture would be rejected
+# before any of the I/O contract under test ran.
 _MINIMAL_PLAN = "# Stage 6 fixture\n\n## Stage 1: Smoke\n\n- [ ] T-000001: only task\n"
+
+# Canonical fixture: contains the v1 magic preamble, a phase_id
+# comment, and a T-NNNNNN id, so it passes
+# assert_mcloop_canonical(validate_plan(constructed=True)). Used by
+# the ordinary (no crash, no lock-race) save/update tests so they
+# exercise the default validation="canonical" path.
+#
+# The H1 deliberately avoids the words "Stage"/"Phase" followed by a
+# digit; ``parser._STAGE_RE`` accepts ``#+`` so an H1 like
+# "# Stage 6 fixture" is misparsed as a phase heading rather than the
+# project title, which would fail constructed-mode validation.
+_CANONICAL_PLAN = (
+    "<!-- bob-plan-format: 1 -->\n"
+    "\n"
+    "# Canonical fileio fixture\n"
+    "\n"
+    "## Stage 1: Smoke\n"
+    "<!-- phase_id: phase_001 -->\n"
+    "\n"
+    "- [ ] T-000001: only task\n"
+)
 
 
 def _write(path: Path, text: str) -> None:
@@ -78,8 +106,13 @@ def test_save_crash_between_write_and_rename_preserves_original(
 
     monkeypatch.setattr("os.replace", _boom)
 
+    # validation="unchecked": the assertion under test is atomic-write
+    # crash behavior, not canonical-input enforcement. The
+    # _MINIMAL_PLAN fixture is deliberately non-canonical so
+    # validation="canonical" would raise before os.replace was ever
+    # called, hiding the crash-safety contract we want to pin.
     with pytest.raises(OSError, match="simulated rename crash"):
-        save(path, new_plan)
+        save(path, new_plan, validation="unchecked")
 
     assert path.read_bytes() == original_bytes, (
         "original PLAN.md must be untouched on a write/rename crash"
@@ -153,7 +186,13 @@ def test_update_lock_serializes_concurrent_calls(tmp_path: Path) -> None:
 
     def runner(label: str) -> None:
         try:
-            update(path, make_op(label))
+            # validation="unchecked": this test pins lock
+            # serialization, not canonical enforcement. The
+            # _MINIMAL_PLAN fixture is non-canonical, so the default
+            # canonical mode would reject the rendered output before
+            # the lock-race assertions could observe winner/loser
+            # behavior.
+            update(path, make_op(label), validation="unchecked")
         except ConcurrentUpdateError as exc:
             with errors_lock:
                 errors.append(exc)
@@ -223,8 +262,15 @@ def test_update_detects_mid_flight_external_edit(
 
     monkeypatch.setattr(fileio, "_acquire_exclusive_lock", acquire_after_external_edit)
 
+    # validation="unchecked": this test pins the mid-flight external-
+    # edit detection, not canonical enforcement. The injected external
+    # content and the _MINIMAL_PLAN baseline are both deliberately
+    # non-canonical; the default canonical mode would not change the
+    # outcome here (the ConcurrentUpdateError is raised before the
+    # render/validate step), but staying on unchecked keeps the focus
+    # on the race-detection contract under test.
     with pytest.raises(ConcurrentUpdateError) as exc_info:
-        update(path, _retitle("would clobber"))
+        update(path, _retitle("would clobber"), validation="unchecked")
     assert exc_info.value.path == path
 
     # Sanity: the externally-written bytes are still on disk; the
@@ -236,18 +282,21 @@ def test_update_detects_mid_flight_external_edit(
 
 
 def test_update_happy_path_returns_new_plan_and_persists(tmp_path: Path) -> None:
-    """Sanity post-condition for the no-race case.
+    """Sanity post-condition for the no-race, canonical-mode case.
 
     With no concurrent writer, :func:`update` returns the
     ``operation``'s output Plan and writes it to disk such that a
-    subsequent :func:`load` recovers the same content. Guards
-    against a regression where the locked branch silently drops the
-    save or fails to return the new Plan to the caller. Why this
-    falsifies the prior stub: it calls ``update``, which used to
-    raise ``NotImplementedError`` unconditionally.
+    subsequent :func:`load` recovers the same content. Uses the
+    default ``validation="canonical"`` against ``_CANONICAL_PLAN``
+    (per T-000181: ordinary update fixtures must be canonical) so
+    the happy path exercises the validate-and-write branch rather
+    than the unchecked fallback. Guards against a regression where
+    the locked branch silently drops the save, fails to return the
+    new Plan to the caller, or writes bytes other than the ones the
+    validator approved.
     """
     path = tmp_path / "PLAN.md"
-    _write(path, _MINIMAL_PLAN)
+    _write(path, _CANONICAL_PLAN)
 
     returned = update(path, _retitle("Renamed Title"))
     assert returned.project_title == "Renamed Title"
@@ -284,7 +333,13 @@ def test_save_holds_advisory_lock_while_writing(
     monkeypatch.setattr(fileio, "_acquire_exclusive_lock", counting_acquire)
 
     plan = load(path)
-    save(path, plan)
+    # validation="unchecked": this test pins the save-locks-on-its-
+    # own contract. The _MINIMAL_PLAN fixture is non-canonical, so
+    # the default canonical mode would raise before any lock was
+    # acquired and the counting_acquire helper would observe zero
+    # calls — flipping the assertion from "exactly one lock" to "no
+    # lock", which is not the property under test.
+    save(path, plan, validation="unchecked")
 
     assert calls == [path], (
         f"save() must acquire the exclusive lock exactly once for the "

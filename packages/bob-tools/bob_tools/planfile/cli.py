@@ -132,6 +132,16 @@ def cmd_fmt(args: argparse.Namespace) -> int:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     migrated = migrate(plan)
+    # ``migrate`` per design doc section 3.2 only assigns T-NNNNNN ids
+    # and phase_id comments; it deliberately does not touch
+    # magic_version. ``fmt``, however, is the user-facing
+    # canonicalization command, and a canonical save (the post-v4-
+    # Decision-4 default) requires ``magic_version == 1``. Promote a
+    # missing magic version here so a compat-form input round-trips
+    # through ``fmt`` into a fully canonical PLAN.md rather than
+    # being rejected at save time.
+    if migrated.magic_version is None:
+        migrated = dataclasses.replace(migrated, magic_version=1)
     try:
         save(path, migrated)
     except OSError as exc:
