@@ -513,6 +513,31 @@
   fragile call-counting or content-matching. The same marker
   approach is reused for both tests.
 
+- 2026-05-21 [19.1] [T-000188] Migrated duplo's bug-write path
+  (`pipeline._fix_mode`) to `make_task` + `add_bug_task` via
+  `planfile.update`. Removed `saver.append_to_bugs_section`,
+  `saver._escape_mcloop_tags` (and its helpers `_task_body`,
+  `_task_key`, `_FIX_ANNOTATION_RE`, `_MCLOOP_TAG_RE`,
+  `_TASK_LINE_PREFIX_RE`, `_LEADING_DIRECTIVE_RE`, `_BUGS_HEADING`,
+  `_PLAN_FILENAME`), and `investigator.investigation_to_fix_tasks`.
+  Two intentional behavioral shifts: (a) the fix-annotation value is
+  now bare (`[fix: bug one]`) rather than quoted
+  (`[fix: "bug one"]`); the quotes were a workaround for the
+  regex-based dedup parser in `saver` and are unnecessary with typed
+  annotations. (b) The bug-write goes through `planfile.update` with
+  `validation="unchecked"`, matching `planner.save_plan`
+  (planner.py:758) — user-facing PLAN.md files in `duplo fix` may
+  not be in mcloop's canonical form (TODO tasks without ids, ad-hoc
+  headings), so canonical validation would reject otherwise-valid
+  inputs. A consequence: `parse_plan` does not surface TODO/DONE
+  tasks that sit before any phase heading, so the
+  parse→add_bug_task→render round-trip drops those tasks. The old
+  `append_to_bugs_section` preserved them because it did raw
+  markdown editing. This matches what users actually see from
+  `duplo`-generated PLAN.md (which always emits at least one phase
+  heading) but would surprise a user who hand-wrote a PLAN.md with
+  bare task lines.
+
 ## Hypotheses
 
 ## Eliminated
