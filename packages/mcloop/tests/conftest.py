@@ -51,3 +51,25 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
         return _real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(_mcloop_subprocess, "run", _guarded_run)
+
+    # The subscription preflight (mcloop/runner.py:ensure_subscription_preflight)
+    # spawns its own `claude -p ok` probe to verify subscription auth.
+    # That probe is the exact shape this guard rejects. The preflight
+    # is correct in production; in tests it just needs to be a no-op
+    # since the LLM path is mocked anyway. Patching it here avoids
+    # threading a test-mode env var through production code.
+    #
+    # Skip for test_subscription_preflight.py itself: that module is
+    # testing the preflight and supplies its own mocked subprocess.run
+    # so the LLM guard above does not fire — the real preflight code
+    # must be reachable there.
+    test_path = str(request.node.fspath)
+    if "test_subscription_preflight.py" not in test_path:
+        import mcloop.runner as _mcloop_runner  # noqa: PLC0415
+
+        monkeypatch.setattr(
+            _mcloop_runner,
+            "ensure_subscription_preflight",
+            lambda **kwargs: None,
+        )
+        monkeypatch.setattr(_mcloop_runner, "_SUBSCRIPTION_PREFLIGHT_OK", True)
