@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import atexit
 import json as _json
 import os
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from mcloop import formatting
 from mcloop.checklist import (
@@ -27,6 +30,64 @@ _current_task_text = ""
 _current_task_id = ""  # R4: canonical T-NNNNNN id; "" when absent
 _phase_start_time = 0.0
 _project_dir: Path | None = None
+_lifecycle_state = "not_started"
+_atexit_callback_registered = False
+
+
+def register_atexit_cleanup() -> None:
+    """Register process cleanup exactly once for interpreter shutdown."""
+    global _atexit_callback_registered, _lifecycle_state
+    if _atexit_callback_registered:
+        return
+    atexit.register(_atexit_shutdown)
+    _atexit_callback_registered = True
+    _lifecycle_state = "running"
+
+
+def unregister_atexit_cleanup() -> None:
+    """Remove the lifecycle atexit cleanup hook if it was registered."""
+    global _atexit_callback_registered
+    if not _atexit_callback_registered:
+        return
+    atexit.unregister(_atexit_shutdown)
+    _atexit_callback_registered = False
+
+
+def shutdown_lifecycle() -> None:
+    """Explicitly shut down lifecycle resources.
+
+    Explicit shutdown is diagnostic: unexpected lifecycle cleanup errors
+    are allowed to propagate to the caller while logging and stderr are
+    still alive. The atexit wrapper below is narrower and avoids late
+    imports during interpreter teardown.
+    """
+    _shutdown_lifecycle(from_atexit=False)
+
+
+def _atexit_shutdown() -> None:
+    """Best-effort interpreter-teardown cleanup.
+
+    This path must not import orchestra. Importing new modules from an
+    atexit callback can trip Python's own shutdown ordering, notably
+    ``threading._register_atexit`` via ``concurrent.futures``.
+    """
+    _shutdown_lifecycle(from_atexit=True)
+
+
+def _shutdown_lifecycle(*, from_atexit: bool) -> None:
+    global _lifecycle_state
+    if _lifecycle_state in {"stopping", "stopped"}:
+        return
+    _lifecycle_state = "stopping"
+    try:
+        _kill_active_process(
+            allow_orchestra_import=not from_atexit,
+            propagate_orchestra_errors=not from_atexit,
+        )
+    finally:
+        _lifecycle_state = "stopped"
+        if not from_atexit:
+            unregister_atexit_cleanup()
 
 
 def _save_interrupt_state() -> None:
@@ -448,13 +509,10 @@ def _kill_orchestra_active_process() -> None:
     a future orchestra refactor that changes ``SessionState`` does not
     break mcloop.
     """
-    try:
-        from orchestra.adapters._subprocess import (
-            clear_active_process,
-            get_active_process,
-        )
-    except ImportError:
+    accessors = _orchestra_process_accessors(allow_import=True)
+    if accessors is None:
         return
+    get_active_process, clear_active_process = accessors
     try:
         proc = get_active_process()
     except Exception:
@@ -492,7 +550,47 @@ def _kill_orchestra_active_process() -> None:
         pass
 
 
-def _kill_active_process() -> None:
+def _orchestra_process_accessors(
+    *,
+    allow_import: bool,
+) -> tuple[Callable[[], Any], Callable[[], None]] | None:
+    """Return orchestra active-process accessors without unsafe late imports."""
+    if allow_import:
+        try:
+            from orchestra.adapters._subprocess import (
+                clear_active_process as imported_clear_active_process,
+            )
+            from orchestra.adapters._subprocess import (
+                get_active_process as imported_get_active_process,
+            )
+        except ImportError:
+            return None
+        return imported_get_active_process, imported_clear_active_process
+
+    module = sys.modules.get("orchestra.adapters._subprocess")
+    if module is None:
+        return None
+    get_active_process_func = getattr(module, "get_active_process", None)
+    clear_active_process_func = getattr(module, "clear_active_process", None)
+    if not callable(get_active_process_func) or not callable(clear_active_process_func):
+        return None
+    return get_active_process_func, clear_active_process_func
+
+
+def _is_known_interpreter_teardown_error(exc: RuntimeError) -> bool:
+    message = str(exc)
+    return (
+        "can't register atexit after shutdown" in message
+        or "interpreter shutdown" in message
+        or "sys.meta_path is None" in message
+    )
+
+
+def _kill_active_process(
+    *,
+    allow_orchestra_import: bool = True,
+    propagate_orchestra_errors: bool = False,
+) -> None:
     """Kill any active claude subprocess and its process group with SIGKILL.
 
     Used by the atexit handler where graceful shutdown is not possible.
@@ -512,16 +610,19 @@ def _kill_active_process() -> None:
             except OSError:
                 pass
         _runner._active_process = None
-    try:
-        from orchestra.adapters._subprocess import (
-            clear_active_process,
-            get_active_process,
-        )
-    except ImportError:
+    accessors = _orchestra_process_accessors(allow_import=allow_orchestra_import)
+    if accessors is None:
         return
+    get_active_process, clear_active_process = accessors
     try:
         oproc = get_active_process()
+    except RuntimeError as exc:
+        if propagate_orchestra_errors or not _is_known_interpreter_teardown_error(exc):
+            raise
+        return
     except Exception:
+        if propagate_orchestra_errors:
+            raise
         return
     if oproc is None:
         return
@@ -535,8 +636,12 @@ def _kill_active_process() -> None:
             pass
     try:
         clear_active_process()
+    except RuntimeError as exc:
+        if propagate_orchestra_errors or not _is_known_interpreter_teardown_error(exc):
+            raise
     except Exception:
-        pass
+        if propagate_orchestra_errors:
+            raise
 
 
 def _graceful_kill_active_process() -> None:

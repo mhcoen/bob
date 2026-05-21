@@ -93,12 +93,14 @@ from mcloop.lifecycle import (
     _all_tasks,  # noqa: F401 — re-exported for tests
     _check_interrupted,
     _graceful_kill_active_process,  # noqa: F401 — re-exported for tests
-    _kill_active_process,
+    _kill_active_process,  # noqa: F401 — re-exported for tests
     _kill_orphan_sessions,
     _save_interrupt_state,  # noqa: F401 — re-exported for tests
     _write_eliminated_json,  # noqa: F401 — re-exported for tests
     _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
+    register_atexit_cleanup,
     register_signal_handlers,
+    shutdown_lifecycle,
 )
 from mcloop.maintain import run_maintain
 from mcloop.notify import notify
@@ -209,7 +211,6 @@ _READONLY_TASK_PHRASES: tuple[str, ...] = (
     "without making any changes",
 )
 
-
 def _enforce_canonical_inputs(
     master_path: Path,
     current_plan_path: Path,
@@ -294,50 +295,57 @@ def main() -> None:
     import mcloop.runner as _runner
     from mcloop.ledger_pause import HardStop
 
-    atexit.register(_kill_active_process)
+    register_atexit_cleanup()
     atexit.register(_terminate_reviewers)
 
     register_signal_handlers(_runner, cleanup_callback=_terminate_reviewers)
     try:
-        _main()
-    except HardStop as exc:
-        # Plan Ledger Slice D: a threshold crossing that warrants
-        # auto-reauthor either could not run (reauthor_unavailable),
-        # produced an invalid plan (lineage_invalid), or otherwise
-        # failed (reauthor_failed); OR auto_reauthor is disabled and
-        # a manual pause is required (manual_pause). Exit code 5 is
-        # reserved for this class of pause per the Slice D design.
-        print(
-            f"\nmcloop: Plan Ledger paused the run (reason={exc.reason})",
-            file=sys.stderr,
-        )
-        print(f"  detail: {exc.detail}", file=sys.stderr)
-        sys.exit(5)
-    except PlanCorruptionError as exc:
-        # The user shouldn't see a Python traceback for an expected
-        # condition like a malformed PLAN.md. Print the error message
-        # cleanly; write the full traceback to a log file for debugging.
-        print(f"\nmcloop: {exc}\n", file=sys.stderr)
         try:
-            log_dir = Path.cwd() / ".mcloop"
-            log_dir.mkdir(exist_ok=True)
-            log_path = log_dir / "last_error.log"
-            log_path.write_text(
-                f"PlanCorruptionError\n\n{exc}\n\nTraceback:\n"
-                + "".join(traceback.format_exception(exc))
+            _main()
+        except HardStop as exc:
+            # Plan Ledger Slice D: a threshold crossing that warrants
+            # auto-reauthor either could not run (reauthor_unavailable),
+            # produced an invalid plan (lineage_invalid), or otherwise
+            # failed (reauthor_failed); OR auto_reauthor is disabled and
+            # a manual pause is required (manual_pause). Exit code 5 is
+            # reserved for this class of pause per the Slice D design.
+            print(
+                f"\nmcloop: Plan Ledger paused the run (reason={exc.reason})",
+                file=sys.stderr,
             )
-            print(f"Full traceback logged to {log_path}", file=sys.stderr)
-        except OSError:
-            pass  # Logging is best-effort; never let it mask the real error.
-        sys.exit(2)
-    except PlanNotCanonicalError as exc:
-        # B3 increment 3: canonical-plan precondition rejected the
-        # input. Exit code 3 is reserved for this class so callers
-        # (CI, scripts) can distinguish "PLAN.md not migrated yet"
-        # from a generic run failure (1), a parser corruption (2),
-        # or a Plan-Ledger pause (5).
-        print(f"\n!!! {exc}\n", file=sys.stderr)
-        sys.exit(3)
+            print(f"  detail: {exc.detail}", file=sys.stderr)
+            sys.exit(5)
+        except PlanCorruptionError as exc:
+            # The user shouldn't see a Python traceback for an expected
+            # condition like a malformed PLAN.md. Print the error message
+            # cleanly; write the full traceback to a log file for debugging.
+            print(f"\nmcloop: {exc}\n", file=sys.stderr)
+            try:
+                log_dir = Path.cwd() / ".mcloop"
+                log_dir.mkdir(exist_ok=True)
+                log_path = log_dir / "last_error.log"
+                log_path.write_text(
+                    f"PlanCorruptionError\n\n{exc}\n\nTraceback:\n"
+                    + "".join(traceback.format_exception(exc))
+                )
+                print(f"Full traceback logged to {log_path}", file=sys.stderr)
+            except OSError:
+                pass  # Logging is best-effort; never let it mask the real error.
+            sys.exit(2)
+        except PlanNotCanonicalError as exc:
+            # B3 increment 3: canonical-plan precondition rejected the
+            # input. Exit code 3 is reserved for this class so callers
+            # (CI, scripts) can distinguish "PLAN.md not migrated yet"
+            # from a generic run failure (1), a parser corruption (2),
+            # or a Plan-Ledger pause (5).
+            print(f"\n!!! {exc}\n", file=sys.stderr)
+            sys.exit(3)
+    finally:
+        try:
+            shutdown_lifecycle()
+        finally:
+            _terminate_reviewers()
+            atexit.unregister(_terminate_reviewers)
 
 
 def _main() -> None:

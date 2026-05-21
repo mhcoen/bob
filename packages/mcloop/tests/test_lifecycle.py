@@ -3,12 +3,15 @@
 import json
 import signal
 import subprocess
+import sys
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import mcloop.lifecycle as lifecycle_mod
 from mcloop.lifecycle import (
     _all_tasks,
+    _atexit_shutdown,
     _check_interrupted,
     _graceful_kill_active_process,
     _kill_active_process,
@@ -17,7 +20,9 @@ from mcloop.lifecycle import (
     _unlink_active_pid_file,
     _write_eliminated_json,
     _write_ruledout_to_plan,
+    register_atexit_cleanup,
     register_signal_handlers,
+    shutdown_lifecycle,
 )
 
 # ── _all_tasks ──
@@ -34,6 +39,11 @@ def _task(text, children=None):
         indent_level=0,
         children=children or [],
     )
+
+
+def _reset_lifecycle_state(monkeypatch):
+    monkeypatch.setattr(lifecycle_mod, "_lifecycle_state", "not_started")
+    monkeypatch.setattr(lifecycle_mod, "_atexit_callback_registered", False)
 
 
 def test_all_tasks_flat():
@@ -54,6 +64,90 @@ def test_all_tasks_nested():
 def test_all_tasks_empty():
     """Empty input returns empty list."""
     assert _all_tasks([]) == []
+
+
+# ── lifecycle shutdown ──
+
+
+def test_shutdown_lifecycle_can_be_called_twice(monkeypatch):
+    """Explicit lifecycle shutdown is idempotent."""
+    _reset_lifecycle_state(monkeypatch)
+    mock_kill = MagicMock()
+    monkeypatch.setattr(lifecycle_mod, "_kill_active_process", mock_kill)
+
+    shutdown_lifecycle()
+    shutdown_lifecycle()
+
+    mock_kill.assert_called_once_with(
+        allow_orchestra_import=True,
+        propagate_orchestra_errors=True,
+    )
+    assert lifecycle_mod._lifecycle_state == "stopped"
+
+
+def test_explicit_shutdown_unregisters_atexit_and_makes_callback_noop(monkeypatch):
+    """After explicit shutdown, the registered atexit hook is inert."""
+    _reset_lifecycle_state(monkeypatch)
+    mock_register = MagicMock()
+    mock_unregister = MagicMock()
+    mock_kill = MagicMock()
+    monkeypatch.setattr(lifecycle_mod.atexit, "register", mock_register)
+    monkeypatch.setattr(lifecycle_mod.atexit, "unregister", mock_unregister)
+    monkeypatch.setattr(lifecycle_mod, "_kill_active_process", mock_kill)
+
+    register_atexit_cleanup()
+    shutdown_lifecycle()
+    _atexit_shutdown()
+
+    mock_register.assert_called_once_with(_atexit_shutdown)
+    mock_unregister.assert_called_once_with(_atexit_shutdown)
+    mock_kill.assert_called_once()
+
+
+def test_atexit_shutdown_does_not_traceback_during_interpreter_finalization(
+    monkeypatch,
+    capsys,
+):
+    """Known interpreter-teardown invalid states are quiet from atexit."""
+    _reset_lifecycle_state(monkeypatch)
+
+    def late_get_active_process():
+        raise RuntimeError("can't register atexit after shutdown")
+
+    fake_subprocess = SimpleNamespace(
+        get_active_process=late_get_active_process,
+        clear_active_process=MagicMock(),
+    )
+    monkeypatch.setitem(sys.modules, "orchestra.adapters._subprocess", fake_subprocess)
+    monkeypatch.setattr(lifecycle_mod, "_lifecycle_state", "running")
+
+    _atexit_shutdown()
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert lifecycle_mod._lifecycle_state == "stopped"
+
+
+def test_explicit_shutdown_surfaces_real_lifecycle_errors(monkeypatch):
+    """Explicit shutdown still reports unexpected lifecycle cleanup failures."""
+    _reset_lifecycle_state(monkeypatch)
+
+    def failing_get_active_process():
+        raise RuntimeError("real lifecycle cleanup failure")
+
+    monkeypatch.setattr(
+        lifecycle_mod,
+        "_orchestra_process_accessors",
+        lambda *, allow_import: (failing_get_active_process, MagicMock()),
+    )
+
+    try:
+        shutdown_lifecycle()
+    except RuntimeError as exc:
+        assert str(exc) == "real lifecycle cleanup failure"
+    else:
+        raise AssertionError("shutdown_lifecycle swallowed a real cleanup error")
 
 
 # ── _write_ruledout_to_plan ──
