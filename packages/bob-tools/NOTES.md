@@ -2,6 +2,31 @@
 
 ## Observations
 
+- 2026-05-20 [14.1] [T-000177] `replace_phase_validated` design
+  decisions made to resolve ambiguity in the v4 Contract 3 wording:
+  (a) `assign_missing_ids=False` rejects BOTH a missing `phase_id`
+  on `new_phase` AND any missing `task_id` inside `new_phase`, on
+  the reading that "missing ids" (plural, generic) in the contract
+  covers both kinds. When `True`, both are auto-filled. (b) The
+  task-id counter starts above the max id present in the
+  *substituted* plan (i.e., the union of plan-minus-target and
+  `new_phase`'s retained ids) so a caller-supplied id inside
+  `new_phase` that already exceeds the plan max is not collided with
+  by an auto-assigned id. (c) The phase-id counter for a missing
+  `new_phase.phase_id` uses `_max_phase_id_number(plan) + 1`,
+  matching `migrate`'s convention; this scans the *pre-substitute*
+  plan including the target phase. If duplo wants to reuse the
+  replaced phase's exact `phase_NNN` suffix on a reauthor, it must
+  pass that id explicitly on `new_phase`.
+- 2026-05-20 [14.1] [T-000177] Stage 14 task gate verification: all
+  four checks pass. `ruff check .` clean,
+  `ruff format --check .` reports 40 files already formatted after a
+  one-time `ruff format` to apply canonical wrapping to the new code
+  and tests, `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports
+  641 passed / 2 skipped, `mypy .` (run as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` because bare
+  `mypy` is not on PATH) reports "Success: no issues found in 40
+  source files".
 - 2026-05-20 [13.2] [T-000176] Stage 13 gate verification: all four
   checks pass. `ruff check .` clean, `ruff format --check .` reports
   40 files already formatted, `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest`

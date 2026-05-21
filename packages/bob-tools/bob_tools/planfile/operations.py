@@ -2517,6 +2517,152 @@ def replace_phase(plan: Plan, phase_id: str, new_phase: Phase) -> Plan:
     return dataclasses.replace(plan, phases=tuple(new_phases))
 
 
+def _iter_phase_task_tree_with_label(
+    phase: Phase,
+) -> Iterator[tuple[str, Task]]:
+    """Yield ``(label, task)`` for every task in ``phase``, including children.
+
+    Labels mirror :func:`_iter_plan_tasks_with_label` but are rooted at
+    the phase (``tasks[i]...``, ``subsections[j].tasks[k]...``) so
+    diagnostics from :func:`replace_phase_validated` locate the offending
+    task within the supplied ``new_phase`` rather than within the plan
+    (which has not yet been substituted at the point of the check).
+    """
+    for task_index, task in enumerate(phase.tasks):
+        for path, node in _iter_task_tree_with_paths(task):
+            yield f"tasks[{task_index}]{_child_path_suffix(path)}", node
+    for sub_index, sub in enumerate(phase.subsections):
+        for task_index, task in enumerate(sub.tasks):
+            for path, node in _iter_task_tree_with_paths(task):
+                yield (
+                    f"subsections[{sub_index}].tasks[{task_index}]"
+                    f"{_child_path_suffix(path)}",
+                    node,
+                )
+
+
+def replace_phase_validated(
+    plan: Plan,
+    phase_id: str,
+    new_phase: Phase,
+    *,
+    assign_missing_ids: bool = True,
+    preserve_position: bool = True,
+) -> Plan:
+    """Substitute ``phase_id`` with ``new_phase`` and enforce constructed validity.
+
+    Per v4 Contract 3. Replaces :func:`replace_phase` for callers that
+    need the substituted plan to satisfy the construction-API invariants
+    end-to-end; structural validity only, lineage policy stays in duplo.
+
+    Behavior:
+
+    * **Exactly one match.** ``phase_id`` must resolve to exactly one
+      phase in ``plan.phases``. Zero matches (unknown phase) or two-plus
+      matches (duplicate-id input) raise :class:`PlanValidationError`
+      before any substitution is attempted; the function never silently
+      picks one of several duplicates.
+    * **Missing phase id.** When ``new_phase.phase_id is None`` and
+      ``assign_missing_ids`` is ``True`` the substitute is given a fresh
+      ``phase_NNN`` id one above the maximum existing suffix in ``plan``
+      (mirrors :func:`migrate`'s convention) and
+      ``phase_id_source="explicit_comment"`` so the renderer emits a
+      ``<!-- phase_id: ... -->`` comment.
+    * **Missing task ids.** When ``assign_missing_ids`` is ``True``,
+      tasks in ``new_phase`` (root and subsection, recursing through
+      ``children``) whose ``task_id`` is ``None`` receive sequential
+      global-unique ``T-NNNNNN`` ids starting at one above the maximum
+      existing suffix in ``plan`` (:func:`_assign_task_ids` with a
+      shared counter); existing ids are preserved.
+    * **assign_missing_ids=False.** When the flag is ``False`` and any
+      phase or task id on ``new_phase`` is missing, raise
+      :class:`PlanValidationError` listing every offender. The caller
+      is asserting "I provided all the ids myself; reject if any are
+      missing."
+    * **Ordinal normalization.** When ``preserve_position`` is ``True``
+      (default) ``new_phase.ordinal`` is overwritten with the replaced
+      phase's ordinal so the substitution keeps document order. When
+      ``False`` the supplied ordinal is honored, and
+      :func:`validate_plan` rejects the result if the ordinals are no
+      longer contiguous ``1..N``.
+    * **Final validation.** The substituted plan is passed through
+      :func:`validate_plan` with ``constructed=True``, which enforces
+      the v4 Contract 4 invariants (no duplicate phase or task ids,
+      ids well-formed, scalars/deps/tags valid, ordinals contiguous,
+      and full per-task / non-task scalar field-stability). Any
+      violation propagates as :class:`PlanValidationError`.
+
+    Other phases, the Bugs section, and the plan preamble are returned
+    unchanged. :class:`PlanValidationError` is the only exception this
+    function raises; callers do not need to catch :class:`ValueError`.
+    """
+    matched = [
+        (index, phase)
+        for index, phase in enumerate(plan.phases)
+        if phase.phase_id == phase_id
+    ]
+    if not matched:
+        raise PlanValidationError([f"phase {phase_id!r} not found in plan"])
+    if len(matched) > 1:
+        positions = [index for index, _ in matched]
+        raise PlanValidationError(
+            [f"phase {phase_id!r} matches multiple phases at positions {positions}"]
+        )
+    match_index, matched_phase = matched[0]
+
+    if not assign_missing_ids:
+        missing: list[str] = []
+        if new_phase.phase_id is None:
+            missing.append("new_phase.phase_id is missing")
+        for label, node in _iter_phase_task_tree_with_label(new_phase):
+            if node.task_id is None:
+                missing.append(f"new_phase.{label}.task_id is missing")
+        if missing:
+            raise PlanValidationError(missing)
+
+    candidate = new_phase
+
+    if candidate.phase_id is None:
+        next_phase_num = _max_phase_id_number(plan) + 1
+        candidate = dataclasses.replace(
+            candidate,
+            phase_id=f"phase_{next_phase_num:03d}",
+            phase_id_source="explicit_comment",
+        )
+
+    if assign_missing_ids:
+        # ``_next_task_id_number`` reads only the supplied plan; the
+        # counter must also clear ids already present inside
+        # ``new_phase`` so an auto-assigned id never collides with a
+        # caller-supplied id (e.g. plan max is 7 but ``new_phase``
+        # already carries T-000020 — assignment must continue from 21,
+        # not 8). Compose a pre-substitute plan with the candidate in
+        # the target slot so the helper sees every retained id.
+        phases_for_max = list(plan.phases)
+        phases_for_max[match_index] = candidate
+        plan_for_max = dataclasses.replace(plan, phases=tuple(phases_for_max))
+        counter = [_next_task_id_number(plan_for_max)]
+        new_root_tasks = _assign_task_ids(candidate.tasks, counter)
+        new_subsections = tuple(
+            dataclasses.replace(sub, tasks=_assign_task_ids(sub.tasks, counter))
+            for sub in candidate.subsections
+        )
+        candidate = dataclasses.replace(
+            candidate, tasks=new_root_tasks, subsections=new_subsections
+        )
+
+    if preserve_position:
+        candidate = dataclasses.replace(candidate, ordinal=matched_phase.ordinal)
+
+    new_phases = list(plan.phases)
+    new_phases[match_index] = candidate
+    new_plan = dataclasses.replace(plan, phases=tuple(new_phases))
+
+    validate_plan(new_plan, constructed=True)
+
+    return new_plan
+
+
 _PHASE_ID_RE = re.compile(r"^phase_(\d+)$")
 
 

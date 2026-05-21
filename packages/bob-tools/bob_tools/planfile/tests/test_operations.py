@@ -53,6 +53,7 @@ from bob_tools.planfile.operations import (
     make_task,
     next_tasks,
     replace_phase,
+    replace_phase_validated,
     reset_task,
     resolve_task_context,
     validate_plan,
@@ -2552,6 +2553,292 @@ class TestReplacePhase:
         plan = _plan(phases=(_phase_with_tasks(tasks=(_task(task_id="T-000001"),)),))
         with pytest.raises(ValueError, match="phase_999"):
             replace_phase(plan, "phase_999", new_phase)
+
+
+class TestReplacePhaseValidated:
+    """``replace_phase_validated`` per v4 Contract 3."""
+
+    def test_replaces_in_place_preserving_other_phases(self) -> None:
+        keep_first = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        replace_target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        keep_last = _phase_with_tasks(
+            tasks=(_task(task_id="T-000003"),),
+            phase_id="phase_003",
+            ordinal=3,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000099", text="fresh"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(keep_first, replace_target, keep_last))
+        new_plan = replace_phase_validated(plan, "phase_002", new_phase)
+        assert new_plan.phases[0] is keep_first
+        assert new_plan.phases[2] is keep_last
+        assert new_plan.phases[1].phase_id == "phase_002"
+        assert new_plan.phases[1].tasks[0].task_id == "T-000099"
+
+    def test_assigns_missing_phase_id_above_existing_suffixes(self) -> None:
+        keep = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_005",
+            ordinal=1,
+        )
+        replace_target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        new_phase = Phase(
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=2,
+            keyword="Stage",
+            title="Stage",
+            prose="",
+            subsections=(),
+            tasks=(_task(task_id="T-000010", text="fresh"),),
+            line_number=5,
+        )
+        plan = _plan(phases=(keep, replace_target))
+        new_plan = replace_phase_validated(plan, "phase_002", new_phase)
+        assert new_plan.phases[1].phase_id == "phase_006"
+        assert new_plan.phases[1].phase_id_source == "explicit_comment"
+
+    def test_assigns_missing_task_ids_global_sequential(self) -> None:
+        existing = _phase_with_tasks(
+            tasks=(_task(task_id="T-000007"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        replace_target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        child_without_id = _task(task_id=None, indent_level=2)
+        parent_with_id = _task(task_id="T-000020", children=(child_without_id,))
+        anonymous_root = _task(task_id=None, text="anon root")
+        new_phase = _phase_with_tasks(
+            tasks=(parent_with_id, anonymous_root),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(existing, replace_target))
+        new_plan = replace_phase_validated(plan, "phase_002", new_phase)
+        replaced = new_plan.phases[1]
+        assert replaced.tasks[0].task_id == "T-000020"
+        # Sequential ids start above the max existing suffix (T-000020).
+        assert replaced.tasks[0].children[0].task_id == "T-000021"
+        assert replaced.tasks[1].task_id == "T-000022"
+
+    def test_preserve_position_normalizes_ordinal(self) -> None:
+        first = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000003", text="fresh"),),
+            phase_id="phase_002",
+            ordinal=99,
+        )
+        plan = _plan(phases=(first, target))
+        new_plan = replace_phase_validated(plan, "phase_002", new_phase)
+        assert new_plan.phases[1].ordinal == 2
+
+    def test_preserve_position_false_with_non_contiguous_ordinal_raises(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002", text="fresh"),),
+            phase_id="phase_001",
+            ordinal=99,
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError) as exc_info:
+            replace_phase_validated(
+                plan, "phase_001", new_phase, preserve_position=False
+            )
+        assert any(
+            "contiguous" in msg or "ordinals" in msg for msg in exc_info.value.messages
+        )
+
+    def test_no_match_raises_plan_validation_error(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),), phase_id="phase_001"
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError, match="phase_999"):
+            replace_phase_validated(plan, "phase_999", new_phase)
+
+    def test_multi_match_raises_plan_validation_error(self) -> None:
+        first_dup = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        second_dup = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_001",
+            ordinal=2,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000003", text="fresh"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        plan = _plan(phases=(first_dup, second_dup))
+        with pytest.raises(PlanValidationError, match="multiple phases"):
+            replace_phase_validated(plan, "phase_001", new_phase)
+
+    def test_invalid_dep_raises(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002", deps=("T-000999",), text="x"),),
+            phase_id="phase_001",
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError, match="T-000999"):
+            replace_phase_validated(plan, "phase_001", new_phase)
+
+    def test_assign_missing_ids_false_rejects_missing_task_id(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id=None, text="anon"),), phase_id="phase_001"
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError, match="task_id is missing"):
+            replace_phase_validated(
+                plan, "phase_001", new_phase, assign_missing_ids=False
+            )
+
+    def test_assign_missing_ids_false_rejects_missing_phase_id(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = Phase(
+            phase_id=None,
+            phase_id_source="none",
+            ordinal=1,
+            keyword="Stage",
+            title="Stage",
+            prose="",
+            subsections=(),
+            tasks=(_task(task_id="T-000002", text="fresh"),),
+            line_number=5,
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError, match="phase_id is missing"):
+            replace_phase_validated(
+                plan, "phase_001", new_phase, assign_missing_ids=False
+            )
+
+    def test_assign_missing_ids_false_with_all_ids_present_succeeds(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000050", text="fresh"),),
+            phase_id="phase_001",
+        )
+        plan = _plan(phases=(target,))
+        new_plan = replace_phase_validated(
+            plan, "phase_001", new_phase, assign_missing_ids=False
+        )
+        assert new_plan.phases[0].tasks[0].task_id == "T-000050"
+
+    def test_duplicate_task_id_against_other_phase_raises(self) -> None:
+        keep = _phase_with_tasks(
+            tasks=(_task(task_id="T-000007"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        # new_phase reuses T-000007 from phase_001 → duplicate id.
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000007", text="dup"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        plan = _plan(phases=(keep, target))
+        with pytest.raises(PlanValidationError, match="duplicate task id T-000007"):
+            replace_phase_validated(plan, "phase_002", new_phase)
+
+    def test_duplicate_phase_id_in_result_raises(self) -> None:
+        keep = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),),
+            phase_id="phase_001",
+            ordinal=1,
+        )
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002"),),
+            phase_id="phase_002",
+            ordinal=2,
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000003", text="fresh"),),
+            phase_id="phase_001",
+            ordinal=2,
+        )
+        plan = _plan(phases=(keep, target))
+        with pytest.raises(PlanValidationError, match="duplicate phase_id phase_001"):
+            replace_phase_validated(plan, "phase_002", new_phase)
+
+    def test_field_stability_violation_raises(self) -> None:
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002", text="bad\ntext"),),
+            phase_id="phase_001",
+        )
+        plan = _plan(phases=(target,))
+        with pytest.raises(PlanValidationError, match="embedded newline"):
+            replace_phase_validated(plan, "phase_001", new_phase)
+
+    def test_bugs_section_preserved(self) -> None:
+        bugs = BugsSection(
+            tasks=(_task(task_id="T-000900", line_number=99),),
+            line_number=98,
+        )
+        target = _phase_with_tasks(
+            tasks=(_task(task_id="T-000001"),), phase_id="phase_001"
+        )
+        new_phase = _phase_with_tasks(
+            tasks=(_task(task_id="T-000002", text="fresh"),),
+            phase_id="phase_001",
+        )
+        plan = _plan(phases=(target,), bugs=bugs)
+        new_plan = replace_phase_validated(plan, "phase_001", new_phase)
+        assert new_plan.bugs is bugs
 
 
 @dataclass(frozen=True)
