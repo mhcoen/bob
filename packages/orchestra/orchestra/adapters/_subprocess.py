@@ -716,9 +716,15 @@ def run_session(
 
     def _reader() -> None:
         assert process.stdout is not None
-        for line in process.stdout:
-            line_q.put(line)
-        line_q.put(_SENTINEL)
+        try:
+            for line in process.stdout:
+                line_q.put(line)
+        except Exception:
+            # Decoding errors, closed pipe, etc. should not strand the
+            # main loop waiting for a SENTINEL that will never arrive.
+            pass
+        finally:
+            line_q.put(_SENTINEL)
 
     reader_thread = threading.Thread(target=_reader, daemon=True)
     reader_thread.start()
@@ -748,6 +754,13 @@ def run_session(
                     process.kill()
                 process.wait()
                 return _assemble(head_lines, tail_lines, dropped), -2
+            # Bailout: if the reader thread is gone AND no buffered
+            # lines remain AND the subprocess has exited, return now.
+            # Covers the case where the reader crashed in the for-line
+            # loop and never queued a SENTINEL.
+            if not reader_thread.is_alive() and line_q.empty() and process.poll() is not None:
+                exit_code = process.returncode if process.returncode is not None else 1
+                return _assemble(head_lines, tail_lines, dropped), exit_code
             try:
                 line = line_q.get(timeout=PROGRESS_QUEUE_INTERVAL)
             except queue.Empty:
