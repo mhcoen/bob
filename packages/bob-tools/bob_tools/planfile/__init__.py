@@ -52,6 +52,10 @@ from bob_tools.planfile.operations import (
     validate_plan,
 )
 from bob_tools.planfile.parser import parse_plan
+from bob_tools.planfile.plan_artifact import (
+    PlanArtifactRejected,
+    sanitize_plan_artifact,
+)
 from bob_tools.planfile.renderer import canonicalize, render_plan
 
 __all__ = [
@@ -63,6 +67,7 @@ __all__ = [
     "Outcome",
     "Phase",
     "Plan",
+    "PlanArtifactRejected",
     "PlanInconsistencyError",
     "PlanSyntaxError",
     "PlanValidationError",
@@ -92,6 +97,7 @@ __all__ = [
     "replace_phase_validated",
     "reset_task",
     "resolve_task_context",
+    "sanitize_plan_artifact",
     "save",
     "update",
     "validate_plan",

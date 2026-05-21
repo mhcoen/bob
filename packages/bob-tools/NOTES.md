@@ -2,6 +2,56 @@
 
 ## Observations
 
+- 2026-05-21 [22.1] [T-000194] Bug re-attempt: the prior run of this
+  task failed only on a `ruff check` RUF043 violation in
+  `bob_tools/planfile/tests/test_plan_artifact.py:143`, where the
+  `match=` regex passed to `pytest.raises` used a non-raw string with a
+  metacharacter (`"NOT the\\s+trailing"`). Fix is one line: convert to
+  a raw string (`r"NOT the\s+trailing"`); semantics are identical
+  because Python collapsed `"\\s"` to `"\s"` before the regex engine
+  saw it anyway. No production-code change was needed — the migration
+  payload from the earlier [22.1] entry below is intact and the same
+  six-contract verification still holds. Bob-tools checks all green:
+  `ruff check .` reports "All checks passed!"; `ruff format --check .`
+  reports "43 files already formatted";
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 680 passed /
+  2 skipped (same totals as the prior entry, confirming no test count
+  drift); bare `mypy .` is not on PATH (same precedent flagged in
+  earlier gate entries), invoked as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`, reports "Success:
+  no issues found in 43 source files".
+
+- 2026-05-21 [22.1] [T-000194] Made `duplo.plan_document` callerless
+  in production. The last production import lived in
+  `duplo/reauthor.py` (PlanArtifactRejected, sanitize_plan_artifact);
+  the helpers were ported verbatim into the new module
+  `bob_tools/planfile/plan_artifact.py` and re-exported from
+  `bob_tools.planfile.__init__`. `duplo/reauthor.py` now imports them
+  via `from bob_tools.planfile import (PlanArtifactRejected,
+  sanitize_plan_artifact, ...)`. `duplo/reauthor_assemble.py` had no
+  production import (only a historical docstring mention) so no
+  source change was required there. `rg 'from duplo\.plan_document'`
+  under `duplo/duplo/` returns zero matches; the only remaining
+  references in `duplo/` are docstring history and the legacy test
+  file `duplo/tests/test_plan_document.py` (untouched per the
+  "do not delete the module yet" constraint). Behavior preserved:
+  the new module's sanitize_plan_artifact is character-identical
+  in regex, _VERDICT_SHAPE_KEYS, control flow, and error messages
+  to the duplo original (the duplo tests at
+  `duplo/tests/test_plan_document.py:367-518` would fail on any
+  behavior drift). New tests at
+  `bob_tools/planfile/tests/test_plan_artifact.py` double-pin the
+  contract (pass-through on clean/non-verdict input, extraction of a
+  trailing verdict, rejection of mid-body and multiple-verdict
+  shapes). Bob-tools checks all green:
+  `ruff check .` reports "All checks passed!";
+  `ruff format --check .` reports "43 files already formatted";
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 680 passed
+  / 2 skipped (12 new tests over the 21.2 baseline of 670 — covers
+  the new sanitizer plus 2 cases that exist in the duplo originals);
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` reports "Success:
+  no issues found in 43 source files" (was 41 before).
+
 - 2026-05-21 [21.2] [T-000193] Stage 21 gate verified. Confirmed the
   six contract claims hold against the post-T-000192 reauthor.py:
   (1) preserves unchanged phases — `assemble_reauthored_plan`
