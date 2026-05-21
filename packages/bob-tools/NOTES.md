@@ -2,6 +2,45 @@
 
 ## Observations
 
+- 2026-05-21 [21.2] [T-000193] Stage 21 gate verified. Confirmed the
+  six contract claims hold against the post-T-000192 reauthor.py:
+  (1) preserves unchanged phases — `assemble_reauthored_plan`
+  (reauthor.py:471) is the preserve-by-default assembly built on
+  `prior_plan` (the bob_tools.planfile parse of the prior PLAN.md at
+  reauthor.py:286); any phase not named in `normalized_lineage` is
+  carried forward verbatim. (2) substitutes changed — assembly
+  composes around `bob_tools.planfile.replace_phase_validated` (the
+  imports in `reauthor_assemble`, exercised by every supersede/
+  split/merge/new entry in the normalized lineage). (3) lineage
+  validated — `validate_lineage` is called twice: pre-flight at
+  reauthor.py:465-469 (with the normalized lineage's own seen ids as
+  `new_plan_ids`, surfacing internal contradictions before the
+  fail-fast in `replace_phase_validated` can mask them) and
+  post-assembly at reauthor.py:485-489 (catching header-vs-phases
+  mismatches only the assembled plan can expose). (4) lifecycle
+  events emitted — `_emit_lifecycle_events` (reauthor.py:570-576)
+  appends `phase_superseded`/`split`/`merged`/`abandoned` events
+  FIRST, then `_emit_plan_reauthored` (reauthor.py:578-587) appends
+  the meta-event referencing them, matching the design-doc option-(a)
+  ordering. (5) save only via planfile — `planfile_save(out_path,
+  assembled_plan)` at reauthor.py:567 is the only persistence call
+  in the success path; `rg 'write_text|\.write\('` against both
+  `duplo/reauthor.py` and `duplo/reauthor_assemble.py` returns zero
+  matches. (6) canonical helper passes — `assert_mcloop_canonical(
+  assembled_plan, source_path=plan_path)` at reauthor.py:550 is the
+  gate the assembled plan must clear before save; on
+  `PlanValidationError` the run pauses with a wrapped `ReauthorError`
+  (reauthor.py:553-560). Verification commands (run from bob-tools):
+  `ruff check .` reports "All checks passed!";
+  `ruff format --check .` reports "41 files already formatted";
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 670 passed
+  / 2 skipped; `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`
+  reports "Success: no issues found in 41 source files". Duplo's own
+  checks (run from the duplo repo): `/Users/mhcoen/.local/bin/ruff
+  check .` reports "All checks passed!";
+  `/Users/mhcoen/proj/duplo/.venv/bin/pytest` reports 3280 passed /
+  60 skipped.
+
 - 2026-05-21 [21.1] [T-000192] Duplo reauthor path migrated to
   `bob_tools.planfile`. `duplo.reauthor.reauthor_plan` now parses the
   prior PLAN.md via `bob_tools.planfile.parse_plan` (replacing
