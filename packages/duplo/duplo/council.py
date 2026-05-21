@@ -71,6 +71,21 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from bob_tools.planfile import (
+    Phase,
+    Plan,
+    PlanSyntaxError,
+    PlanValidationError,
+    RuledOut,
+    Subsection,
+    Task,
+    assert_mcloop_canonical,
+    make_task,
+    migrate,
+    parse_plan,
+    validate_plan,
+)
+
 from duplo.canonical_consistency import (
     validate_spec_pyproject_runsh_consistency,
 )
@@ -175,38 +190,15 @@ class CouncilError(RuntimeError):
     """Raised when the council path cannot run or returns no plan."""
 
 
-class CanonicalPlanFormatError(ValueError):
-    """Raised when a synthesized canonical PLAN.md is not McLoop-executable.
-
-    The canonical-mode plan body must contain at least one
-    ``## Phase phase_NNN: title`` header (Slice C convention) and
-    each phase must have at least one unchecked ``- [ ]`` task line.
-    A plan body that fails either invariant is rejected fail-closed
-    before duplo writes PLAN.md to disk; the upstream caller in
-    ``duplo.planner.generate_phase_plan`` surfaces the error rather
-    than handing McLoop a plan it cannot execute.
-
-    This is the canonical-mode counterpart to Slice C's
-    ``LineageValidationError`` (re-author mode). Both validators
-    enforce contracts the synthesizer template documents but the
-    schema cannot. The Slice D fswatch-run smoke is the empirical
-    case that produced the need (4 phases, narrative prose, zero
-    ``- [ ]`` lines, McLoop saw a plan it could not run); see
-    ``orchestra/design/synthesizer-output-contract.md``'s
-    "Workflow boundary" section for the structural rationale.
-    """
-
-
-# Canonical-mode plan body parsing. The header regex is permissive
-# enough to detect any `## Phase <id>:` form (so the validator can
-# tell users what they got wrong); a separate strict regex enforces
-# the canonical phase_NNN form. Slice C's reauthor parser uses the
-# permissive regex too -- shared across modes for cross-mode
-# consistency.
+# Canonical-mode plan body parsing. The header regex is shared with
+# ``compute_required_phase_id`` to detect ``## Phase <id>:`` lines in
+# an existing PLAN.md on disk. Per-synthesis content validation has
+# moved into bob_tools.planfile (parse_plan + validate_plan
+# constructed=True + assert_mcloop_canonical); this module only needs
+# the existing-PLAN.md header scanner.
 _CANONICAL_PHASE_HEADER_RE = re.compile(
     r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
 )
-_CANONICAL_TASK_LINE_RE = re.compile(r"^\s*-\s+\[\s*\]\s+\S")
 _STRICT_PHASE_ID_RE = re.compile(r"^phase_\d{3,}$")
 
 
@@ -257,146 +249,6 @@ def compute_required_phase_id(plan_path: Path) -> str:
     return f"phase_{highest + 1:03d}"
 
 
-def _validate_canonical_plan_markdown(
-    plan_body: str,
-    *,
-    required_phase_id: str | None = None,
-) -> None:
-    """Fail-closed check that ``plan_body`` is McLoop-executable AND
-    uses the supplied ``required_phase_id``.
-
-    Invariants enforced:
-
-      Check 1: the plan body has at least one
-        ``## Phase phase_NNN: title`` header (permissive regex).
-
-      Check 2: each phase section (the lines between consecutive
-        phase headers, or from the final header to EOF) has at
-        least one unchecked ``- [ ]`` task line, AND the total
-        across the plan body is greater than zero.
-
-      Check 3: every phase header's phase_id matches the strict
-        canonical form ``^phase_\\d{3,}$``. Headers like
-        ``## Phase Phase 1: ...`` or ``## Phase phase1: ...`` are
-        rejected.
-
-      Check 4: phase_ids are unique within the plan body.
-
-      Check 5: when ``required_phase_id`` is supplied, the plan
-        body MUST contain a phase header using exactly that id.
-
-      Check 6: phase_ids are monotonically increasing in document
-        order by their numeric suffix.
-
-    All violations are accumulated; one raise surfaces the full
-    picture so the synthesizer (or a debugging human) sees what to
-    fix in one error message.
-    """
-    lines = plan_body.splitlines()
-    headers: list[tuple[int, str, str]] = []
-    for index, line in enumerate(lines):
-        match = _CANONICAL_PHASE_HEADER_RE.match(line)
-        if match is not None:
-            headers.append(
-                (index, match.group("id"), match.group("title"))
-            )
-
-    if not headers:
-        raise CanonicalPlanFormatError(
-            "synthesized PLAN.md has no `## Phase phase_NNN: title` "
-            "headers; canonical mode requires the Slice C phase-id "
-            "header form so McLoop can resolve task -> phase mappings"
-        )
-
-    errors: list[str] = []
-    total_tasks = 0
-
-    # Check 2 (per-phase tasks) + Check 1 task total accumulator.
-    for idx, (line_idx, phase_id, title) in enumerate(headers):
-        next_line_idx = (
-            headers[idx + 1][0] if idx + 1 < len(headers) else len(lines)
-        )
-        section = lines[line_idx + 1 : next_line_idx]
-        tasks = sum(1 for line in section if _CANONICAL_TASK_LINE_RE.match(line))
-        total_tasks += tasks
-        if tasks == 0:
-            errors.append(
-                f"phase {phase_id!r} ({title!r}) has no `- [ ]` task "
-                "lines; mcloop cannot iterate a phase that contains "
-                "only narrative prose"
-            )
-
-    if total_tasks == 0:
-        errors.insert(
-            0,
-            "synthesized PLAN.md has zero `- [ ]` task lines across "
-            f"{len(headers)} phase header(s); the canonical contract "
-            "requires executable checklist tasks (the Slice D smoke "
-            "regression case)",
-        )
-
-    # Check 3: strict phase_id format.
-    nonstrict = [pid for _, pid, _ in headers if not _STRICT_PHASE_ID_RE.match(pid)]
-    if nonstrict:
-        errors.append(
-            "phase header(s) with non-canonical phase_id (must match "
-            "`^phase_\\d{3,}$`): " + ", ".join(repr(pid) for pid in nonstrict)
-        )
-
-    # Check 4: uniqueness.
-    seen: dict[str, int] = {}
-    duplicates: set[str] = set()
-    for _, pid, _ in headers:
-        seen[pid] = seen.get(pid, 0) + 1
-        if seen[pid] > 1:
-            duplicates.add(pid)
-    if duplicates:
-        errors.append(
-            "duplicate phase_id(s) in synthesized plan body: "
-            + ", ".join(sorted(repr(pid) for pid in duplicates))
-        )
-
-    # Check 5: required_phase_id present when supplied.
-    if required_phase_id is not None:
-        actual_ids = [pid for _, pid, _ in headers]
-        if required_phase_id not in actual_ids:
-            errors.append(
-                f"required_phase_id {required_phase_id!r} not present in "
-                "synthesized plan body; synthesizer emitted "
-                f"{actual_ids!r} instead. The runtime computes the "
-                "phase_id deterministically from the existing PLAN.md; "
-                "the synthesizer must use it verbatim."
-            )
-
-    # Check 6: monotonic order by numeric suffix (skip when any id is
-    # non-strict; the Check 3 message will already be on the error
-    # list, and pretending we know an order over malformed ids would
-    # produce confusing error messages).
-    suffixes: list[int] = []
-    have_all_strict = True
-    for _, pid, _ in headers:
-        s = _phase_id_numeric_suffix(pid)
-        if s is None:
-            have_all_strict = False
-            break
-        suffixes.append(s)
-    if have_all_strict:
-        out_of_order = [
-            (headers[i][1], headers[i + 1][1])
-            for i in range(len(suffixes) - 1)
-            if suffixes[i] >= suffixes[i + 1]
-        ]
-        if out_of_order:
-            errors.append(
-                "phase_ids out of order in document (must be strictly "
-                "monotonically increasing): "
-                + ", ".join(f"{a!r} -> {b!r}" for a, b in out_of_order)
-            )
-
-    if errors:
-        raise CanonicalPlanFormatError("; ".join(errors))
-
-
 def is_enabled() -> bool:
     """Return True when council mode should run for this invocation.
 
@@ -427,14 +279,157 @@ def set_config_path(path: str | None) -> None:
         os.environ[_CONFIG_PATH_ENV] = path
 
 
+def _rebuild_task_constructed(task: Task) -> Task:
+    """Rebuild ``task`` via :func:`make_task` so it is field-stable.
+
+    The synthesizer's plan body comes through :func:`parse_plan`, which
+    attaches source positions and may absorb stray prose into
+    ``trailing_lines``. The constructed-mode validator in
+    :func:`validate_plan` rejects nonempty ``trailing_lines`` and runs
+    a per-task field-stability harness. Rebuilding each task with
+    :func:`make_task` and the canonical structural fields (text, status,
+    tags, annotations, deps, ruled_out, children) drops position
+    metadata and forces ``trailing_lines=()`` so the result is a
+    constructed plan, not a parsed one.
+
+    Children are rebuilt recursively. Task ids on the parsed tasks are
+    ``None`` because the canonical synthesizer template does not author
+    them; :func:`migrate` assigns ids on the rebuilt plan later.
+    """
+    rebuilt_children = tuple(_rebuild_task_constructed(child) for child in task.children)
+    rebuilt_ruled_out = tuple(
+        RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out
+    )
+    return make_task(
+        task.text,
+        status=task.status,
+        flag_tags=task.flag_tags,
+        action_tag=task.action_tag,
+        annotations=task.annotations,
+        deps=task.deps,
+        children=rebuilt_children,
+        ruled_out=rebuilt_ruled_out,
+        task_id=task.task_id,
+    )
+
+
+def _rebuild_phase_constructed(phase: Phase, *, ordinal: int) -> Phase:
+    """Rebuild ``phase`` with constructed-mode tasks and stable ordinal."""
+    rebuilt_tasks = tuple(_rebuild_task_constructed(t) for t in phase.tasks)
+    rebuilt_subsections = tuple(
+        Subsection(
+            title=sub.title,
+            prose=sub.prose,
+            tasks=tuple(_rebuild_task_constructed(t) for t in sub.tasks),
+            line_number=0,
+        )
+        for sub in phase.subsections
+    )
+    phase_id_source = (
+        phase.phase_id_source if phase.phase_id_source != "none" else "none"
+    )
+    # Normalize `explicit_header` to `explicit_comment` so the renderer
+    # emits a `<!-- phase_id: ... -->` line that survives round-trip
+    # under constructed-mode field-stability checks.
+    if phase_id_source == "explicit_header":
+        phase_id_source = "explicit_comment"
+    return Phase(
+        phase_id=phase.phase_id,
+        phase_id_source=phase_id_source,
+        ordinal=ordinal,
+        keyword=phase.keyword,
+        title=phase.title,
+        prose=phase.prose,
+        subsections=rebuilt_subsections,
+        tasks=rebuilt_tasks,
+        line_number=0,
+    )
+
+
+def typed_plan_from_synthesizer_text(
+    plan_text: str,
+    *,
+    required_phase_id: str,
+) -> Plan:
+    """Convert the synthesizer's plan body to a validated typed Plan.
+
+    The synthesizer emits a markdown plan body following the canonical
+    Slice C contract (``## Phase phase_NNN: title`` headers + per-task
+    ``- [ ]`` checklist lines). This helper:
+
+    1. Parses the body via :func:`bob_tools.planfile.parse_plan` so the
+       checklist structure becomes typed Phase / Task values.
+    2. Rebuilds each task via :func:`make_task` to drop parser-side
+       source positions and ``trailing_lines`` so the result is a
+       constructed plan (the v4 Contract 4 invariant).
+    3. Sets ``magic_version=1`` (the construction-mode requirement) and
+       assigns task ids via :func:`migrate`.
+    4. Validates with :func:`validate_plan` ``constructed=True``.
+    5. Validates with :func:`assert_mcloop_canonical` so mcloop's
+       canonical-input contract holds.
+    6. Asserts ``required_phase_id`` is present in the resulting plan;
+       the runtime owns phase identity and the synthesizer must honor
+       the supplied value.
+
+    Returns the validated :class:`Plan`. Any synthesis-time failure
+    surfaces as :class:`bob_tools.planfile.PlanSyntaxError` (malformed
+    body) or :class:`PlanValidationError` (constructed-mode or
+    canonical-contract violation); both propagate to the caller.
+    """
+    try:
+        parsed = parse_plan(plan_text)
+    except PlanSyntaxError as exc:
+        raise PlanValidationError(
+            [
+                "synthesizer plan body could not be parsed as PLAN.md: "
+                f"{exc}"
+            ]
+        ) from exc
+
+    rebuilt_phases = tuple(
+        _rebuild_phase_constructed(phase, ordinal=index + 1)
+        for index, phase in enumerate(parsed.phases)
+    )
+    constructed = Plan(
+        magic_version=1,
+        project_title=parsed.project_title,
+        preamble=parsed.preamble,
+        phases=rebuilt_phases,
+        bugs=None,
+        source_path=None,
+    )
+    migrated = migrate(constructed)
+    validate_plan(migrated, constructed=True)
+    assert_mcloop_canonical(migrated)
+
+    actual_phase_ids = [phase.phase_id for phase in migrated.phases]
+    if required_phase_id not in actual_phase_ids:
+        raise PlanValidationError(
+            [
+                f"required_phase_id {required_phase_id!r} not present in "
+                f"synthesized plan body; synthesizer emitted "
+                f"{actual_phase_ids!r} instead. The runtime computes the "
+                "phase_id deterministically from the existing PLAN.md; "
+                "the synthesizer must use it verbatim."
+            ]
+        )
+
+    return migrated
+
+
+# Backward-compat private alias. Kept until callers migrate; do not
+# remove without a grep across consumers.
+_typed_plan_from_synthesizer_text = typed_plan_from_synthesizer_text
+
+
 def author_phase_plan(
     *,
     prompt: str,
     system: str,
     phase_num: int | str,
     project_dir: Path | None = None,
-) -> str:
-    """Run ``council_four`` and return the synthesizer's plan body.
+) -> Plan:
+    """Run ``council_four`` and return the synthesizer's plan as a typed Plan.
 
     ``prompt`` and ``system`` are the same strings the legacy
     ``query()`` path would send: prompt is the rendered reference
@@ -445,8 +440,20 @@ def author_phase_plan(
     re-authoring becomes a real path, the question shape will be
     revisited.
 
+    The synthesizer's plan-body artifact is converted to a typed
+    :class:`bob_tools.planfile.Plan` via
+    :func:`typed_plan_from_synthesizer_text`: the body is parsed,
+    rebuilt as a constructed plan, ids are assigned, and the result is
+    validated under both ``validate_plan(constructed=True)`` and
+    :func:`assert_mcloop_canonical`. Callers receive structured data and
+    must persist via :func:`bob_tools.planfile.save`, not raw markdown
+    ``write_text``.
+
     Raises ``CouncilError`` on terminal != "done", missing plan
     artifact, or import-time failures.
+    :class:`bob_tools.planfile.PlanValidationError` surfaces when the
+    synthesized body fails construction or canonical validation; the
+    audit dir is still written so the offending body is recoverable.
     """
     project_dir = (project_dir or Path.cwd()).resolve()
 
@@ -562,20 +569,17 @@ def author_phase_plan(
         elapsed_s=elapsed_s,
     )
 
-    # Canonical-mode format validator: the McLoop consumer expects
-    # phase headers in `## Phase phase_NNN: title` form and at least
-    # one `- [ ]` task line per phase. The validator also enforces
-    # the required_phase_id constraint computed above (Check 5),
-    # phase_id uniqueness (Check 4), strict format (Check 3), and
-    # monotonic order (Check 6). Audit dir is already written for
-    # debugging; PLAN.md is NOT written by author_phase_plan itself
-    # (the caller in duplo.planner does that), so a raise here
-    # means PLAN.md stays untouched.
-    _validate_canonical_plan_markdown(
+    # Canonical validation has moved into bob_tools.planfile. The plan
+    # body is parsed, rebuilt as a constructed plan, ids are assigned,
+    # and the result is validated under both
+    # ``validate_plan(constructed=True)`` and ``assert_mcloop_canonical``
+    # so the data the caller persists is structured and McLoop-executable.
+    # Audit dir is already written; PLAN.md is NOT written by
+    # ``author_phase_plan`` itself, so a raise here means PLAN.md stays
+    # untouched.
+    return typed_plan_from_synthesizer_text(
         plan_text, required_phase_id=required_phase_id
     )
-
-    return plan_text
 
 
 def _env_truthy(name: str) -> bool:

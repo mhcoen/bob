@@ -6,6 +6,16 @@ import dataclasses
 import re
 from pathlib import Path
 
+from bob_tools.planfile import (
+    Phase,
+    Plan,
+    PlanSyntaxError,
+    PlanValidationError,
+    parse_plan,
+)
+from bob_tools.planfile import load as planfile_load
+from bob_tools.planfile import save as planfile_save
+
 from duplo import council
 from duplo.claude_cli import query
 from duplo.extractor import Feature
@@ -16,7 +26,7 @@ You are a senior software architect generating a build plan for one
 phase of an application.
 
 You will be given a roadmap phase (number, title, goal, features,
-test criteria) along with build preferences. Generate a PLAN.md
+test criteria) along with build preferences. Generate a phase body
 that McLoop can execute. McLoop works through checklist items one
 at a time, launching a fresh Claude Code session per task.
 
@@ -51,8 +61,8 @@ Rules for the plan:
   build-system description paragraph at the top of the phase.
   That information is written once in the PLAN.md project
   header and must not be repeated per phase. Start the phase
-  content with the H1 phase heading line, then go directly to
-  task checkboxes.
+  content with the canonical Slice C ``## Phase phase_NNN:``
+  header line, then go directly to task checkboxes.
 - Do NOT emit a separate visual-design section. Any design
   requirements are injected into PLAN.md by the caller, after
   the phase heading.
@@ -69,10 +79,9 @@ Rules for the plan:
   Scaffolding or structural tasks that do not map to any feature
   use no annotation.
 
-Output ONLY the Markdown for PLAN.md. No explanation outside it.
-Format:
+Canonical Slice C form (the runtime owns phase identity):
 
-# <AppName> — Phase N: <Title>
+## Phase phase_NNN: <Title>
 
 - [ ] Set up project structure and build system
 - [ ] [BATCH] Add user authentication [feat: "User authentication"]
@@ -82,46 +91,37 @@ Format:
 - [ ] Fix input validation on signup [fix: "email format not checked"]
 - [ ] ...
 
-The heading MUST use the exact format shown: app name, em dash (—),
-Phase N, colon, then the phase title. Use the project name as the
-app name. The phase number and title are provided in the prompt.
+The H2 ``## Phase phase_NNN:`` header MUST use the exact phase_id
+the runtime supplied; do not invent your own ordinal. Do NOT
+emit a top-level ``# <AppName> — Phase N: <Title>`` H1; the
+runtime owns the project envelope.
 """
 
 _NEXT_PHASE_SYSTEM = """\
 You are a senior software architect helping to plan the next phase of an application build.
 
 Given the completed phase plan, user feedback, and (optionally) visual issues from
-screenshot comparison, produce the next phase PLAN.md in Markdown. The next phase must:
+screenshot comparison, produce the next phase body. The next phase must:
 - Build incrementally on what was completed in the previous phase
 - Address all user feedback items
 - Fix any visual issues identified in screenshot comparison
 - Add the next most valuable batch of features (not everything at once)
 
-Output ONLY the Markdown for PLAN.md. Do not add any explanation outside the Markdown.
-Use the following structure exactly:
+Emit the canonical Slice C phase body: a ``## Phase phase_NNN: <title>``
+H2 header followed by ``- [ ]`` checklist tasks. The runtime owns the
+phase_id and the project H1 envelope; do not invent ordinals or wrap
+the body in a ``# <AppName>`` heading.
 
-# Phase N: <short title>
+## Phase phase_NNN: <short title>
 
-## Objective
-One or two sentences describing what this phase accomplishes.
+- [ ] Implementation step. Steps that implement one or more features
+  MUST end with a [feat: "Feature Name"] annotation. Multiple
+  features go comma-separated: [feat: "Push-to-talk recording",
+  "Global keyboard shortcuts"]. Bug or visual-issue fixes use
+  [fix: "description"]. Scaffolding or structural steps that do
+  not map to any feature use no annotation.
 
-## Addresses
-A bullet list of user feedback items and visual issues being resolved in this phase.
-Omit this section if there is no feedback or visual issues.
-
-## Features in scope
-A bullet list of new features or improvements being added.
-
-## Implementation steps
-A numbered list of concrete implementation steps. Each step must be specific enough
-for a developer to act on without ambiguity.
-- Every step that implements one or more features MUST end with a
-  [feat: "Feature Name"] annotation. If a step addresses multiple
-  features, list them comma-separated:
-  [feat: "Push-to-talk recording", "Global keyboard shortcuts"].
-  Steps that fix bugs or visual issues use [fix: "description"].
-  Scaffolding or structural steps that do not map to any feature
-  use no annotation.
+Additional rules:
 - When a step has multiple subtasks that are all specific enough
   to be executed without design decisions, mark the parent step
   with [BATCH] so McLoop combines the subtasks into a single
@@ -130,12 +130,6 @@ for a developer to act on without ambiguity.
   scriptable form. Runnable verification must be expressed as a
   helper-script creation step plus an [AUTO:run_cli] step that
   invokes the helper with an absolute command path.
-
-## Success criteria
-A checklist of observable outcomes that confirm this phase is complete and working.
-
-## Out of scope
-A brief bullet list of items deliberately deferred to later phases.
 """
 
 _PLAN_FILENAME = "PLAN.md"
@@ -495,8 +489,25 @@ def generate_phase_plan(
     spec_text: str = "",
     platform_addendum: str = "",
     prior_phases_files: list[str] | None = None,
-) -> str:
-    """Generate a PLAN.md for a specific roadmap phase.
+    target_dir: Path | str = ".",
+) -> Plan:
+    """Generate a typed :class:`Plan` for a specific roadmap phase.
+
+    Returns a validated :class:`bob_tools.planfile.Plan` that:
+
+    1. When the council path is enabled, comes directly from
+       :func:`duplo.council.author_phase_plan` (which already runs the
+       parsed body through ``validate_plan(constructed=True)`` and
+       ``assert_mcloop_canonical``).
+    2. Otherwise, runs the legacy ``query()`` LLM call, strips outer
+       code fences, then converts the markdown body to a typed Plan via
+       :func:`duplo.council.typed_plan_from_synthesizer_text` using a
+       ``required_phase_id`` computed deterministically from any
+       existing PLAN.md in ``target_dir``.
+
+    No raw markdown leaks past this boundary; the caller must persist
+    via :func:`save_plan`, which delegates to
+    :func:`bob_tools.planfile.save`.
 
     Args:
         source_url: The product URL that was scraped.
@@ -515,12 +526,10 @@ def generate_phase_plan(
             phases in this run. When non-empty, the prompt instructs the
             LLM not to recreate or redefine these files so the next phase
             builds on prior output instead of duplicating it.
-
-    Returns:
-        Markdown string suitable for writing to PLAN.md. The caller
-        injects any visual-design section after the phase heading; this
-        function never emits design prose as a preamble before the
-        heading, which would confuse mcloop's phase parser.
+        target_dir: Directory whose PLAN.md drives the deterministic
+            ``required_phase_id`` for the non-council legacy path.
+            Ignored by the council path (which computes the same value
+            internally).
     """
     prefs_dict = dataclasses.asdict(preferences)
     constraints_text = (
@@ -585,20 +594,21 @@ Preferences:
 Features for this phase:
 {features_text}
 {issues_block}{spec_block}{prior_files_block}
-Generate the PLAN.md now.
+Generate the phase body now.
 """
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
     if council.is_enabled():
-        raw = _strip_fences(
-            council.author_phase_plan(
-                prompt=prompt, system=system, phase_num=phase_num
-            )
+        return council.author_phase_plan(
+            prompt=prompt, system=system, phase_num=phase_num
         )
-    else:
-        raw = _strip_fences(query(prompt, system=system))
-    with_heading = _ensure_h1_heading(raw, project_name, phase_num, phase_title)
-    return _strip_trailing_commentary(with_heading)
+
+    raw = _strip_fences(query(prompt, system=system))
+    plan_path = Path(target_dir) / _PLAN_FILENAME
+    required_phase_id = council.compute_required_phase_id(plan_path)
+    return council.typed_plan_from_synthesizer_text(
+        raw, required_phase_id=required_phase_id
+    )
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
@@ -676,53 +686,258 @@ def _strip_bugs_section(content: str) -> str:
 
 
 def save_plan(
-    content: str,
+    content: Plan | str,
     *,
     target_dir: Path | str = ".",
     expected_h1_ordinals: list[int] | None = None,
+    extra_markdown_tasks: str = "",
 ) -> Path:
-    """Write *content* to ``PLAN.md`` in *target_dir*.
+    """Persist a phase plan to ``PLAN.md`` in *target_dir*.
 
-    If PLAN.md already exists, new content is appended after a blank
-    line so that existing checked and unchecked items are preserved.
+    Per T-000186, plan content flows through the typed
+    :class:`bob_tools.planfile.Plan` API end-to-end; the bytes on disk
+    are produced by :func:`bob_tools.planfile.save` (which renders the
+    Plan, runs ``assert_mcloop_canonical``, and writes atomically under
+    a sidecar lock). ``save_plan`` itself no longer calls
+    :meth:`pathlib.Path.write_text` on plan content.
 
-    The written content never contains a ``## Bugs`` section: if *content*
-    (e.g. from an LLM) includes one, the heading is stripped and any
-    tasks that were under it are kept above. ``## Bugs`` is an mcloop
-    convention that duplo does not emit.
+    ``content`` accepts either a :class:`Plan` (the canonical typed
+    path) or a markdown string (back-compat for callers that still
+    pre-render). When a string is supplied, it is parsed via
+    :func:`bob_tools.planfile.parse_plan` first, then routed through
+    the same typed-persistence path.
 
-    ``expected_h1_ordinals`` (when provided) is the source-of-truth list
-    of phase ordinals Duplo's roadmap has emitted across all save_plan
-    calls in this run, in document order. Forwarded to
-    ``validate_h1_ordinal_sequence`` for an exact-match check against
-    the accumulated PLAN.md. When None, the validator falls back to
-    the internal contiguity check (backward-compatible path for
-    callers that don't track roadmap state explicitly).
+    ``extra_markdown_tasks`` is the optional verification/contracts
+    block emitted by :func:`format_verification_tasks` and
+    :func:`format_contracts_as_verification`. It is parsed into Task
+    values and appended to the just-authored phase via
+    :func:`bob_tools.planfile.add_phase_task` so the typed Plan stays
+    the source of truth for what ends up on disk; T-000190 will
+    migrate the helpers themselves to emit typed tasks directly.
 
-    Returns the path.
+    Backward-compat behaviors retained from the legacy markdown path:
+
+    * The deprecated ``## Bugs`` heading is stripped from any string
+      content before parsing; tasks that were under it survive.
+    * Mid-sentence ``[USER]/[BATCH]/[AUTO]`` tokens inside task bodies
+      are rewritten to their parenthesized forms so mcloop does not
+      mis-interpret them.
+    * ``expected_h1_ordinals``, when provided, is checked against the
+      accumulated PLAN.md text after persistence as a fail-closed
+      backstop for the roadmap-state source-of-truth invariant. A
+      violation does not roll back the write — that is now the
+      planfile-layer concern.
+
+    Returns the resolved PLAN.md path.
     """
-    content = _strip_bugs_section(content)
-    content = _escape_mcloop_tags(content)
     path = (Path(target_dir) / _PLAN_FILENAME).resolve()
-    if path.exists():
-        existing = path.read_text(encoding="utf-8")
-        accumulated = existing.rstrip("\n") + "\n\n" + content
-    else:
-        accumulated = content
 
-    # H1 ordinal sequence check on the FULL accumulated PLAN.md
-    # (after Duplo's strip-and-render in _ensure_h1_heading has run
-    # on the per-phase content). When ``expected_h1_ordinals`` is
-    # provided, the check is exact-match against Duplo's roadmap
-    # state. When None, falls back to internal contiguity.
-    # Either path raises BEFORE writing so a violation leaves
-    # PLAN.md untouched. The check is a no-op when no canonical
-    # H1 phase headings are present (e.g., during a pre-canonical
-    # scaffold write where the body has not yet been wrapped in the
-    # ``# <project> — Phase N: <title>`` envelope).
-    validate_h1_ordinal_sequence(
-        accumulated, expected_ordinals=expected_h1_ordinals
+    if isinstance(content, Plan):
+        plan = content
+    else:
+        cleaned = _strip_bugs_section(content)
+        cleaned = _escape_mcloop_tags(cleaned)
+        try:
+            plan = parse_plan(cleaned)
+        except PlanSyntaxError as exc:
+            # Legacy callers (notably the project-header preamble write
+            # at pipeline.py ~1825) pass a pure-prose block with no
+            # phase headers; parse_plan handles that as a preamble-only
+            # plan, so a real syntax error here is exceptional.
+            raise PlanValidationError(
+                [f"save_plan: could not parse markdown content: {exc}"]
+            ) from exc
+
+    if extra_markdown_tasks.strip():
+        plan = _append_extra_markdown_tasks(plan, extra_markdown_tasks)
+
+    if path.exists():
+        existing_plan = planfile_load(path)
+        plan = _merge_existing_plan(existing_plan, plan)
+
+    planfile_save(path, plan, validation="unchecked")
+
+    if expected_h1_ordinals is not None:
+        accumulated = path.read_text(encoding="utf-8")
+        validate_h1_ordinal_sequence(
+            accumulated, expected_ordinals=expected_h1_ordinals
+        )
+
+    return path
+
+
+def _merge_existing_plan(existing: Plan, new: Plan) -> Plan:
+    """Return ``existing`` with phases / preamble / project_title from
+    ``new`` folded in.
+
+    Used by :func:`save_plan` when PLAN.md already exists on disk so
+    each phase-generation call appends rather than overwrites. The
+    merge rules:
+
+    * If ``existing`` has no ``project_title`` and ``new`` does, the
+      new one wins (the project-header preamble write happens before
+      phases land, so the second invocation carries the title).
+    * ``new``'s preamble is concatenated after ``existing``'s when
+      both are non-empty; an empty side is dropped.
+    * Phases are appended in order; ordinals on appended phases are
+      renumbered so the merged sequence is contiguous and monotonic
+      ``1..len(merged_phases)``. ``typed_plan_from_synthesizer_text``
+      always emits ``ordinal=index+1`` within its own body
+      (the synthesizer authors one phase at a time, so each new Plan
+      arrives with ``ordinal=1``); without renumbering the merged
+      plan would carry duplicate ordinals that fail mcloop's parser
+      structural-sanity check on the next load. Phase identity stays
+      with ``phase_id``; only the display-ordinal is renumbered.
+    * Duplicate ``phase_id`` values are NOT silently de-duplicated —
+      that remains the validator's job at save time (the canonical
+      gate). Renumbering is a strictly cosmetic ordinal repair.
+    """
+    from bob_tools.planfile import migrate as planfile_migrate
+
+    project_title = new.project_title or existing.project_title
+    preamble_parts = [p for p in (existing.preamble, new.preamble) if p]
+    preamble = "\n\n".join(preamble_parts)
+
+    # Strip task ids from the inbound plan's phases so the post-merge
+    # ``migrate`` reassignment (below) sees the existing tasks' ids as
+    # the source of truth and continues numbering from
+    # ``max(existing) + 1``. Without this, both ``existing`` and ``new``
+    # carry their own ``T-000001..`` sequences (each ``migrate`` call
+    # restarts at ``T-000001`` for a fresh plan), producing duplicate
+    # ids when the phases are concatenated.
+    new_phases_no_ids = tuple(
+        _phase_with_clean_task_ids(phase) for phase in new.phases
     )
 
-    path.write_text(accumulated, encoding="utf-8")
-    return path
+    combined = tuple(existing.phases) + new_phases_no_ids
+    renumbered = tuple(
+        dataclasses.replace(phase, ordinal=index + 1)
+        for index, phase in enumerate(combined)
+    )
+    merged = dataclasses.replace(
+        existing,
+        project_title=project_title,
+        preamble=preamble,
+        phases=renumbered,
+        bugs=existing.bugs or new.bugs,
+    )
+    return planfile_migrate(merged)
+
+
+def _phase_with_clean_task_ids(phase: Phase) -> Phase:
+    """Return ``phase`` with task ids cleared on every (sub)task tree.
+
+    Used by :func:`_merge_existing_plan` so the post-merge :func:`migrate`
+    can reassign monotonic ids from ``max(existing) + 1`` without
+    colliding with the inbound plan's own ``T-000001..`` sequence.
+    """
+    return dataclasses.replace(
+        phase,
+        tasks=tuple(_task_without_id(t) for t in phase.tasks),
+        subsections=tuple(
+            dataclasses.replace(
+                sub,
+                tasks=tuple(_task_without_id(t) for t in sub.tasks),
+            )
+            for sub in phase.subsections
+        ),
+    )
+
+
+def _task_without_id(task):
+    """Return ``task`` (and its children, recursively) with ``task_id``
+    set to ``None`` so :func:`migrate` reassigns a fresh id at merge time.
+    """
+    return dataclasses.replace(
+        task,
+        task_id=None,
+        children=tuple(_task_without_id(child) for child in task.children),
+    )
+
+
+def _append_extra_markdown_tasks(plan: Plan, markdown: str) -> Plan:
+    """Parse ``markdown`` (a verification/contracts task block) and
+    append each ``- [ ]`` task it contains to ``plan``'s final phase.
+
+    The verification helpers (``format_verification_tasks`` and
+    ``format_contracts_as_verification``) emit a bare task list with
+    no phase header. To route it through the typed API we synthesize
+    a temporary phase header above the block so :func:`parse_plan`
+    recognizes the lines as tasks, then add the parsed tasks to the
+    real plan's last phase via :func:`add_phase_task`.
+
+    :func:`add_phase_task` validates the resulting plan in
+    constructed mode, which requires ``magic_version=1`` and every
+    task to carry a stable ``T-NNNNNN`` id. Plans handed in by the
+    string-content path of :func:`save_plan` come straight from
+    :func:`parse_plan` and may carry neither, so this helper runs
+    them through :func:`migrate` before appending.
+    """
+    if not plan.phases:
+        # No phase to attach verification tasks to (project-header
+        # preamble write). Append nothing; the verification block is
+        # only emitted on phase content writes.
+        return plan
+
+    from bob_tools.planfile import add_phase_task
+    from bob_tools.planfile import migrate as planfile_migrate
+
+    if plan.magic_version is None or any(
+        task.task_id is None
+        for phase in plan.phases
+        for task in phase.tasks
+    ):
+        plan = planfile_migrate(
+            dataclasses.replace(plan, magic_version=1)
+            if plan.magic_version is None
+            else plan
+        )
+
+    last_phase = plan.phases[-1]
+    target_phase_id = last_phase.phase_id
+    if target_phase_id is None:
+        return plan
+
+    wrapper = (
+        f"## Phase {target_phase_id}: extra-tasks-wrapper\n\n{markdown}\n"
+    )
+    try:
+        wrapper_plan = parse_plan(wrapper)
+    except PlanSyntaxError:
+        return plan
+
+    if not wrapper_plan.phases:
+        return plan
+
+    extra_tasks = wrapper_plan.phases[0].tasks
+    merged = plan
+    for task in extra_tasks:
+        merged, _assigned = add_phase_task(
+            merged, target_phase_id, _stripped_task(task)
+        )
+    return merged
+
+
+def _stripped_task(task):
+    """Return ``task`` rebuilt with no source-line metadata so
+    :func:`add_phase_task`'s constructed-mode harness accepts it.
+
+    ``parse_plan`` attaches ``line_number`` and possibly
+    ``trailing_lines``; rebuilding via :func:`make_task` strips both
+    while preserving the task's structural fields and any nested
+    children (recursively).
+    """
+    from bob_tools.planfile import make_task
+
+    rebuilt_children = tuple(_stripped_task(child) for child in task.children)
+    return make_task(
+        task.text,
+        status=task.status,
+        flag_tags=task.flag_tags,
+        action_tag=task.action_tag,
+        annotations=task.annotations,
+        deps=task.deps,
+        children=rebuilt_children,
+        ruled_out=tuple(task.ruled_out),
+        task_id=task.task_id,
+    )

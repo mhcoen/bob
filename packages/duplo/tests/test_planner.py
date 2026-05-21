@@ -9,6 +9,9 @@ import re
 
 import pytest
 
+from bob_tools.planfile import Plan
+from bob_tools.planfile.renderer import render_plan
+
 from duplo.extractor import Feature
 from duplo.planner import (
     CanonicalH1OrdinalError,
@@ -48,34 +51,81 @@ def _sample_prefs() -> BuildPreferences:
     )
 
 
-_SAMPLE_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal working app."
+def _canonical_body(
+    phase_id: str = "phase_001",
+    title: str = "Core Auth",
+    *,
+    extra_tasks: tuple[str, ...] = (),
+    phase_prose: str = "",
+) -> str:
+    """Return a canonical Slice C synthesizer body the council pipeline
+    accepts as input to :func:`typed_plan_from_synthesizer_text`.
+
+    The runtime owns ``phase_id``; tests pass the same id the runtime
+    will compute (``phase_001`` against an empty PLAN.md) so the
+    constructed-mode validator sees the body the synthesizer is
+    contractually required to emit. ``phase_prose`` lives below the
+    phase header so :func:`bob_tools.planfile.parser.parse_plan`
+    attaches it to ``Phase.prose`` (the planfile-level ``preamble``
+    field is reserved for content above the first phase, which only
+    appears when there is a ``# <project>`` H1).
+    """
+    lines: list[str] = []
+    lines.append(f"## Phase {phase_id}: {title}")
+    lines.append("")
+    if phase_prose:
+        lines.extend(phase_prose.rstrip("\n").split("\n"))
+        lines.append("")
+    lines.append("- [ ] Set up project structure")
+    for extra in extra_tasks:
+        lines.append(extra)
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _plan_to_text(plan: Plan) -> str:
+    """Render a typed :class:`Plan` to PLAN.md bytes via the planfile
+    renderer so tests can grep for canonical-form structural markers
+    (``## Phase phase_NNN:``, ``<!-- phase_id: ... -->``, task lines).
+    """
+    return render_plan(plan)
+
+
+def _walk_with_children(task):
+    """Yield ``task`` and its nested children (depth-first), used by
+    typed-plan assertions that compare against pre-T-000186 flat
+    grep-style checks."""
+    yield task
+    for child in task.children:
+        yield from _walk_with_children(child)
+
+
+_SAMPLE_PLAN = _canonical_body()
 
 
 class TestGeneratePhasePlan:
-    def test_returns_string(self):
-        """generate_phase_plan returns a string. Duplo strips any
-        ``# ... Phase N: ...`` line from the synthesizer's body
-        (broader strip per clarification #2: matches any H1 with
-        ``Phase \\d+:`` regardless of separator/case) and prepends
-        the canonical envelope. _SAMPLE_PLAN's ``# Phase 1: Core
-        Auth`` matches the strip, so only the non-H1 body content
-        survives, plus Duplo's canonical H1 on top."""
+    def test_returns_typed_plan(self):
+        """After T-000186, generate_phase_plan returns a typed
+        :class:`bob_tools.planfile.Plan` value, not a markdown string.
+        The synthesizer body (``## Phase phase_001: <title>`` with task
+        checkboxes) is parsed, rebuilt as a constructed plan, and
+        validated end-to-end via
+        :func:`duplo.council.typed_plan_from_synthesizer_text`.
+        """
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        assert isinstance(result, str)
-        # Non-H1 body content survives in the result.
-        assert "## Objective" in result
-        assert "Minimal working app" in result
-        # The synthesizer's stray ``# Phase 1: Core Auth`` H1 was
-        # stripped (broader strip applies).
-        assert "Core Auth" not in result
-        # Duplo's canonical H1 is at the top.
-        assert result.startswith("# ")
-        assert " — Phase " in result.split("\n", 1)[0]
+        assert isinstance(result, Plan)
+        assert len(result.phases) == 1
+        phase = result.phases[0]
+        assert phase.phase_id == "phase_001"
+        assert phase.title == "Core Auth"
+        assert any(
+            "Set up project structure" in t.text for t in phase.tasks
+        )
 
     def test_passes_source_url_to_prompt(self):
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
@@ -126,7 +176,7 @@ class TestGeneratePhasePlan:
                 [],
                 _sample_prefs(),
             )
-        assert isinstance(result, str)
+        assert isinstance(result, Plan)
 
     def test_handles_empty_constraints_and_preferences(self):
         prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
@@ -138,7 +188,7 @@ class TestGeneratePhasePlan:
             )
         prompt = mock_query.call_args[0][0]
         assert "(none)" in prompt
-        assert isinstance(result, str)
+        assert isinstance(result, Plan)
 
     def test_spec_text_injected_into_prompt(self):
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
@@ -299,127 +349,125 @@ class TestGeneratePhasePlan:
 
 
 class TestGeneratePhasePlanH1Heading:
-    """Verify generate_phase_plan() always returns content starting with '# '."""
+    """Verify generate_phase_plan() returns a typed Plan whose first
+    phase carries the runtime-computed ``phase_NNN`` id.
 
-    def test_returned_content_starts_with_h1(self):
+    Pre-T-000186, this class pinned a markdown ``# <project> — Phase N:
+    <title>`` H1 envelope on the returned string. After T-000186, the
+    return value is a structured :class:`bob_tools.planfile.Plan`; the
+    runtime owns phase identity and the synthesizer must emit a body
+    whose ``## Phase phase_NNN:`` header matches the supplied id.
+    These tests now cover the structural contract that replaced the
+    string-envelope checks.
+    """
+
+    def test_returned_value_is_typed_plan_with_canonical_phase_id(self):
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        assert result.startswith("# ")
+        assert isinstance(result, Plan)
+        assert result.phases
+        assert result.phases[0].phase_id == "phase_001"
 
-    def test_prepends_h1_when_missing(self):
-        no_h1 = "Some preamble describing the phase.\n\n- [ ] Build thing"
-        with patch("duplo.planner.query", return_value=no_h1):
-            result = generate_phase_plan(
-                "https://example.com",
-                _sample_features(),
-                _sample_prefs(),
-                project_name="Numi",
-                phase_number=0,
-            )
-        assert result.startswith("# Numi")
-        first_line = result.split("\n", 1)[0]
-        assert "Phase 0:" in first_line
-        assert "Some preamble describing the phase." in result
-
-    def test_prepends_h1_when_h2_at_start(self):
-        h2_only = "## Subsection heading\n\n- [ ] Task"
-        phase = {
-            "phase": 2,
-            "title": "Polish",
-            "goal": "Polish it",
-            "features": ["Dashboard"],
-            "test": "",
-        }
-        with patch("duplo.planner.query", return_value=h2_only):
-            result = generate_phase_plan(
-                "https://example.com",
-                _sample_features(),
-                _sample_prefs(),
-                phase=phase,
-                project_name="MyApp",
-            )
-        assert result.startswith("# MyApp")
-        first_line = result.split("\n", 1)[0]
-        assert "Phase 2:" in first_line
-        assert "Polish" in first_line
-        assert "## Subsection heading" in result
-
-    def test_overrides_synthesizer_h1_with_canonical(self):
-        """Synthesizer emits an H1 with one project name + ordinal;
-        Duplo overrides with the canonical H1 from its roadmap state.
-        The body content survives but the H1 envelope is Duplo's.
-        Codex's framing: model emits content, Duplo wraps it in the
-        deterministic envelope."""
-        with_h1 = "# LLM Heading — Phase 1: Core\n\n- [ ] Task"
-        with patch("duplo.planner.query", return_value=with_h1):
-            result = generate_phase_plan(
-                "https://example.com",
-                _sample_features(),
-                _sample_prefs(),
-                project_name="Different",
-            )
-        # Duplo's canonical H1 is at the top, NOT the synthesizer's.
-        assert result.startswith("# Different — Phase ")
-        # Synthesizer's H1 is stripped.
-        assert "LLM Heading" not in result
-        # Task content survives.
-        assert "- [ ] Task" in result
-
-    def test_strips_llm_preamble_before_h1(self):
-        """generate_phase_plan strips LLM meta-commentary before
-        the H1 AND the H1 itself, then renders Duplo's canonical
-        envelope. Reproduces the numi Phase 4 regression with the
-        new strip-and-render contract: preamble + model H1 both
-        gone, single clean Duplo H1 at the top.
+    def test_synthesizer_must_emit_runtime_phase_id(self):
+        """When the synthesizer skips the runtime-supplied
+        ``phase_NNN`` header, :func:`generate_phase_plan` raises
+        :class:`bob_tools.planfile.PlanValidationError` rather than
+        silently rendering its own ordinal. The runtime owns phase
+        identity; the synthesizer must honor it.
         """
-        with_preamble = (
-            "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
-            "\n"
-            "---\n"
-            "\n"
-            "# Numi — Phase 4: Advanced\n"
-            "\n"
-            "Python/SwiftUI calculator app.\n"
-            "\n"
-            "- [ ] Build advanced scientific functions\n"
+        from bob_tools.planfile import PlanValidationError
+
+        no_phase_header = (
+            "Some preamble describing the phase.\n\n- [ ] Build thing\n"
         )
-        phase = {
-            "phase": 4,
-            "title": "Advanced",
-            "goal": "scientific funcs",
-            "features": [],
-            "test": "",
-        }
-        with patch("duplo.planner.query", return_value=with_preamble):
+        with patch("duplo.planner.query", return_value=no_phase_header):
+            with pytest.raises(PlanValidationError):
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    project_name="Numi",
+                    phase_number=0,
+                )
+
+    def test_synthesizer_using_wrong_phase_id_raises(self):
+        """The synthesizer emits ``## Phase phase_007: Wrong`` while
+        the runtime (against an empty target_dir) expects ``phase_001``.
+        :func:`typed_plan_from_synthesizer_text` raises rather than
+        accept the mismatch.
+        """
+        from bob_tools.planfile import PlanValidationError
+
+        wrong_id_body = _canonical_body(
+            phase_id="phase_007", title="Wrong"
+        )
+        with patch("duplo.planner.query", return_value=wrong_id_body):
+            with pytest.raises(PlanValidationError):
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    project_name="Different",
+                )
+
+    def test_canonical_body_round_trips_through_renderer(self):
+        """The typed Plan returned by :func:`generate_phase_plan`
+        renders to a canonical PLAN.md whose phase header line is
+        the planfile renderer's ``## Phase N: <title>`` form (with
+        an accompanying ``<!-- phase_id: phase_NNN -->`` comment),
+        not the retired ``# <project> — Phase N: <title>`` H1
+        envelope.
+        """
+        body = _canonical_body(phase_id="phase_001", title="Advanced")
+        with patch("duplo.planner.query", return_value=body):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
-                phase=phase,
                 project_name="Numi",
             )
-        # Duplo's canonical H1 is at the top.
-        assert result.startswith("# Numi — Phase 4: Advanced")
-        # LLM preamble fully stripped.
-        assert "The PLAN.md content is ready" not in result
-        assert "append to PLAN.md" not in result
-        # Body content survives.
-        assert "Python/SwiftUI calculator app" in result
-        assert "Build advanced scientific functions" in result
-        # Exactly one phase H1 heading in the result.
-        phase_h1_lines = [
-            ln
-            for ln in result.splitlines()
-            if ln.startswith("# ") and " — Phase " in ln
-        ]
-        assert len(phase_h1_lines) == 1
+        text = _plan_to_text(result)
+        assert "## Phase 1: Advanced" in text
+        assert "<!-- phase_id: phase_001 -->" in text
+        # The legacy H1 envelope is gone.
+        assert "# Numi — Phase " not in text
 
-    def test_prepended_heading_uses_phase_number_and_title(self):
-        no_h1 = "- [ ] Task"
+    def test_synthesizer_phase_prose_preserved_on_phase(self):
+        """Prose the synthesizer emits between the ``## Phase
+        phase_NNN:`` header and the first task lands on
+        :attr:`Phase.prose` so no body content is silently lost. The
+        Plan-level ``preamble`` only fills when the body has a
+        ``# <project>`` H1 above the first phase, which the
+        synthesizer must not author (the runtime owns the project
+        envelope).
+        """
+        body = _canonical_body(
+            phase_id="phase_001",
+            title="Advanced",
+            phase_prose="Python/SwiftUI calculator app.",
+        )
+        with patch("duplo.planner.query", return_value=body):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="Numi",
+            )
+        assert isinstance(result, Plan)
+        assert result.phases[0].phase_id == "phase_001"
+        assert "Python/SwiftUI calculator app" in result.phases[0].prose
+
+    def test_phase_dict_drives_runtime_title(self):
+        """The roadmap-supplied phase title appears verbatim in the
+        synthesizer prompt; the synthesizer body controls the typed
+        Plan's phase title (which the renderer emits in
+        ``## Phase N: <title>``).
+        """
+        body = _canonical_body(phase_id="phase_001", title="Integrations")
         phase = {
             "phase": 5,
             "title": "Integrations",
@@ -427,7 +475,7 @@ class TestGeneratePhasePlanH1Heading:
             "features": [],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=no_h1):
+        with patch("duplo.planner.query", return_value=body):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -435,8 +483,8 @@ class TestGeneratePhasePlanH1Heading:
                 phase=phase,
                 project_name="Widget",
             )
-        first_line = result.split("\n", 1)[0]
-        assert first_line == "# Widget — Phase 5: Integrations"
+        assert isinstance(result, Plan)
+        assert result.phases[0].title == "Integrations"
 
 
 class TestEnsureH1Heading:
@@ -656,14 +704,17 @@ class TestPhaseSystemPromptAnnotations:
         assert '[fix: "email format not checked"]' in _PHASE_SYSTEM
 
     def test_system_prompt_forbids_platform_boilerplate_paragraph(self):
+        # The directive moved from "H1 phase heading" to the canonical
+        # Slice C ``## Phase phase_NNN:`` header per T-000186; the
+        # platform-boilerplate prohibition itself stays.
         assert (
             "Do NOT include a platform, language, prerequisites, or\n"
             "  build-system description paragraph at the top of the phase.\n"
             "  That information is written once in the PLAN.md project\n"
-            "  header and must not be repeated per phase. Start the phase\n"
-            "  content with the H1 phase heading line, then go directly to\n"
-            "  task checkboxes."
+            "  header and must not be repeated per phase."
         ) in _PHASE_SYSTEM
+        assert "## Phase phase_NNN:" in _PHASE_SYSTEM
+        assert "go directly to task checkboxes" in _PHASE_SYSTEM
 
     def test_system_prompt_reserves_user_for_human_only_checks(self):
         assert "Reserve [USER] only for genuinely human-only checks" in _PHASE_SYSTEM
@@ -694,9 +745,7 @@ class TestNextPhaseSystemPromptAnnotations:
 _SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
 
 _ANNOTATED_PHASE_PLAN = """\
-# MyApp
-
-Web app built with Python/FastAPI and PostgreSQL.
+## Phase phase_001: Core
 
 - [ ] Set up project structure and build system
 - [ ] Add user login form [feat: "User auth"]
@@ -723,7 +772,26 @@ _ANNOTATION_RE = re.compile(r"\[(feat|fix):\s*\"[^\"]+\"(?:,\s*\"[^\"]+\")*\]")
 
 
 class TestPlanAnnotationOutput:
-    """Verify that generated plans contain [feat:] or [fix:] annotations."""
+    """Verify that generated typed Plans carry [feat:] / [fix:]
+    annotations on their tasks.
+
+    Pre-T-000186 these tests grepped a markdown string for annotation
+    syntax. After T-000186, ``generate_phase_plan`` returns a typed
+    :class:`bob_tools.planfile.Plan` whose tasks carry annotations as
+    structured ``(key, value)`` pairs on ``Task.annotations``. The
+    intent — that synthesizer-emitted ``[feat: ...]`` and ``[fix:
+    ...]`` survive end-to-end — is preserved; the assertion shape is
+    structural, not stringly.
+    """
+
+    @staticmethod
+    def _walk_all_tasks(plan):
+        for phase in plan.phases:
+            for task in phase.tasks:
+                yield from _walk_with_children(task)
+            for sub in phase.subsections:
+                for task in sub.tasks:
+                    yield from _walk_with_children(task)
 
     def test_phase_plan_contains_feat_annotations(self):
         with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
@@ -732,8 +800,14 @@ class TestPlanAnnotationOutput:
                 _sample_features(),
                 _sample_prefs(),
             )
-        feat_matches = re.findall(r'\[feat: "[^"]+"\]', result)
-        assert len(feat_matches) >= 1
+        assert isinstance(result, Plan)
+        feat_values = [
+            value
+            for task in self._walk_all_tasks(result)
+            for key, value in task.annotations
+            if key == "feat"
+        ]
+        assert feat_values
 
     def test_phase_plan_contains_fix_annotations(self):
         with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
@@ -742,21 +816,35 @@ class TestPlanAnnotationOutput:
                 _sample_features(),
                 _sample_prefs(),
             )
-        fix_matches = re.findall(r'\[fix: "[^"]+"\]', result)
-        assert len(fix_matches) >= 1
+        assert isinstance(result, Plan)
+        fix_values = [
+            value
+            for task in self._walk_all_tasks(result)
+            for key, value in task.annotations
+            if key == "fix"
+        ]
+        assert fix_values
 
     def test_phase_plan_annotations_on_task_lines(self):
+        """The typed-plan equivalent: every annotation lives on a Task,
+        not on prose. Rendered output places annotations only on
+        ``- [ ] ...`` lines because the renderer emits them as part of
+        the task body — that property is preserved by construction in
+        the typed model.
+        """
         with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        for line in result.splitlines():
-            match = _ANNOTATION_RE.search(line)
-            if match:
+        text = _plan_to_text(result)
+        for line in text.splitlines():
+            if _ANNOTATION_RE.search(line):
                 stripped = line.lstrip()
-                assert stripped.startswith("- [ ]") or stripped.startswith("- [x]")
+                assert stripped.startswith("- [ ]") or stripped.startswith(
+                    "- [x]"
+                )
 
     def test_next_phase_plan_contains_feat_annotations(self):
         with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
@@ -783,10 +871,16 @@ class TestPlanAnnotationOutput:
                 _sample_features(),
                 _sample_prefs(),
             )
-        for line in result.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith("- [ ]") and "project structure" in stripped:
-                assert not _ANNOTATION_RE.search(line)
+        # The "Set up project structure ..." scaffolding task carries
+        # no [feat:] / [fix:] annotation in the typed plan.
+        scaffold_tasks = [
+            t
+            for t in self._walk_all_tasks(result)
+            if "project structure" in t.text
+        ]
+        assert scaffold_tasks, "scaffolding task must survive parsing"
+        for task in scaffold_tasks:
+            assert task.annotations == ()
 
 
 class TestDetectNextPhaseNumber:
@@ -966,29 +1060,76 @@ class TestSavePlan:
         assert path.is_absolute()
 
     def test_appends_to_existing_file(self, tmp_path: Path):
+        """``save_plan`` reads the existing PLAN.md, merges the new
+        Plan via :func:`_merge_existing_plan`, and writes the combined
+        result back. After T-000186 both the on-disk and inbound texts
+        must be valid PLAN.md (the typed-plan boundary rejects ad-hoc
+        prose).
+        """
         plan_path = tmp_path / _PLAN_FILENAME
-        plan_path.write_text("- [x] Done task\n- [ ] Open task\n", encoding="utf-8")
-        save_plan("- [ ] New task", target_dir=tmp_path)
+        plan_path.write_text(
+            "## Phase phase_001: Existing\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [x] T-000001: Done task\n"
+            "- [ ] T-000002: Open task\n",
+            encoding="utf-8",
+        )
+        save_plan(
+            "## Phase phase_002: Added\n\n- [ ] New task\n",
+            target_dir=tmp_path,
+        )
         text = plan_path.read_text(encoding="utf-8")
-        assert "- [x] Done task" in text
-        assert "- [ ] Open task" in text
-        assert "- [ ] New task" in text
+        assert "Done task" in text
+        assert "Open task" in text
+        assert "New task" in text
 
     def test_append_preserves_existing_content_exactly(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
-        original = "# Phase 1\n\n- [x] First\n- [ ] Second\n"
+        original = (
+            "## Phase phase_001: First phase\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [x] T-000001: First\n"
+            "- [ ] T-000002: Second\n"
+        )
         plan_path.write_text(original, encoding="utf-8")
-        save_plan("- [ ] Third", target_dir=tmp_path)
+        save_plan(
+            "## Phase phase_002: Added\n\n- [ ] Third\n",
+            target_dir=tmp_path,
+        )
         text = plan_path.read_text(encoding="utf-8")
-        assert text.startswith("# Phase 1\n\n- [x] First\n- [ ] Second")
-        assert text.endswith("- [ ] Third\n")
+        # The existing phase header, both tasks, and the appended
+        # task all survive the merge.
+        assert "First phase" in text
+        assert "- [x] T-000001: First" in text
+        assert "- [ ] T-000002: Second" in text
+        assert text.rstrip().endswith("Third")
 
-    def test_append_separates_with_blank_line(self, tmp_path: Path):
+    def test_append_separates_phases_with_blank_line(self, tmp_path: Path):
+        """The canonical renderer separates phase blocks with a single
+        blank line — the typed equivalent of pre-T-000186's
+        ``\\n\\n- [ ] New\\n`` assertion.
+        """
         plan_path = tmp_path / _PLAN_FILENAME
-        plan_path.write_text("- [ ] Existing\n", encoding="utf-8")
-        save_plan("- [ ] New", target_dir=tmp_path)
+        plan_path.write_text(
+            "## Phase phase_001: Existing\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: Existing\n",
+            encoding="utf-8",
+        )
+        save_plan(
+            "## Phase phase_002: Added\n\n- [ ] New\n",
+            target_dir=tmp_path,
+        )
         text = plan_path.read_text(encoding="utf-8")
-        assert "\n\n- [ ] New\n" in text
+        # Two phase H2 headers in the output, in order.
+        h2_lines = [ln for ln in text.splitlines() if ln.startswith("## Phase ")]
+        assert len(h2_lines) == 2
+        # The phase-id comment for the new phase is present, separating
+        # the second phase from the first.
+        assert "<!-- phase_id: phase_002 -->" in text
 
     def test_default_target_dir_is_cwd(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         monkeypatch.chdir(tmp_path)
@@ -1277,69 +1418,118 @@ class TestStripIsSupersetOfMcloopParser:
 
 
 class TestSavePlanAcceptsExpectedOrdinals:
-    """Defect 2 (continued): save_plan forwards expected_h1_ordinals
-    to the validator, raising on source-of-truth mismatch BEFORE
-    writing (atomicity preserved)."""
+    """Save path: phases land canonically with monotonic 1..N ordinals.
 
-    def test_save_plan_passes_with_matching_expected(self, tmp_path: Path):
+    Pre-T-000186 the ``expected_h1_ordinals`` argument compared an
+    accumulated list of ``# X — Phase N: <title>`` ordinals against a
+    caller-supplied source-of-truth list. After T-000186 the
+    typed-planfile renderer always emits ``## Phase 1: <title>``,
+    ``## Phase 2: ...`` in contiguous monotonic order (the merge step
+    in :func:`_merge_existing_plan` renumbers any duplicates), so the
+    same intent is now enforced structurally by the canonical
+    contract. These tests pin that intent against the new form.
+    """
+
+    def test_save_plan_renders_contiguous_ordinals_after_append(
+        self, tmp_path: Path
+    ):
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "# App — Phase 0: A\n\n- [ ] a\n",
+            "## Phase phase_001: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: a\n",
             encoding="utf-8",
         )
         save_plan(
-            "# App — Phase 1: B\n\n- [ ] b\n",
+            "## Phase phase_002: B\n\n- [ ] b\n",
             target_dir=tmp_path,
-            expected_h1_ordinals=[0, 1],
+            expected_h1_ordinals=[1, 2],
         )
         text = plan_path.read_text(encoding="utf-8")
-        assert "Phase 0: A" in text
-        assert "Phase 1: B" in text
+        h2_lines = [
+            ln for ln in text.splitlines() if ln.startswith("## Phase ")
+        ]
+        assert h2_lines == ["## Phase 1: A", "## Phase 2: B"]
 
-    def test_save_plan_raises_on_expected_mismatch(self, tmp_path: Path):
+    def test_save_plan_renumbers_duplicate_inbound_ordinals(
+        self, tmp_path: Path
+    ):
+        """The inbound Plan independently arrives with ordinal=1
+        (each synthesis is self-contained); the merge step in
+        :func:`_merge_existing_plan` renumbers so the final on-disk
+        sequence is contiguous 1..N. The original behavior
+        ``test_save_plan_raises_on_expected_mismatch`` pinned —
+        rejecting non-monotonic accumulated ordinals before write —
+        is now enforced by construction, not by post-hoc validation.
+        """
         plan_path = tmp_path / _PLAN_FILENAME
-        original = "# App — Phase 0: A\n\n- [ ] a\n"
-        plan_path.write_text(original, encoding="utf-8")
-        with pytest.raises(CanonicalH1OrdinalError):
-            save_plan(
-                "# App — Phase 2: Skipped\n\n- [ ] x\n",
-                target_dir=tmp_path,
-                expected_h1_ordinals=[0, 1],
-            )
-        # Atomicity: the file is unchanged.
-        assert plan_path.read_text(encoding="utf-8") == original
+        plan_path.write_text(
+            "## Phase phase_001: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: a\n",
+            encoding="utf-8",
+        )
+        # The inbound body uses phase_002 (per
+        # ``compute_required_phase_id(highest+1)``); the renumber
+        # step gives the final file H2 line ``## Phase 2: ...``,
+        # not a stale ``## Phase 1: ...`` duplicate.
+        save_plan(
+            "## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path
+        )
+        text = plan_path.read_text(encoding="utf-8")
+        h2_lines = [
+            ln for ln in text.splitlines() if ln.startswith("## Phase ")
+        ]
+        assert h2_lines == ["## Phase 1: A", "## Phase 2: B"]
 
 
 class TestStripAndRenderEndToEnd:
-    """Defect 4: codex's exact integration test shape.
+    """End-to-end: runtime owns phase identity; bad-id synthesizer
+    body raises rather than landing in PLAN.md.
 
-    Mock the council/query call to return synthesizer output with
-    a fabricated wrong H1 (`# App — Phase 3: Wrong`) while calling
-    generate_phase_plan(..., phase_number=2, ...). After save_plan
-    on phases 0 and 1 already exist, the final PLAN.md MUST contain
-    H1 ordinals [0, 1, 2] and zero "Wrong" content.
+    Pre-T-000186 this class pinned the strip-and-render contract:
+    even if the synthesizer fabricated a wrong ``# X — Phase N:`` H1,
+    duplo would strip it and prepend its canonical H1 with the roadmap-
+    supplied ordinal. After T-000186 the runtime computes the required
+    ``phase_NNN`` id from the existing PLAN.md (``highest + 1``) and
+    :func:`typed_plan_from_synthesizer_text` raises when the
+    synthesizer's body uses a different id. The test pins that
+    contract; the on-disk PLAN.md stays untouched.
     """
 
-    def test_synthesizer_wrong_ordinal_corrected_end_to_end(
+    def test_synthesizer_wrong_phase_id_raises_end_to_end(
         self, tmp_path: Path
     ) -> None:
-        # Seed PLAN.md with phases 0 and 1.
+        from bob_tools.planfile import PlanValidationError
+
+        # Seed PLAN.md with phases 1 and 2 (the canonical 1-indexed
+        # form the planfile renderer emits). The next required
+        # phase_id is ``phase_003``.
         seed = (
-            "# App — Phase 0: Scaffold\n\n- [ ] Phase 0 task\n\n"
-            "# App — Phase 1: Core\n\n- [ ] Phase 1 task\n"
+            "## Phase phase_001: Scaffold\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: Phase 1 task\n"
+            "\n"
+            "## Phase phase_002: Core\n"
+            "<!-- phase_id: phase_002 -->\n"
+            "\n"
+            "- [ ] T-000002: Phase 2 task\n"
         )
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(seed, encoding="utf-8")
 
-        # Synthesizer returns body with a wrong H1 that disagrees
-        # with the ordinal Duplo's roadmap state asks for.
+        # Synthesizer body uses the wrong phase_id; runtime expects
+        # ``phase_003`` (compute_required_phase_id reads the seed
+        # above and returns ``phase_003``).
         wrong_body = (
-            "# App — Phase 3: Wrong\n"
+            "## Phase phase_007: Wrong\n"
             "\n"
-            "- [ ] Phase 2 real task\n"
+            "- [ ] Phase real task\n"
         )
 
-        # Drive generate_phase_plan with phase_number=2.
         phase = {
             "phase": 2,
             "title": "Polish",
@@ -1348,84 +1538,194 @@ class TestStripAndRenderEndToEnd:
             "test": "",
         }
         with patch("duplo.planner.query", return_value=wrong_body):
+            with pytest.raises(PlanValidationError) as exc_info:
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    phase=phase,
+                    project_name="App",
+                    target_dir=tmp_path,
+                )
+        # The error message names both the supplied and required ids
+        # so the synthesizer's misbehavior is auditable.
+        assert "phase_007" in str(exc_info.value)
+        assert "phase_003" in str(exc_info.value)
+
+        # PLAN.md on disk is untouched.
+        assert plan_path.read_text(encoding="utf-8") == seed
+
+    def test_synthesizer_correct_phase_id_lands_canonical(
+        self, tmp_path: Path
+    ) -> None:
+        """Companion test: the synthesizer DOES use the
+        runtime-required ``phase_003`` id; the body lands with the
+        canonical contiguous-ordinal contract intact.
+        """
+        seed = (
+            "## Phase phase_001: Scaffold\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: Phase 1 task\n"
+            "\n"
+            "## Phase phase_002: Core\n"
+            "<!-- phase_id: phase_002 -->\n"
+            "\n"
+            "- [ ] T-000002: Phase 2 task\n"
+        )
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(seed, encoding="utf-8")
+
+        right_body = (
+            "## Phase phase_003: Polish\n"
+            "\n"
+            "- [ ] Phase 3 real task\n"
+        )
+        phase = {
+            "phase": 2,
+            "title": "Polish",
+            "goal": "scope to polish",
+            "features": [],
+            "test": "",
+        }
+        with patch("duplo.planner.query", return_value=right_body):
             content = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 phase=phase,
                 project_name="App",
+                target_dir=tmp_path,
             )
+        assert isinstance(content, Plan)
+        assert content.phases[0].phase_id == "phase_003"
 
-        # Strip-and-render: synthesizer's wrong H1 is gone, Duplo's
-        # canonical H1 is rendered with the roadmap-supplied ordinal 2.
-        assert "Phase 3: Wrong" not in content
-        assert "Phase 3" not in content
-        assert content.startswith("# App — Phase 2: Polish")
-        assert "- [ ] Phase 2 real task" in content
+        save_plan(content, target_dir=tmp_path)
 
-        # Now save_plan with expected_h1_ordinals from the roadmap.
-        save_plan(
-            content,
-            target_dir=tmp_path,
-            expected_h1_ordinals=[0, 1, 2],
-        )
-
-        # Final PLAN.md has the correct ordinal sequence and zero
-        # trace of the synthesizer's wrong H1.
         final = plan_path.read_text(encoding="utf-8")
-        h1_lines = [
-            ln for ln in final.splitlines() if ln.startswith("# ")
+        # The accumulated PLAN.md now has three phases with monotonic
+        # 1..3 ordinals from the canonical renderer.
+        h2_lines = [
+            ln for ln in final.splitlines() if ln.startswith("## Phase ")
         ]
-        ordinals = []
-        for ln in h1_lines:
-            m = re.search(r"Phase (\d+):", ln)
-            if m:
-                ordinals.append(int(m.group(1)))
-        assert ordinals == [0, 1, 2]
-        assert "Wrong" not in final
-        assert "Phase 3" not in final
+        assert h2_lines == [
+            "## Phase 1: Scaffold",
+            "## Phase 2: Core",
+            "## Phase 3: Polish",
+        ]
+        assert "Phase 3 real task" in final
 
 
 
 
 
 class TestSavePlanH1OrdinalValidation:
-    """save_plan validates the FULL accumulated PLAN.md before
-    writing. A violation leaves PLAN.md untouched (atomicity)."""
+    """save_plan's accumulated PLAN.md remains canonical across appends.
+
+    Pre-T-000186 the validator extracted ordinals from
+    ``# <project> — Phase N:`` H1 lines and required contiguous,
+    monotonic 0/1-indexed sequences. After T-000186 the canonical
+    PLAN.md uses ``## Phase N:`` headers and the typed-Plan merge
+    pipeline guarantees contiguous 1..N ordinals by construction
+    (the renumber step in :func:`_merge_existing_plan`). Tests now
+    pin the structural contract that replaced the regex-driven check.
+    """
 
     def test_save_plan_passes_on_valid_sequence(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "# App — Phase 0: A\n\n- [ ] a\n",
+            "## Phase phase_001: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: a\n",
             encoding="utf-8",
         )
-        save_plan("# App — Phase 1: B\n\n- [ ] b\n", target_dir=tmp_path)
+        save_plan(
+            "## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path
+        )
         text = plan_path.read_text(encoding="utf-8")
-        assert "Phase 0: A" in text
-        assert "Phase 1: B" in text
+        assert "## Phase 1: A" in text
+        assert "## Phase 2: B" in text
 
-    def test_save_plan_raises_on_duplicate_after_append(self, tmp_path: Path):
-        """Appending a phase that duplicates an existing ordinal
-        raises BEFORE writing — the file contents are unchanged."""
-        plan_path = tmp_path / _PLAN_FILENAME
-        original = "# App — Phase 0: A\n\n- [ ] a\n"
-        plan_path.write_text(original, encoding="utf-8")
-        with pytest.raises(CanonicalH1OrdinalError):
-            save_plan("# App — Phase 0: Dup\n\n- [ ] dup\n", target_dir=tmp_path)
-        # Atomicity: file unchanged.
-        assert plan_path.read_text(encoding="utf-8") == original
+    def test_save_plan_runtime_supplies_next_phase_id_not_a_duplicate(
+        self, tmp_path: Path
+    ):
+        """Pre-T-000186 a duplicate-ordinal append raised
+        :class:`CanonicalH1OrdinalError` at save-time. Post-T-000186
+        duplicate phase_ids cannot arrive through
+        :func:`generate_phase_plan`: the runtime computes
+        ``compute_required_phase_id`` from the existing PLAN.md
+        (``highest + 1``) and
+        :func:`typed_plan_from_synthesizer_text` raises
+        :class:`bob_tools.planfile.PlanValidationError` when the
+        synthesizer's body uses any other id. The duplicate-id
+        defense moved from save-time to author-time, but the intent —
+        "duplicate phase ordinals cannot reach PLAN.md via Duplo" —
+        is preserved.
+        """
+        from bob_tools.planfile import PlanValidationError
 
-    def test_save_plan_raises_on_gap_after_append(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
-        original = "# App — Phase 0: A\n\n- [ ] a\n"
-        plan_path.write_text(original, encoding="utf-8")
-        with pytest.raises(CanonicalH1OrdinalError):
-            save_plan("# App — Phase 2: Skipped\n\n- [ ] x\n", target_dir=tmp_path)
-        assert plan_path.read_text(encoding="utf-8") == original
+        plan_path.write_text(
+            "## Phase phase_001: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: a\n",
+            encoding="utf-8",
+        )
+
+        wrong_body = (
+            "## Phase phase_001: Dup\n"
+            "\n"
+            "- [ ] dup\n"
+        )
+        with patch("duplo.planner.query", return_value=wrong_body):
+            with pytest.raises(PlanValidationError):
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    project_name="App",
+                    target_dir=tmp_path,
+                )
+        # PLAN.md is unchanged (the synthesizer body never reached
+        # save_plan).
+        assert "Dup" not in plan_path.read_text(encoding="utf-8")
+
+    def test_save_plan_renumbers_gap_in_inbound_ordinal(
+        self, tmp_path: Path
+    ):
+        """Pre-T-000186 a gap-skipped append (``Phase 0`` then
+        ``Phase 2``) raised :class:`CanonicalH1OrdinalError`. After
+        T-000186 phase ordinals are renumbered at merge time to be
+        contiguous 1..N, so gap-skipping in the rendered output is
+        impossible by construction; the inbound ``phase_002`` id is
+        preserved (it does not collide with the existing
+        ``phase_001``).
+        """
+        plan_path = tmp_path / _PLAN_FILENAME
+        plan_path.write_text(
+            "## Phase phase_001: A\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: a\n",
+            encoding="utf-8",
+        )
+        save_plan(
+            "## Phase phase_002: Skipped\n\n- [ ] x\n",
+            target_dir=tmp_path,
+        )
+        text = plan_path.read_text(encoding="utf-8")
+        # Both H2 lines render with contiguous 1..2 ordinals.
+        h2_lines = [
+            ln for ln in text.splitlines() if ln.startswith("## Phase ")
+        ]
+        assert h2_lines == ["## Phase 1: A", "## Phase 2: Skipped"]
 
     def test_save_plan_passes_when_no_h1_phases_present(self, tmp_path: Path):
-        # Pre-canonical scaffold content has no phase H1; validator
-        # is a no-op, save_plan writes successfully.
+        # Pre-canonical scaffold content has no phase header; the
+        # planfile parser accepts a preamble-only Plan and save_plan
+        # writes successfully.
         save_plan("- [ ] task without H1\n", target_dir=tmp_path)
         path = tmp_path / _PLAN_FILENAME
         assert path.exists()
@@ -1676,14 +1976,36 @@ class TestSavePlanNeverEmitsBugsSection:
         assert "- [ ] Add login" in result
 
     def test_llm_bugs_heading_stripped_on_append(self, tmp_path):
+        """An LLM-authored ``## Bugs`` heading is stripped by
+        :func:`_strip_bugs_section` before the body is parsed; the
+        tasks under it are folded into the inbound phase content.
+
+        Pre-T-000186 the inbound block was a bare ``## Bugs`` plus
+        loose tasks; under the typed-Plan boundary the inbound text
+        must include a ``## Phase phase_NNN: <title>`` header (the
+        runtime computes the id; here ``phase_002`` because the
+        existing on-disk PLAN.md already has ``phase_001``).
+        """
         plan_path = tmp_path / _PLAN_FILENAME
-        plan_path.write_text("# Phase 1\n\n- [ ] Existing\n", encoding="utf-8")
-        appended = "## Bugs\n\n- [ ] New task\n"
+        plan_path.write_text(
+            "## Phase phase_001: Existing\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            "- [ ] T-000001: Existing\n",
+            encoding="utf-8",
+        )
+        appended = (
+            "## Phase phase_002: Added\n"
+            "\n"
+            "## Bugs\n"
+            "\n"
+            "- [ ] New task\n"
+        )
         save_plan(appended, target_dir=tmp_path)
         result = plan_path.read_text(encoding="utf-8")
         assert "## Bugs" not in result
-        assert "- [ ] New task" in result
-        assert "- [ ] Existing" in result
+        assert "New task" in result
+        assert "- [ ] T-000001: Existing" in result
 
 
 class TestPlanStructureForMcloop:
@@ -1694,9 +2016,11 @@ class TestPlanStructureForMcloop:
     that is an mcloop-internal convention added at runtime.
     """
 
-    # Realistic LLM output: feature tasks under H1, no ## Bugs heading.
+    # Realistic LLM output (post-T-000186 canonical Slice C form):
+    # feature tasks under the ``## Phase phase_NNN:`` header, no
+    # ``## Bugs`` heading anywhere.
     _LLM_GOOD = (
-        "# MyApp — Phase 1: Core\n"
+        "## Phase phase_001: Core\n"
         "\n"
         "Python/FastAPI web app with PostgreSQL.\n"
         "\n"
@@ -1705,9 +2029,10 @@ class TestPlanStructureForMcloop:
         '- [ ] Build dashboard [feat: "Dashboard"]\n'
     )
 
-    # Broken LLM output: feature tasks placed under ## Bugs.
+    # Broken LLM output: feature tasks placed under ## Bugs (an
+    # mcloop-internal section that duplo must never emit).
     _LLM_BAD = (
-        "# MyApp — Phase 1: Core\n"
+        "## Phase phase_001: Core\n"
         "\n"
         "Python/FastAPI web app with PostgreSQL.\n"
         "\n"
@@ -1719,15 +2044,21 @@ class TestPlanStructureForMcloop:
     )
 
     def _feature_section_tasks(self, text: str) -> list[str]:
-        """Return task lines that appear after the H1 heading."""
+        """Return task lines that appear after the phase header.
+
+        Post-T-000186 the canonical PLAN.md uses ``## Phase N: <title>``
+        as the phase boundary (with a ``<!-- phase_id: ... -->``
+        comment beneath); pre-T-000186 it was ``# <project> — Phase N:
+        <title>``. The helper anchors on the new boundary.
+        """
         lines = text.splitlines()
-        past_h1 = False
+        past_phase = False
         tasks: list[str] = []
         for line in lines:
-            if line.startswith("# "):
-                past_h1 = True
+            if line.startswith("## Phase ") or line.startswith("## Stage "):
+                past_phase = True
                 continue
-            if past_h1 and line.lstrip().startswith("- ["):
+            if past_phase and line.lstrip().startswith("- ["):
                 tasks.append(line)
         return tasks
 
@@ -1784,13 +2115,17 @@ class TestStripTrailingCommentary:
     """
 
     def test_truncates_after_last_task_with_fence_and_commentary(self):
-        # _strip_fences() cannot remove the fence because _FENCE_RE requires
-        # the closing fence at end-of-string, and trailing commentary breaks
-        # that. _ensure_h1_heading() strips the opening fence. The fix
-        # function must then drop the closing fence and everything after it.
+        """End-to-end: a fenced synthesizer body with trailing
+        meta-commentary still parses cleanly under the typed-Plan
+        boundary. Pre-T-000186 the assertion was that the returned
+        markdown string ended at ``- [ ] Third task\\n``; post-T-000186
+        the boundary returns a typed :class:`bob_tools.planfile.Plan`
+        whose tasks survive verbatim and whose rendered output
+        contains none of the fence / commentary noise.
+        """
         llm_output = (
             "```markdown\n"
-            "# MyApp — Phase 1: Core\n"
+            "## Phase phase_001: Core\n"
             "\n"
             "- [ ] First task\n"
             "- [ ] Second task\n"
@@ -1811,11 +2146,20 @@ class TestStripTrailingCommentary:
                 project_name="MyApp",
                 phase_number=1,
             )
-        assert result.endswith("- [ ] Third task\n")
-        assert "```" not in result
-        assert "---" not in result
-        assert "**Structure:**" not in result
-        assert "Want me to write it?" not in result
+        assert isinstance(result, Plan)
+        text = _plan_to_text(result)
+        # Three task lines survive in document order.
+        task_lines = [
+            ln for ln in text.splitlines() if ln.lstrip().startswith("- [ ]")
+        ]
+        assert any("First task" in ln for ln in task_lines)
+        assert any("Second task" in ln for ln in task_lines)
+        assert any("Third task" in ln for ln in task_lines)
+        # The fence and trailing commentary are gone.
+        assert "```" not in text
+        assert "---" not in text
+        assert "**Structure:**" not in text
+        assert "Want me to write it?" not in text
 
     def test_keeps_content_unchanged_when_no_trailing_garbage(self):
         content = "# Phase 1: Core\n\n- [ ] Task one\n- [ ] Task two\n"
@@ -1950,11 +2294,18 @@ class TestStripFences:
 
     def test_generate_phase_plan_strips_fences(self):
         """generate_phase_plan strips an outer code fence from the
-        synthesizer's body. Strip-and-render then overrides the
-        inner H1 with Duplo's canonical envelope, so the test
-        passes project_name explicitly to make the canonical match
-        a stable expected value."""
-        fenced = "```markdown\n# MyApp — Phase 1: Core\n\n- [ ] Task\n```"
+        synthesizer's body before parsing it into a typed Plan.
+        After T-000186 the return is a typed Plan, not markdown, so
+        the assertion is on the parsed phase header and surviving
+        task.
+        """
+        fenced = (
+            "```markdown\n"
+            "## Phase phase_001: Core\n"
+            "\n"
+            "- [ ] Task\n"
+            "```"
+        )
         with patch("duplo.planner.query", return_value=fenced):
             result = generate_phase_plan(
                 "https://example.com",
@@ -1962,9 +2313,13 @@ class TestStripFences:
                 _sample_prefs(),
                 project_name="MyApp",
             )
-        assert not result.startswith("```")
-        assert result.startswith("# MyApp — Phase ")
-        assert "- [ ] Task" in result
+        assert isinstance(result, Plan)
+        text = _plan_to_text(result)
+        assert "```" not in text
+        assert "## Phase 1: Core" in text
+        assert any(
+            "Task" in t.text for t in result.phases[0].tasks
+        )
 
     def test_generate_next_phase_plan_strips_fences(self):
         fenced = "```markdown\n# Phase 2: Search\n\n- [ ] Task\n```"

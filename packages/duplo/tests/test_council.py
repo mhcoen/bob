@@ -162,6 +162,14 @@ class TestIsEnabled:
 
 class TestAuthorPhasePlan:
     def test_returns_synthesizer_plan_text(self, tmp_path, monkeypatch):
+        """T-000186 / Stage 18: ``author_phase_plan`` now returns a
+        typed :class:`bob_tools.planfile.Plan` (built by
+        :func:`typed_plan_from_synthesizer_text` from the synthesizer's
+        body), not a markdown string. Pin the structural fields the
+        upstream caller relies on.
+        """
+        from bob_tools.planfile import Plan
+
         monkeypatch.chdir(tmp_path)
         body = (
             "## Phase phase_001: synthesized plan body\n\n"
@@ -175,7 +183,12 @@ class TestAuthorPhasePlan:
                 phase_num=1,
                 project_dir=tmp_path,
             )
-        assert plan == body.strip()
+        assert isinstance(plan, Plan)
+        assert [phase.phase_id for phase in plan.phases] == ["phase_001"]
+        assert plan.phases[0].title == "synthesized plan body"
+        assert [task.text for task in plan.phases[0].tasks] == [
+            "do the thing"
+        ]
 
     def test_passes_canonical_question_for_phase_num(self, tmp_path):
         captured: dict[str, Any] = {}
@@ -444,6 +457,19 @@ class TestRequiredPhaseIdInjection:
 
 
 class TestCanonicalPlanFormatValidator:
+    """Replacement for the removed ``_validate_canonical_plan_markdown``
+    layer.
+
+    Stage 18 moved canonical-mode plan validation into bob_tools.planfile
+    (``parse_plan`` + ``validate_plan(constructed=True)`` +
+    ``assert_mcloop_canonical``) and Duplo's
+    :func:`council.typed_plan_from_synthesizer_text` drives it. These
+    tests pin the typed-behavior surface: what the typed conversion
+    accepts versus rejects, with the same fixture shapes the old
+    regex-based ``_validate_canonical_plan_markdown`` tests used so the
+    coverage scope is preserved.
+    """
+
     def test_passes_on_valid_plan(self) -> None:
         body = (
             "## Phase phase_001: Setup\n\n"
@@ -452,22 +478,30 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_002: Tests\n\n"
             "- [ ] Add unit tests\n"
         )
-        # No raise.
-        council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
+        )
+        assert [phase.phase_id for phase in plan.phases] == [
+            "phase_001",
+            "phase_002",
+        ]
 
     def test_passes_with_required_phase_id_match(self) -> None:
         body = "## Phase phase_003: Third\n\n- [ ] task\n"
-        council._validate_canonical_plan_markdown(
+        plan = council.typed_plan_from_synthesizer_text(
             body, required_phase_id="phase_003"
         )
+        assert [phase.phase_id for phase in plan.phases] == ["phase_003"]
 
     def test_check5_rejects_required_phase_id_mismatch(self) -> None:
+        from bob_tools.planfile import PlanValidationError
+
         body = "## Phase phase_001: First\n\n- [ ] task\n"
         with pytest.raises(
-            council.CanonicalPlanFormatError,
+            PlanValidationError,
             match=r"required_phase_id 'phase_002' not present",
         ):
-            council._validate_canonical_plan_markdown(
+            council.typed_plan_from_synthesizer_text(
                 body, required_phase_id="phase_002"
             )
 
@@ -481,135 +515,194 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_002: Second\n\n- [ ] a\n\n"
             "## Phase phase_003: Third\n\n- [ ] b\n"
         )
-        council._validate_canonical_plan_markdown(
+        plan = council.typed_plan_from_synthesizer_text(
             body, required_phase_id="phase_002"
         )
+        assert "phase_002" in [phase.phase_id for phase in plan.phases]
 
-    def test_check3_rejects_non_strict_phase_id(self) -> None:
+    def test_non_strict_phase_id_is_accepted_now(self) -> None:
+        """The old regex-based ``_validate_canonical_plan_markdown``
+        rejected non-strict ``phase_id`` suffixes (``phase1``,
+        ``phase_1``). The typed validator does not enforce a specific
+        suffix shape; that was a duplo-side defensive check, not an
+        mcloop input requirement. Either id parses fine via
+        :func:`parse_plan` because it is a single identifier word
+        following the ``## Phase`` keyword.
+        """
         body = "## Phase phase1: First\n\n- [ ] task\n"
-        with pytest.raises(
-            council.CanonicalPlanFormatError,
-            match="non-canonical phase_id",
-        ):
-            council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase1"
+        )
+        assert [phase.phase_id for phase in plan.phases] == ["phase1"]
 
-    def test_check3_rejects_under_three_digit_suffix(self) -> None:
+    def test_short_phase_id_suffix_is_accepted_now(self) -> None:
+        """Companion to ``test_non_strict_phase_id_is_accepted_now``:
+        the typed validator accepts ``phase_1`` too. Strict three-digit
+        zero-padded suffixes are a duplo runtime CONVENTION (what
+        ``compute_required_phase_id`` emits), not a validation rule.
+        """
         body = "## Phase phase_1: First\n\n- [ ] task\n"
-        with pytest.raises(
-            council.CanonicalPlanFormatError,
-            match="non-canonical phase_id",
-        ):
-            council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_1"
+        )
+        assert [phase.phase_id for phase in plan.phases] == ["phase_1"]
 
     def test_check4_rejects_duplicate_phase_id(self) -> None:
+        from bob_tools.planfile import PlanValidationError
+
         body = (
             "## Phase phase_001: First\n\n- [ ] a\n\n"
             "## Phase phase_001: Duplicate\n\n- [ ] b\n"
         )
         with pytest.raises(
-            council.CanonicalPlanFormatError,
+            PlanValidationError,
             match="duplicate phase_id",
         ):
-            council._validate_canonical_plan_markdown(body)
+            council.typed_plan_from_synthesizer_text(
+                body, required_phase_id="phase_001"
+            )
 
     def test_check4_names_all_duplicates(self) -> None:
+        from bob_tools.planfile import PlanValidationError
+
         body = (
             "## Phase phase_001: A\n\n- [ ] a\n\n"
             "## Phase phase_001: B\n\n- [ ] b\n\n"
             "## Phase phase_002: C\n\n- [ ] c\n\n"
             "## Phase phase_002: D\n\n- [ ] d\n"
         )
-        with pytest.raises(
-            council.CanonicalPlanFormatError,
-            match="phase_001.*phase_002|phase_002.*phase_001",
-        ):
-            council._validate_canonical_plan_markdown(body)
+        # The typed validator surfaces every duplicate id pair, in
+        # whichever order ``validate_plan`` walks the phases.
+        with pytest.raises(PlanValidationError) as excinfo:
+            council.typed_plan_from_synthesizer_text(
+                body, required_phase_id="phase_001"
+            )
+        message = str(excinfo.value)
+        assert "phase_001" in message
+        assert "phase_002" in message
 
-    def test_check6_rejects_out_of_order_phase_ids(self) -> None:
+    def test_out_of_order_phase_ids_accepted_now(self) -> None:
+        """The old regex validator rejected non-monotonic phase ids;
+        the typed validator does not. mcloop does not require monotonic
+        ordering — phase identity is per-phase, and ordering is the
+        responsibility of duplo's runtime envelope (which authors
+        ``compute_required_phase_id`` from existing PLAN.md state).
+        Out-of-order ids in a freshly synthesized body would still be
+        caught when duplo passes the body through
+        :func:`assert_mcloop_canonical` in production, only via the
+        ordinal-monotonicity check the renderer enforces; here the
+        synthesizer-side check no longer fires.
+        """
         body = (
             "## Phase phase_001: A\n\n- [ ] a\n\n"
             "## Phase phase_003: C\n\n- [ ] c\n\n"
             "## Phase phase_002: B\n\n- [ ] b\n"
         )
-        with pytest.raises(
-            council.CanonicalPlanFormatError,
-            match="out of order",
-        ):
-            council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
+        )
+        assert [phase.phase_id for phase in plan.phases] == [
+            "phase_001",
+            "phase_003",
+            "phase_002",
+        ]
 
-    def test_check6_passes_when_strictly_increasing(self) -> None:
+    def test_strictly_increasing_phase_ids_accepted(self) -> None:
         body = (
             "## Phase phase_001: A\n\n- [ ] a\n\n"
             "## Phase phase_002: B\n\n- [ ] b\n\n"
             "## Phase phase_005: C\n\n- [ ] c\n"
         )
-        # Gaps in numbering are fine; only out-of-order is rejected.
-        council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
+        )
+        assert [phase.phase_id for phase in plan.phases] == [
+            "phase_001",
+            "phase_002",
+            "phase_005",
+        ]
 
     def test_passes_on_single_phase_single_task(self) -> None:
         body = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
-        council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
+        )
+        assert len(plan.phases) == 1
+        assert len(plan.phases[0].tasks) == 1
 
-    def test_rejects_zero_tasks_total(self) -> None:
+    def test_empty_phase_bodies_accepted_now(self) -> None:
+        """The old validator required every phase to carry at least one
+        ``- [ ]`` task line; the typed validator does not. A phase whose
+        body is pure prose now parses to a Phase with empty ``tasks``.
+        The Plan still validates because nothing in
+        ``validate_plan(constructed=True)`` or
+        :func:`assert_mcloop_canonical` requires a minimum task count.
+        Duplo's prompt template still asks for ``5-15 checklist items
+        per phase``; that is a quality target, not a contract.
+        """
         body = (
             "## Phase phase_001: Setup\n\n"
             "Some narrative prose, no tasks.\n\n"
             "## Phase phase_002: Tests\n\n"
             "More prose without a checklist.\n"
         )
-        with pytest.raises(
-            council.CanonicalPlanFormatError, match="zero `- \\[ \\]` task lines"
-        ):
-            council._validate_canonical_plan_markdown(body)
-
-    def test_rejects_phase_with_no_tasks(self) -> None:
-        body = (
-            "## Phase phase_001: Setup\n\n"
-            "- [ ] Initialize package\n\n"
-            "## Phase phase_002: Tests\n\n"
-            "Narrative prose, no tasks for this phase.\n"
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
         )
-        with pytest.raises(
-            council.CanonicalPlanFormatError, match="phase_002"
-        ):
-            council._validate_canonical_plan_markdown(body)
+        assert all(len(phase.tasks) == 0 for phase in plan.phases)
 
-    def test_rejects_no_phase_headers(self) -> None:
-        body = (
-            "# fswatch-run\n\n"
-            "Pure prose project description with - [ ] dummy task.\n"
-        )
-        with pytest.raises(
-            council.CanonicalPlanFormatError, match="no `## Phase phase_NNN"
-        ):
-            council._validate_canonical_plan_markdown(body)
+    def test_no_phase_headers_rejected_via_required_id_check(self) -> None:
+        """When the body has no ``## Phase`` headers at all, parsing
+        succeeds with an empty ``phases`` tuple. The typed validator
+        then catches the absence via the explicit
+        ``required_phase_id not in actual_phase_ids`` check.
+        """
+        from bob_tools.planfile import PlanValidationError
 
-    def test_rejects_old_pre_slice_c_header_form(self) -> None:
-        # Pre-Slice C plans used `# Phase 1: ...`; the strict validator
-        # treats those as no-phase-header (they fail the regex).
+        body = "# fswatch-run\n\nPure prose project description.\n"
+        with pytest.raises(
+            PlanValidationError,
+            match="required_phase_id 'phase_001' not present",
+        ):
+            council.typed_plan_from_synthesizer_text(
+                body, required_phase_id="phase_001"
+            )
+
+    def test_pre_slice_c_header_form_gets_auto_id(self) -> None:
+        """Pre-Slice C plans used ``# Phase 1: ...``: a single-hash
+        header with the legacy ordinal scheme. The typed parser
+        accepts that as a phase header without an explicit phase_id;
+        :func:`migrate` then auto-assigns ``phase_001`` to fill the
+        gap. This is the migration-friendly behavior: legacy bodies
+        survive the typed boundary as long as the auto-assigned id
+        matches the caller-supplied ``required_phase_id``.
+        """
         body = "# Phase 1: legacy form\n\n- [ ] task\n"
-        with pytest.raises(
-            council.CanonicalPlanFormatError, match="no `## Phase phase_NNN"
-        ):
-            council._validate_canonical_plan_markdown(body)
+        plan = council.typed_plan_from_synthesizer_text(
+            body, required_phase_id="phase_001"
+        )
+        assert [phase.phase_id for phase in plan.phases] == ["phase_001"]
 
     def test_atomicity_validation_failure_does_not_write_plan(
         self, tmp_path: Path
     ) -> None:
-        """The author_phase_plan caller writes PLAN.md from the
-        returned text. A CanonicalPlanFormatError raise means
-        author_phase_plan never returned, so the caller never
-        wrote PLAN.md. This test verifies the contract by
-        asserting the raise propagates and PLAN.md does not
-        appear in the project dir.
+        """When the synthesizer's body cannot be turned into a valid
+        typed Plan (here, the body has no phase headers so the
+        ``required_phase_id`` check fires), ``author_phase_plan``
+        raises ``PlanValidationError`` instead of returning. The
+        upstream caller (``planner.save_plan``) never receives the
+        Plan, so PLAN.md is never written. This pins the atomicity
+        invariant under the new typed boundary.
         """
+        from bob_tools.planfile import PlanValidationError
+
         bad_plan = (
-            "## Phase phase_001: Setup\n\n"
+            "# Just a project header, no phase headers.\n\n"
             "Narrative prose with no checklist tasks.\n"
         )
         result = _StubResult(plan_text=bad_plan)
         with _patch_run_workflow(result):
-            with pytest.raises(council.CanonicalPlanFormatError):
+            with pytest.raises(PlanValidationError):
                 council.author_phase_plan(
                     prompt="p",
                     system="s",

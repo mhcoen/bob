@@ -182,15 +182,17 @@ def _build_plan_header(
     app_name: str,
     spec: ProductSpec | None,
     prefs: BuildPreferences,
-) -> str:
-    """Build the top-level PLAN.md header block.
+):
+    """Build the top-level PLAN.md header as a typed :class:`Plan`.
 
-    The block is: ``# {app_name}`` / blank line / project description
-    (from ``spec.purpose`` when available, otherwise a placeholder) /
-    blank line / a single platform/language/constraints line derived
-    from *prefs*.  mcloop and downstream tools rely on PLAN.md starting
-    with this H1 project header rather than a phase heading.
+    The header carries the project title, a description preamble
+    (from ``spec.purpose`` when available, otherwise a placeholder),
+    and a single platform/language/constraints line derived from
+    *prefs*. The returned :class:`Plan` has no phases yet; phase
+    generation appends them via :func:`duplo.planner.save_plan`.
     """
+    from bob_tools.planfile import Plan as _Plan
+
     description = ""
     if spec is not None and spec.purpose:
         description = spec.purpose.strip()
@@ -206,7 +208,15 @@ def _build_plan_header(
     parts.extend(p for p in prefs.preferences if p)
     platform_line = ", ".join(parts) if parts else "Platform and constraints: TBD"
 
-    return f"# {app_name}\n\n{description}\n\n{platform_line}"
+    preamble = f"{description}\n\n{platform_line}"
+    return _Plan(
+        magic_version=None,
+        project_title=app_name,
+        preamble=preamble,
+        phases=(),
+        bugs=None,
+        source_path=None,
+    )
 
 
 def _load_preferences(data: dict, spec) -> list[BuildPreferences]:
@@ -1205,21 +1215,68 @@ def _extract_created_files(content: str) -> list[str]:
     return _PHASE_CREATED_FILE_RE.findall(content)
 
 
-def _observed_phase_count(plan_text: str) -> int:
-    """Count canonical-envelope H1 phase headings in *plan_text*.
+def _extract_created_files_from_plan(plan_or_text: object) -> list[str]:
+    """Extract created-file paths from a typed Plan or a markdown string.
 
-    Uses ``planner._PHASE_H1_VALIDATE_RE`` so an observed heading must
-    match the strict envelope shape ``# <project> -- Phase N: <title>``
-    that ``_ensure_h1_heading`` renders. Prose H1s like
-    ``# Background: Phase 1 introduced filtering`` are excluded by
-    construction (the validate regex anchors on the em-dash separator
-    and the "Phase N" prefix).
+    The phase-generation loop now receives a :class:`Plan` instead of a
+    markdown string, but the legacy ``Create `<path>``` scan still
+    operates on task text. This helper renders the plan's task text and
+    runs the legacy regex over it; for backward-compat it accepts a
+    string too (so resume paths that load PLAN.md text keep working
+    without a typed round-trip).
     """
-    from duplo import planner
+    if isinstance(plan_or_text, str):
+        return _extract_created_files(plan_or_text)
+    from bob_tools.planfile import Plan as _Plan
+
+    if not isinstance(plan_or_text, _Plan):
+        return []
+    lines: list[str] = []
+    for phase in plan_or_text.phases:
+        for task in _walk_plan_tasks(phase.tasks):
+            lines.append(task.text)
+        for sub in phase.subsections:
+            for task in _walk_plan_tasks(sub.tasks):
+                lines.append(task.text)
+    joined = "\n".join(lines)
+    return _PHASE_CREATED_FILE_RE.findall(joined)
+
+
+def _walk_plan_tasks(tasks):
+    """Yield every task in ``tasks`` plus all nested children, in document order."""
+    for task in tasks:
+        yield task
+        yield from _walk_plan_tasks(task.children)
+
+
+_OBSERVED_PHASE_HEADER_RE = re.compile(
+    r"^##\s+(?:Phase|Stage)\s+\S+:\s+\S"
+)
+
+
+def _observed_phase_count(plan_text: str) -> int:
+    """Count canonical phase H2 headings in *plan_text*.
+
+    After T-000186 migrated PLAN.md generation onto the typed
+    :class:`bob_tools.planfile.Plan` API, the renderer emits each phase
+    as ``## Phase phase_NNN: <title>`` (or ``## Stage N: <title>``)
+    followed by a ``<!-- phase_id: ... -->`` comment line. The legacy
+    ``# <project> -- Phase N: <title>`` envelope has been retired from
+    fresh-generation writes, so resume bookkeeping must count the H2
+    phase headers the planfile renderer actually emits.
+
+    The regex matches any depth-2 heading whose first word is
+    ``Phase`` or ``Stage`` (mcloop's two recognized phase keywords)
+    followed by an ordinal token (digits, ``phase_NNN``, etc.), a
+    colon, and a non-blank title. Prose H2s like ``## Background``
+    are excluded by the ``Phase|Stage`` anchor; mid-document
+    references like ``## Notes about Phase 1`` are excluded by the
+    leading-keyword requirement.
+    """
     return sum(
         1
         for line in plan_text.splitlines()
-        if planner._PHASE_H1_VALIDATE_RE.match(line)
+        if _OBSERVED_PHASE_HEADER_RE.match(line)
     )
 
 
@@ -1274,6 +1331,7 @@ def _run_phase_generation_loop(
                 platform_addendum=platform_addendum,
                 prior_phases_files=list(prior_phases_files),
             )
+            extra_markdown = ""
             if idx == total_phases - 1:
                 frame_descs = load_frame_descriptions()
                 if frame_descs:
@@ -1281,20 +1339,20 @@ def _run_phase_generation_loop(
                     vcases = extract_verification_cases(frame_descs)
                     if vcases:
                         vtasks = format_verification_tasks(vcases)
-                        content = content.rstrip() + "\n" + vtasks
+                        extra_markdown += "\n" + vtasks
                         print(f"  {len(vcases)} verification case(s) added.")
-                spec_vtasks = ""
                 if spec:
                     spec_vtasks = format_contracts_as_verification(spec)
-                if spec_vtasks:
-                    assert spec is not None
-                    content = content.rstrip() + "\n" + spec_vtasks
-                    print(
-                        f"  {len(spec.behavior_contracts)} spec "
-                        f"verification case(s) added."
-                    )
-            saved_plan_path = save_plan(content)
-            prior_phases_files.extend(_extract_created_files(content))
+                    if spec_vtasks:
+                        extra_markdown += "\n" + spec_vtasks
+                        print(
+                            f"  {len(spec.behavior_contracts)} spec "
+                            f"verification case(s) added."
+                        )
+            saved_plan_path = save_plan(
+                content, extra_markdown_tasks=extra_markdown
+            )
+            prior_phases_files.extend(_extract_created_files_from_plan(content))
         except ClaudeCliError as exc:
             record_failure(
                 "pipeline:phase_generation",

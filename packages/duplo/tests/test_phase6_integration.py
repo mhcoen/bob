@@ -1138,9 +1138,24 @@ class TestInitThenDuploRunWorksEndToEnd:
         plan_path = tmp_path / "PLAN.md"
         assert plan_path.is_file()
         plan_text = plan_path.read_text()
-        # Mocked plan body must land on disk verbatim — save_plan does
-        # not touch the generated content itself.
-        assert plan_content in plan_text
+        # Post T-000186 the mocked synthesizer body is parsed by
+        # :func:`bob_tools.planfile.parse_plan` and rendered through
+        # the typed Plan API; on-disk bytes are produced by
+        # :func:`bob_tools.planfile.save`, not by a verbatim write of
+        # the mocked string. The mocked body uses the legacy
+        # ``# <project> -- Phase N: <title>`` H1 form, which the
+        # parser treats as a phase header (the H1-as-Phase shape that
+        # the typed planfile recognizes too). After
+        # ``_merge_existing_plan`` the rendered output carries a
+        # ``## Phase N: <title>`` heading with a phase-id comment
+        # beneath, the task lines from the synthesizer body (each
+        # carrying a T-NNNNNN id assigned by ``migrate``), and the
+        # ``[feat: ...]`` annotations from the source body.
+        assert "## Phase 1: Core calculator" in plan_text, plan_text
+        assert "<!-- phase_id: phase_001 -->" in plan_text, plan_text
+        assert "Set up project scaffolding" in plan_text, plan_text
+        assert "Implement inline evaluation" in plan_text, plan_text
+        assert "Implement unit conversion" in plan_text, plan_text
         for feat in features:
             assert feat.name in plan_text
 
@@ -1160,6 +1175,125 @@ class TestInitThenDuploRunWorksEndToEnd:
         saved_names = {f["name"] for f in data.get("features", [])}
         expected_names = {f.name for f in features}
         assert expected_names.issubset(saved_names)
+
+    def test_fresh_generation_planmd_passes_mcloop_enforce_canonical(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Cross-repo gate: a representative duplo fresh-generation run
+        must produce a PLAN.md that mcloop's real
+        :func:`mcloop._planfile_precondition.enforce_canonical` accepts.
+
+        This is the T-000187 acceptance check. Duplo's fresh-generation
+        path persists the typed Plan through
+        :func:`bob_tools.planfile.save`, whose ``canonical`` mode runs
+        :func:`bob_tools.planfile.assert_mcloop_canonical` against the
+        Plan before writing. The bytes on disk are therefore equal to
+        the validator's output by construction; this test pins that
+        the *consumer* of those bytes — mcloop's preconditioner — also
+        accepts them, so the two predicates have not silently
+        diverged at the duplo seam. The bob-tools parity test
+        (``test_planfile_precondition_parity``) covers the abstract
+        equivalence; this test covers it against the artifact a real
+        duplo run lands on disk.
+
+        mcloop is not a duplo dependency, so the test imports
+        ``mcloop._planfile_precondition`` from a hard-coded sibling
+        project path and skips cleanly when the source tree is
+        absent. This mirrors the bob-tools parity test's import
+        approach.
+        """
+        import sys
+
+        import pytest
+
+        from duplo.init import run_init
+        from duplo.pipeline import _subsequent_run
+        from duplo.validator import ValidationResult
+
+        mcloop_root = Path("/Users/mhcoen/proj/mcloop")
+        precondition_path = mcloop_root / "mcloop" / "_planfile_precondition.py"
+        if not precondition_path.is_file():
+            pytest.skip(
+                "mcloop._planfile_precondition source not present at "
+                f"{precondition_path}; skipping cross-repo canonical "
+                "gate. The parity property is also covered by bob-tools "
+                "test_planfile_precondition_parity."
+            )
+        if str(mcloop_root) not in sys.path:
+            sys.path.insert(0, str(mcloop_root))
+        try:
+            from mcloop import (
+                _planfile_precondition as mcloop_precondition,
+            )
+        except Exception as exc:
+            pytest.skip(
+                f"mcloop._planfile_precondition import failed: {exc}; "
+                "skipping cross-repo canonical gate."
+            )
+
+        from bob_tools.planfile import parse_plan
+
+        monkeypatch.chdir(tmp_path)
+
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="single identifiable product",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=_END_TO_END_DRAFTED_SPEC),
+        ):
+            run_init(_make_args(url=_IDENTIFIED_FIXTURE_URL))
+        capsys.readouterr()
+
+        spec_path = tmp_path / "SPEC.md"
+        spec_text = spec_path.read_text()
+        spec_text = spec_text.replace(_ARCHITECTURE_FILL_IN, _FILLED_IN_ARCHITECTURE)
+        spec_path.write_text(spec_text)
+
+        with (
+            patch(
+                "duplo.pipeline.fetch_site",
+                return_value=_fetch_site_identified_fixture(),
+            ),
+            patch(
+                "duplo.pipeline.extract_features",
+                return_value=_make_end_to_end_features(),
+            ),
+            patch("duplo.saver._find_duplicate_groups", return_value=[]),
+            patch(
+                "duplo.main.select_features",
+                side_effect=_select_all_features,
+            ),
+            patch(
+                "duplo.pipeline.generate_roadmap",
+                return_value=_make_end_to_end_roadmap(),
+            ),
+            patch(
+                "duplo.pipeline.generate_phase_plan",
+                return_value=_make_end_to_end_plan_content(),
+            ),
+        ):
+            _subsequent_run()
+        capsys.readouterr()
+
+        plan_path = tmp_path / "PLAN.md"
+        assert plan_path.is_file(), "fresh-generation flow did not produce PLAN.md"
+        plan_text = plan_path.read_text(encoding="utf-8")
+        plan = parse_plan(plan_text, source_path=plan_path)
+
+        # The real predicate. ``enforce_canonical`` raises
+        # ``PlanNotCanonicalError`` on rejection; a clean call is the
+        # ACCEPT verdict the gate requires.
+        mcloop_precondition.enforce_canonical(plan_text, plan, source_path=plan_path)
 
     def test_subsequent_run_pipeline_mocks_route_correctly(self, tmp_path, monkeypatch):
         """Confirm the three mocks 6.25.2 names route to the functions

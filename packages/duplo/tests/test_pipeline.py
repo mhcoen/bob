@@ -195,7 +195,15 @@ class TestPlanProjectHeader:
         )
         monkeypatch.chdir(tmp_path)
 
-        llm_output = "# numi -- Phase 0: Scaffold\n\n- [ ] Scaffold project\n"
+        # Post-T-000186 the canonical phase header is the H2
+        # ``## Phase phase_NNN: <title>``; the project ``# numi`` H1
+        # is the planfile ``project_title``. The test mocks the
+        # synthesizer body and runs the pipeline end-to-end, then
+        # checks the structural project-header invariant against the
+        # new on-disk shape.
+        llm_output = (
+            "## Phase phase_001: Scaffold\n\n- [ ] Scaffold project\n"
+        )
         with (
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.pipeline.generate_phase_plan", return_value=llm_output),
@@ -205,15 +213,28 @@ class TestPlanProjectHeader:
         written = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         lines = written.splitlines()
         assert lines, "PLAN.md is empty"
-        # First line must be the top-level project header, not a phase heading.
-        assert lines[0] == "# numi", f"PLAN.md first line must be '# numi', got: {lines[0]!r}"
-        # The project header must appear before any phase heading in the file.
+        # The top-level project header is ``# numi``. The planfile
+        # renderer prefixes the file with a magic-version comment;
+        # the project H1 lives on the first non-blank, non-comment
+        # line.
+        first_h1 = next(
+            (ln for ln in lines if ln.startswith("# ")), None
+        )
+        assert first_h1 == "# numi", (
+            f"PLAN.md project header must be '# numi', got: {first_h1!r}"
+        )
+        # The project header appears before any phase header.
+        h1_idx = lines.index(first_h1)
         phase_idx = next(
-            (i for i, ln in enumerate(lines) if ln.startswith("# ") and "Phase" in ln),
+            (
+                i
+                for i, ln in enumerate(lines)
+                if ln.startswith("## Phase ")
+            ),
             None,
         )
-        assert phase_idx is not None and phase_idx > 0, (
-            "Phase heading must come after the project header"
+        assert phase_idx is not None and phase_idx > h1_idx, (
+            "Phase header must come after the project header"
         )
         # The description from SPEC.md Purpose is present.
         assert "command-line calculator" in written
@@ -239,10 +260,15 @@ class TestSubsequentRunResume:
 
     def test_skips_plan_generation_when_plan_exists(self, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        # Canonical envelope so the resume branch sees observed == roadmap
-        # length and does not regenerate.
+        # Canonical Slice C phase header so the resume branch sees
+        # observed == roadmap length and does not regenerate. Post
+        # T-000186 the renderer emits ``## Phase phase_NNN: <title>``
+        # with a phase-id comment beneath, which
+        # :func:`pipeline._observed_phase_count` matches.
         (tmp_path / "PLAN.md").write_text(
-            "# Stub — Phase 0: Core\n", encoding="utf-8"
+            "## Phase phase_001: Core\n"
+            "<!-- phase_id: phase_001 -->\n",
+            encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
 
@@ -254,11 +280,14 @@ class TestSubsequentRunResume:
 
     def test_incomplete_plan_prints_run_mcloop(self, capsys, tmp_path, monkeypatch):
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        # Canonical envelope so observed == roadmap length; this exercises
-        # the "PLAN.md complete for current cycle but tasks unchecked"
-        # branch, not the new partial-write resume branch.
+        # Canonical phase header so observed == roadmap length; this
+        # exercises the "PLAN.md complete for current cycle but tasks
+        # unchecked" branch, not the new partial-write resume branch.
         (tmp_path / "PLAN.md").write_text(
-            "# Stub — Phase 0: Core\n- [ ] Task\n", encoding="utf-8"
+            "## Phase phase_001: Core\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [ ] Task\n",
+            encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
 
@@ -3918,9 +3947,23 @@ class TestGapDetectorSkipsWithUncheckedTasks:
     def test_gap_detector_skipped_when_plan_has_unchecked_tasks(
         self, capsys, tmp_path, monkeypatch
     ):
-        """When PLAN.md has unchecked tasks, gap detection must not run."""
+        """When PLAN.md has unchecked tasks, gap detection must not run.
+
+        Post T-000186 the canonical phase header is the H2
+        ``## Phase phase_NNN: Title`` (with a ``<!-- phase_id: ... -->``
+        comment line beneath), which
+        :func:`pipeline._observed_phase_count` matches. The plan body
+        below must use that form so the resume branch sees
+        ``observed == len(roadmap) == 1`` and dispatches to the
+        gap-detection arm under test.
+        """
         _write_duplo_json(tmp_path, self._BASE_DATA)
-        plan = "# Phase 0\n- [x] Done task\n- [ ] User-added task\n"
+        plan = (
+            "## Phase phase_001: Core\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [x] Done task\n"
+            "- [ ] User-added task\n"
+        )
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
         duplo_dir = tmp_path / ".duplo"
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
@@ -4729,16 +4772,21 @@ class TestPhase2NotStartedRunDuplo:
         ],
     }
 
-    # PLAN.md must contain one canonical envelope per roadmap entry so
-    # the new State 2 resume branch sees observed == len(roadmap) and
-    # falls through to the "Run mcloop" path under test. The Phase 1
-    # envelope carries no tasks because current_phase=1 makes
-    # _plan_is_complete inspect that section; with no tasks present it
-    # returns False, keeping the dispatch on State 2.
+    # PLAN.md must contain one canonical phase header per roadmap entry
+    # so the State 2 resume branch sees observed == len(roadmap) and
+    # falls through to the "Run mcloop" path under test. After
+    # T-000186 the canonical form is ``## Phase phase_NNN: <title>``
+    # with a phase-id comment beneath, emitted by the planfile
+    # renderer. The Phase 1 entry carries no tasks because
+    # current_phase=1 makes _plan_is_complete inspect that section;
+    # with no tasks present it returns False, keeping the dispatch
+    # on State 2.
     _PHASE2_PLAN = (
-        "# TestApp — Phase 1: Core\n\n"
+        "## Phase phase_001: Core\n"
+        "<!-- phase_id: phase_001 -->\n\n"
         "(completed earlier; recorded in history)\n\n"
-        "# TestApp — Phase 2: Search & Export\n\n"
+        "## Phase phase_002: Search & Export\n"
+        "<!-- phase_id: phase_002 -->\n\n"
         '- [ ] Implement search [feat: "Search"]\n'
         '- [ ] Implement export [feat: "Export"]\n'
     )
@@ -5112,9 +5160,21 @@ class TestPhase2CompleteRunDuplo:
         assert call_kwargs.kwargs.get("phase_number") == 3
 
         plan_text = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
-        assert "Phase 3" in plan_text
+        # Post T-000186 the rendered output uses ordinals from
+        # ``_merge_existing_plan`` (which renumbers phases to a
+        # contiguous 1..N sequence), so the runtime "Phase 3" number
+        # is not what lands in the H2. Instead the merged plan
+        # carries two phases (the prior Phase 2 body + the freshly
+        # authored Alerts body), and the Alerts content must be
+        # present on disk.
+        assert "Alerts" in plan_text
+        assert "Add notifications" in plan_text
 
         out = capsys.readouterr().out
+        # The runtime phase number "Phase 3" still appears in
+        # user-facing log lines (``Generating Phase 3 ...``) because
+        # those lines are formatted from the planner argument, not
+        # the rendered ordinal.
         assert "Phase 3" in out
         assert "Run mcloop to start building" in out
 
@@ -5266,7 +5326,16 @@ class TestSubsequentRunSpecVerificationIndependent:
         )()
 
     def test_no_frames_with_spec(self, capsys, tmp_path, monkeypatch):
-        """(a) No frame_descs, SPEC present → spec vtasks appended."""
+        """(a) No frame_descs, SPEC present → spec vtasks passed through
+        :func:`save_plan`'s ``extra_markdown_tasks`` kwarg.
+
+        Pre-T-000186 verification text was concatenated into the
+        ``content`` positional arg before calling ``save_plan``.
+        After T-000186 the pipeline keeps the typed-Plan boundary
+        clean by forwarding verification markdown via the
+        ``extra_markdown_tasks`` keyword, which ``save_plan``
+        parses and appends via :func:`bob_tools.planfile.add_phase_task`.
+        """
         self._setup(tmp_path, monkeypatch)
         from duplo.extractor import Feature as F
 
@@ -5290,8 +5359,8 @@ class TestSubsequentRunSpecVerificationIndependent:
             main()
 
         mock_fmt.assert_called_once()
-        saved_content = mock_save.call_args[0][0]
-        assert "Verify: type `1+1`, expect result `2`" in saved_content
+        extra = mock_save.call_args.kwargs.get("extra_markdown_tasks", "")
+        assert "Verify: type `1+1`, expect result `2`" in extra
 
     def test_frames_no_vcases_with_spec(self, capsys, tmp_path, monkeypatch):
         """(b) frame_descs non-empty, vcases empty, SPEC present → no crash."""
@@ -5321,11 +5390,15 @@ class TestSubsequentRunSpecVerificationIndependent:
         ):
             main()
 
-        saved_content = mock_save.call_args[0][0]
-        assert "Verify: type `1+1`, expect result `2`" in saved_content
+        extra = mock_save.call_args.kwargs.get("extra_markdown_tasks", "")
+        assert "Verify: type `1+1`, expect result `2`" in extra
 
     def test_frames_with_vcases_no_spec(self, capsys, tmp_path, monkeypatch):
-        """(c) frame_descs non-empty, vcases non-empty, SPEC absent → no crash."""
+        """(c) frame_descs non-empty, vcases non-empty, SPEC absent → no crash.
+
+        Verification text reaches :func:`save_plan` via the
+        ``extra_markdown_tasks`` kwarg post-T-000186.
+        """
         self._setup(tmp_path, monkeypatch)
         from duplo.extractor import Feature as F
         from duplo.verification_extractor import VerificationCase
@@ -5356,12 +5429,14 @@ class TestSubsequentRunSpecVerificationIndependent:
         ):
             main()
 
-        saved_content = mock_save.call_args[0][0]
-        assert "Verify: type `1+1`" in saved_content
-        assert "Verify: type `1+1`, expect result `2`" not in saved_content
+        extra = mock_save.call_args.kwargs.get("extra_markdown_tasks", "")
+        assert "Verify: type `1+1`" in extra
+        assert "Verify: type `1+1`, expect result `2`" not in extra
 
     def test_happy_path_frames_vcases_and_spec(self, capsys, tmp_path, monkeypatch):
-        """(d) frame_descs + vcases + SPEC → both appended."""
+        """(d) frame_descs + vcases + SPEC → both appended via the
+        ``extra_markdown_tasks`` kwarg on :func:`save_plan`.
+        """
         self._setup(tmp_path, monkeypatch)
         from duplo.extractor import Feature as F
         from duplo.verification_extractor import VerificationCase
@@ -5397,9 +5472,9 @@ class TestSubsequentRunSpecVerificationIndependent:
         ):
             main()
 
-        saved_content = mock_save.call_args[0][0]
-        assert "Verify: type `1+1`" in saved_content
-        assert "Verify: type `1+1`, expect result `2`" in saved_content
+        extra = mock_save.call_args.kwargs.get("extra_markdown_tasks", "")
+        assert "Verify: type `1+1`" in extra
+        assert "Verify: type `1+1`, expect result `2`" in extra
 
 
 class TestVerificationTasksAppendToLastPhase:
@@ -5514,20 +5589,38 @@ class TestVerificationTasksAppendToLastPhase:
         ):
             main()
 
-        saved_blobs = [call.args[0] for call in mock_save.call_args_list]
-        # Three phases generated in order: 0 (scaffold), 1 (core), 2 (polish).
-        # Find each phase's saved content by its unique body marker.
-        phase0 = next(b for b in saved_blobs if "task for phase 0" in b)
-        phase1 = next(b for b in saved_blobs if "task for phase 1" in b)
-        phase2 = next(b for b in saved_blobs if "task for phase 2" in b)
-
+        # Post-T-000186 the pipeline forwards verification text via the
+        # ``extra_markdown_tasks`` kwarg on each :func:`save_plan` call;
+        # the phase body itself is the first positional arg. The first
+        # save in a multi-phase run is the project-header preamble
+        # write (no phase body, no extras); the remaining saves are
+        # the per-phase generation calls in roadmap order.
+        all_extras = [
+            call.kwargs.get("extra_markdown_tasks", "")
+            for call in mock_save.call_args_list
+        ]
+        # Phase saves are those whose first positional arg is a
+        # markdown string carrying the ``_gen_plan`` side_effect's
+        # body marker. The first save in a multi-phase run is the
+        # project-header preamble write (also a string, but without
+        # the phase-task marker); skip it by matching the marker.
+        phase_extras = [
+            call.kwargs.get("extra_markdown_tasks", "")
+            for call in mock_save.call_args_list
+            if isinstance(call.args[0], str)
+            and "task for phase" in call.args[0]
+        ]
+        assert len(phase_extras) == 3, (
+            f"expected one save per phase, got {len(phase_extras)} "
+            f"phase-saves out of {len(all_extras)} total: {all_extras!r}"
+        )
         # Verification belongs only on the LAST phase.
-        assert "Verify: click submit" not in phase0
-        assert "Verify: type `1+1`, expect result `2`" not in phase0
-        assert "Verify: click submit" not in phase1
-        assert "Verify: type `1+1`, expect result `2`" not in phase1
-        assert "Verify: click submit" in phase2
-        assert "Verify: type `1+1`, expect result `2`" in phase2
+        assert "Verify: click submit" not in phase_extras[0]
+        assert "Verify: type `1+1`, expect result `2`" not in phase_extras[0]
+        assert "Verify: click submit" not in phase_extras[1]
+        assert "Verify: type `1+1`, expect result `2`" not in phase_extras[1]
+        assert "Verify: click submit" in phase_extras[2]
+        assert "Verify: type `1+1`, expect result `2`" in phase_extras[2]
 
     def test_verify_lines_only_after_last_phase_heading_in_plan_md(self, tmp_path, monkeypatch):
         """Read PLAN.md after a 3-phase run; every ``- [ ] Verify:`` line
@@ -5553,13 +5646,28 @@ class TestVerificationTasksAppendToLastPhase:
         spec = self._make_spec()
         vcases = [VerificationCase(input="1+1", expected="2", frame="f.png")]
 
+        # Post-T-000186 the runtime computes ``required_phase_id``
+        # deterministically from the existing PLAN.md (``highest +
+        # 1``); each fresh synthesis arrives with that id baked in.
+        # Because ``generate_phase_plan`` is mocked here (no real
+        # synthesizer body to validate), the fake just emits the
+        # canonical id that ``compute_required_phase_id`` would have
+        # demanded for this position in the loop.
+        from duplo import council as _council
+
         def _gen_plan(*_args, phase=None, phase_number=None, **_kw):
             num = (
                 phase_number
                 if phase_number is not None
-                else (phase.get("phase") if phase else "?")
+                else (phase.get("phase") if phase else 0)
             )
-            return f"## Phase {num}: Dummy\n\n- [ ] dummy task for phase {num}\n"
+            required_id = _council.compute_required_phase_id(
+                tmp_path / "PLAN.md"
+            )
+            return (
+                f"## Phase {required_id}: Dummy\n\n"
+                f"- [ ] dummy task for phase {num}\n"
+            )
 
         with (
             patch("duplo.pipeline.read_spec", return_value=spec),
@@ -5587,18 +5695,31 @@ class TestVerificationTasksAppendToLastPhase:
         plan_text = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         lines = plan_text.splitlines()
 
+        # The canonical renderer emits ``## Phase N: <title>`` with
+        # one-indexed ordinals; three phases land as Phase 1, 2, 3.
         def _heading_index(n: int) -> int:
+            target = f"## Phase {n}:"
             for i, ln in enumerate(lines):
-                if ln.startswith(f"## Phase {n}"):
+                if ln.startswith(target):
                     return i
-            raise AssertionError(f"Phase {n} heading not found in PLAN.md:\n{plan_text}")
+            raise AssertionError(
+                f"Phase {n} heading not found in PLAN.md:\n{plan_text}"
+            )
 
-        h0 = _heading_index(0)
-        h1 = _heading_index(1)
-        h2 = _heading_index(2)
+        h0 = _heading_index(1)
+        h1 = _heading_index(2)
+        h2 = _heading_index(3)
         assert h0 < h1 < h2, "Phase headings out of order in PLAN.md"
 
-        verify_indices = [i for i, ln in enumerate(lines) if ln.startswith("- [ ] Verify:")]
+        # Verification tasks land via add_phase_task on the last phase
+        # and carry T-NNNNNN ids in the rendered output, so the prefix
+        # match must accept either bare ``- [ ] Verify:`` or the
+        # id-prefixed ``- [ ] T-NNNNNN: Verify:`` form.
+        verify_indices = [
+            i
+            for i, ln in enumerate(lines)
+            if "Verify:" in ln and ln.lstrip().startswith("- [ ]")
+        ]
         assert verify_indices, (
             "No '- [ ] Verify:' lines found in PLAN.md; "
             "expected verification tasks on the last phase"
@@ -5606,7 +5727,7 @@ class TestVerificationTasksAppendToLastPhase:
         for i in verify_indices:
             assert i > h2, (
                 f"Verify line at index {i} ({lines[i]!r}) appears before the "
-                f"Phase 2 heading at index {h2}. Verify lines must only follow "
+                f"Phase 3 heading at index {h2}. Verify lines must only follow "
                 f"the last phase heading.\nFull PLAN.md:\n{plan_text}"
             )
 
@@ -9357,7 +9478,12 @@ class TestSubsequentRunProductNameSync:
             return "# Numi — Phase 1: Scaffold\n- [ ] task"
 
         monkeypatch.setattr(m, "generate_phase_plan", fake_generate)
-        monkeypatch.setattr(m, "save_plan", lambda c: tmp_path / "PLAN.md")
+        # Post T-000186 the pipeline calls
+        # ``save_plan(content, extra_markdown_tasks=...)`` so the mock
+        # must accept arbitrary keyword arguments.
+        monkeypatch.setattr(
+            m, "save_plan", lambda c, **_kw: tmp_path / "PLAN.md"
+        )
         monkeypatch.setattr(m, "notify_phase_complete", lambda *a, **kw: None)
 
         main()
