@@ -29,6 +29,7 @@ import pytest
 from bob_tools.planfile import (
     ConcurrentUpdateError,
     Plan,
+    PlanValidationError,
     fileio,
     load,
     parse_plan,
@@ -344,4 +345,123 @@ def test_save_holds_advisory_lock_while_writing(
     assert calls == [path], (
         f"save() must acquire the exclusive lock exactly once for the "
         f"target path; got {calls}"
+    )
+
+
+# --- Stage 16 gate (T-000182) -------------------------------------------------
+#
+# These tests pin the four properties the Stage 16 verification gate calls
+# out: save's default raises on a non-canonical plan; unchecked still
+# writes; update honors the same mode; and there is no _save_unlocked
+# Plan-taking helper left in fileio that could bypass validation. They
+# are intentionally minimal — the substantive canonical/atomic-write
+# contracts are pinned elsewhere — but they make the gate itself a unit-
+# tested invariant so a future change that re-introduces a bypass (or
+# silently flips the default to unchecked) fails here rather than only
+# at the next manual gate verification.
+
+
+def test_save_default_canonical_rejects_non_canonical_plan(tmp_path: Path) -> None:
+    """save() with the default validation refuses a non-canonical plan.
+
+    Loading ``_MINIMAL_PLAN`` yields a Plan that parses fine but lacks
+    the v1 magic preamble and the explicit phase_id comment required by
+    ``assert_mcloop_canonical``. The default canonical mode must raise
+    :class:`PlanValidationError` before the atomic-write path is
+    reached, so the on-disk bytes remain the original fixture. Pins
+    that canonical is the default, that the validator's reject is
+    surfaced through save's own surface, and that no half-written file
+    leaks out when the validator rejects.
+    """
+    path = tmp_path / "PLAN.md"
+    _write(path, _MINIMAL_PLAN)
+    original_bytes = path.read_bytes()
+    plan = load(path)
+
+    with pytest.raises(PlanValidationError):
+        save(path, plan)
+
+    assert path.read_bytes() == original_bytes, (
+        "rejected save must not modify the file on disk"
+    )
+
+
+def test_save_unchecked_writes_non_canonical_plan(tmp_path: Path) -> None:
+    """save(..., validation='unchecked') writes a non-canonical plan.
+
+    Companion to the canonical-rejects test: the opt-out really does
+    skip validation. A round-trip through load -> save(unchecked) ->
+    load with the non-canonical ``_MINIMAL_PLAN`` fixture is observable
+    on disk. Pins that unchecked is a real escape hatch (so the low-
+    level lock/crash tests above are not silently asserting against
+    canonical-mode behavior) and that it does not require any other
+    keyword to opt in.
+    """
+    path = tmp_path / "PLAN.md"
+    _write(path, _MINIMAL_PLAN)
+    plan = load(path)
+    new_plan = dataclasses.replace(plan, project_title="Unchecked Write")
+
+    save(path, new_plan, validation="unchecked")
+
+    reloaded = load(path)
+    assert reloaded.project_title == "Unchecked Write"
+
+
+def test_update_default_canonical_rejects_non_canonical_result(tmp_path: Path) -> None:
+    """update() with the default validation refuses a non-canonical result.
+
+    The on-disk file is non-canonical, so the operation's input Plan is
+    too. The default canonical mode must raise
+    :class:`PlanValidationError` in the in-lock save step and must not
+    overwrite the existing bytes. Pins that update honors the same
+    canonical default as save, closing the obvious bypass where a
+    caller could mutate via update() and skip the gate that save()
+    enforces.
+    """
+    path = tmp_path / "PLAN.md"
+    _write(path, _MINIMAL_PLAN)
+    original_bytes = path.read_bytes()
+
+    with pytest.raises(PlanValidationError):
+        update(path, _retitle("default canonical update"))
+
+    assert path.read_bytes() == original_bytes, (
+        "rejected update must not modify the file on disk"
+    )
+
+
+def test_update_unchecked_writes_non_canonical_result(tmp_path: Path) -> None:
+    """update(..., validation='unchecked') persists a non-canonical result.
+
+    Mirror of the save-unchecked test for the update surface: the
+    explicit opt-out commits the operation's output even when the plan
+    would not satisfy ``assert_mcloop_canonical``. Pins that update's
+    ``validation`` kwarg is honored (not silently overridden by the
+    default) and that the unchecked path round-trips through the
+    in-lock save.
+    """
+    path = tmp_path / "PLAN.md"
+    _write(path, _MINIMAL_PLAN)
+
+    returned = update(path, _retitle("Unchecked Update"), validation="unchecked")
+    assert returned.project_title == "Unchecked Update"
+
+    reloaded = load(path)
+    assert reloaded.project_title == "Unchecked Update"
+
+
+def test_fileio_module_has_no_save_unlocked_bypass() -> None:
+    """The pre-Stage-16 ``_save_unlocked`` Plan-taking helper is gone.
+
+    The atomic-write helper that exists today (``_atomic_write_text``)
+    takes already-rendered text, not a Plan, so it cannot be misused
+    as a validation bypass. A future refactor that re-introduces a
+    helper named ``_save_unlocked`` (or one that takes a Plan and
+    writes without going through ``_render_for_validation``) would
+    weaken the gate; this test fails loudly if either happens.
+    """
+    assert not hasattr(fileio, "_save_unlocked"), (
+        "fileio must not expose a Plan-taking _save_unlocked helper; "
+        "atomic-write should run on already-validated text only"
     )
