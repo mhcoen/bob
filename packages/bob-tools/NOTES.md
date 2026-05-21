@@ -864,3 +864,5 @@ adf7278: Added a verification script to ensure `bob-plan fmt` only makes additiv
 2e00820: Added replace_phase_validated function to enforce v4 Contract 3 for phase substitution. It validates exact phase matches, optionally auto-assigns missing phase and task IDs, preserves ordinal position, and ensures the resulting plan meets all construction invariants. Includes comprehensive tests for edge cases like duplicate IDs, missing IDs, and validation failures.
 
 a0739ff: Added a new function `add_phase_task` to insert tasks into specific phases, supporting placement at the phase root, under a parent task, or within a named subsection. This implements v4 Contract 6, ensuring field-stable tasks and proper validation. Comprehensive tests verify placement logic, ID assignment, and error handling.
+
+f6c7ec2: Added a plan-artifact sanitizer module to extract trailing verdict JSON blocks from LLM responses, preventing corruption of plan files. The module is now imported by duplo/reauthor.py, making duplo.plan_document callerless in production. Also fixed a minor regex string issue in a test.
