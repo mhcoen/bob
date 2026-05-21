@@ -357,6 +357,50 @@ def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
+def test_noop_stage_gate_with_task_specific_evidence_is_success(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """No file changes are valid when a verify task reports concrete evidence."""
+    task_text = (
+        "Verify Stage 13 gate: absent section, append, unchanged-TODO, "
+        "reopen-DONE, reopen-FAILED, fix-key dedup, text-key dedup, "
+        "id assignment, children preserved, field-stability rejection; "
+        "ruff, ruff format, mypy strict, full pytest all green."
+    )
+    md = _make_project(tmp_path, f"- [ ] {task_text}\n")
+    mock_run.return_value = _ok_run_result(
+        output=(
+            "Stage 13 gate verified - all four mandatory checks pass.\n"
+            "`ruff check .` clean; `ruff format --check .` 40 files already formatted;\n"
+            "pytest 626 passed / 2 skipped; `mypy .` no issues in 40 files.\n"
+        )
+    )
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert result.ok
+    mock_run.assert_called_once()
+    mock_commit.assert_not_called()
+    mock_checks.assert_called_once_with(tmp_path)
+    content = md.read_text()
+    assert_canonical_checkbox(content, "x", task_text)
+
+    calls = _notify_calls(mock_notify)
+    assert calls == [("All tasks completed!", "info")]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_bug_task_noop_is_failure_even_when_checks_pass(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):

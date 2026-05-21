@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import re
 import select
 import shlex
 import subprocess
@@ -211,6 +212,7 @@ _READONLY_TASK_PHRASES: tuple[str, ...] = (
     "without making any changes",
 )
 
+
 def _enforce_canonical_inputs(
     master_path: Path,
     current_plan_path: Path,
@@ -259,6 +261,75 @@ def _is_readonly_task(task_text: str) -> bool:
     failure)."""
     text = task_text.lower()
     return any(phrase in text for phrase in _READONLY_TASK_PHRASES)
+
+
+_PASS_EVIDENCE_TERMS = (
+    "already formatted",
+    "all checks pass",
+    "all four checks pass",
+    "clean",
+    "green",
+    "no failures",
+    "no issues",
+    "pass",
+    "passed",
+)
+
+_CHECK_EVIDENCE_TERMS = (
+    "cargo test",
+    "go test",
+    "mypy",
+    "npm test",
+    "pnpm test",
+    "pyright",
+    "pytest",
+    "ruff",
+    "swift test",
+    "xcodebuild",
+)
+
+_VERIFICATION_TASK_TERMS = (
+    "all green",
+    "gate",
+    "verify",
+    "verification",
+)
+
+
+def _stage_anchor(task_text: str) -> str:
+    match = re.search(r"\bstage\s+(\d+)\b", task_text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    return f"stage {match.group(1)}"
+
+
+def _has_task_specific_acceptance_evidence(
+    task_text: str,
+    output: str,
+    *,
+    task_id: str = "",
+) -> bool:
+    """Return True when a no-change session proves the requested task."""
+    normalized_output = output.lower()
+    if not normalized_output.strip():
+        return False
+
+    anchors = [anchor for anchor in (task_id.lower(), _stage_anchor(task_text)) if anchor]
+    if not anchors or not any(anchor in normalized_output for anchor in anchors):
+        return False
+
+    task_lower = task_text.lower()
+    is_verification_task = any(term in task_lower for term in _VERIFICATION_TASK_TERMS)
+    has_explicit_acceptance = "acceptance evidence" in normalized_output
+    if not is_verification_task and not has_explicit_acceptance:
+        return False
+
+    check_terms_seen = {
+        term for term in _CHECK_EVIDENCE_TERMS if term in normalized_output
+    }
+    has_check_evidence = len(check_terms_seen) >= 2
+    has_pass_evidence = any(term in normalized_output for term in _PASS_EVIDENCE_TERMS)
+    return has_check_evidence and has_pass_evidence
 
 
 def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
@@ -1660,6 +1731,56 @@ def run_loop(
                             flush=True,
                         )
                         ctx.add(label, task.text, elapsed, result.output)
+                        success = True
+                        break
+                    if _has_task_specific_acceptance_evidence(
+                        task.text,
+                        result.output,
+                        task_id=task.task_id or "",
+                    ):
+                        elapsed = _format_elapsed(
+                            time.monotonic() - task_start,
+                        )
+                        check_off(active_file, task)
+                        if active_file == current_plan_path and active_phase_name:
+                            acceptance_evidence_phases.add(active_phase_name)
+                        completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                        task_entries.append(
+                            TaskEntry(
+                                label=label,
+                                text=task.text,
+                                outcome="success",
+                                elapsed=round(time.monotonic() - task_start, 2),
+                                model=task_model or "",
+                                attempts=attempt,
+                                success=True,
+                                exit_code=result.exit_code,
+                                log_path=str(result.log_path) if result.log_path else "",
+                                changed_files=[],
+                                task_id=task.task_id or "",
+                            )
+                        )
+                        print(
+                            formatting.system_msg(
+                                "Task produced no file changes but provided"
+                                " task-specific acceptance evidence"
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            formatting.task_complete(label, elapsed),
+                            flush=True,
+                        )
+                        ctx.add(label, task.text, elapsed, result.output)
+                        _ledger_settle(
+                            label,
+                            TaskOutcome(
+                                success=True,
+                                abandoned=False,
+                                summary=task.text[:200],
+                                changed_files=(),
+                            ),
+                        )
                         success = True
                         break
                     # Non-read-only no-op: editor was supposed to make
