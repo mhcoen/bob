@@ -3,9 +3,7 @@
 import json
 import signal
 import subprocess
-import sys
 import time
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import mcloop.lifecycle as lifecycle_mod
@@ -114,11 +112,16 @@ def test_atexit_shutdown_does_not_traceback_during_interpreter_finalization(
     def late_get_active_process():
         raise RuntimeError("can't register atexit after shutdown")
 
-    fake_subprocess = SimpleNamespace(
-        get_active_process=late_get_active_process,
-        clear_active_process=MagicMock(),
+    monkeypatch.setattr(
+        lifecycle_mod,
+        "_orchestra_get_active_process",
+        late_get_active_process,
     )
-    monkeypatch.setitem(sys.modules, "orchestra.adapters._subprocess", fake_subprocess)
+    monkeypatch.setattr(
+        lifecycle_mod,
+        "_orchestra_clear_active_process",
+        MagicMock(),
+    )
     monkeypatch.setattr(lifecycle_mod, "_lifecycle_state", "running")
 
     _atexit_shutdown()

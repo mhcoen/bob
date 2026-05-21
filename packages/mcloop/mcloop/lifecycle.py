@@ -23,6 +23,19 @@ from mcloop._planfile_compat import (
 )
 from mcloop.formatting import format_elapsed
 
+try:
+    from orchestra.adapters._subprocess import (
+        clear_active_process as _orchestra_clear_active_process,
+    )
+    from orchestra.adapters._subprocess import (
+        get_active_process as _orchestra_get_active_process,
+    )
+    from orchestra.adapters._subprocess import set_interrupted as _orchestra_set_interrupted
+except ImportError:
+    _orchestra_clear_active_process = None
+    _orchestra_get_active_process = None
+    _orchestra_set_interrupted = None
+
 # Phase tracking for interrupt state capture
 _current_phase = ""  # task, checks, audit, user_prompt
 _current_task_label = ""
@@ -504,12 +517,10 @@ def _signal_orchestra_interrupt() -> None:
     The call is a no-op when no orchestra session is registered, so
     it is safe to invoke unconditionally on every signal.
     """
-    try:
-        from orchestra.adapters._subprocess import set_interrupted
-    except ImportError:
+    if _orchestra_set_interrupted is None:
         return
     try:
-        set_interrupted(True)
+        _orchestra_set_interrupted(True)
     except Exception:
         pass
 
@@ -568,26 +579,10 @@ def _orchestra_process_accessors(
     allow_import: bool,
 ) -> tuple[Callable[[], Any], Callable[[], None]] | None:
     """Return orchestra active-process accessors without unsafe late imports."""
-    if allow_import:
-        try:
-            from orchestra.adapters._subprocess import (
-                clear_active_process as imported_clear_active_process,
-            )
-            from orchestra.adapters._subprocess import (
-                get_active_process as imported_get_active_process,
-            )
-        except ImportError:
-            return None
-        return imported_get_active_process, imported_clear_active_process
-
-    module = sys.modules.get("orchestra.adapters._subprocess")
-    if module is None:
+    _ = allow_import
+    if _orchestra_get_active_process is None or _orchestra_clear_active_process is None:
         return None
-    get_active_process_func = getattr(module, "get_active_process", None)
-    clear_active_process_func = getattr(module, "clear_active_process", None)
-    if not callable(get_active_process_func) or not callable(clear_active_process_func):
-        return None
-    return get_active_process_func, clear_active_process_func
+    return _orchestra_get_active_process, _orchestra_clear_active_process
 
 
 def _is_known_interpreter_teardown_error(exc: RuntimeError) -> bool:
