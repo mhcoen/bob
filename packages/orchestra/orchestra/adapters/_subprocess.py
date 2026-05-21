@@ -124,9 +124,7 @@ def _load_mcloop_config() -> dict[str, Any]:
     return loaded
 
 
-def load_role_config(
-    role: str, source: dict[str, Any] | None = None
-) -> dict[str, Any] | None:
+def load_role_config(role: str, source: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Return the per-role config block from ``~/.mcloop/config.json``.
 
     Lifted from mcloop ``load_role_config``. ``role`` must be one of
@@ -262,9 +260,7 @@ def build_session_env(
         # any other provider routing the user has configured actually
         # takes effect on the env passed to the subprocess.
         provider_cfg = (
-            executor_config
-            if executor_config is not None
-            else load_role_config("executor")
+            executor_config if executor_config is not None else load_role_config("executor")
         )
         apply_provider_env(env, model, provider_cfg)
     return env
@@ -276,9 +272,7 @@ def build_session_env(
 # --------------------------------------------------------------------
 
 
-def _publish_active_pid(
-    cwd: Path, pid: int, pgid: int, cmd: list[str]
-) -> Path:
+def _publish_active_pid(cwd: Path, pid: int, pgid: int, cmd: list[str]) -> Path:
     pid_dir = cwd / ".mcloop"
     pid_dir.mkdir(exist_ok=True)
     pid_file = pid_dir / "active-pid"
@@ -595,9 +589,7 @@ def register_active_process(
     target.process = proc
 
 
-def clear_active_process(
-    *, session: SessionState | None = None
-) -> None:
+def clear_active_process(*, session: SessionState | None = None) -> None:
     """Drop the active-process reference. Called by ``run_session``
     when the subprocess exits, including on timeout and exception
     paths."""
@@ -606,9 +598,7 @@ def clear_active_process(
         target.process = None
 
 
-def get_active_process(
-    *, session: SessionState | None = None
-) -> subprocess.Popen[str] | None:
+def get_active_process(*, session: SessionState | None = None) -> subprocess.Popen[str] | None:
     """Return the running inner CLI process for ``session``, or
     ``None``."""
     target = session if session is not None else _current_session()
@@ -622,9 +612,7 @@ def is_interrupted(*, session: SessionState | None = None) -> bool:
     return target.interrupted if target is not None else False
 
 
-def set_interrupted(
-    value: bool = True, *, session: SessionState | None = None
-) -> None:
+def set_interrupted(value: bool = True, *, session: SessionState | None = None) -> None:
     """Flag the wait loop for early exit on ``session``.
 
     Mcloop's signal handler sets this to ``True`` on whichever session
@@ -684,11 +672,7 @@ def run_session(
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
-        stdin=(
-            subprocess.PIPE
-            if stdin_bytes is not None
-            else subprocess.DEVNULL
-        ),
+        stdin=(subprocess.PIPE if stdin_bytes is not None else subprocess.DEVNULL),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -718,9 +702,7 @@ def run_session(
         pgid = process.pid
     pid_file: Path = _publish_active_pid(cwd, process.pid, pgid, cmd)
     session.pid_file = pid_file
-    watchdog: subprocess.Popen[bytes] | None = _start_watchdog(
-        os.getpid(), pgid, pid_file
-    )
+    watchdog: subprocess.Popen[bytes] | None = _start_watchdog(os.getpid(), pgid, pid_file)
     session.watchdog = watchdog
 
     if process.stdout is None:
@@ -816,6 +798,21 @@ def run_session(
                     if not silent:
                         print(".", end="", flush=True)
                     last_dot = now
+                # Liveness check: if the subprocess has exited but the
+                # reader thread is stuck (stdout buffer never returned
+                # EOF — can happen when the CLI dies early), force-
+                # close stdout to unblock the reader and bail out with
+                # whatever we collected. Without this the main loop
+                # waits forever for a SENTINEL that never arrives.
+                if process.poll() is not None:
+                    try:
+                        if process.stdout is not None:
+                            process.stdout.close()
+                    except OSError:
+                        pass
+                    reader_thread.join(timeout=2.0)
+                    exit_code = process.returncode if process.returncode is not None else 1
+                    return _assemble(head_lines, tail_lines, dropped), exit_code
                 continue
             if line is _SENTINEL:
                 break
