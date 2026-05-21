@@ -1,5 +1,5 @@
-## Stage 14: Phase C Increment 5 - replace_phase_validated
-<!-- phase_id: phase_014 -->
+## Stage 15: Phase C Increment 6 - add_phase_task
+<!-- phase_id: phase_015 -->
 
-- [x] T-000177: Implement replace_phase_validated(plan, phase_id, new_phase, *, assign_missing_ids=True, preserve_position=True) per v4 Contract 3: exactly one phase matched and replaced in place; missing phase id gets fresh phase_NNN above all existing suffixes; missing task ids assigned global-sequential; ordinal normalized to the replaced phase ordinal when preserve_position; whole result must pass validate_plan constructed=True including field-stability. Structural validity only; lineage policy stays in duplo. PlanValidationError on no or multi match, dup ids, malformed ids, invalid scalars or deps or tags, non-contiguous ordinals, canonical or round-trip failure, missing ids when assign_missing_ids is False.
-- [ ] T-000178: Verify Stage 14 gate: in-place replace, id assignment, ordinal normalization, dup and unknown phase rejection, invalid deps, assert_mcloop_canonical success; ruff, ruff format, mypy strict, full pytest all green.
+- [ ] T-000179: Implement add_phase_task(plan, phase_id, task, *, parent_id=None, subsection_title=None) -> tuple[Plan, str] per v4 Contract 6: append a Stage-10 field-stable task into an existing phase at root, under parent_id, or under a named subsection; share make_task validation and global-sequential id assignment; return new plan and the assigned T-NNNNNN; result must pass validate_plan constructed=True. PlanValidationError on unknown phase_id, parent_id, or subsection, invalid task, dup id, unknown deps.
+- [ ] T-000180: Verify Stage 15 gate: root, parent, and subsection append; id assignment; plan-and-id return; validation; ruff, ruff format, mypy strict, full pytest all green.
