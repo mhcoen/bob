@@ -92,7 +92,7 @@ from orchestra.transforms import (
 from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
-ACTOR_PROGRESS_INTERVAL_SECONDS = 15.0
+ACTOR_PROGRESS_INTERVAL_SECONDS = 30.0
 FAN_OUT_PROGRESS_INTERVAL_SECONDS = 30.0
 ProgressWatchdogFactory = Callable[[float, Callable[[], None]], Callable[[], None]]
 
