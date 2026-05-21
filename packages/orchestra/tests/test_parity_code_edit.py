@@ -479,10 +479,8 @@ def test_parity_code_edit_single(tmp_path: Path, patched_subprocess: None) -> No
     # instead of placing it in argv. The mcloop direct path still
     # places the prompt as a positional argument (claude -p
     # <prompt>). Equivalence now means: the two paths feed the same
-    # prompt bytes to the inner CLI. The orchestra path additionally
-    # pins Claude's stdin interpretation to text mode so the piped
-    # prompt is consumed as the user prompt rather than relying on CLI
-    # defaults.
+    # prompt bytes to the inner CLI. With the prompt off argv the
+    # remaining command shape is otherwise identical.
     direct_prompt = direct_call.cmd[2]
     assert "Task: [T-123456] Add a dataclass to src/example.py" in direct_prompt
     assert orch_call.stdin_buffer is not None
@@ -491,13 +489,8 @@ def test_parity_code_edit_single(tmp_path: Path, patched_subprocess: None) -> No
         "both paths must build the same prompt from the same inputs"
     )
     direct_cmd_no_prompt = direct_call.cmd[:2] + direct_call.cmd[3:]
-    orch_cmd_without_input_format = list(orch_call.cmd)
-    input_format_at = orch_cmd_without_input_format.index("--input-format")
-    assert orch_cmd_without_input_format[input_format_at + 1] == "text"
-    del orch_cmd_without_input_format[input_format_at : input_format_at + 2]
-    assert direct_cmd_no_prompt == orch_cmd_without_input_format, (
-        "command shape must match apart from the prompt position and "
-        "orchestra's explicit stdin input format"
+    assert direct_cmd_no_prompt == list(orch_call.cmd), (
+        "command shape must match apart from the prompt position"
     )
     assert direct_call.cwd == orch_call.cwd
 

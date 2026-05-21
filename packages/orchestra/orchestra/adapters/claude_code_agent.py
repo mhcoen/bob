@@ -189,14 +189,16 @@ class ClaudeCodeAgentAdapter:
     # ----- internals --------------------------------------------------
 
     def _build_command(self, model: str | None, allowed_tools: str) -> list[str]:
-        # Pass-7 fix: prompt no longer in argv; piped via stdin so it
-        # cannot leak through ps output, the .mcloop/active-pid file,
-        # transcript logs, or the prepare() summary.
+        # Pass-7 fix: the prompt no longer appears in argv. The
+        # adapter pipes the rendered prompt to the inner CLI via
+        # stdin so it cannot leak through ps output, the
+        # .mcloop/active-pid file, transcript logs, or the prepare()
+        # summary. ``-p`` enters non-interactive (print) mode; the
+        # CLI reads its prompt from stdin when no prompt argument
+        # is supplied.
         cmd: list[str] = [
             self._cli,
             "-p",
-            "--input-format",
-            "text",
             "--allowedTools",
             allowed_tools,
             "--permission-mode",
