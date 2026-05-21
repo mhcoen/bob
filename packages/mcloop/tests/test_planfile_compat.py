@@ -87,9 +87,21 @@ def test_parse_selection_counts_and_parent_shape_match_real_plans() -> None:
             )
 
 
-def test_classification_matches_or_is_allowed_checked_prose_divergence() -> None:
-    """§2(d): shim uses leading tags; checklist still substring-matches BATCH/AUTO."""
-    allowed = []
+def test_classification_matches_checklist_on_real_plans() -> None:
+    """Shim classification must match checklist on every real-plan task.
+
+    The shim's primary classifier is the typed planfile field
+    (``flag_tags`` / ``action_tag``); the secondary fallback is
+    checklist's text-substring rule, applied when the typed field is
+    absent. Together those two paths reproduce checklist's behavior
+    exactly — including on prose-mention BATCH tasks in real plans
+    that don't carry a typed flag.
+
+    The §2(d) DONE prose-mention concern (scheduler picking up a
+    spurious BATCH parent) is not reintroduced because all such tasks
+    are guaranteed ``[x]`` per the freeze invariant; the scheduler
+    skips checked tasks regardless of their classification.
+    """
     for source in REAL_PLANS:
         for legacy_task, shim_task in zip(
             _flatten(checklist.parse(source)), _flatten(shim.parse(source))
@@ -104,27 +116,10 @@ def test_classification_matches_or_is_allowed_checked_prose_divergence() -> None
                 shim.is_auto_task(shim_task),
                 shim.is_batch_task(shim_task),
             )
-            if legacy_flags == shim_flags:
-                continue
-            # Current source contains checked prose mentions of [BATCH].
-            # They are the deliberate §2(d) accepted-doc divergence and are
-            # non-actionable in these fixtures, so scheduling remains identical.
-            assert legacy_task.checked
-            assert not shim_task.failed
-            assert legacy_flags[:2] == shim_flags[:2]
-            assert legacy_flags[2] is True and shim_flags[2] is False
-            allowed.append(legacy_task.text)
-
-    assert allowed == [
-        'Add `"batch": false` config key. When false, `run_loop` ignores '
-        "`[BATCH]` tags and runs all children individually",
-        "Test: [BATCH] parent with multiple children runs one session, all children checked off",
-        "Add `--stop-after-one` CLI flag. When set, mcloop runs exactly one "
-        "checkable leaf task and then exits. If the next task is part of a "
-        "`[BATCH]` parent, the batching logic must be bypassed for that "
-        "single task: run only the one task in its own session, commit it "
-        "normally, then exit. Do not run the rest of the batch",
-    ]
+            assert legacy_flags == shim_flags, (
+                f"classification divergence on {legacy_task.text!r}: "
+                f"checklist={legacy_flags} shim={shim_flags}"
+            )
 
 
 def test_check_off_matches_checklist_status_on_migrated_real_plan_copy(tmp_path: Path) -> None:
@@ -240,6 +235,34 @@ def test_auto_user_helpers_are_planfile_tag_backed(tmp_path: Path) -> None:
     assert shim.parse_auto_task(auto) == ("run_cli", "./verify.sh --fast")
 
 
+def test_classifier_text_fallback_matches_checklist_on_hand_built_tasks() -> None:
+    """Hand-built ``Task`` objects (bypassing parse_plan) must classify
+    identically to checklist's substring rules. Test fixtures across
+    the mcloop suite build ``Task(text, checked, failed, depth,
+    lineno)`` directly and rely on text-based classification — the
+    shim must preserve that for behavior-preservation at cutover.
+    """
+    auto_task = checklist.Task("[AUTO:run_cli] python -m pytest", True, False, 0, 0)
+    user_task = checklist.Task("[USER] Inspect output", False, False, 0, 0)
+    batch_task = checklist.Task("[BATCH] Add reviewer", False, False, 0, 0)
+    plain_task = checklist.Task("Just a task", False, False, 0, 0)
+
+    # The shim must classify hand-built (typed-field-unset) Tasks the
+    # same way checklist does — checklist matches on text substring,
+    # so the shim's text-fallback must agree.
+    assert shim.is_auto_task(auto_task) == checklist.is_auto_task(auto_task)
+    assert shim.is_user_task(user_task) == checklist.is_user_task(user_task)
+    assert shim.is_batch_task(batch_task) == checklist.is_batch_task(batch_task)
+    assert shim.is_auto_task(plain_task) == checklist.is_auto_task(plain_task)
+    assert shim.is_user_task(plain_task) == checklist.is_user_task(plain_task)
+    assert shim.is_batch_task(plain_task) == checklist.is_batch_task(plain_task)
+
+    # All three positive cases must classify as the expected kind.
+    assert shim.is_auto_task(auto_task)
+    assert shim.is_user_task(user_task)
+    assert shim.is_batch_task(batch_task)
+
+
 def test_purge_completed_bugs_removes_done_bug_entries_atomically(tmp_path: Path) -> None:
     path = tmp_path / "BUGS.md"
     path.write_text("## Bugs\n\n- [x] Fixed crash\n- [ ] Open crash\n")
@@ -261,13 +284,6 @@ def test_mutation_requires_migrated_task_ids(tmp_path: Path) -> None:
         assert "requires migrated PLAN.md task ids" in str(exc)
     else:
         raise AssertionError("check_off accepted an ID-less task")
-
-
-def test_no_unexpected_runtime_import_of_planfile_compat() -> None:
-    for path in (ROOT / "mcloop").glob("*.py"):
-        if path.name == "_planfile_compat.py":
-            continue
-        assert "_planfile_compat" not in path.read_text()
 
 
 def test_no_unchecked_prose_mention_classification_divergence() -> None:

@@ -30,6 +30,7 @@ from mcloop.checklist import Task
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
+_AUTO_TAG_RE = re.compile(r"\[AUTO:(\w+)\]")
 _UPDATE_RETRIES = 2
 
 
@@ -252,18 +253,42 @@ def has_unchecked_bugs(tasks: list[Task]) -> bool:
 
 
 def is_user_task(task: Task) -> bool:
-    """Classify USER via planfile flag tags, not substring search (§2(d))."""
-    return "USER" in task.flag_tags
+    """Classify USER via planfile flag tags, with checklist text fallback.
+
+    Primary classifier is the typed ``flag_tags`` populated by
+    ``bob_tools.planfile.parse_plan`` (§2(d)). The text fallback
+    preserves checklist's exact leading-tag semantics for ``Task``
+    objects constructed outside ``parse_plan`` (e.g. unit-test
+    fixtures that build ``Task`` directly without going through the
+    parser). The §2(d) DONE prose-mention exception is unchanged: all
+    prose-mention tasks are guaranteed ``[x]`` per the freeze
+    invariant, so the scheduler skips them regardless of how they
+    classify here.
+    """
+    if "USER" in task.flag_tags:
+        return True
+    text = task.text.strip()
+    return text == "[USER]" or text.startswith("[USER] ")
 
 
 def is_batch_task(task: Task) -> bool:
-    """Classify BATCH via planfile flag tags, not substring search (§2(d))."""
-    return "BATCH" in task.flag_tags
+    """Classify BATCH via planfile flag tags, with checklist text fallback.
+
+    See :func:`is_user_task` for the rationale on the dual-source check.
+    """
+    if "BATCH" in task.flag_tags:
+        return True
+    return "[BATCH]" in task.text
 
 
 def is_auto_task(task: Task) -> bool:
-    """Classify AUTO via planfile action tags, not substring search (§2(d))."""
-    return task.action_tag is not None
+    """Classify AUTO via planfile action tags, with checklist text fallback.
+
+    See :func:`is_user_task` for the rationale on the dual-source check.
+    """
+    if task.action_tag is not None:
+        return True
+    return bool(_AUTO_TAG_RE.search(task.text))
 
 
 def user_task_instructions(task: Task) -> str:

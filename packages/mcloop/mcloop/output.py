@@ -7,11 +7,13 @@ import json as _json
 from pathlib import Path
 
 from mcloop import formatting
+from mcloop._planfile_compat import (
+    count_unchecked,
+    find_next,
+)
 from mcloop.checklist import (
     Task,
-    count_unchecked,
     current_stage,
-    find_next,
     get_stages,
 )
 from mcloop.checks import detect_run

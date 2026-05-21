@@ -14,6 +14,24 @@ from pathlib import Path
 
 import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
+from mcloop._planfile_compat import (
+    check_off,
+    count_unchecked,
+    find_next,
+    find_parent,
+    get_batch_children,
+    has_unchecked_bugs,
+    is_auto_task,
+    is_batch_task,
+    is_user_task,
+    mark_failed,
+    parse,
+    parse_auto_task,
+    user_task_instructions,
+)
+from mcloop._planfile_compat import (
+    task_label as _task_label,
+)
 from mcloop._planfile_precondition import (
     PlanNotCanonicalError,
     enforce_canonical,
@@ -22,26 +40,10 @@ from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
     PlanCorruptionError,
     Task,
-    check_off,
     clear_failed_markers,
-    count_unchecked,
-    find_next,
-    find_parent,
-    get_batch_children,
     get_eliminated,
-    has_unchecked_bugs,
-    is_auto_task,
-    is_batch_task,
-    is_user_task,
-    mark_failed,
-    parse,
-    parse_auto_task,
     parse_description,
     purge_completed_bugs,
-    user_task_instructions,
-)
-from mcloop.checklist import (
-    task_label as _task_label,
 )
 from mcloop.checks import (
     detect_build,
