@@ -2,6 +2,70 @@
 
 ## Observations
 
+- 2026-05-21 [23.2] [T-000197] Stage 23 gate verification. The gate's
+  six conditions split into ones I can verify from bob-tools and ones
+  I cannot. Verifiable from here: (a) no production imports of
+  `duplo.plan_document` in `/Users/mhcoen/proj/duplo/duplo` — `rg
+  '^(from|import).*plan_document'` returns only
+  `duplo/tests/test_plan_document.py:16` (legacy test file for the
+  retiring module); the lone source-tree hit is a docstring reference
+  in `duplo/reauthor_assemble.py:31` narrating the T-000192 migration,
+  not an import; (b) no raw PLAN.md write sites remain in duplo
+  source — `rg 'plan_path\.write_text|PLAN\.md.*write_text'` under
+  `/Users/mhcoen/proj/duplo/duplo` returns no matches (the [23.1]
+  baseline's `_save_plan_with_tag_escape` and related helpers have
+  been stripped from `duplo/saver.py` in the WORKING-tree diff — see
+  caveat (4) below); (c) bob-tools is green and unchanged from the
+  [23.1] baseline — `ruff check .` "All checks passed!"; `ruff format
+  --check .` "43 files already formatted";
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` 680 passed / 2
+  skipped; bare `mypy .` not on PATH (same precedent flagged in every
+  prior gate entry), invoked as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`, reports "Success:
+  no issues found in 43 source files". NOT verifiable / NOT met from
+  here: (1) `plan_document.py deleted` — the file
+  `/Users/mhcoen/proj/duplo/duplo/plan_document.py` is still on disk
+  (25436 bytes, mtime 2026-05-10), confirmed by `ls -la`. I cannot
+  delete it: the task preamble forbids file deletion unconditionally
+  ("Never delete any file. Do not use rm, git rm, ...; If you believe
+  a file should be removed, leave it and note it in NOTES.md for the
+  user to decide"). The user must remove this file (and its legacy
+  test `duplo/tests/test_plan_document.py`) themselves from the duplo
+  repo. (2) `all-path end-to-end no-migrate test green` — a real
+  duplo run exercising initial generation, gap append, verification,
+  contracts, bug append, and reauthor would invoke `claude` and
+  likely `codex` at every synthesis step; the same task preamble's
+  test-mock rule ("Tests must NEVER make real subprocess calls to
+  claude, codex, or any LLM CLI") forbids this. The user must run
+  this end-to-end test manually under their own LLM-cost budget;
+  there is no automated harness in either repo that runs the
+  no-migrate end-to-end loop without real LLM calls. (3) `duplo
+  green` — `cd /Users/mhcoen/proj/duplo && git status` shows nine
+  modified source files (gap_detector, investigator, pipeline,
+  planner, reauthor, reauthor_assemble, saver, spec_reader,
+  verification_extractor) and eight modified test files, totaling
+  ~1061 insertions / ~2055 deletions vs HEAD (`871ab56 Stage 18:
+  replace markdown plan generation with typed planfile API`). These
+  changes are uncommitted and unpushed. The mandatory check-command
+  rule scopes me to bob-tools (the four listed commands run from
+  `/Users/mhcoen/proj/bob-tools`), so I did not run ruff/pytest in
+  duplo; the user must commit duplo's working tree, then run
+  duplo-side checks. (4) `duplo and bob-tools both pushed` — bob-tools
+  is "ahead of 'origin/main' by 1 commit" (the [23.1] mcloop
+  checkpoint commit `3b0165a`, which the orchestrator will turn into
+  a Complete commit after this session). duplo's HEAD `871ab56` is
+  "up to date with 'origin/master'" but the unstaged changes above
+  are not committed at all. I am not pushing either repo: pushing is
+  on the durable forbidden-without-explicit-ask list, and no such
+  authorization was given in this task. Summary: bob-tools side of
+  the gate is met and stable; the three duplo-side conditions
+  (delete `plan_document.py`, run the no-migrate end-to-end test,
+  commit-and-push the in-flight duplo refactor) all require user
+  action and remain open. The same blocker set was identified at the
+  end of [23.1]; this entry adds the (b) write-site evidence and the
+  (3) uncommitted-duplo-tree fact, both of which were not in the
+  [23.1] entry.
+
 - 2026-05-21 [23.1] [T-000196] Task instructed deletion of
   `duplo/plan_document.py` and a full end-to-end duplo run; neither
   was performed in this session. Two hard prohibitions in the task's
