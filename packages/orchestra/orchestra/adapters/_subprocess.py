@@ -85,8 +85,18 @@ THIRD_PARTY_PREFIXES: tuple[str, ...] = ("deepseek/", "moonshotai/", "openai/")
 
 DEFAULT_PROVIDER_BASE_URL: str = "https://openrouter.ai/api"
 
-DEFAULT_TIMEOUT_S: int = 1800
-"""Wall-clock cap matching mcloop's ``DEFAULT_TASK_TIMEOUT``."""
+DEFAULT_TIMEOUT_S: int = 3600
+"""Hard wall-clock cap. Defense against runaway sessions that produce
+output but never finish. Substantive editor/verify tasks routinely
+cross 30 minutes of real work; the idle timeout below is the actual
+"stuck or alive" detector."""
+
+IDLE_TIMEOUT_S: float = 600.0
+"""Kill the session if no stream event has arrived in this many
+seconds. The reader thread sees every line the inner CLI emits, so
+no progress on that channel is a true "stuck" signal — distinct from
+"working slowly". Prevents the wall-clock cap from punishing
+legitimate long-but-progressing work."""
 
 PROGRESS_QUEUE_INTERVAL: float = 3.0
 """How long the reader thread blocks before checking the timeout."""
@@ -737,6 +747,7 @@ def run_session(
     shown_waiting = False
     last_dot = time.monotonic()
     started = time.monotonic()
+    last_event_time = time.monotonic()
 
     try:
         while True:
@@ -754,6 +765,20 @@ def run_session(
                     process.kill()
                 process.wait()
                 return _assemble(head_lines, tail_lines, dropped), -2
+            if (time.monotonic() - last_event_time) > IDLE_TIMEOUT_S:
+                if not silent:
+                    elapsed_min = (time.monotonic() - last_event_time) / 60.0
+                    print(
+                        f"\n!!! No stream activity for {elapsed_min:.1f} min "
+                        f"(IDLE_TIMEOUT_S={IDLE_TIMEOUT_S:.0f}s). Killing session.",
+                        flush=True,
+                    )
+                try:
+                    os.killpg(os.getpgid(process.pid), 9)
+                except OSError:
+                    process.kill()
+                process.wait()
+                return _assemble(head_lines, tail_lines, dropped), -3
             # Bailout: if the reader thread is gone AND no buffered
             # lines remain AND the subprocess has exited, return now.
             # Covers the case where the reader crashed in the for-line
@@ -827,6 +852,7 @@ def run_session(
                     exit_code = process.returncode if process.returncode is not None else 1
                     return _assemble(head_lines, tail_lines, dropped), exit_code
                 continue
+            last_event_time = time.monotonic()
             if line is _SENTINEL:
                 break
             if len(head_lines) < _MAX_HEAD_LINES:
