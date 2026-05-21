@@ -2,6 +2,31 @@
 
 ## Observations
 
+- 2026-05-21 [22.2] [T-000195] Stage 22 gate verified. No production
+  callers of `duplo.plan_document` remain: `rg '^(from|import).*plan_document'`
+  under `/Users/mhcoen/proj/duplo` returns a single match —
+  `duplo/tests/test_plan_document.py:16`, which is the legacy module's
+  own test file, retained per the explicit "do not delete the module
+  yet" constraint. The two other text-level hits (`duplo/duplo/reauthor_assemble.py:31`
+  and two lines in `duplo/tests/test_reauthor.py`) are docstring/comment
+  history references narrating the T-000192 migration, not imports.
+  Behavior-preservation is enforced by the existing
+  `duplo/tests/test_plan_document.py:367-518` tests against the ported
+  sanitizer (see [22.1] entry for the character-identity argument);
+  those tests pass as part of the duplo suite below. Verification
+  commands: bob-tools (run from
+  `/Users/mhcoen/proj/bob-tools`): `ruff check .` reports "All checks
+  passed!"; `ruff format --check .` reports "43 files already
+  formatted"; `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports
+  680 passed / 2 skipped; bare `mypy .` is not on PATH (same
+  precedent flagged in earlier gate entries), invoked as
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`, reports "Success:
+  no issues found in 43 source files". Duplo (run from
+  `/Users/mhcoen/proj/duplo`): `ruff check .` reports "All checks
+  passed!"; `/Users/mhcoen/proj/duplo/.venv/bin/pytest` reports 3280
+  passed / 60 skipped (same totals as the [21.2] baseline, confirming
+  no test count drift across Stage 22).
+
 - 2026-05-21 [22.1] [T-000194] Bug re-attempt: the prior run of this
   task failed only on a `ruff check` RUF043 violation in
   `bob_tools/planfile/tests/test_plan_artifact.py:143`, where the
