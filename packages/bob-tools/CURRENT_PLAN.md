@@ -1,5 +1,5 @@
-## Stage 13: Phase C Increment 4 - add_bug_task
-<!-- phase_id: phase_013 -->
+## Stage 14: Phase C Increment 5 - replace_phase_validated
+<!-- phase_id: phase_014 -->
 
-- [x] T-000175: Implement add_bug_task(plan, task, *, dedup_keys=()) -> tuple[Plan, str] per v4 Contract 2: returns one of appended, reopened, unchanged; creates the Bugs section if absent; root bug tasks only; force TODO and assign next global T-NNNNNN on append; dedup keys = explicit keys then fix annotation values then normalized text; TODO match returns unchanged; DONE or FAILED match reopens earliest in place preserving id, children, annotations, deps, ruled_out, position; task must pass Stage 10 field-stability. PlanValidationError only.
-- [ ] T-000176: Verify Stage 13 gate: absent section, append, unchanged-TODO, reopen-DONE, reopen-FAILED, fix-key dedup, text-key dedup, id assignment, children preserved, field-stability rejection; ruff, ruff format, mypy strict, full pytest all green.
+- [ ] T-000177: Implement replace_phase_validated(plan, phase_id, new_phase, *, assign_missing_ids=True, preserve_position=True) per v4 Contract 3: exactly one phase matched and replaced in place; missing phase id gets fresh phase_NNN above all existing suffixes; missing task ids assigned global-sequential; ordinal normalized to the replaced phase ordinal when preserve_position; whole result must pass validate_plan constructed=True including field-stability. Structural validity only; lineage policy stays in duplo. PlanValidationError on no or multi match, dup ids, malformed ids, invalid scalars or deps or tags, non-contiguous ordinals, canonical or round-trip failure, missing ids when assign_missing_ids is False.
+- [ ] T-000178: Verify Stage 14 gate: in-place replace, id assignment, ordinal normalization, dup and unknown phase rejection, invalid deps, assert_mcloop_canonical success; ruff, ruff format, mypy strict, full pytest all green.
