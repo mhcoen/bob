@@ -805,11 +805,12 @@ class TestValidatePlanConstructed:
 class TestAssertMcloopCanonical:
     """Tests for ``assert_mcloop_canonical`` per v4 Contract 5.
 
-    The function validates a constructed plan, renders it, re-parses,
-    requires semantic equality (NOT byte fixed point) under the v4
-    normalizer, and runs the R1/R2 equivalents without importing
-    mcloop. On success it returns the rendered text so the caller can
-    persist exactly what was checked.
+    The function renders a plan, re-parses, requires semantic equality
+    (NOT byte fixed point) under the v4 normalizer, and runs the R1/R2
+    equivalents without importing mcloop. On success it returns the
+    rendered text so the caller can persist exactly what was checked.
+    Construction-API strictness remains under
+    ``validate_plan(..., constructed=True)``.
     """
 
     def _ctask(
@@ -868,31 +869,29 @@ class TestAssertMcloopCanonical:
         assert "<!-- bob-plan-format: 1 -->" in rendered
         assert "T-000001" in rendered
 
-    def test_constructed_validation_failure_is_raised(self) -> None:
-        # missing magic_version is one of the constructed=True checks;
-        # assert_mcloop_canonical must surface that error before the
-        # render/re-parse step ever runs.
+    def test_missing_magic_version_is_allowed_by_mcloop_canonical_contract(
+        self,
+    ) -> None:
         plan = dataclasses.replace(self._cplan(), magic_version=None)
-        with pytest.raises(PlanValidationError) as exc_info:
-            assert_mcloop_canonical(plan)
-        assert any("plan.magic_version must be 1" in m for m in exc_info.value.messages)
+        rendered = assert_mcloop_canonical(plan)
+        assert rendered == render_plan(plan)
+        assert "<!-- bob-plan-format: 1 -->" not in rendered
 
-    def test_constructed_validation_catches_d1_text_leak(self) -> None:
-        # The Stage 10 per-task field-stability harness catches a task
-        # whose ``text`` scalar would re-parse as an annotation. The
-        # v3 leak class (byte fixed point but semantically divergent)
-        # is rejected here before Contract 5's own round-trip even runs.
-        leaky = self._ctask(text="title [fix: leaked]")
-        plan = self._cplan(tasks=(leaky,))
-        with pytest.raises(PlanValidationError) as exc_info:
-            assert_mcloop_canonical(plan)
-        assert any("failed to round-trip" in m for m in exc_info.value.messages)
+    def test_multiline_phase_prose_allowed_by_mcloop_canonical_contract(
+        self,
+    ) -> None:
+        phase = dataclasses.replace(
+            self._cplan().phases[0],
+            prose="First paragraph.\n\nSecond paragraph.",
+        )
+        plan = dataclasses.replace(self._cplan(), phases=(phase,))
+        rendered = assert_mcloop_canonical(plan)
+        assert rendered == render_plan(plan)
+        assert "Second paragraph." in rendered
 
     def test_missing_id_rejected(self) -> None:
-        # constructed=True requires every task to have a T-NNNNNN id;
-        # the parse step would also reject id-less tasks in strict
-        # mode, but assert_mcloop_canonical surfaces the friendlier
-        # validate_plan message.
+        # R2 equivalent: every parsed task must carry a stable
+        # T-NNNNNN id, matching mcloop's canonical precondition.
         bare = Task(
             task_id=None,
             text="x",
@@ -907,11 +906,11 @@ class TestAssertMcloopCanonical:
             line_number=0,
             trailing_lines=(),
         )
-        plan = self._cplan(tasks=(bare,))
+        plan = dataclasses.replace(self._cplan(tasks=(bare,)), magic_version=None)
         with pytest.raises(PlanValidationError) as exc_info:
             assert_mcloop_canonical(plan)
         assert any(
-            "task_id is missing on constructed task" in m
+            "parsed plan has 1 task(s) without stable T-NNNNNN id(s)" in m
             for m in exc_info.value.messages
         )
 

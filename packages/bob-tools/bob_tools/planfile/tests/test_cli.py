@@ -40,6 +40,19 @@ STRICT_PLAN = """<!-- bob-plan-format: 1 -->
 - [ ] T-000002: second task
 """
 
+MCLOOP_CANONICAL_NON_CONSTRUCTED_PLAN = """# McLoop Canonical Fixture
+
+## Stage 1: Bootstrap
+<!-- phase_id: phase_001 -->
+
+First paragraph.
+
+Second paragraph.
+
+- [ ] T-000001: first task
+- [ ] T-000002: second task
+"""
+
 COMPAT_PLAN = """# Compat CLI Fixture
 
 ## Stage 1: Bootstrap
@@ -62,6 +75,13 @@ INVALID_PLAN = """# Broken Plan
 def strict_plan_path(tmp_path: Path) -> Path:
     path = tmp_path / "PLAN.md"
     path.write_text(STRICT_PLAN)
+    return path
+
+
+@pytest.fixture
+def mcloop_canonical_non_constructed_path(tmp_path: Path) -> Path:
+    path = tmp_path / "PLAN.md"
+    path.write_text(MCLOOP_CANONICAL_NON_CONSTRUCTED_PLAN)
     return path
 
 
@@ -157,6 +177,27 @@ class TestDone:
         assert settlements[0]["kind"] == "commit_landed"
         assert "[x] T-000001" in strict_plan_path.read_text()
 
+    def test_marks_mcloop_canonical_non_constructed_plan_done(
+        self,
+        mcloop_canonical_non_constructed_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        rc = main(
+            [
+                "done",
+                str(mcloop_canonical_non_constructed_path),
+                "T-000001",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == EXIT_OK
+        settlements = json.loads(captured.out)
+        assert settlements[0]["task_id"] == "T-000001"
+        text = mcloop_canonical_non_constructed_path.read_text()
+        assert "[x] T-000001" in text
+        assert "Second paragraph." in text
+        assert "<!-- bob-plan-format: 1 -->" not in text
+
     def test_unknown_task_exits_two(
         self, strict_plan_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -187,6 +228,30 @@ class TestFail:
         assert settlements[0]["kind"] == "test_failed"
         assert settlements[0]["summary"] == "tests failed"
         assert "[!] T-000002" in strict_plan_path.read_text()
+
+    def test_marks_mcloop_canonical_non_constructed_plan_failed(
+        self,
+        mcloop_canonical_non_constructed_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        rc = main(
+            [
+                "fail",
+                str(mcloop_canonical_non_constructed_path),
+                "T-000002",
+                "--reason",
+                "tests failed",
+            ]
+        )
+        captured = capsys.readouterr()
+        assert rc == EXIT_OK
+        settlements = json.loads(captured.out)
+        assert settlements[0]["task_id"] == "T-000002"
+        assert settlements[0]["kind"] == "test_failed"
+        text = mcloop_canonical_non_constructed_path.read_text()
+        assert "[!] T-000002" in text
+        assert "Second paragraph." in text
+        assert "<!-- bob-plan-format: 1 -->" not in text
 
     def test_unknown_task_exits_two(
         self, strict_plan_path: Path, capsys: pytest.CaptureFixture[str]

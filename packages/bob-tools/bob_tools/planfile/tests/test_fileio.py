@@ -37,20 +37,22 @@ from bob_tools.planfile import (
     update,
 )
 
-# Non-canonical fixture: missing the v1 magic preamble and the
-# <!-- phase_id: ... --> comment, so it does not satisfy
-# assert_mcloop_canonical. Used by tests whose purpose is atomic-write,
-# lock, or crash behavior — those exercise the I/O path itself and
-# must opt out of canonical validation (per T-000181) by passing
-# validation="unchecked", otherwise the fixture would be rejected
-# before any of the I/O contract under test ran.
+# Legacy-but-mcloop-canonical fixture: missing the v1 magic preamble and
+# the <!-- phase_id: ... --> comment, but every incomplete checkbox sits
+# under a Stage header and every parsed task carries a T-NNNNNN id. It
+# satisfies assert_mcloop_canonical after the Contract 5 amendment that
+# split mcloop's R1/R2 canonical-input contract from constructed=True
+# construction-API strictness.
 _MINIMAL_PLAN = "# Stage 6 fixture\n\n## Stage 1: Smoke\n\n- [ ] T-000001: only task\n"
+
+# Truly non-canonical for mcloop's R2 predicate: the parsed task lacks a
+# stable T-NNNNNN id. Default canonical save/update must reject this.
+_IDLESS_PLAN = "# Stage 6 fixture\n\n## Stage 1: Smoke\n\n- [ ] only task\n"
 
 # Canonical fixture: contains the v1 magic preamble, a phase_id
 # comment, and a T-NNNNNN id, so it passes
-# assert_mcloop_canonical(validate_plan(constructed=True)). Used by
-# the ordinary (no crash, no lock-race) save/update tests so they
-# exercise the default validation="canonical" path.
+# assert_mcloop_canonical and validate_plan(constructed=True). Used by
+# ordinary strict save/update tests that need construction-API shape.
 #
 # The H1 deliberately avoids the words "Stage"/"Phase" followed by a
 # digit; ``parser._STAGE_RE`` accepts ``#+`` so an H1 like
@@ -108,10 +110,7 @@ def test_save_crash_between_write_and_rename_preserves_original(
     monkeypatch.setattr("os.replace", _boom)
 
     # validation="unchecked": the assertion under test is atomic-write
-    # crash behavior, not canonical-input enforcement. The
-    # _MINIMAL_PLAN fixture is deliberately non-canonical so
-    # validation="canonical" would raise before os.replace was ever
-    # called, hiding the crash-safety contract we want to pin.
+    # crash behavior, not canonical-input enforcement.
     with pytest.raises(OSError, match="simulated rename crash"):
         save(path, new_plan, validation="unchecked")
 
@@ -188,11 +187,7 @@ def test_update_lock_serializes_concurrent_calls(tmp_path: Path) -> None:
     def runner(label: str) -> None:
         try:
             # validation="unchecked": this test pins lock
-            # serialization, not canonical enforcement. The
-            # _MINIMAL_PLAN fixture is non-canonical, so the default
-            # canonical mode would reject the rendered output before
-            # the lock-race assertions could observe winner/loser
-            # behavior.
+            # serialization, not canonical enforcement.
             update(path, make_op(label), validation="unchecked")
         except ConcurrentUpdateError as exc:
             with errors_lock:
@@ -335,11 +330,8 @@ def test_save_holds_advisory_lock_while_writing(
 
     plan = load(path)
     # validation="unchecked": this test pins the save-locks-on-its-
-    # own contract. The _MINIMAL_PLAN fixture is non-canonical, so
-    # the default canonical mode would raise before any lock was
-    # acquired and the counting_acquire helper would observe zero
-    # calls — flipping the assertion from "exactly one lock" to "no
-    # lock", which is not the property under test.
+    # own contract. It should observe exactly one lock acquisition
+    # without depending on canonical validation behavior.
     save(path, plan, validation="unchecked")
 
     assert calls == [path], (
@@ -364,17 +356,13 @@ def test_save_holds_advisory_lock_while_writing(
 def test_save_default_canonical_rejects_non_canonical_plan(tmp_path: Path) -> None:
     """save() with the default validation refuses a non-canonical plan.
 
-    Loading ``_MINIMAL_PLAN`` yields a Plan that parses fine but lacks
-    the v1 magic preamble and the explicit phase_id comment required by
-    ``assert_mcloop_canonical``. The default canonical mode must raise
-    :class:`PlanValidationError` before the atomic-write path is
-    reached, so the on-disk bytes remain the original fixture. Pins
-    that canonical is the default, that the validator's reject is
-    surfaced through save's own surface, and that no half-written file
-    leaks out when the validator rejects.
+    Loading ``_IDLESS_PLAN`` yields a Plan that parses fine but fails
+    mcloop's R2 canonical-input predicate. The default canonical mode
+    must raise :class:`PlanValidationError` before the atomic-write path
+    is reached, so the on-disk bytes remain the original fixture.
     """
     path = tmp_path / "PLAN.md"
-    _write(path, _MINIMAL_PLAN)
+    _write(path, _IDLESS_PLAN)
     original_bytes = path.read_bytes()
     plan = load(path)
 
@@ -386,19 +374,40 @@ def test_save_default_canonical_rejects_non_canonical_plan(tmp_path: Path) -> No
     )
 
 
+def test_save_default_canonical_accepts_mcloop_canonical_legacy_plan(
+    tmp_path: Path,
+) -> None:
+    """Missing magic/phase-id metadata alone is not a save-time reject.
+
+    Those are constructed=True concerns. The default canonical save
+    gate tracks mcloop's R1/R2 precondition so bob-plan can operate on
+    canonical inputs regardless of provenance.
+    """
+    path = tmp_path / "PLAN.md"
+    _write(path, _MINIMAL_PLAN)
+    plan = load(path)
+    new_plan = dataclasses.replace(plan, project_title="Legacy Canonical")
+
+    save(path, new_plan)
+
+    reloaded = load(path)
+    assert reloaded.project_title == "Legacy Canonical"
+    assert reloaded.magic_version is None
+
+
 def test_save_unchecked_writes_non_canonical_plan(tmp_path: Path) -> None:
     """save(..., validation='unchecked') writes a non-canonical plan.
 
     Companion to the canonical-rejects test: the opt-out really does
-    skip validation. A round-trip through load -> save(unchecked) ->
-    load with the non-canonical ``_MINIMAL_PLAN`` fixture is observable
+    skip validation. A round-trip through load -> save(unchecked) -> load
+    with the non-canonical ``_IDLESS_PLAN`` fixture is observable
     on disk. Pins that unchecked is a real escape hatch (so the low-
     level lock/crash tests above are not silently asserting against
     canonical-mode behavior) and that it does not require any other
     keyword to opt in.
     """
     path = tmp_path / "PLAN.md"
-    _write(path, _MINIMAL_PLAN)
+    _write(path, _IDLESS_PLAN)
     plan = load(path)
     new_plan = dataclasses.replace(plan, project_title="Unchecked Write")
 
@@ -411,16 +420,12 @@ def test_save_unchecked_writes_non_canonical_plan(tmp_path: Path) -> None:
 def test_update_default_canonical_rejects_non_canonical_result(tmp_path: Path) -> None:
     """update() with the default validation refuses a non-canonical result.
 
-    The on-disk file is non-canonical, so the operation's input Plan is
-    too. The default canonical mode must raise
-    :class:`PlanValidationError` in the in-lock save step and must not
-    overwrite the existing bytes. Pins that update honors the same
-    canonical default as save, closing the obvious bypass where a
-    caller could mutate via update() and skip the gate that save()
-    enforces.
+    The on-disk file parses but fails mcloop's R2 predicate. The default
+    canonical mode must raise :class:`PlanValidationError` in the in-lock
+    save step and must not overwrite the existing bytes.
     """
     path = tmp_path / "PLAN.md"
-    _write(path, _MINIMAL_PLAN)
+    _write(path, _IDLESS_PLAN)
     original_bytes = path.read_bytes()
 
     with pytest.raises(PlanValidationError):
@@ -442,7 +447,7 @@ def test_update_unchecked_writes_non_canonical_result(tmp_path: Path) -> None:
     in-lock save.
     """
     path = tmp_path / "PLAN.md"
-    _write(path, _MINIMAL_PLAN)
+    _write(path, _IDLESS_PLAN)
 
     returned = update(path, _retitle("Unchecked Update"), validation="unchecked")
     assert returned.project_title == "Unchecked Update"

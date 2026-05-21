@@ -967,16 +967,13 @@ def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
 
     The Stage 10 task-only normalizer rejects nonempty ``trailing_lines``
     rather than clearing them, because at construction time any opaque
-    retained markdown is precisely the escape hatch Path 1 forbids. By
-    the time :func:`assert_mcloop_canonical` reaches this code, however,
-    :func:`validate_plan` with ``constructed=True`` has already rejected
-    intended-side ``trailing_lines``. The parsed-side image may pick up
-    ``trailing_lines`` only if the rendered text contained content the
-    parser captured as opaque tail (which would itself be a leak); the
-    R1-equivalent count check below catches the meaningful subset of
-    that case — checkbox lines that did not surface as tasks — so the
-    semantic comparison can safely normalize ``trailing_lines`` to ``()``
-    on both sides.
+    retained markdown is precisely the escape hatch Path 1 forbids.
+    McLoop's canonical input contract is intentionally narrower: it
+    normalizes ``trailing_lines`` as position/source trivia while the
+    R1-equivalent count check below catches the meaningful leak class —
+    checkbox lines that did not surface as tasks. That lets canonical
+    save operate on mcloop-canonical plans regardless of whether they
+    were produced by the construction API.
     """
     return dataclasses.replace(
         task,
@@ -1154,14 +1151,20 @@ def _count_todo_tasks(plan: Plan) -> int:
 def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> str:
     """Validate ``plan`` to mcloop's canonical-input contract; return rendered text.
 
-    Per v4 Contract 5: runs :func:`validate_plan` with
-    ``constructed=True``; renders the plan; re-parses the rendered text;
-    requires SEMANTIC equality of parsed-vs-intended after normalizing
-    only ``line_number``, ``Task.indent_level``, ``Plan.source_path``,
-    and ``Task.trailing_lines`` (NOT a byte fixed point — the v3 leak
-    class can byte-fixed-point while semantically diverging); then
-    enforces the R1/R2 equivalents independently, so mcloop is not
-    imported:
+    Per v4 Contract 5 as amended: renders the plan; re-parses the
+    rendered text; requires SEMANTIC equality of parsed-vs-intended
+    after normalizing only ``line_number``, ``Task.indent_level``,
+    ``Plan.source_path``, and ``Task.trailing_lines`` (NOT a byte fixed
+    point — the v3 leak class can byte-fixed-point while semantically
+    diverging); then enforces the R1/R2 equivalents independently, so
+    mcloop is not imported.
+
+    This is deliberately separate from the construction-API contract in
+    :func:`validate_plan` with ``constructed=True``. McLoop's real
+    ``enforce_canonical`` does not require ``magic_version == 1`` or the
+    constructed-mode field-stability invariants; callers that need those
+    construction guarantees must request them explicitly via
+    ``validate_plan(plan, constructed=True)``.
 
     * **R1 (grammar-narrowing equivalent).** Every ``- [ ]`` line in
       the rendered text must surface as a parsed ``TaskStatus.TODO``
@@ -1181,7 +1184,6 @@ def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> s
     ``source_path`` is forwarded to the re-parse so a re-parse syntax
     error surfaces with the correct file context for the caller.
     """
-    validate_plan(plan, constructed=True)
     rendered = render_plan(plan)
     reparsed = parse_plan(rendered, source_path=source_path)
 
