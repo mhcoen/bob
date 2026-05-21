@@ -5,6 +5,7 @@ from __future__ import annotations
 import atexit
 import json as _json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -14,10 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from mcloop import formatting
-from mcloop.checklist import (
+from mcloop._planfile_compat import (
     CHECKBOX_RE,
     Task,
-    _checkbox_task_text,
     mark_failed,
     parse,
 )
@@ -32,6 +32,7 @@ _phase_start_time = 0.0
 _project_dir: Path | None = None
 _lifecycle_state = "not_started"
 _atexit_callback_registered = False
+_TASK_ID_RE = re.compile(r"^(T-\d{6}):\s*(.*)$")
 
 
 def register_atexit_cleanup() -> None:
@@ -307,6 +308,18 @@ def _all_tasks(tasks: list[Task]) -> list[Task]:
         result.append(t)
         result.extend(_all_tasks(t.children))
     return result
+
+
+def _checkbox_task_text(line: str) -> str | None:
+    """Return checkbox task text without a leading canonical task id."""
+    match = CHECKBOX_RE.match(line)
+    if match is None:
+        return None
+    text = match.group(3).strip()
+    id_match = _TASK_ID_RE.match(text)
+    if id_match is None:
+        return text
+    return id_match.group(2).strip()
 
 
 def _write_ruledout_to_plan(

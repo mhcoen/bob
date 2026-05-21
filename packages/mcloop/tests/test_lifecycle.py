@@ -907,9 +907,9 @@ def test_check_interrupted_skip_marks_active_file_not_master(tmp_path, monkeypat
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     master = tmp_path / "PLAN.md"
-    master.write_text("## Stage 1\n- [ ] Fix something\n")
+    master.write_text("## Stage 1\n- [ ] T-000001: Fix something\n")
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("## Stage 1\n- [ ] Fix something\n")
+    current.write_text("## Stage 1\n- [ ] T-000001: Fix something\n")
     bugs = tmp_path / "BUGS.md"
     bugs.write_text("## Bugs\n\n")
 
@@ -920,7 +920,7 @@ def test_check_interrupted_skip_marks_active_file_not_master(tmp_path, monkeypat
         active_paths=[bugs, current, master],
     )
     assert result == "skip"
-    assert "- [!] Fix something" in current.read_text()
+    assert "- [!] T-000001: Fix something" in current.read_text()
     assert "- [!]" not in master.read_text()
 
 
@@ -936,11 +936,11 @@ def test_check_interrupted_skip_marks_bugs_over_current(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     master = tmp_path / "PLAN.md"
-    master.write_text("## Stage 1\n- [ ] Other\n")
+    master.write_text("## Stage 1\n- [ ] T-000001: Other\n")
     current = tmp_path / "CURRENT_PLAN.md"
-    current.write_text("## Stage 1\n- [ ] Other\n")
+    current.write_text("## Stage 1\n- [ ] T-000001: Other\n")
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("## Bugs\n\n- [ ] Crash on startup\n")
+    bugs.write_text("## Bugs\n\n- [ ] T-000002: Crash on startup\n")
 
     monkeypatch.setattr("builtins.input", lambda _="": "s")
     result = _check_interrupted(
@@ -949,7 +949,7 @@ def test_check_interrupted_skip_marks_bugs_over_current(tmp_path, monkeypatch):
         active_paths=[bugs, current, master],
     )
     assert result == "skip"
-    assert "- [!] Crash on startup" in bugs.read_text()
+    assert "- [!] T-000002: Crash on startup" in bugs.read_text()
     assert "- [!]" not in current.read_text()
     assert "- [!]" not in master.read_text()
 
