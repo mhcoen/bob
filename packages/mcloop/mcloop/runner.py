@@ -23,7 +23,7 @@ from mcloop.prompts import (
     build_sync_prompt,
 )
 
-DEFAULT_TASK_TIMEOUT = 1800  # 30 minutes; override with --timeout
+DEFAULT_TASK_TIMEOUT = 3600  # 60 minutes; override with --timeout
 SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
 SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
 
@@ -303,8 +303,7 @@ def ensure_subscription_preflight(
     except subprocess.TimeoutExpired as exc:
         output = (exc.stdout or "") + (exc.stderr or "")
         raise SubscriptionPreflightError(
-            "Claude Code subscription preflight timed out. "
-            "Run `claude /login` and retry mcloop.",
+            "Claude Code subscription preflight timed out. Run `claude /login` and retry mcloop.",
             output,
         ) from exc
     except OSError as exc:
