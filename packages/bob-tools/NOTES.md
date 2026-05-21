@@ -2,6 +2,37 @@
 
 ## Observations
 
+- 2026-05-21 [20.2] [T-000191] Stage 20 gate verified. Confirmed the
+  three duplo helpers each return `list[bob_tools.planfile.Task]`
+  built via `make_task` with no markdown strings:
+  `gap_detector.format_gap_tasks` (gap_detector.py:307),
+  `verification_extractor.format_verification_tasks`
+  (verification_extractor.py:125), and
+  `spec_reader.format_contracts_as_verification` (spec_reader.py:988).
+  Each module imports `Task, make_task` from `bob_tools.planfile`.
+  Pipeline append sites route typed tasks through
+  `bob_tools.planfile.update` + `add_phase_task`
+  (pipeline.py:1265 `_append_gap_tasks_to_plan`) or through
+  `duplo.planner.save_plan`'s `extra_tasks` kwarg (planner.py:692,
+  `_append_extra_tasks` at planner.py:862), which itself persists via
+  `bob_tools.planfile.save`. Canonical-gate compliance comes through
+  `add_phase_task`'s constructed-mode validator (run after a
+  one-time `migrate` + ordinal renumber via
+  `_ensure_constructed_invariants` when the user-facing plan is
+  missing magic line/ids/contiguous ordinals); both append paths use
+  `validation="unchecked"` on `update`/`save` to avoid rejecting
+  otherwise-valid user-edited PLAN.md files, matching the bug-append
+  pattern from T-000188/189. Verification commands (run from
+  bob-tools): `ruff check .` clean; `ruff format --check .` reports
+  41 files already formatted; `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest`
+  reports 670 passed / 2 skipped; bare `mypy .` is not on PATH so
+  invoked as `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` (per the
+  precedent in earlier gate-verification entries), reports "Success:
+  no issues found in 41 source files". Duplo's own checks
+  (`/Users/mhcoen/proj/duplo/.venv/bin/pytest` and `ruff check .` from
+  the duplo repo) report 3285 passed / 60 skipped and clean
+  respectively.
+
 - 2026-05-21 [20.1] [T-000190] Stage 20 typed helpers landed: duplo
   `gap_detector.format_gap_tasks`, `verification_extractor.format_verification_tasks`,
   and `spec_reader.format_contracts_as_verification` now return
