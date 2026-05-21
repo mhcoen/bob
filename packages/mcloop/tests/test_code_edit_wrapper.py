@@ -111,6 +111,7 @@ def test_direct_backend_returns_code_edit_result(tmp_path: Path) -> None:
     log_path = tmp_path / "session.log"
     with (
         patch("mcloop.runner._build_command", side_effect=_fake_build_command),
+        patch("mcloop.runner.ensure_subscription_preflight") as preflight,
         patch("mcloop.runner._run_session", return_value=("ok\n", 0)),
         patch("mcloop.runner._write_log", return_value=log_path),
     ):
@@ -132,6 +133,10 @@ def test_direct_backend_returns_code_edit_result(tmp_path: Path) -> None:
     assert captured["model"] == "opus"
     assert inputs["instruction"] in captured["prompt"]
     assert "BUG FIX" not in captured["prompt"]
+    preflight.assert_called_once()
+    assert preflight.call_args.kwargs["cli"] == "claude"
+    assert preflight.call_args.kwargs["model"] == "opus"
+    assert preflight.call_args.kwargs["cwd"] == project_dir
 
 
 # --------------------------------------------------------------------
@@ -231,8 +236,14 @@ def test_orchestra_backend_returns_code_edit_result(
 
     import mcloop.code_edit as _ce
 
+    preflight_calls: list[dict[str, Any]] = []
+
+    def _capture_preflight(**kwargs: Any) -> None:
+        preflight_calls.append(kwargs)
+
     monkeypatch.setattr("orchestra.run_workflow", _stub_run_workflow)
     monkeypatch.setattr(_ce, "run_workflow", _stub_run_workflow, raising=False)
+    monkeypatch.setattr("mcloop.runner.ensure_subscription_preflight", _capture_preflight)
 
     assert _select_backend(project_dir) == "orchestra"
     result = invoke_code_edit(**inputs)
@@ -257,6 +268,10 @@ def test_orchestra_backend_returns_code_edit_result(
     assert result.summary.get("terminal") == "done"
     assert result.summary.get("exit_code") == 0
     assert result.log_path == adapter_log
+    assert preflight_calls
+    assert preflight_calls[0]["cli"] == "claude"
+    assert preflight_calls[0]["model"] == "opus"
+    assert preflight_calls[0]["cwd"] == project_dir
 
 
 def test_orchestra_backend_falls_back_when_pattern_is_direct(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import collections
+import json
 import os
 import queue
 import re
@@ -23,6 +24,8 @@ from mcloop.prompts import (
 )
 
 DEFAULT_TASK_TIMEOUT = 1800  # 30 minutes; override with --timeout
+SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
+SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
 
 
 @dataclass
@@ -31,6 +34,16 @@ class RunResult:
     output: str
     exit_code: int
     log_path: Path
+
+
+class SubscriptionPreflightError(RuntimeError):
+    """Raised when the Claude Code subscription preflight fails."""
+
+    exit_code = SUBSCRIPTION_PREFLIGHT_EXIT_CODE
+
+    def __init__(self, message: str, output: str = "") -> None:
+        super().__init__(message)
+        self.output = output
 
 
 INVESTIGATION_TOOLS = "Edit,Write,Bash,Read,Glob,Grep,WebFetch,WebSearch"
@@ -116,6 +129,7 @@ _MODEL_PROVIDERS = {
 }
 
 _THIRD_PARTY_PREFIXES = ("deepseek/", "moonshotai/", "openai/")
+_SUBSCRIPTION_PREFLIGHT_OK = False
 
 
 def warn_unknown_model(cli: str, model: str) -> None:
@@ -221,6 +235,120 @@ def _build_session_env(
             env["ANTHROPIC_AUTH_TOKEN"] = or_key
         env["ANTHROPIC_API_KEY"] = ""
     return env
+
+
+def _reset_subscription_preflight_for_tests() -> None:
+    global _SUBSCRIPTION_PREFLIGHT_OK
+    _SUBSCRIPTION_PREFLIGHT_OK = False
+
+
+def _subscription_preflight_required(
+    *,
+    cli: str,
+    model: str | None,
+    env: dict[str, str],
+) -> bool:
+    """Return True when this session should probe Claude subscription auth."""
+    if cli != "claude":
+        return False
+    from mcloop.install_cmd import _load_mcloop_config
+
+    billing = _load_mcloop_config().get("billing")
+    if billing in {"api", "openrouter"}:
+        return False
+    if model and _provider_for_model(model) is not None:
+        return False
+    if env.get("ANTHROPIC_API_KEY"):
+        return False
+    if env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_AUTH_TOKEN"):
+        return False
+    return True
+
+
+def ensure_subscription_preflight(
+    *,
+    cli: str,
+    model: str | None,
+    env: dict[str, str],
+    cwd: Path,
+) -> None:
+    """Fail fast if a native Claude Code subscription session is unusable.
+
+    The check is intentionally narrow: it runs only for subscription-backed
+    ``claude`` sessions after the caller has constructed the same env that
+    the real task session will use. API billing, OpenRouter billing, Codex,
+    and third-party provider-routed models are skipped because they have
+    different auth surfaces.
+    """
+    global _SUBSCRIPTION_PREFLIGHT_OK
+    if _SUBSCRIPTION_PREFLIGHT_OK:
+        return
+    if not _subscription_preflight_required(cli=cli, model=model, env=env):
+        return
+
+    cmd = ["claude", "-p", "ok", "--output-format", "stream-json", "--verbose"]
+    if model:
+        cmd.extend(["--model", model])
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=cwd,
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=SUBSCRIPTION_PREFLIGHT_TIMEOUT,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        output = (exc.stdout or "") + (exc.stderr or "")
+        raise SubscriptionPreflightError(
+            "Claude Code subscription preflight timed out. "
+            "Run `claude /login` and retry mcloop.",
+            output,
+        ) from exc
+    except OSError as exc:
+        raise SubscriptionPreflightError(
+            f"Claude Code subscription preflight could not start: {exc}",
+            str(exc),
+        ) from exc
+
+    output = (result.stdout or "") + (result.stderr or "")
+    normalized = output.lower()
+    has_result = _stream_json_has_result(output)
+    if (
+        result.returncode != 0
+        or "not logged in" in normalized
+        or "please run /login" in normalized
+        or not has_result
+    ):
+        reason = (
+            "Claude Code subscription preflight failed before starting a task.\n"
+            f"Exit code: {result.returncode}\n"
+        )
+        if not has_result:
+            reason += "\nNo stream-json result was produced."
+        if output.strip():
+            reason += "\n" + output.strip()
+        reason += "\n\nRun `claude /login` and retry mcloop."
+        raise SubscriptionPreflightError(reason, output)
+    _SUBSCRIPTION_PREFLIGHT_OK = True
+
+
+def _stream_json_has_result(output: str) -> bool:
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except (TypeError, ValueError):
+            continue
+        if (
+            isinstance(event, dict)
+            and event.get("type") == "result"
+            and event.get("is_error") is not True
+            and event.get("subtype", "success") == "success"
+        ):
+            return True
+    return False
 
 
 def _build_shared_parts(
@@ -648,6 +776,12 @@ def run_task(
         build_kwargs["allowed_tools"] = allowed_tools
     session_env = _build_session_env(task_label=task_label, cli=cli)
     cmd = _build_command(cli, prompt, env=session_env, **build_kwargs)
+    ensure_subscription_preflight(
+        cli=cli,
+        model=model,
+        env=session_env,
+        cwd=project_dir,
+    )
     output, returncode = _run_session(
         cmd,
         project_dir,

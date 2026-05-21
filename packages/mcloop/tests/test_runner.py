@@ -34,6 +34,11 @@ from mcloop.runner import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _disable_subscription_preflight(monkeypatch):
+    monkeypatch.setattr("mcloop.runner.ensure_subscription_preflight", lambda **kwargs: None)
+
+
 def test_build_command_claude():
     cmd = _build_command("claude", "fix the bug")
     assert cmd[0] == "claude"

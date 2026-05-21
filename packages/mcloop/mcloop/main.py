@@ -147,6 +147,7 @@ from mcloop.runner import (
     DEFAULT_TASK_TIMEOUT,
     INVESTIGATION_TOOLS,
     RunResult,
+    SubscriptionPreflightError,
     run_audit,
     run_task,
     warn_unknown_model,
@@ -411,6 +412,9 @@ def main() -> None:
             # or a Plan-Ledger pause (5).
             print(f"\n!!! {exc}\n", file=sys.stderr)
             sys.exit(3)
+        except SubscriptionPreflightError as exc:
+            print(f"\n!!! {exc}\n", file=sys.stderr)
+            sys.exit(exc.exit_code)
     finally:
         try:
             shutdown_lifecycle()

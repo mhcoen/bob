@@ -325,6 +325,12 @@ def _invoke_direct(
         )
     session_env = _runner._build_session_env(task_label=task_label, cli="claude")
     cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
+    _runner.ensure_subscription_preflight(
+        cli="claude",
+        model=model,
+        env=session_env,
+        cwd=project_dir,
+    )
     output, returncode = _runner._run_session(
         cmd,
         project_dir,
@@ -452,6 +458,12 @@ def _invoke_orchestra(
     from orchestra.config import load_config
 
     cfg = load_config(project_dir)
+    _ensure_orchestra_subscription_preflight(
+        cfg=cfg,
+        model=model,
+        task_label=task_label,
+        project_dir=project_dir,
+    )
     inputs: dict[str, Any] = {
         "instruction": instruction,
         "context": context,
@@ -480,6 +492,44 @@ def _invoke_orchestra(
         data_root=log_dir / "orchestra-runs",
     )
     return _orchestra_to_code_edit_result(result, fallback_log=log_dir)
+
+
+def _ensure_orchestra_subscription_preflight(
+    *,
+    cfg: Any,
+    model: str | None,
+    task_label: str,
+    project_dir: Path,
+) -> None:
+    """Run the Claude subscription preflight for orchestra-backed code edits.
+
+    Orchestra owns the subprocess env for this backend, so use its env
+    builder instead of approximating the direct runner path. If mcloop
+    supplied a model override, orchestra applies that model to every
+    state; otherwise use the configured editor role when present.
+    """
+    try:
+        from orchestra.adapters._subprocess import build_session_env
+    except ImportError:
+        return
+
+    preflight_model = model
+    if preflight_model is None:
+        binding = getattr(cfg, "roles", {}).get("editor")
+        adapter = getattr(binding, "adapter", "") if binding is not None else ""
+        if adapter.startswith("claude_code"):
+            preflight_model = getattr(binding, "model", None)
+    env = build_session_env(
+        task_label=task_label,
+        cli="claude",
+        model=preflight_model,
+    )
+    _runner.ensure_subscription_preflight(
+        cli="claude",
+        model=preflight_model,
+        env=env,
+        cwd=project_dir,
+    )
 
 
 def _invoke_bug_verify_orchestra(
