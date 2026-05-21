@@ -319,12 +319,6 @@ def _has_task_specific_acceptance_evidence(
     if not anchors or not any(anchor in normalized_output for anchor in anchors):
         return False
 
-    task_lower = task_text.lower()
-    is_verification_task = any(term in task_lower for term in _VERIFICATION_TASK_TERMS)
-    has_explicit_acceptance = "acceptance evidence" in normalized_output
-    if not is_verification_task and not has_explicit_acceptance:
-        return False
-
     check_terms_seen = {
         term for term in _CHECK_EVIDENCE_TERMS if term in normalized_output
     }
