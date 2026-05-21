@@ -586,3 +586,5 @@ adf7278: Added a verification script to ensure `bob-plan fmt` only makes additiv
 28c9dda: Added a new `add_bug_task` function to manage bug tasks with deduplication and reopen-in-place semantics. It appends new bugs, reopens closed ones if they match, or leaves unchanged if already open. Includes dedup key matching via explicit keys, fix annotations, and normalized text. Comprehensive tests verify behavior for various scenarios.
 
 2e00820: Added replace_phase_validated function to enforce v4 Contract 3 for phase substitution. It validates exact phase matches, optionally auto-assigns missing phase and task IDs, preserves ordinal position, and ensures the resulting plan meets all construction invariants. Includes comprehensive tests for edge cases like duplicate IDs, missing IDs, and validation failures.
+
+a0739ff: Added a new function `add_phase_task` to insert tasks into specific phases, supporting placement at the phase root, under a parent task, or within a named subsection. This implements v4 Contract 6, ensuring field-stable tasks and proper validation. Comprehensive tests verify placement logic, ID assignment, and error handling.
