@@ -2,6 +2,36 @@
 
 ## Observations
 
+- 2026-05-21 [20.1] [T-000190] Stage 20 typed helpers landed: duplo
+  `gap_detector.format_gap_tasks`, `verification_extractor.format_verification_tasks`,
+  and `spec_reader.format_contracts_as_verification` now return
+  `list[bob_tools.planfile.Task]` built via `make_task`. The pipeline
+  gap path (`_detect_and_append_gaps` → new `_append_gap_tasks_to_plan`)
+  routes appends through `bob_tools.planfile.update` plus
+  `add_phase_task` with `validation="unchecked"`, attaching tasks to
+  the plan's last phase. The verification path forwards typed tasks
+  via a new `extra_tasks` kwarg on `duplo.planner.save_plan`
+  (replacing the prior `extra_markdown_tasks` string kwarg) and
+  `_append_extra_tasks` skips the markdown-roundtrip the old
+  `_append_extra_markdown_tasks` performed. Design decisions worth
+  recording: (a) the old `## Gaps detected from updated reference materials`
+  H2 header is gone — typed tasks attach directly to the last phase
+  as root tasks, not under a separate heading or subsection; (b) gap
+  appends require the plan's phase ordinals to be contiguous `1..N`
+  (constructed-mode invariant on `add_phase_task`), so the new
+  `_ensure_constructed_invariants` helper renumbers ordinals
+  (identity still travels via `phase_id`) before calling
+  `add_phase_task`; (c) `add_phase_task` validation is stricter than
+  the bugs-section path used in T-000188, so user-edited PLAN.md
+  files with non-contiguous ordinals or missing magic line/ids are
+  repaired in-place via `migrate` + ordinal renumber rather than
+  rejected. Verification commands (run from bob-tools): `ruff check .`
+  clean, `ruff format --check .` reports 41 files already formatted,
+  `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 670 passed
+  / 2 skipped, `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` reports
+  "Success: no issues found in 41 source files". Duplo's own test
+  suite (run with duplo's venv) reports 3285 passed / 60 skipped.
+
 - 2026-05-21 [19.2] [T-000189] Stage 19 gate verified: duplo
   `saver.append_to_bugs_section` and `investigator.investigation_to_fix_tasks`
   are removed; duplo's saver has no remaining PLAN.md/BUGS.md markdown
