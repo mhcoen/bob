@@ -1,5 +1,5 @@
-## Stage 21: Phase C Increment 12 - migrate duplo reauthor
-<!-- phase_id: phase_021 -->
+## Stage 22: Phase C Increment 13 - make plan_document.py callerless
+<!-- phase_id: phase_022 -->
 
-- [x] T-000192: In duplo, migrate the reauthor path: parse and construct via bob_tools.planfile, substitute changed phases with replace_phase_validated, keep lineage and ledger policy in duplo, persist only via bob_tools.planfile save, output must pass assert_mcloop_canonical. Reauthor preserves unchanged phases and validates lineage as before.
-- [ ] T-000193: Verify Stage 21 gate: reauthor preserves unchanged phases, substitutes changed, lineage validated, lifecycle events emitted, save only via planfile, canonical helper passes; duplo ruff and pytest green; bob-tools still green.
+- [ ] T-000194: In duplo, remove the last production imports of duplo/plan_document.py by moving remaining callers (reauthor.py, reauthor_assemble.py) onto bob_tools.planfile. Do not delete the module yet. Run the behavior-preservation checks from the v4 ledger and prove every retained guarantee still holds against bob-tools paths.
+- [ ] T-000195: Verify Stage 22 gate: rg plan_document across duplo and tests shows no production callers; behavior-preservation tests pass; duplo ruff and pytest green; bob-tools still green.
