@@ -584,3 +584,5 @@ ecdf99d: Added a Stage 7 verification script for the bob-plan CLI that performs 
 adf7278: Added a verification script to ensure `bob-plan fmt` only makes additive changes to duplo-generated plan files. The script copies a real plan, runs the formatter, and compares parsed structures to detect any semantic changes beyond allowed formatting adjustments. If divergences are found, it logs them to a bugs file and fails.
 
 28c9dda: Added a new `add_bug_task` function to manage bug tasks with deduplication and reopen-in-place semantics. It appends new bugs, reopens closed ones if they match, or leaves unchanged if already open. Includes dedup key matching via explicit keys, fix annotations, and normalized text. Comprehensive tests verify behavior for various scenarios.
+
+2e00820: Added replace_phase_validated function to enforce v4 Contract 3 for phase substitution. It validates exact phase matches, optionally auto-assigns missing phase and task IDs, preserves ordinal position, and ensures the resulting plan meets all construction invariants. Includes comprehensive tests for edge cases like duplicate IDs, missing IDs, and validation failures.
