@@ -1,4 +1,4 @@
-"""Preserve-by-default reauthor assembly.
+"""Preserve-by-default reauthor assembly via bob_tools.planfile.
 
 Slice C reauthor mode used to trust the synthesizer to emit the FULL
 re-authored plan plus a fully-accounting lineage sidecar. That kept
@@ -9,36 +9,31 @@ expected to repeat all N-1 unchanged phases verbatim and to write
 only the changed phase plus a partial lineage; ``validate_lineage``
 fails closed (correctly), and the user has no way to make progress.
 
-This module owns the deterministic envelope. The contract becomes:
+This module owns the deterministic envelope. The contract is:
 
   - The synthesizer authors **changed/new phase content** and the
     **non-preserve lineage intent** (supersede / split / merge / new
     / abandoned). It is NOT responsible for repeating unchanged
     phase content or for emitting preserve entries.
 
-  - Duplo (this module) parses the prior PLAN.md into per-phase
-    units, normalizes the synthesizer's lineage by adding a
-    ``preserve`` entry for every prior id the synthesizer did not
-    explicitly consume, and assembles the final plan from preserved
-    prior units plus synthesized changed/new units.
+  - Duplo (this module) parses the prior PLAN.md into typed
+    :class:`bob_tools.planfile.Phase` values, normalizes the
+    synthesizer's lineage by adding a ``preserve`` entry for every
+    prior id the synthesizer did not explicitly consume, and
+    assembles the final plan from preserved prior phases plus
+    synthesized changed/new phases.
 
   - ``validate_lineage`` continues to run after normalization, on
-    the ASSEMBLED plan's headers vs. the normalized lineage.
+    the ASSEMBLED plan's phase ids vs. the normalized lineage.
     Contradictions still raise; the validator is not weakened.
 
-  - The deterministic unit is the pair ``(preserved phase unit,
-    preserved lineage entry)``. Adding preserve entries to lineage
-    while writing the synthesizer's partial plan is forbidden — the
-    units must be preserved alongside the lineage.
-
-Structural ownership note. The H1 envelope + H2 phase header pair
-that defines a phase unit is owned by :mod:`duplo.plan_document`.
-This module never concatenates H1 lines by hand; it produces a
-:class:`~duplo.plan_document.Plan` via :func:`assemble_reauthored_plan`
-and lets the renderer write the structural metadata. That is the
-only path that emits H1 envelopes: assembly cannot leave a stale
-"Phase 2" H1 above a substituted ``phase_010`` H2 because render
-derives every H1 ordinal from the final unit position.
+Phase C Increment 12 (T-000192) migrated the assembly path off
+``duplo.plan_document``: parsing, rendering, and substitution all go
+through :mod:`bob_tools.planfile`. The 1:1 substitution primitive is
+:func:`bob_tools.planfile.replace_phase_validated`; split/merge/new/
+abandoned cases compose around that primitive by tuple manipulation,
+with the canonical-mode validators (``validate_plan(constructed=True)``
+and ``assert_mcloop_canonical``) enforcing the result.
 
 See the module-level tests in ``tests/test_reauthor_assemble.py``
 for the contract pinned in code.
@@ -46,85 +41,34 @@ for the contract pinned in code.
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from duplo.plan_document import (
-    PhaseUnit,
+from bob_tools.planfile import (
+    Phase,
     Plan,
-    parse_plan,
+    RuledOut,
+    Subsection,
+    Task,
+    make_task,
+    migrate,
+    replace_phase_validated,
 )
-
-
-# Backwards-compatible alias. ``PhaseSection`` was the per-phase shape
-# used before plan_document took structural ownership; the new shape is
-# :class:`PhaseUnit`, which adds the H1 envelope. External callers that
-# imported ``PhaseSection`` from this module continue to work, but the
-# ``text`` field they may have read is no longer present — body and
-# headers are split into separate fields.
-PhaseSection = PhaseUnit
 
 
 class ReauthorAssemblyError(RuntimeError):
     """Raised when section/lineage assembly cannot produce a valid PLAN.md.
 
     Distinct from :class:`duplo.reauthor_phase_ids.LineageValidationError`
-    (synthesizer lineage contract) and from
-    :class:`duplo.plan_document.StructuralValidationError` (assembled
-    plan structural invariants). This one fires when assembly's own
+    (synthesizer lineage contract). This one fires when assembly's own
     rules cannot be satisfied: e.g., the lineage names a new phase id
     (supersede / split / merge / new) but the synthesizer's plan body
-    has no unit for that id.
+    has no phase for that id.
     """
 
 
-def parse_plan_sections(
-    plan_text: str,
-) -> tuple[str, list[PhaseUnit]]:
-    """Thin wrapper around :func:`duplo.plan_document.parse_plan`.
-
-    Returns ``(preamble, units)`` so existing callers that expected
-    a ``(preamble, sections)`` tuple keep working. The list element
-    type is now :class:`PhaseUnit`; the ``text`` attribute the old
-    PhaseSection carried (full ``## Phase ...`` line + body) is split
-    into ``phase_id``, ``h2_title``, and ``body``. The plan-document
-    parser is strict: missing H2 under an H1, multiple H2s under one
-    H1, or non-whitespace text between H1 and H2 raises
-    :class:`~duplo.plan_document.ParseError`. The fswatch-run-smoke
-    corruption shape (one H1 with several H2s + embedded verdict
-    JSON) fails fast at this boundary rather than silently
-    accumulating across reauthor passes.
-    """
-    plan = parse_plan(plan_text)
-    return (plan.preamble, list(plan.units))
-
-
-def _consumed_prior_ids(
-    lineage: Mapping[str, Any], prior_ids: set[str]
-) -> set[str]:
-    """Return prior ids consumed by lineage entries (not preserved).
-
-    Consumed = appears in supersede/split/merge ``from`` lists, or
-    listed in ``abandoned``. Used by ``normalize_lineage_for_preservation``
-    to decide which prior ids need a preserve-default entry.
-    """
-    consumed: set[str] = set()
-    for entry in lineage.get("phases", []) or []:
-        if not isinstance(entry, Mapping):
-            continue
-        action = entry.get("action")
-        from_field = entry.get("from") or []
-        if action in ("supersede", "split", "merge"):
-            for fid in from_field:
-                if isinstance(fid, str) and fid in prior_ids:
-                    consumed.add(fid)
-    for entry in lineage.get("abandoned") or []:
-        if not isinstance(entry, Mapping):
-            continue
-        aid = entry.get("id")
-        if isinstance(aid, str) and aid in prior_ids:
-            consumed.add(aid)
-    return consumed
+_NEW_ID_ACTIONS = frozenset(["supersede", "split", "merge", "new"])
 
 
 def normalize_lineage_for_preservation(
@@ -185,63 +129,147 @@ def normalize_lineage_for_preservation(
     return out
 
 
-_NEW_ID_ACTIONS = frozenset(["supersede", "split", "merge", "new"])
+def rebuild_task_constructed(task: Task) -> Task:
+    """Rebuild ``task`` via :func:`make_task` so it is field-stable.
+
+    The synthesizer's plan body comes through
+    :func:`bob_tools.planfile.parse_plan`, which attaches source
+    positions and may absorb stray prose into ``trailing_lines``. The
+    constructed-mode validator in
+    :func:`bob_tools.planfile.validate_plan` rejects nonempty
+    ``trailing_lines`` and runs a per-task field-stability harness.
+    Rebuilding each task with :func:`make_task` and the canonical
+    structural fields (text, status, tags, annotations, deps,
+    ruled_out, children) drops position metadata and forces
+    ``trailing_lines=()`` so the result is a constructed plan, not a
+    parsed one.
+
+    Children are rebuilt recursively. Task ids on the parsed tasks are
+    typically ``None`` because the synthesizer template does not author
+    them; :func:`bob_tools.planfile.migrate` (called by the caller)
+    assigns ids on the rebuilt plan later.
+    """
+    rebuilt_children = tuple(rebuild_task_constructed(child) for child in task.children)
+    rebuilt_ruled_out = tuple(
+        RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out
+    )
+    return make_task(
+        task.text,
+        status=task.status,
+        flag_tags=task.flag_tags,
+        action_tag=task.action_tag,
+        annotations=task.annotations,
+        deps=task.deps,
+        children=rebuilt_children,
+        ruled_out=rebuilt_ruled_out,
+        task_id=task.task_id,
+    )
+
+
+def rebuild_phase_constructed(phase: Phase, *, ordinal: int) -> Phase:
+    """Rebuild ``phase`` with constructed-mode tasks and stable ordinal.
+
+    Normalizes ``phase_id_source="explicit_header"`` to
+    ``"explicit_comment"`` so the renderer emits a
+    ``<!-- phase_id: ... -->`` line that survives round-trip under
+    constructed-mode field-stability checks.
+    """
+    rebuilt_tasks = tuple(rebuild_task_constructed(t) for t in phase.tasks)
+    rebuilt_subsections = tuple(
+        Subsection(
+            title=sub.title,
+            prose=sub.prose,
+            tasks=tuple(rebuild_task_constructed(t) for t in sub.tasks),
+            line_number=0,
+        )
+        for sub in phase.subsections
+    )
+    phase_id_source = phase.phase_id_source
+    if phase_id_source == "explicit_header":
+        phase_id_source = "explicit_comment"
+    return Phase(
+        phase_id=phase.phase_id,
+        phase_id_source=phase_id_source,
+        ordinal=ordinal,
+        keyword=phase.keyword,
+        title=phase.title,
+        prose=phase.prose,
+        subsections=rebuilt_subsections,
+        tasks=rebuilt_tasks,
+        line_number=0,
+    )
 
 
 def assemble_reauthored_plan(
     prior_plan: Plan,
-    synth_units: Iterable[PhaseUnit],
+    synth_phases: Iterable[Phase],
     normalized_lineage: Mapping[str, Any],
 ) -> Plan:
-    """Build the re-authored :class:`Plan` from preserved + new units.
+    """Build the re-authored :class:`Plan` from preserved + new phases.
 
-    Walks ``prior_plan.units`` in order and, for each prior unit:
+    Walks ``prior_plan.phases`` in order and, for each prior phase:
 
-      - If its phase_id is in ``abandoned``, the unit is dropped.
+      - If its phase_id is in ``abandoned``, the phase is dropped.
       - If its phase_id is consumed by a supersede / split / merge,
-        the synthesized unit(s) that took its place are emitted at
+        the synthesized phase(s) that took its place are emitted at
         this position. Merge targets emit at the position of their
         FIRST source prior; later sources of the same merge are
         skipped. Splits emit every branch at the prior position.
-      - Otherwise (preserve, explicit or default), the prior unit
+      - Otherwise (preserve, explicit or default), the prior phase
         is emitted verbatim.
 
     After the walk, every ``"new"`` lineage entry (no prior id
     consumed) is appended at the end in synthesizer-declared order.
 
-    The returned Plan inherits ``project_name`` and ``preamble`` from
-    ``prior_plan``. H1 ordinals are NOT stored on the Plan; they are
-    derived by :func:`~duplo.plan_document.render` from each unit's
-    final position. Substituting a unit therefore renumbers every
-    downstream H1 deterministically.
+    The 1:1 supersede substitution is materialized via
+    :func:`bob_tools.planfile.replace_phase_validated`, which assigns
+    missing task ids, normalizes the ordinal to the replaced slot, and
+    validates the surrounding plan in constructed mode. Split, merge,
+    new, and abandoned cases are not 1:1 and compose around the
+    primitive by direct phases-tuple manipulation; the final plan is
+    re-numbered and handed back for the caller to gate through
+    :func:`bob_tools.planfile.assert_mcloop_canonical`.
+
+    Returned plan carries ``magic_version=1`` so the canonical gate
+    accepts it. Project title, preamble, and the bugs section are
+    inherited verbatim from ``prior_plan``.
 
     Raises
     ------
     ReauthorAssemblyError
         When a new id named by lineage as supersede / split / merge /
-        new has no matching unit in ``synth_units``. The synthesizer
-        declared the lineage intent without authoring the unit body.
+        new has no matching phase in ``synth_phases``; when the
+        synthesizer emitted two phases with the same id; or when the
+        prior plan carries duplicate phase ids (which would make the
+        lineage map ambiguous).
     """
-    if len({u.phase_id for u in prior_plan.units}) != len(prior_plan.units):
+    prior_phase_ids = [p.phase_id for p in prior_plan.phases if p.phase_id is not None]
+    if len(set(prior_phase_ids)) != len(prior_phase_ids):
         raise ReauthorAssemblyError(
             "prior plan has duplicate phase ids; refusing to assemble"
         )
 
-    synth_by_id: dict[str, PhaseUnit] = {}
-    for unit in synth_units:
-        if unit.phase_id in synth_by_id:
+    synth_by_id: dict[str, Phase] = {}
+    for phase in synth_phases:
+        if phase.phase_id is None:
+            raise ReauthorAssemblyError(
+                "synthesized phase is missing phase_id; the council "
+                "emitted a phase without a stable identifier, which "
+                "the assembly path cannot key by lineage"
+            )
+        if phase.phase_id in synth_by_id:
             # Last-write-wins on the dict would silently drop the
-            # earlier unit's body; validate_structure on the
-            # assembled plan can't see the duplicate because only
-            # one survives. Surface the violation here, before any
+            # earlier phase's body; the canonical validator on the
+            # assembled plan can't see the duplicate because only one
+            # survives. Surface the violation here, before any
             # downstream layer has a chance to mask it.
             raise ReauthorAssemblyError(
                 "synthesized plan has duplicate phase id "
-                f"{unit.phase_id!r}; the council emitted two units "
+                f"{phase.phase_id!r}; the council emitted two phases "
                 "for the same phase id, which is a model output "
                 "error"
             )
-        synth_by_id[unit.phase_id] = unit
+        synth_by_id[phase.phase_id] = phase
 
     abandoned_ids: set[str] = set()
     for entry in normalized_lineage.get("abandoned") or []:
@@ -277,15 +305,21 @@ def assemble_reauthored_plan(
             string_sources = [s for s in from_field if isinstance(s, str)]
             if string_sources:
                 merge_first_source[new_id] = string_sources[0]
-                replacement_at_prior.setdefault(string_sources[0], []).append(new_id)
+                # Every merge source records the merge target as its
+                # replacement; only the first-source slot actually
+                # emits the target (tracked by ``merge_first_source``),
+                # while later-source slots see the target in
+                # ``emitted_merge_targets`` and drop themselves
+                # without leaking the consumed prior into the output.
                 for fid in string_sources:
+                    replacement_at_prior.setdefault(fid, []).append(new_id)
                     consumed_priors.add(fid)
         elif action == "new":
             new_phase_ids.append(new_id)
-        # preserve: no replacement; the prior's unit at that
+        # preserve: no replacement; the prior's phase at that
         # position remains.
 
-    missing_units: list[str] = []
+    missing_phases: list[str] = []
     for entry in normalized_lineage.get("phases") or []:
         if not isinstance(entry, Mapping):
             continue
@@ -293,44 +327,111 @@ def assemble_reauthored_plan(
         new_id = entry.get("id")
         if action in _NEW_ID_ACTIONS and isinstance(new_id, str):
             if new_id not in synth_by_id:
-                missing_units.append(new_id)
-    if missing_units:
+                missing_phases.append(new_id)
+    if missing_phases:
         raise ReauthorAssemblyError(
-            "synthesized plan is missing unit(s) for lineage-declared "
-            f"new id(s): {', '.join(sorted(set(missing_units)))}"
+            "synthesized plan is missing phase(s) for lineage-declared "
+            f"new id(s): {', '.join(sorted(set(missing_phases)))}"
         )
 
-    out_units: list[PhaseUnit] = []
+    # Rebuild the prior plan's phases for constructed-mode field
+    # stability. Phases that came through ``parse_plan`` carry
+    # ``trailing_lines`` and parser-side ``line_number`` values; the
+    # constructed-mode validator rejects both. Rebuilding clears
+    # those positional artifacts while preserving task content
+    # verbatim. Tasks with existing ids keep them; ``migrate`` below
+    # assigns ids to any task that never had one so the substituted
+    # plan satisfies ``validate_plan(constructed=True)`` at every
+    # ``replace_phase_validated`` step.
+    rebuilt_prior_phases = tuple(
+        rebuild_phase_constructed(phase, ordinal=index + 1)
+        for index, phase in enumerate(prior_plan.phases)
+    )
+    working_plan = dataclasses.replace(prior_plan, phases=rebuilt_prior_phases)
+    if working_plan.magic_version is None:
+        # The canonical reauthor output is a constructed plan; the
+        # magic line is required for strict-mode parse on read-back.
+        working_plan = dataclasses.replace(working_plan, magic_version=1)
+    working_plan = migrate(working_plan)
+
+    one_to_one_supersedes: dict[str, str] = {}
+    for prior_id, new_ids in replacement_at_prior.items():
+        if (
+            len(new_ids) == 1
+            and merge_first_source.get(new_ids[0]) is None
+        ):
+            # Genuine 1:1 supersede (or a single-source split or a
+            # single-source 'merge' that the validator rejects later;
+            # we treat all of these uniformly here since the lineage
+            # validator catches the malformed cases elsewhere).
+            one_to_one_supersedes[prior_id] = new_ids[0]
+
+    for prior_id, new_id in one_to_one_supersedes.items():
+        working_plan = replace_phase_validated(
+            working_plan,
+            prior_id,
+            synth_by_id[new_id],
+            assign_missing_ids=True,
+            preserve_position=True,
+        )
+
+    # After 1:1 supersedes have run, walk the (partially substituted)
+    # plan and apply the remaining transformations: drop abandoned
+    # priors; expand multi-branch substitutions (split, merge); skip
+    # already-substituted priors (handled by replace_phase_validated
+    # above); preserve everything else verbatim.
+    out_phases: list[Phase] = []
     emitted_merge_targets: set[str] = set()
-    for prior in prior_plan.units:
-        pid = prior.phase_id
+    for phase in working_plan.phases:
+        pid = phase.phase_id
+        if pid is None:
+            out_phases.append(phase)
+            continue
         if pid in abandoned_ids:
             continue
-        if pid in consumed_priors:
-            for new_id in replacement_at_prior.get(pid, []):
+        if pid in one_to_one_supersedes:
+            # The replace_phase_validated call above already swapped
+            # this slot; the phase we're iterating IS the new one.
+            out_phases.append(phase)
+            continue
+        replacements = replacement_at_prior.get(pid, [])
+        if replacements:
+            for new_id in replacements:
                 if new_id in emitted_merge_targets:
                     continue
-                out_units.append(synth_by_id[new_id])
+                out_phases.append(synth_by_id[new_id])
                 if merge_first_source.get(new_id) == pid:
                     emitted_merge_targets.add(new_id)
             continue
-        out_units.append(prior)
+        out_phases.append(phase)
 
+    # Append any genuinely new phases.
     for new_id in new_phase_ids:
-        out_units.append(synth_by_id[new_id])
+        out_phases.append(synth_by_id[new_id])
 
-    return Plan(
-        project_name=prior_plan.project_name,
-        preamble=prior_plan.preamble,
-        units=tuple(out_units),
+    # Renumber ordinals 1..N (canonical for constructed plans).
+    renumbered = tuple(
+        dataclasses.replace(phase, ordinal=index + 1)
+        for index, phase in enumerate(out_phases)
     )
+
+    assembled = dataclasses.replace(working_plan, phases=renumbered)
+
+    # Assign stable T-NNNNNN ids to any task that came through the
+    # preserve path without one (legacy PLAN.md inputs do not carry
+    # ids on every task). ``migrate`` preserves existing ids; tasks
+    # already assigned by ``replace_phase_validated`` above are left
+    # untouched. After migrate the plan satisfies the
+    # constructed-mode requirement that every task has a stable id,
+    # which the canonical gate (``assert_mcloop_canonical``) enforces
+    # via its R2 equivalent.
+    return migrate(assembled)
 
 
 __all__ = [
-    "PhaseSection",
-    "PhaseUnit",
     "ReauthorAssemblyError",
     "assemble_reauthored_plan",
     "normalize_lineage_for_preservation",
-    "parse_plan_sections",
+    "rebuild_phase_constructed",
+    "rebuild_task_constructed",
 ]

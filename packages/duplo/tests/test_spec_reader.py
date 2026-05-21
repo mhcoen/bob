@@ -997,7 +997,7 @@ class TestFormatScopeOverridePrompt:
 class TestFormatContractsAsVerification:
     def test_empty_when_no_contracts(self):
         spec = ProductSpec()
-        assert format_contracts_as_verification(spec) == ""
+        assert format_contracts_as_verification(spec) == []
 
     def test_generates_tasks(self):
         spec = ProductSpec(
@@ -1006,22 +1006,23 @@ class TestFormatContractsAsVerification:
                 BehaviorContract(input="10 km in miles", expected="6.21 mi"),
             ]
         )
-        result = format_contracts_as_verification(spec)
-        assert "- [ ] Verify: type `2+3`, expect result `5`" in result
-        assert "- [ ] Verify: type `10 km in miles`, expect result `6.21 mi`" in result
+        tasks = format_contracts_as_verification(spec)
+        texts = [t.text for t in tasks]
+        assert "Verify: type `2+3`, expect result `5`" in texts
+        assert "Verify: type `10 km in miles`, expect result `6.21 mi`" in texts
 
-    def test_no_h2_headers_in_output(self):
+    def test_all_tasks_are_todo(self):
+        from bob_tools.planfile import TaskStatus
+
         spec = ProductSpec(
             behavior_contracts=[
                 BehaviorContract(input="2+3", expected="5"),
             ]
         )
-        result = format_contracts_as_verification(spec)
-        for line in result.splitlines():
-            assert not line.startswith("## "), (
-                f"format_contracts_as_verification output must not create "
-                f"H2 sections; found: {line!r}"
-            )
+        tasks = format_contracts_as_verification(spec)
+        assert tasks
+        for task in tasks:
+            assert task.status == TaskStatus.TODO
 
 
 class TestSourceEntryDefaults:

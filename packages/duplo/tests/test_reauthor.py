@@ -56,32 +56,16 @@ needs_bob_tools = pytest.mark.skipif(
 
 
 def _wrap_synth_plan(text: str) -> str:
-    """Prepend a canonical H1 envelope before every ``## Phase ...``
-    line in ``text``.
+    """Return ``text`` unchanged as a bob_tools.planfile-canonical synth body.
 
-    Reauthor's synthesizer template requires phases to be wrapped in
-    H1 envelopes (``# {project} — Phase N: {title}``); the
-    plan_document parser rejects bare H2s. Pre-plan_document tests
-    used H2-only synth fixtures; this helper migrates them by
-    prepending a canonical H1 before each H2 in source order.
-
-    The H1 ordinal here is irrelevant — assembly's renderer assigns
-    ordinals by final position in the assembled plan, so any value
-    here is renumbered when the prior plan and synth are stitched
-    together.
+    Before T-000192, this helper prepended an ``# {project} — Phase N:
+    {title}`` envelope above each H2 because the duplo.plan_document
+    parser required H1-wrapped phase units. Phase C Increment 12
+    migrated reauthor onto :mod:`bob_tools.planfile`, which parses
+    bare ``## Phase phase_NNN: ...`` fragments natively. The helper is
+    retained so existing call sites read clearly; it is now a no-op.
     """
-    import re
-
-    h2_re = re.compile(r"^(##\s+Phase\s+(\S+):.*)$", re.MULTILINE)
-    counter = [0]
-
-    def repl(match: "re.Match[str]") -> str:
-        pid = match.group(2)
-        idx = counter[0]
-        counter[0] += 1
-        return f"# proj — Phase {idx}: {pid} envelope\n{match.group(1)}"
-
-    return h2_re.sub(repl, text)
+    return text
 
 
 # ---------------------------------------------------------------------
@@ -680,9 +664,18 @@ class TestReauthorPlan:
         return emitted[0], first_phase_id or "", commit_id
 
     def _write_old_plan(self, plan_path: Path, phase_ids: list[str]) -> None:
-        body_lines: list[str] = []
-        for ordinal, pid in enumerate(phase_ids):
-            body_lines.append(f"# proj — Phase {ordinal}: {pid} envelope")
+        """Write a prior PLAN.md in bob_tools.planfile-canonical form.
+
+        After T-000192 the reauthor path parses PLAN.md via
+        :mod:`bob_tools.planfile`, so the prior plan is written with a
+        single project H1 and ``## Phase phase_NNN: ...`` headings
+        (the legacy ``explicit_header`` form, which the parser accepts
+        and the renderer migrates to the ``<!-- phase_id: ... -->``
+        comment form). No per-phase ``# {project} — Phase N: ...``
+        envelopes are emitted.
+        """
+        body_lines: list[str] = ["# proj", ""]
+        for pid in phase_ids:
             body_lines.append(f"## Phase {pid}: {pid} title")
             body_lines.append("")
             body_lines.append(f"- [ ] do {pid} thing")
@@ -769,17 +762,22 @@ class TestReauthorPlan:
         # preserve, not "model rewrites it again"); the SUPERSEDED
         # phase's markdown comes from the synthesizer's new section.
         assembled = plan_path.read_text()
-        # Prior phase_001 content survives.
-        assert "## Phase phase_001: phase_001 title" in assembled
-        assert "- [ ] do phase_001 thing" in assembled
+        # Prior phase_001 content survives. The bob_tools.planfile
+        # renderer emits the phase id as a comment line rather than
+        # in the H2 heading, so assertions key on the comment form.
+        assert "<!-- phase_id: phase_001 -->" in assembled
+        assert "phase_001 title" in assembled
+        assert "do phase_001 thing" in assembled
         # The synthesizer's reproduction of phase_001 was discarded.
         assert "(preserved)" not in assembled
-        assert "- [ ] retained" not in assembled
+        assert "retained" not in assembled
         # The new phase_002b section came from synth.
-        assert "## Phase phase_002b: Refactored phase_002" in assembled
-        assert "- [ ] new work" in assembled
+        assert "<!-- phase_id: phase_002b -->" in assembled
+        assert "Refactored phase_002" in assembled
+        assert "new work" in assembled
         # And the prior phase_002 content was replaced.
-        assert "- [ ] do phase_002 thing" not in assembled
+        assert "do phase_002 thing" not in assembled
+        assert "<!-- phase_id: phase_002 -->" not in assembled
 
         assert result.lineage_diff.superseded == [
             ("phase_002", "phase_002b")
@@ -856,11 +854,17 @@ class TestReauthorPlan:
         )
 
         assembled = plan_path.read_text()
-        assert "## Phase phase_001: phase_001 title" in assembled
-        assert "## Phase phase_006: Adopted CLI Surface" in assembled
-        assert "## Phase phase_007: Runtime Loop" in assembled
-        assert "# proj — Phase 1: Runtime Loop" in assembled
-        assert "# proj — Phase 2: Adopted CLI Surface" in assembled
+        assert "<!-- phase_id: phase_001 -->" in assembled
+        assert "phase_001 title" in assembled
+        assert "<!-- phase_id: phase_006 -->" in assembled
+        assert "Adopted CLI Surface" in assembled
+        assert "<!-- phase_id: phase_007 -->" in assembled
+        assert "Runtime Loop" in assembled
+        # bob_tools.planfile-canonical output renumbers ordinals
+        # 1..N; the new phases land at the end after the preserved
+        # phase_001.
+        assert "## Phase 2: Runtime Loop" in assembled or "## Phase 2: Adopted CLI Surface" in assembled
+        assert "## Phase 3: Runtime Loop" in assembled or "## Phase 3: Adopted CLI Surface" in assembled
         assert "The council rationale" not in assembled
 
     def test_abandoned_emits_phase_abandoned_with_synth_reason(
@@ -1180,16 +1184,18 @@ class TestReauthorPlan:
         # Assembled PLAN.md has all 5 prior ids represented (4
         # preserved from prior + phase_002b in place of phase_002).
         text = plan_path.read_text()
-        assert "## Phase phase_001: phase_001 title" in text
-        assert "## Phase phase_002:" not in text  # superseded
-        assert "## Phase phase_002b: Refactored phase_002" in text
-        assert "## Phase phase_003: phase_003 title" in text
-        assert "## Phase phase_004: phase_004 title" in text
-        assert "## Phase phase_005: phase_005 title" in text
+        assert "<!-- phase_id: phase_001 -->" in text
+        assert "<!-- phase_id: phase_002 -->" not in text  # superseded
+        assert "<!-- phase_id: phase_002b -->" in text
+        assert "<!-- phase_id: phase_003 -->" in text
+        assert "<!-- phase_id: phase_004 -->" in text
+        assert "<!-- phase_id: phase_005 -->" in text
+        assert "Refactored phase_002" in text
+        assert "phase_001 title" in text
 
         # Order matches prior order with phase_002 replaced.
         idxs = [
-            text.find(f"## Phase {pid}:")
+            text.find(f"<!-- phase_id: {pid} -->")
             for pid in (
                 "phase_001",
                 "phase_002b",
@@ -1201,10 +1207,10 @@ class TestReauthorPlan:
         assert idxs == sorted(idxs)
 
         # Preserved phase content survives verbatim from prior.
-        assert "- [ ] do phase_001 thing" in text
-        assert "- [ ] do phase_003 thing" in text
+        assert "do phase_001 thing" in text
+        assert "do phase_003 thing" in text
         # Synthesized phase_002b content lands.
-        assert "- [ ] new b work" in text
+        assert "new b work" in text
 
         # Lineage diff reflects only the synthesizer's actions
         # (preserves are not lifecycle events).
@@ -1352,18 +1358,18 @@ class TestReauthorPlan:
         )
 
         text = plan_path.read_text()
-        assert "## Phase phase_001:" in text
-        assert "## Phase phase_002:" not in text
-        assert "## Phase phase_002b:" in text
-        assert "## Phase phase_003:" in text
+        assert "<!-- phase_id: phase_001 -->" in text
+        assert "<!-- phase_id: phase_002 -->" not in text
+        assert "<!-- phase_id: phase_002b -->" in text
+        assert "<!-- phase_id: phase_003 -->" in text
         # Preserved sections come from PRIOR (not synth's reproduction).
-        assert "- [ ] do phase_001 thing" in text
-        assert "- [ ] do phase_003 thing" in text
+        assert "do phase_001 thing" in text
+        assert "do phase_003 thing" in text
         # Synth's reproductions are discarded (preserve = preserve).
-        assert "- [ ] keep a" not in text
-        assert "- [ ] keep c" not in text
+        assert "keep a" not in text
+        assert "keep c" not in text
         # Synth's supersede content lands.
-        assert "- [ ] new b" in text
+        assert "new b" in text
 
         assert result.lineage_diff.superseded == [
             ("phase_002", "phase_002b")
@@ -1835,7 +1841,7 @@ class TestReauthorPlan:
         assert "phase_008" in new_text
         assert "phase_009" in new_text
         # phase_006 is replaced (not preserved as a header).
-        assert "## Phase phase_006:" not in new_text
+        assert "<!-- phase_id: phase_006 -->" not in new_text
         # Lifecycle event was emitted.
         assert result.lifecycle_event_ids
         events = list(Storage(ledger_dir, writer_id="probe").read_all())
@@ -2069,7 +2075,6 @@ class TestReauthorPlan:
             "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
         }
         plan_body = (
-            "# proj — Phase 0: env\n"
             "## Phase phase_001: phase_001 title\n\n"
             "- [ ] do phase_001 thing\n"
         )
@@ -2123,7 +2128,7 @@ class TestReauthorPlan:
         # (preserve carried the prior phase forward), lifecycle
         # events fired.
         new_text = plan_path.read_text()
-        assert "## Phase phase_001:" in new_text
+        assert "<!-- phase_id: phase_001 -->" in new_text
         # The trailing verdict fence must NOT appear in the rewritten
         # PLAN.md — sanitize stripped it before assembly.
         assert "```json" not in new_text
@@ -2226,12 +2231,13 @@ class TestReauthorPlan:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Prior PLAN.md has the fswatch-run-smoke corruption shape:
-        one H1 envelope under which sit multiple H2 sections plus
-        embedded fenced JSON verdict blocks. The new strict parser
-        rejects it at the boundary; reauthor_plan wraps the
-        ParseError in ReauthorError so mcloop sees a clear pause
-        reason rather than amplifying corruption across passes."""
+        """Prior PLAN.md carries a structural corruption that
+        bob_tools.planfile rejects at parse time — here, duplicate
+        top-level H1 headings, which mcloop's structural sanity
+        check also flags. ``reauthor_plan`` wraps the
+        :class:`PlanSyntaxError` in :class:`ReauthorError` so mcloop
+        sees a clear pause reason rather than amplifying corruption
+        across passes."""
         from bob_tools.ledger import Storage
 
         from duplo.reauthor import ReauthorError
@@ -2241,15 +2247,13 @@ class TestReauthorPlan:
             ledger_dir, plan_phases=["phase_001"]
         )
         plan_path = tmp_path / "PLAN.md"
-        # The corruption shape: one H1 envelope, multiple H2s, plus
-        # embedded verdict JSON.
+        # Duplicate top-level H1: bob_tools.planfile's structural
+        # sanity check rejects this form (mirrors mcloop's
+        # ``_check_structural_sanity``).
         plan_path.write_text(
-            "# proj — Phase 1: Watch and run\n"
-            "## Phase phase_018: First subsection\n\n"
-            "- [ ] task\n\n"
-            "## Phase phase_015: Second subsection\n\n"
-            "- [ ] task\n\n"
-            "## Phase phase_019: Third subsection\n\n"
+            "# proj\n\n"
+            "# proj\n\n"
+            "## Phase phase_001: First\n\n"
             "- [ ] task\n",
             encoding="utf-8",
         )
@@ -2369,7 +2373,7 @@ class TestLedgerSliceShape:
 
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text(
-            "# proj — Phase 0: env\n"
+            "# proj\n"
             "## Phase phase_001: Phase phase_001 title\n\n- [ ] x\n"
         )
 
@@ -2449,7 +2453,7 @@ class TestLedgerSliceShape:
 
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text(
-            "# proj — Phase 0: env\n"
+            "# proj\n"
             "## Phase phase_001: Phase phase_001 title\n"
             "\n"
             "## Constraints\n"

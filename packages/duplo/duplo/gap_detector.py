@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
+from bob_tools.planfile import Task, make_task
+
 from duplo.claude_cli import query
 from duplo.parsing import extract_json
 from duplo.doc_examples import CodeExample
@@ -302,28 +304,26 @@ def detect_design_gaps(
     return refinements
 
 
-def format_gap_tasks(result: GapResult) -> str:
-    """Format gap results as PLAN.md checklist items to append."""
-    if (
-        not result.missing_features
-        and not result.missing_examples
-        and not result.design_refinements
-    ):
-        return ""
+def format_gap_tasks(result: GapResult) -> list[Task]:
+    """Render gap results as typed :class:`Task` values.
 
-    lines: list[str] = []
-    lines.append("")
-    lines.append("## Gaps detected from updated reference materials")
-    lines.append("")
+    Returns one :class:`Task` per missing feature, per missing example,
+    and per design-refinement category (refinements are grouped by
+    category so a palette of colors becomes a single task). Empty
+    list when ``result`` has no gaps. The caller appends these to a
+    phase via :func:`bob_tools.planfile.add_phase_task`; this helper
+    never emits PLAN.md markdown.
+    """
+    tasks: list[Task] = []
 
     for feat in result.missing_features:
         reason_suffix = f" ({feat.reason})" if feat.reason else ""
-        lines.append(f"- [ ] Implement {feat.name}{reason_suffix}")
+        tasks.append(make_task(f"Implement {feat.name}{reason_suffix}"))
 
     for ex in result.missing_examples:
         desc = ex.summary or f"example #{ex.index}"
         reason_suffix = f" ({ex.reason})" if ex.reason else ""
-        lines.append(f"- [ ] Add test/implementation for {desc}{reason_suffix}")
+        tasks.append(make_task(f"Add test/implementation for {desc}{reason_suffix}"))
 
     # Group design refinements by category into composite tasks
     # instead of listing one task per raw design token.
@@ -339,7 +339,6 @@ def format_gap_tasks(result: GapResult) -> str:
         for cat, items in by_category.items():
             label = category_labels.get(cat, f"Update {cat} design")
             details = ", ".join(item.detail for item in items)
-            lines.append(f"- [ ] {label}: {details}")
+            tasks.append(make_task(f"{label}: {details}"))
 
-    lines.append("")
-    return "\n".join(lines)
+    return tasks

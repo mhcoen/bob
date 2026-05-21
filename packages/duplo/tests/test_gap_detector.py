@@ -187,18 +187,18 @@ class TestParseResultRobustness:
 
 
 class TestFormatGapTasks:
-    def test_empty_result_returns_empty_string(self):
+    def test_empty_result_returns_empty_list(self):
         result = GapResult(missing_features=[], missing_examples=[])
-        assert format_gap_tasks(result) == ""
+        assert format_gap_tasks(result) == []
 
     def test_formats_missing_features(self):
         result = GapResult(
             missing_features=[MissingFeature(name="Dark mode", reason="Not in plan")],
             missing_examples=[],
         )
-        text = format_gap_tasks(result)
-        assert "- [ ] Implement Dark mode (Not in plan)" in text
-        assert "## Gaps detected" in text
+        tasks = format_gap_tasks(result)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Implement Dark mode (Not in plan)"
 
     def test_formats_missing_examples(self):
         result = GapResult(
@@ -207,25 +207,29 @@ class TestFormatGapTasks:
                 MissingExample(index=0, summary="hello world demo", reason="No test")
             ],
         )
-        text = format_gap_tasks(result)
-        assert "- [ ] Add test/implementation for hello world demo (No test)" in text
+        tasks = format_gap_tasks(result)
+        assert len(tasks) == 1
+        assert (
+            tasks[0].text == "Add test/implementation for hello world demo (No test)"
+        )
 
     def test_example_without_summary_uses_index(self):
         result = GapResult(
             missing_features=[],
             missing_examples=[MissingExample(index=3, summary="", reason="missing")],
         )
-        text = format_gap_tasks(result)
-        assert "example #3" in text
+        tasks = format_gap_tasks(result)
+        assert any("example #3" in t.text for t in tasks)
 
     def test_feature_without_reason(self):
         result = GapResult(
             missing_features=[MissingFeature(name="Export", reason="")],
             missing_examples=[],
         )
-        text = format_gap_tasks(result)
-        assert "- [ ] Implement Export\n" in text
-        assert "()" not in text
+        tasks = format_gap_tasks(result)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Implement Export"
+        assert "()" not in tasks[0].text
 
 
 # ---------------------------------------------------------------------------
@@ -377,9 +381,9 @@ class TestFormatGapTasksDesign:
                 )
             ],
         )
-        text = format_gap_tasks(result)
-        assert "- [ ] Update color palette: primary: #ff0000" in text
-        assert "## Gaps detected" in text
+        tasks = format_gap_tasks(result)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Update color palette: primary: #ff0000"
 
     def test_empty_when_no_gaps_at_all(self):
         result = GapResult(
@@ -387,7 +391,7 @@ class TestFormatGapTasksDesign:
             missing_examples=[],
             design_refinements=[],
         )
-        assert format_gap_tasks(result) == ""
+        assert format_gap_tasks(result) == []
 
     def test_mixed_features_and_design(self):
         result = GapResult(
@@ -401,9 +405,10 @@ class TestFormatGapTasksDesign:
                 )
             ],
         )
-        text = format_gap_tasks(result)
-        assert "Implement Export" in text
-        assert "Update typography: body: Roboto" in text
+        tasks = format_gap_tasks(result)
+        texts = [t.text for t in tasks]
+        assert "Implement Export (Not in plan)" in texts
+        assert "Update typography: body: Roboto" in texts
 
     def test_consolidates_multiple_colors_into_one_task(self):
         result = GapResult(
@@ -427,13 +432,13 @@ class TestFormatGapTasksDesign:
                 ),
             ],
         )
-        text = format_gap_tasks(result)
+        tasks = format_gap_tasks(result)
         # All colors in one task, not three separate tasks.
-        color_tasks = [line for line in text.splitlines() if "color palette" in line.lower()]
+        color_tasks = [t for t in tasks if "color palette" in t.text.lower()]
         assert len(color_tasks) == 1
-        assert "primary: #ff0000" in color_tasks[0]
-        assert "secondary: #00ff00" in color_tasks[0]
-        assert "accent: #0000ff" in color_tasks[0]
+        assert "primary: #ff0000" in color_tasks[0].text
+        assert "secondary: #00ff00" in color_tasks[0].text
+        assert "accent: #0000ff" in color_tasks[0].text
 
     def test_groups_by_category_separately(self):
         result = GapResult(
@@ -445,9 +450,8 @@ class TestFormatGapTasksDesign:
                 DesignRefinement(category="color", detail="fg: #000", reason=""),
             ],
         )
-        text = format_gap_tasks(result)
-        task_lines = [line for line in text.splitlines() if line.startswith("- [ ]")]
-        assert len(task_lines) == 2  # one color task, one font task
+        tasks = format_gap_tasks(result)
+        assert len(tasks) == 2  # one color task, one font task
 
 
 # ---------------------------------------------------------------------------
@@ -456,34 +460,23 @@ class TestFormatGapTasksDesign:
 
 
 class TestFormatGapTasksAppendOnly:
-    """Verify that gap tasks can be appended without altering existing content."""
-
-    def test_appending_preserves_original_plan(self):
-        """Simulates the append operation and checks original content survives."""
-        original = "# Phase 1\n- [x] Completed task\n- [ ] Pending task\n"
-        result = GapResult(
-            missing_features=[MissingFeature(name="Search", reason="Missing")],
-            missing_examples=[],
-        )
-        gap_text = format_gap_tasks(result)
-        updated = original.rstrip() + "\n" + gap_text
-
-        for line in original.strip().splitlines():
-            assert line in updated
-        assert "- [ ] Implement Search" in updated
-        assert updated.startswith(original.rstrip())
+    """Verify that gap tasks are unchecked TODOs ready for append."""
 
     def test_gap_tasks_only_contain_unchecked_items(self):
-        """Gap tasks must never contain checked items that could mask originals."""
+        """Gap tasks must always be TODO so they cannot mask completed work."""
+        from bob_tools.planfile import TaskStatus
+
         result = GapResult(
             missing_features=[MissingFeature(name="A", reason="r")],
             missing_examples=[MissingExample(index=0, summary="ex", reason="r")],
             design_refinements=[DesignRefinement(category="color", detail="x", reason="r")],
         )
-        text = format_gap_tasks(result)
-        for line in text.splitlines():
-            if line.startswith("- "):
-                assert line.startswith("- [ ]"), f"Non-unchecked task: {line!r}"
+        tasks = format_gap_tasks(result)
+        assert tasks, "expected at least one task"
+        for task in tasks:
+            assert task.status == TaskStatus.TODO, (
+                f"Non-TODO gap task: {task!r}"
+            )
 
 
 # ---------------------------------------------------------------------------

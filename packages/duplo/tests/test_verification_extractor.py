@@ -235,51 +235,36 @@ class TestExtractVerificationCases:
 
 
 class TestFormatVerificationTasks:
-    def test_empty_returns_empty_string(self):
-        assert format_verification_tasks([]) == ""
+    def test_empty_returns_empty_list(self):
+        assert format_verification_tasks([]) == []
 
     def test_formats_single_case(self):
         cases = [
             VerificationCase(input="Price: $10", expected="$10", frame="f.png"),
         ]
-        text = format_verification_tasks(cases)
-        assert "- [ ] Verify: type `Price: $10`, expect result `$10`" in text
-
-    def test_no_h2_headers_in_output(self):
-        cases = [
-            VerificationCase(input="1+1", expected="2", frame="f1.png"),
-            VerificationCase(input="2+2", expected="4", frame="f2.png"),
-        ]
-        text = format_verification_tasks(cases)
-        for line in text.splitlines():
-            assert not line.startswith("## "), (
-                f"format_verification_tasks output must not create H2 sections; found: {line!r}"
-            )
-
-    def test_no_h2_headers_when_empty(self):
-        assert not any(
-            line.startswith("## ") for line in format_verification_tasks([]).splitlines()
-        )
+        tasks = format_verification_tasks(cases)
+        assert len(tasks) == 1
+        assert tasks[0].text == "Verify: type `Price: $10`, expect result `$10`"
 
     def test_formats_multiple_cases(self):
         cases = [
             VerificationCase(input="1+1", expected="2", frame="f1.png"),
             VerificationCase(input="4 GBP in Euro", expected="5.71 EUR", frame="f2.png"),
         ]
-        text = format_verification_tasks(cases)
-        task_lines = [line for line in text.splitlines() if line.startswith("- [ ]")]
-        assert len(task_lines) == 2
-        assert "`1+1`" in task_lines[0]
-        assert "`4 GBP in Euro`" in task_lines[1]
+        tasks = format_verification_tasks(cases)
+        assert len(tasks) == 2
+        assert "`1+1`" in tasks[0].text
+        assert "`4 GBP in Euro`" in tasks[1].text
 
     def test_all_tasks_are_unchecked(self):
+        from bob_tools.planfile import TaskStatus
+
         cases = [
             VerificationCase(input="x", expected="y", frame="f.png"),
         ]
-        text = format_verification_tasks(cases)
-        for line in text.splitlines():
-            if line.startswith("- "):
-                assert line.startswith("- [ ]")
+        tasks = format_verification_tasks(cases)
+        for task in tasks:
+            assert task.status == TaskStatus.TODO
 
 
 # ---------------------------------------------------------------------------

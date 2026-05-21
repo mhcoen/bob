@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from bob_tools.planfile import Task, make_task
+
 from duplo.claude_cli import query
 from duplo.parsing import strip_fences
 
@@ -120,24 +122,17 @@ def _parse_cases(raw: str) -> list[VerificationCase]:
     return cases
 
 
-def format_verification_tasks(cases: list[VerificationCase]) -> str:
-    """Render verification cases as PLAN.md checklist items.
+def format_verification_tasks(cases: list[VerificationCase]) -> list[Task]:
+    """Render verification cases as typed :class:`Task` values.
 
-    Returns a Markdown section with one task per case, suitable for
-    appending to a phase plan.
+    Returns one :class:`Task` per case, intended for the caller to
+    attach to a phase via :func:`bob_tools.planfile.add_phase_task`.
+    This helper does not emit PLAN.md markdown.
     """
-    if not cases:
-        return ""
-
-    lines: list[str] = []
-    lines.append("")
-    lines.append("<!-- Functional verification from demo video -->")
-    lines.append("")
-    for case in cases:
-        lines.append(f"- [ ] Verify: type `{case.input}`, expect result `{case.expected}`")
-
-    lines.append("")
-    return "\n".join(lines)
+    return [
+        make_task(f"Verify: type `{case.input}`, expect result `{case.expected}`")
+        for case in cases
+    ]
 
 
 def load_frame_descriptions(

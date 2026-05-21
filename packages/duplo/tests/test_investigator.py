@@ -15,7 +15,6 @@ from duplo.investigator import (
     _parse_result,
     format_investigation,
     investigate,
-    investigation_to_fix_tasks,
 )
 from duplo.spec_reader import BehaviorContract, ReferenceEntry, SourceEntry
 
@@ -316,38 +315,6 @@ class TestFormatInvestigation:
         result = InvestigationResult(diagnoses=[], summary="")
         text = format_investigation(result)
         assert "No specific bugs diagnosed" in text
-
-
-class TestInvestigationToFixTasks:
-    def test_generates_fix_tasks(self):
-        result = InvestigationResult(
-            diagnoses=[
-                Diagnosis(
-                    symptom="Labels broken",
-                    expected="Should show result",
-                    severity="critical",
-                    area="parser",
-                ),
-                Diagnosis(
-                    symptom="Wrong color",
-                    expected="#a8d860",
-                    severity="minor",
-                    area="theme",
-                ),
-            ],
-            summary="Two bugs.",
-        )
-        tasks = investigation_to_fix_tasks(result)
-        assert len(tasks) == 2
-        assert tasks[0].startswith("- [ ] Fix:")
-        assert "Labels broken" in tasks[0]
-        assert "parser" in tasks[0]
-        assert '[fix: "Labels broken"]' in tasks[0]
-
-    def test_empty_diagnoses(self):
-        result = InvestigationResult(diagnoses=[], summary="Fine.")
-        tasks = investigation_to_fix_tasks(result)
-        assert tasks == []
 
 
 class TestInvestigate:

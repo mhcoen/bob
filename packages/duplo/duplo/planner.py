@@ -11,9 +11,13 @@ from bob_tools.planfile import (
     Plan,
     PlanSyntaxError,
     PlanValidationError,
+    Task,
+    add_phase_task,
+    make_task,
     parse_plan,
 )
 from bob_tools.planfile import load as planfile_load
+from bob_tools.planfile import migrate as planfile_migrate
 from bob_tools.planfile import save as planfile_save
 
 from duplo import council
@@ -690,7 +694,7 @@ def save_plan(
     *,
     target_dir: Path | str = ".",
     expected_h1_ordinals: list[int] | None = None,
-    extra_markdown_tasks: str = "",
+    extra_tasks: list[Task] | tuple[Task, ...] = (),
 ) -> Path:
     """Persist a phase plan to ``PLAN.md`` in *target_dir*.
 
@@ -707,13 +711,13 @@ def save_plan(
     :func:`bob_tools.planfile.parse_plan` first, then routed through
     the same typed-persistence path.
 
-    ``extra_markdown_tasks`` is the optional verification/contracts
-    block emitted by :func:`format_verification_tasks` and
-    :func:`format_contracts_as_verification`. It is parsed into Task
-    values and appended to the just-authored phase via
-    :func:`bob_tools.planfile.add_phase_task` so the typed Plan stays
-    the source of truth for what ends up on disk; T-000190 will
-    migrate the helpers themselves to emit typed tasks directly.
+    ``extra_tasks`` is the optional list of verification/contract
+    tasks produced by :func:`format_verification_tasks` and
+    :func:`format_contracts_as_verification`. Per T-000190 the helpers
+    now hand back typed :class:`~bob_tools.planfile.Task` values, so
+    this entry point appends them directly to the just-authored
+    phase via :func:`bob_tools.planfile.add_phase_task`. No markdown
+    round-trip is involved.
 
     Backward-compat behaviors retained from the legacy markdown path:
 
@@ -748,8 +752,8 @@ def save_plan(
                 [f"save_plan: could not parse markdown content: {exc}"]
             ) from exc
 
-    if extra_markdown_tasks.strip():
-        plan = _append_extra_markdown_tasks(plan, extra_markdown_tasks)
+    if extra_tasks:
+        plan = _append_extra_tasks(plan, tuple(extra_tasks))
 
     if path.exists():
         existing_plan = planfile_load(path)
@@ -855,32 +859,24 @@ def _task_without_id(task):
     )
 
 
-def _append_extra_markdown_tasks(plan: Plan, markdown: str) -> Plan:
-    """Parse ``markdown`` (a verification/contracts task block) and
-    append each ``- [ ]`` task it contains to ``plan``'s final phase.
+def _append_extra_tasks(plan: Plan, extra_tasks: tuple[Task, ...]) -> Plan:
+    """Append each typed task in ``extra_tasks`` to ``plan``'s final phase.
 
     The verification helpers (``format_verification_tasks`` and
-    ``format_contracts_as_verification``) emit a bare task list with
-    no phase header. To route it through the typed API we synthesize
-    a temporary phase header above the block so :func:`parse_plan`
-    recognizes the lines as tasks, then add the parsed tasks to the
-    real plan's last phase via :func:`add_phase_task`.
-
-    :func:`add_phase_task` validates the resulting plan in
-    constructed mode, which requires ``magic_version=1`` and every
-    task to carry a stable ``T-NNNNNN`` id. Plans handed in by the
-    string-content path of :func:`save_plan` come straight from
-    :func:`parse_plan` and may carry neither, so this helper runs
-    them through :func:`migrate` before appending.
+    ``format_contracts_as_verification``) hand back fresh tasks built
+    via :func:`make_task`. :func:`add_phase_task` validates the
+    resulting plan in constructed mode, which requires
+    ``magic_version=1`` and every task to carry a stable ``T-NNNNNN``
+    id. Plans handed in by the string-content path of
+    :func:`save_plan` come straight from :func:`parse_plan` and may
+    carry neither, so this helper runs them through :func:`migrate`
+    before appending.
     """
-    if not plan.phases:
+    if not plan.phases or not extra_tasks:
         # No phase to attach verification tasks to (project-header
         # preamble write). Append nothing; the verification block is
         # only emitted on phase content writes.
         return plan
-
-    from bob_tools.planfile import add_phase_task
-    from bob_tools.planfile import migrate as planfile_migrate
 
     if plan.magic_version is None or any(
         task.task_id is None
@@ -898,38 +894,25 @@ def _append_extra_markdown_tasks(plan: Plan, markdown: str) -> Plan:
     if target_phase_id is None:
         return plan
 
-    wrapper = (
-        f"## Phase {target_phase_id}: extra-tasks-wrapper\n\n{markdown}\n"
-    )
-    try:
-        wrapper_plan = parse_plan(wrapper)
-    except PlanSyntaxError:
-        return plan
-
-    if not wrapper_plan.phases:
-        return plan
-
-    extra_tasks = wrapper_plan.phases[0].tasks
     merged = plan
     for task in extra_tasks:
         merged, _assigned = add_phase_task(
-            merged, target_phase_id, _stripped_task(task)
+            merged, target_phase_id, _rebuild_task(task)
         )
     return merged
 
 
-def _stripped_task(task):
+def _rebuild_task(task: Task) -> Task:
     """Return ``task`` rebuilt with no source-line metadata so
     :func:`add_phase_task`'s constructed-mode harness accepts it.
 
-    ``parse_plan`` attaches ``line_number`` and possibly
-    ``trailing_lines``; rebuilding via :func:`make_task` strips both
-    while preserving the task's structural fields and any nested
-    children (recursively).
+    Tasks reach this helper either fresh from :func:`make_task`
+    (already stripped) or — historically — out of :func:`parse_plan`,
+    which attaches ``line_number`` and possibly ``trailing_lines``.
+    Rebuilding via :func:`make_task` clears both while preserving the
+    task's structural fields and any nested children (recursively).
     """
-    from bob_tools.planfile import make_task
-
-    rebuilt_children = tuple(_stripped_task(child) for child in task.children)
+    rebuilt_children = tuple(_rebuild_task(child) for child in task.children)
     return make_task(
         task.text,
         status=task.status,

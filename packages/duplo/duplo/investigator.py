@@ -530,25 +530,3 @@ def format_investigation(result: InvestigationResult) -> str:
         lines.append("")
 
     return "\n".join(lines)
-
-
-def investigation_to_fix_tasks(result: InvestigationResult) -> list[str]:
-    """Convert diagnoses into fix task lines for PLAN.md.
-
-    Each diagnosis becomes a checklist item with the symptom, expected
-    behavior, and area to investigate.
-
-    Returns a list of ``- [ ] Fix: ...`` strings.
-    """
-    tasks: list[str] = []
-    for diag in result.diagnoses:
-        parts = [diag.symptom]
-        if diag.expected:
-            parts.append(f"Expected: {diag.expected}")
-        if diag.area:
-            parts.append(f"Area: {diag.area}")
-        description = ". ".join(parts)
-        # Collapse to single line.
-        oneline = description.replace("\n", " ").strip()
-        tasks.append(f'- [ ] Fix: {oneline} [fix: "{diag.symptom}"]')
-    return tasks

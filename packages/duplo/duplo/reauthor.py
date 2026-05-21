@@ -33,17 +33,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from duplo.plan_document import (
+from bob_tools.planfile import (
     PlanArtifactRejected,
+    PlanValidationError,
+    assert_mcloop_canonical,
     parse_plan,
-    parse_synthesized_plan_fragment,
-    render,
     sanitize_plan_artifact,
-    validate_structure,
 )
+from bob_tools.planfile import save as planfile_save
 from duplo.reauthor_assemble import (
     assemble_reauthored_plan,
     normalize_lineage_for_preservation,
+    rebuild_phase_constructed,
 )
 from duplo.reauthor_phase_ids import (
     LineageDiff,
@@ -85,7 +86,7 @@ class PlanArtifactError(ReauthorError):
       - The plan body contains a fenced ``json`` block in a shape
         that is not the documented trailing-fenced-verdict shape
         (mid-body, multiple blocks, etc.). See
-        :func:`duplo.plan_document.sanitize_plan_artifact`.
+        :func:`bob_tools.planfile.sanitize_plan_artifact`.
       - The trailing fenced verdict extracted from the plan
         artifact does not equal orchestra's judge_verdict artifact
         value (parser disagreement on the model's output).
@@ -274,15 +275,13 @@ def reauthor_plan(
 
     plan_text_old = plan_path.read_text(encoding="utf-8")
     old_phases = parse_plan_phases(plan_text_old)
-    # Parse the prior plan structurally. plan_document.parse_plan is
-    # strict: H1 envelope + H2 phase header pairs as units, with
-    # ParseError on missing or duplicate H2s under one H1 envelope or
-    # non-whitespace text between them. The assembly path walks this
-    # Plan's units to preserve unchanged phases verbatim and substitute
-    # changed/new units in place. A structurally corrupt prior raises
-    # at parse rather than getting amplified across reauthor passes.
+    # Parse the prior plan structurally via bob_tools.planfile. The
+    # assembly path walks this Plan's phases to preserve unchanged
+    # phases verbatim and substitute changed/new phases in place via
+    # replace_phase_validated. A structurally corrupt prior raises at
+    # parse rather than getting amplified across reauthor passes.
     try:
-        prior_plan = parse_plan(plan_text_old)
+        prior_plan = parse_plan(plan_text_old, source_path=plan_path)
     except Exception as exc:
         raise ReauthorError(
             f"prior PLAN.md at {plan_path} cannot be parsed as a "
@@ -413,9 +412,14 @@ def reauthor_plan(
             # changed phase content and non-preserve lineage intent;
             # Duplo wraps the output in the deterministic envelope.
             # See orchestra/design/synthesizer-output-contract.md.
-            # The plan_document layer owns the H1+H2 structural
-            # contract; assembly produces a Plan and renders it.
-            synth_plan = parse_synthesized_plan_fragment(new_plan_text)
+            # Phase C Increment 12 (T-000192) routes parsing through
+            # bob_tools.planfile and rebuilds each synth phase for
+            # constructed-mode field-stability before assembly.
+            synth_plan_parsed = parse_plan(new_plan_text)
+            synth_phases = tuple(
+                rebuild_phase_constructed(phase, ordinal=index + 1)
+                for index, phase in enumerate(synth_plan_parsed.phases)
+            )
 
             # Structural lineage check on the synthesizer's RAW
             # output. Runs before normalize_lineage_for_preservation
@@ -431,19 +435,54 @@ def reauthor_plan(
             normalized_lineage = normalize_lineage_for_preservation(
                 prior_ids, lineage_obj
             )
+
+            # Lineage check on the normalized sidecar. Runs BEFORE
+            # assembly because assembly composes around
+            # ``replace_phase_validated``, which fails fast with a
+            # ``PlanValidationError`` the moment a substitution would
+            # introduce a duplicate phase id. A contradictory lineage
+            # (e.g. a prior id appearing as both ``preserve`` and a
+            # supersede ``from`` source) would trip that fail-fast and
+            # mask the actual cause behind the canonical validator's
+            # message. Pre-flighting the lineage here lets
+            # ``validate_lineage`` surface the contradiction with its
+            # named message before assembly is attempted. The
+            # ``new_plan_ids`` passed in is the set of ids the
+            # synthesizer declared in lineage; the header-vs-phases
+            # check (#5 in ``validate_lineage``) trivially passes
+            # because we compute the list from the same lineage. The
+            # internal contradiction checks (preserve+consume,
+            # mixed-action consume, unaccounted priors) are what we
+            # need to fire first.
+            lineage_seen_ids = [
+                entry["id"]
+                for entry in normalized_lineage.get("phases", [])
+                if isinstance(entry, dict)
+                and isinstance(entry.get("id"), str)
+            ]
+            validate_lineage(
+                prior_ids,
+                lineage_seen_ids,
+                normalized_lineage,
+            )
+
             assembled_plan = assemble_reauthored_plan(
                 prior_plan=prior_plan,
-                synth_units=synth_plan.units,
+                synth_phases=synth_phases,
                 normalized_lineage=normalized_lineage,
             )
 
             # Final lineage check on the assembled Plan + normalized
-            # lineage. Fail-closed semantics preserved: contradictions
-            # the synthesizer authors explicitly are NOT silently
-            # repaired.
+            # lineage. The internal contradictions are already covered
+            # by the pre-flight call above; this run catches the
+            # header-vs-phases mismatch that only the assembled plan
+            # can surface (e.g. assembly emitted an unexpected id).
+            assembled_ids = tuple(
+                p.phase_id for p in assembled_plan.phases if p.phase_id is not None
+            )
             validate_lineage(
                 prior_ids,
-                (u.phase_id for u in assembled_plan.units),
+                assembled_ids,
                 normalized_lineage,
             )
 
@@ -465,7 +504,11 @@ def reauthor_plan(
                     attributions,
                     triggering_commits,
                     prior_ids,
-                    [u.phase_id for u in assembled_plan.units],
+                    [
+                        p.phase_id
+                        for p in assembled_plan.phases
+                        if p.phase_id is not None
+                    ],
                 )
             break
         except LineageValidationError as exc:
@@ -492,20 +535,34 @@ def reauthor_plan(
     # path is the final-attempt raise above.
     assert assembled_plan is not None
 
-    # Structural validation on the assembled Plan: catch stray
-    # H1-shaped lines in unit bodies and embedded verdict JSON that
-    # survived sanitize. validate_lineage above caught
-    # lineage-vs-id contradictions; this layer catches H1+H2-aware
-    # invariants validate_lineage's H2-only parser cannot see.
-    validate_structure(assembled_plan)
+    # Canonical validation. assert_mcloop_canonical runs the renderer,
+    # re-parses the result, requires semantic equality after the
+    # canonical normalizer, and enforces the R1/R2 equivalents
+    # independently. It is the contract gate the saved PLAN.md must
+    # pass before mcloop is allowed to consume it. Per T-000192,
+    # raw-text writes have been removed from this path; the assembled
+    # plan goes through bob_tools.planfile.save (default validation
+    # mode is "canonical"), which renders and writes exactly the
+    # validated bytes.
+    try:
+        assembled_plan_text = assert_mcloop_canonical(
+            assembled_plan, source_path=plan_path
+        )
+    except PlanValidationError as exc:
+        raise ReauthorError(
+            "assembled reauthor plan failed the canonical contract: "
+            f"{exc}. The synthesizer's output combined with Duplo's "
+            "preserve-by-default assembly produced a plan that is "
+            "not mcloop-canonical; the run is paused so the inputs "
+            "can be inspected."
+        ) from exc
 
-    assembled_plan_text = render(assembled_plan)
     diff = compute_lineage_diff(normalized_lineage)
 
     git_snapshot = _capture_git_snapshot(project_dir)
 
     from_plan_commit = _git_head_sha(project_dir)
-    out_path.write_text(assembled_plan_text, encoding="utf-8")
+    planfile_save(out_path, assembled_plan)
     to_plan_commit = _git_head_sha(project_dir)
 
     lifecycle_event_ids = _emit_lifecycle_events(
@@ -1583,9 +1640,9 @@ def _invoke_council_for_reauthor(
     # against orchestra's parsed judge_verdict artifact. They should
     # be byte-equivalent JSON objects: orchestra extracts the
     # verdict via its own parser; this sanitizer extracts the same
-    # fence via plan_document. If they disagree, the model emitted
-    # something the two parsers disagree on — better to fail closed
-    # than to silently pick one.
+    # fence via bob_tools.planfile.sanitize_plan_artifact. If they
+    # disagree, the model emitted something the two parsers
+    # disagree on — better to fail closed than to silently pick one.
     if extracted_verdict is not None and extracted_verdict != verdict:
         raise PlanArtifactError(
             "plan_artifact_verdict_mismatch: the trailing fenced "

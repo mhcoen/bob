@@ -24,6 +24,8 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from bob_tools.planfile import Task, make_task
+
 from duplo.diagnostics import record_failure
 
 _SPEC_FILENAME = "SPEC.md"
@@ -983,20 +985,15 @@ def validate_for_run(spec: ProductSpec) -> ValidationResult:
     return ValidationResult(errors=errors, warnings=warnings)
 
 
-def format_contracts_as_verification(spec: ProductSpec) -> str:
-    """Format behavior contracts as PLAN.md verification tasks.
+def format_contracts_as_verification(spec: ProductSpec) -> list[Task]:
+    """Render behavior contracts as typed :class:`Task` values.
 
-    Returns a Markdown section suitable for appending to a plan, or
-    an empty string if no contracts are present.
+    Returns one :class:`Task` per behavior contract, suitable for the
+    caller to attach to a phase via
+    :func:`bob_tools.planfile.add_phase_task`. Empty list when ``spec``
+    has no contracts. This helper does not emit PLAN.md markdown.
     """
-    if not spec.behavior_contracts:
-        return ""
-    lines: list[str] = [
-        "",
-        "<!-- Functional verification from product spec -->",
-        "",
+    return [
+        make_task(f"Verify: type `{contract.input}`, expect result `{contract.expected}`")
+        for contract in spec.behavior_contracts
     ]
-    for contract in spec.behavior_contracts:
-        lines.append(f"- [ ] Verify: type `{contract.input}`, expect result `{contract.expected}`")
-    lines.append("")
-    return "\n".join(lines)

@@ -79,7 +79,18 @@ from duplo.verification_extractor import (
 from duplo.frame_filter import apply_filter, filter_frames
 from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
-from duplo.investigator import format_investigation, investigate, investigation_to_fix_tasks
+from bob_tools.planfile import (
+    Plan,
+    add_bug_task,
+    add_phase_task,
+    make_task,
+    update,
+)
+from duplo.investigator import (
+    Diagnosis,
+    format_investigation,
+    investigate,
+)
 from duplo.spec_reader import (
     ProductSpec,
     SourceEntry,
@@ -97,7 +108,6 @@ from duplo.spec_writer import append_sources, update_design_autogen
 from duplo.saver import (
     advance_phase,
     append_phase_to_history,
-    append_to_bugs_section,
     derive_app_name,
     get_current_phase,
     load_examples,
@@ -580,6 +590,55 @@ def _investigation_context(spec: ProductSpec | None) -> dict:
     return kwargs
 
 
+def _diagnosis_fix_text(diag: Diagnosis) -> str:
+    """Build the bug task text for a diagnosis (no leading checkbox)."""
+    parts = [diag.symptom]
+    if diag.expected:
+        parts.append(f"Expected: {diag.expected}")
+    if diag.area:
+        parts.append(f"Area: {diag.area}")
+    description = ". ".join(parts).replace("\n", " ").strip()
+    return f"Fix: {description}"
+
+
+def _bug_fix_text(desc: str) -> str:
+    """Build the bug task text for an undiagnosed bug description."""
+    oneline = desc.replace("\n", " ").strip()
+    return f"Fix: {oneline}"
+
+
+def _add_bug_tasks_to_plan(
+    plan_path: Path, entries: list[tuple[str, str]]
+) -> int:
+    """Add each ``(text, fix_key)`` entry to the plan's Bugs section.
+
+    Each entry becomes a task built with :func:`make_task` and carries a
+    ``[fix: <fix_key>]`` annotation so :func:`add_bug_task` can collapse
+    a regenerated bug against an already-tracked one. Returns the number
+    of writes (entries that were appended or reopened); entries that hit
+    a TODO match contribute 0.
+
+    Uses ``validation="unchecked"`` because user-facing PLAN.md files
+    going through ``duplo fix`` may not yet be in mcloop's canonical
+    form — the same reason :func:`duplo.planner.save_plan` uses the
+    unchecked mode (planner.py:758).
+    """
+    writes = 0
+
+    def operation(plan: Plan) -> Plan:
+        nonlocal writes
+        new_plan = plan
+        for text, fix_key in entries:
+            task = make_task(text, annotations=(("fix", fix_key),))
+            new_plan, outcome = add_bug_task(new_plan, task)
+            if outcome != "unchanged":
+                writes += 1
+        return new_plan
+
+    update(plan_path, operation, validation="unchecked")
+    return writes
+
+
 def _fix_mode(args: argparse.Namespace) -> None:
     """Report bugs and append fix tasks to PLAN.md without phase changes.
 
@@ -732,8 +791,10 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        fix_tasks = investigation_to_fix_tasks(result)
-        writes = append_to_bugs_section(fix_tasks)
+        entries = [
+            (_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses
+        ]
+        writes = _add_bug_tasks_to_plan(plan_path, entries)
         print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
         return
@@ -760,8 +821,10 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        fix_tasks = investigation_to_fix_tasks(result)
-        writes = append_to_bugs_section(fix_tasks)
+        entries = [
+            (_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses
+        ]
+        writes = _add_bug_tasks_to_plan(plan_path, entries)
         print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
     else:
@@ -774,12 +837,12 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        fix_tasks = []
+        entries = []
         for desc in bugs:
             oneline = desc.replace("\n", " ").strip()
-            fix_tasks.append(f'- [ ] Fix: {oneline} [fix: "{oneline}"]')
+            entries.append((_bug_fix_text(desc), oneline))
 
-        writes = append_to_bugs_section(fix_tasks)
+        writes = _add_bug_tasks_to_plan(plan_path, entries)
         print(f"Updated {writes} fix task(s) in PLAN.md (undiagnosed).")
         print("Run mcloop to start fixing.")
 
@@ -1188,9 +1251,7 @@ def _detect_and_append_gaps(
     tasks_appended = 0
     gap_tasks = format_gap_tasks(result)
     if gap_tasks:
-        updated = plan_content.rstrip() + "\n" + gap_tasks
-        plan_path.write_text(updated, encoding="utf-8")
-        tasks_appended = sum(1 for line in gap_tasks.splitlines() if line.startswith("- [ ] "))
+        tasks_appended = _append_gap_tasks_to_plan(plan_path, gap_tasks)
         print(f"  Appended {tasks_appended} gap task(s) to PLAN.md.")
 
     return (
@@ -1199,6 +1260,82 @@ def _detect_and_append_gaps(
         len(result.design_refinements),
         tasks_appended,
     )
+
+
+def _append_gap_tasks_to_plan(plan_path: Path, gap_tasks: list) -> int:
+    """Append each typed gap task to the plan's last phase via
+    :func:`add_phase_task`.
+
+    Returns the number of tasks actually appended. When the plan has
+    no phases (e.g. preamble-only), the tasks are dropped: gaps only
+    make sense once a phase exists to attach them to.
+
+    Uses ``validation="unchecked"`` for the same reason
+    :func:`duplo.planner.save_plan` does — user-facing PLAN.md files
+    going through gap detection may not yet be in mcloop's canonical
+    form.
+    """
+    appended = 0
+
+    def operation(plan: Plan) -> Plan:
+        nonlocal appended
+        if not plan.phases:
+            return plan
+        new_plan = _ensure_constructed_invariants(plan)
+        last_phase_id = new_plan.phases[-1].phase_id
+        if last_phase_id is None:
+            return new_plan
+        for task in gap_tasks:
+            new_plan, _assigned = add_phase_task(new_plan, last_phase_id, task)
+            appended += 1
+        return new_plan
+
+    update(plan_path, operation, validation="unchecked")
+    return appended
+
+
+def _ensure_constructed_invariants(plan: Plan) -> Plan:
+    """Return ``plan`` adjusted so ``add_phase_task``'s constructed-mode
+    validator accepts it.
+
+    The validator requires ``magic_version == 1``, every task to carry
+    a ``T-NNNNNN`` id, every phase to carry an explicit ``phase_id``,
+    and the phase ordinals to be contiguous ``1..N``. User-facing
+    PLAN.md files passing through gap detection may be missing any of
+    these (no magic line, no ids, gappy ordinals after a hand-edit).
+    Migrating once fills in ids and synthesizes ``phase_NNN`` for any
+    phase missing one; a second pass renumbers ordinals to ``1..N``
+    so the contiguous-ordinal invariant holds. Identity travels via
+    ``phase_id``, so renumbering the display ordinal does not break
+    addressing.
+    """
+    from bob_tools.planfile import migrate as planfile_migrate_op
+
+    needs_migrate = (
+        plan.magic_version is None
+        or any(task.task_id is None for phase in plan.phases for task in phase.tasks)
+        or any(phase.phase_id_source == "none" for phase in plan.phases)
+    )
+
+    new_plan = plan
+    if needs_migrate:
+        new_plan = planfile_migrate_op(
+            dataclasses.replace(new_plan, magic_version=1)
+            if new_plan.magic_version is None
+            else new_plan
+        )
+
+    ordinals_ok = [phase.ordinal for phase in new_plan.phases] == list(
+        range(1, len(new_plan.phases) + 1)
+    )
+    if not ordinals_ok:
+        new_phases = tuple(
+            dataclasses.replace(phase, ordinal=index + 1)
+            for index, phase in enumerate(new_plan.phases)
+        )
+        new_plan = dataclasses.replace(new_plan, phases=new_phases)
+
+    return new_plan
 
 
 _PHASE_CREATED_FILE_RE = re.compile(r"Create `([^`]+)`")
@@ -1331,27 +1468,24 @@ def _run_phase_generation_loop(
                 platform_addendum=platform_addendum,
                 prior_phases_files=list(prior_phases_files),
             )
-            extra_markdown = ""
+            extra_tasks: list = []
             if idx == total_phases - 1:
                 frame_descs = load_frame_descriptions()
                 if frame_descs:
                     print("Extracting verification cases from demo video …")
                     vcases = extract_verification_cases(frame_descs)
                     if vcases:
-                        vtasks = format_verification_tasks(vcases)
-                        extra_markdown += "\n" + vtasks
+                        extra_tasks.extend(format_verification_tasks(vcases))
                         print(f"  {len(vcases)} verification case(s) added.")
                 if spec:
-                    spec_vtasks = format_contracts_as_verification(spec)
-                    if spec_vtasks:
-                        extra_markdown += "\n" + spec_vtasks
+                    spec_tasks = format_contracts_as_verification(spec)
+                    if spec_tasks:
+                        extra_tasks.extend(spec_tasks)
                         print(
                             f"  {len(spec.behavior_contracts)} spec "
                             f"verification case(s) added."
                         )
-            saved_plan_path = save_plan(
-                content, extra_markdown_tasks=extra_markdown
-            )
+            saved_plan_path = save_plan(content, extra_tasks=extra_tasks)
             prior_phases_files.extend(_extract_created_files_from_plan(content))
         except ClaudeCliError as exc:
             record_failure(
