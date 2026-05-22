@@ -2059,6 +2059,47 @@ def clear_failed(plan: Plan) -> Plan:
     return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
 
 
+def _purge_done_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], bool]:
+    """Return ``tasks`` with DONE tasks removed."""
+    new_tasks: list[Task] = []
+    changed = False
+
+    for task in tasks:
+        if task.status == TaskStatus.DONE:
+            # A DONE parent with non-DONE children is unreachable in canonical
+            # planfiles; if encountered, drop the subtree with the parent.
+            changed = True
+            continue
+
+        new_children = task.children
+        if task.children:
+            new_children, children_changed = _purge_done_tasks(task.children)
+            changed = changed or children_changed
+
+        if new_children != task.children:
+            new_tasks.append(dataclasses.replace(task, children=new_children))
+        else:
+            new_tasks.append(task)
+
+    return tuple(new_tasks), changed
+
+
+def purge_done_bug_tasks(plan: Plan) -> Plan:
+    """Remove DONE tasks from ``plan.bugs`` and return a new plan.
+
+    Mirrors mcloop's legacy ``purge_completed_bugs`` delete behavior for
+    BUGS.md: checked bug entries are removed, phase tasks are untouched,
+    and no ledger Settlement is produced.
+    """
+    new_bugs = plan.bugs
+    if plan.bugs is not None:
+        bug_tasks, bugs_changed = _purge_done_tasks(plan.bugs.tasks)
+        if bugs_changed:
+            new_bugs = dataclasses.replace(plan.bugs, tasks=bug_tasks)
+
+    return dataclasses.replace(plan, bugs=new_bugs)
+
+
 def _next_task_id(plan: Plan) -> str:
     """Return the next sequential ``T-NNNNNN`` id not yet used in ``plan``.
 

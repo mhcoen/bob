@@ -53,6 +53,7 @@ from bob_tools.planfile.operations import (
     fail_task,
     make_task,
     next_tasks,
+    purge_done_bug_tasks,
     replace_phase,
     replace_phase_validated,
     reset_task,
@@ -119,9 +120,11 @@ def _plan(
 
 def test_package_root_exports_clear_failed_and_validate_plan() -> None:
     from bob_tools.planfile import clear_failed as exported_clear_failed
+    from bob_tools.planfile import purge_done_bug_tasks as exported_purge_done_bug_tasks
     from bob_tools.planfile import validate_plan as exported_validate_plan
 
     assert exported_clear_failed is clear_failed
+    assert exported_purge_done_bug_tasks is purge_done_bug_tasks
     assert exported_validate_plan is validate_plan
 
 
@@ -2403,6 +2406,96 @@ class TestClearFailed:
         new_plan = clear_failed(plan)
         assert new_plan == plan
         assert new_plan is not plan
+
+
+class TestPurgeDoneBugTasks:
+    """``purge_done_bug_tasks`` removes DONE bug tasks without settlements."""
+
+    def test_empty_bugs_section_no_op(self) -> None:
+        plan = _plan(bugs=BugsSection(tasks=(), line_number=10))
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan == plan
+        assert new_plan is not plan
+
+    def test_all_done_bugs_removed(self) -> None:
+        first = _task(task_id="T-000900", status=TaskStatus.DONE, text="fixed one")
+        second = _task(task_id="T-000901", status=TaskStatus.DONE, text="fixed two")
+        plan = _plan(bugs=BugsSection(tasks=(first, second), line_number=20))
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks == ()
+
+    def test_mixed_statuses_only_done_filtered(self) -> None:
+        done = _task(task_id="T-000900", status=TaskStatus.DONE, text="fixed")
+        todo = _task(task_id="T-000901", status=TaskStatus.TODO, text="open")
+        failed = _task(task_id="T-000902", status=TaskStatus.FAILED, text="failed")
+        plan = _plan(bugs=BugsSection(tasks=(done, todo, failed), line_number=20))
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks == (todo, failed)
+
+    def test_non_done_bug_retains_parent_and_filters_done_child(self) -> None:
+        done_child = _task(
+            task_id="T-000901",
+            status=TaskStatus.DONE,
+            text="fixed child",
+            indent_level=1,
+        )
+        open_child = _task(
+            task_id="T-000902",
+            status=TaskStatus.TODO,
+            text="open child",
+            indent_level=1,
+        )
+        parent = _task(
+            task_id="T-000900",
+            status=TaskStatus.TODO,
+            text="open parent",
+            children=(done_child, open_child),
+        )
+        plan = _plan(bugs=BugsSection(tasks=(parent,), line_number=20))
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[0].text == "open parent"
+        assert new_plan.bugs.tasks[0].children == (open_child,)
+
+    def test_done_parent_drops_subtree(self) -> None:
+        open_child = _task(
+            task_id="T-000901",
+            status=TaskStatus.TODO,
+            text="unreachable open child",
+            indent_level=1,
+        )
+        parent = _task(
+            task_id="T-000900",
+            status=TaskStatus.DONE,
+            text="done parent",
+            children=(open_child,),
+        )
+        plan = _plan(bugs=BugsSection(tasks=(parent,), line_number=20))
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks == ()
+
+    def test_idempotent(self) -> None:
+        done = _task(task_id="T-000900", status=TaskStatus.DONE, text="fixed")
+        todo = _task(task_id="T-000901", status=TaskStatus.TODO, text="open")
+        plan = _plan(bugs=BugsSection(tasks=(done, todo), line_number=20))
+        once = purge_done_bug_tasks(plan)
+        twice = purge_done_bug_tasks(once)
+        assert twice == once
+
+    def test_phase_tasks_untouched(self) -> None:
+        done_phase = _task(task_id="T-000001", status=TaskStatus.DONE, text="phase")
+        done_bug = _task(task_id="T-000900", status=TaskStatus.DONE, text="bug")
+        plan = _plan(
+            phases=(_phase_with_tasks(tasks=(done_phase,)),),
+            bugs=BugsSection(tasks=(done_bug,), line_number=20),
+        )
+        new_plan = purge_done_bug_tasks(plan)
+        assert new_plan.phases[0].tasks == (done_phase,)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks == ()
 
 
 class TestAddTask:
