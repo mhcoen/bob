@@ -977,3 +977,37 @@ the only two *intended* (non-preserving) behavioral changes so the
 cutover itself remains strictly behavior-preserving — directly
 satisfying the governing risk and the "looks complete, isn't"
 failure-mode mandate.
+
+---
+
+## 6. Closure (2026-05-22)
+
+The de-split is complete and independently audited. Both lineages
+reached the same verdict: zero behavioral defects in the post-cutover
+state.
+
+Frozen refs:
+
+- `mcloop` `desplit-complete` =
+  `a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3`
+- `bob-tools` `desplit-complete` =
+  `3cc32e11125491f51281cd2eb5ad6b9c1115134b`
+
+Audit artifacts:
+
+- Stream A (Code, items 1, 3, 4, 5):
+  `bob/design/desplit-post-completion-audit-claudecode.md`. 25/25
+  end-to-end gate cells PASS under corrected gate (e); 0/0 Bucket I
+  hits across 7 audit greps; 5/5 decision-register entries PASS;
+  22/22 deletion-surface rows PASS.
+- Stream B (Kimi K2.6, item 2): `bob/design/desplit-post-completion-audit-kimi.md`.
+  35/35 §2 parity items PASS; no consequential findings; no
+  design-level decisions required.
+- Convergence note:
+  `bob/design/desplit-post-completion-audit-convergence.md`. Verdict
+  CONVERGE WITH MECHANICAL CORRECTIONS — two doc-side corrections (one
+  per stream), both flagged in the respective reports, neither
+  contradicting the other.
+
+The audit converges. Consolidation planning starts from this verified
+base.
