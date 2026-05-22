@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from bob_tools.planfile import (
@@ -26,7 +27,22 @@ from bob_tools.planfile import (
 )
 from bob_tools.planfile import Task as PlanTask
 
-from mcloop.checklist import Task
+
+@dataclass
+class Task:
+    text: str
+    checked: bool
+    failed: bool
+    line_number: int
+    indent_level: int
+    stage: str = ""
+    children: list[Task] = field(default_factory=list)
+    eliminated: list[str] = field(default_factory=list)
+    body: str = ""
+    task_id: str | None = None
+    flag_tags: tuple[str, ...] = ()
+    action_tag: tuple[str, str] | None = None
+
 
 # Alias so callers that historically caught
 # ``mcloop.checklist.PlanCorruptionError`` keep working. The behavior
