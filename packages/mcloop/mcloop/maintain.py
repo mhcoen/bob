@@ -12,12 +12,6 @@ from typing import Any
 
 from mcloop import formatting
 from mcloop.checks import get_check_commands
-
-# MAINTAIN.md uses the same checkbox grammar as PLAN.md but is parsed
-# entirely locally — no planfile/Plan structure, just an ordered list
-# of invariants. Keeping the regex local avoids coupling maintain to
-# the planfile shim.
-CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 from mcloop.git_ops import (
     _checkpoint,
     _commit,
@@ -29,6 +23,12 @@ from mcloop.git_ops import (
 from mcloop.lifecycle import _kill_orphan_sessions, register_signal_handlers
 from mcloop.notify import notify
 from mcloop.runner import run_task, warn_unknown_model
+
+# MAINTAIN.md uses the same checkbox grammar as PLAN.md but is parsed
+# entirely locally — no planfile/Plan structure, just an ordered list
+# of invariants. Keeping the regex local avoids coupling maintain to
+# the planfile shim.
+CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 
 # Maintain sessions may need web access to verify external state
 # (e.g. checking model catalogs, API docs). Include WebFetch
