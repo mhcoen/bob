@@ -124,8 +124,9 @@ def generate_plan(ctx: BugContext) -> str:
         lines.append("Nothing yet.")
     lines.append("")
 
-    # Investigation steps
-    lines.append("## Steps")
+    # Investigation steps — Stage heading so planfile-backed parsers
+    # recognize the task block as a stage rather than orphan content.
+    lines.append("## Stage 1: Steps")
     lines.append("")
     _add_steps(lines, ctx)
 

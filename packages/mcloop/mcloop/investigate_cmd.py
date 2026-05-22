@@ -17,7 +17,7 @@ from pathlib import Path
 import mcloop.app_interact  # noqa: F401
 import mcloop.process_monitor  # noqa: F401
 from mcloop import formatting, worktree
-from mcloop.checklist import Task, parse
+from mcloop._planfile_compat import Task, parse
 from mcloop.checks import detect_app_type, detect_run
 from mcloop.investigator import gather_bug_context, generate_plan
 from mcloop.notify import notify
@@ -283,10 +283,12 @@ def _append_verification_failure(
             f.write(notes_header)
         f.write(f"- Verification round {round_num} failed: {failure}\n")
 
-    # Append new fix tasks to PLAN.md
+    # Append new fix tasks to PLAN.md. Stage number is offset by +1
+    # because the initial generated plan occupies "## Stage 1: Steps";
+    # successive verification rounds become Stage 2, Stage 3, ...
     plan_path = wt_path / "PLAN.md"
     with open(plan_path, "a") as f:
-        f.write(f"\n## Verification fix (round {round_num})\n\n")
+        f.write(f"\n## Stage {round_num + 1}: Verification fix (round {round_num})\n\n")
         f.write(f"- [ ] Investigate and fix verification failure: {failure}\n")
         f.write("- [ ] Verify the fix resolves the issue\n")
 

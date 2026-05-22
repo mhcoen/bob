@@ -90,9 +90,29 @@ def test_plan_has_verification_step():
 def test_steps_are_checklist_items():
     """All steps are markdown checklist items."""
     plan = generate_plan(BugContext())
-    steps_section = plan.split("## Steps\n\n")[1]
+    steps_section = plan.split("## Stage 1: Steps\n\n")[1]
     for line in steps_section.strip().splitlines():
         assert line.startswith("- [ ] "), f"Not a checklist item: {line!r}"
+
+
+def test_generated_plan_parses_through_planfile_compat_shim(tmp_path):
+    """Pin: generated investigation plans must parse through the shim
+    without losing structure. The `## Stage 1: Steps` heading is the
+    sole task-bearing stage; the other `##` blocks (Debugging Playbook,
+    Bug Description, etc.) are documentation and contribute no tasks.
+    """
+    from mcloop._planfile_compat import parse as shim_parse
+
+    plan_path = tmp_path / "PLAN.md"
+    plan_path.write_text(generate_plan(BugContext(app_type="cli")))
+    tasks = shim_parse(plan_path)
+
+    assert len(tasks) == 8, (
+        f"expected 8 stage-1 tasks, got {len(tasks)}: "
+        f"{[t.text[:40] for t in tasks]}"
+    )
+    assert all(t.stage == "Stage 1: Steps" for t in tasks)
+    assert all(not t.checked for t in tasks)
 
 
 def test_gui_app_type_references_process_monitor():

@@ -3769,7 +3769,7 @@ def test_append_verification_failure_adds_plan_tasks(tmp_path, capsys):
     (tmp_path / "PLAN.md").write_text("# Plan\n\n- [x] Fix the bug\n")
     _append_verification_failure(tmp_path, "App crashed", 1)
     plan = (tmp_path / "PLAN.md").read_text()
-    assert "## Verification fix (round 1)" in plan
+    assert "## Stage 2: Verification fix (round 1)" in plan
     assert "- [ ] Investigate and fix verification failure" in plan
     assert "App crashed" in plan
     assert "- [ ] Verify the fix resolves the issue" in plan
@@ -3852,7 +3852,9 @@ def test_investigation_failed_all_completed(tmp_path, capsys):
     wt_path = tmp_path / "worktree"
     wt_path.mkdir()
 
-    (wt_path / "PLAN.md").write_text("# Plan\n\n- [x] Done task\n")
+    (wt_path / "PLAN.md").write_text(
+        "# Plan\n\n## Stage 1: Tasks\n\n- [x] Done task\n"
+    )
 
     _investigation_failed(wt_path, "investigate-bug")
 
