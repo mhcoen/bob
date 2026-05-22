@@ -39,7 +39,7 @@ def _setup_repo(tmp_path: Path) -> Path:
 
 
 def _active_plan(plan_md: Path) -> Path:
-    current_plan = plan_md.with_name("CURRENT_PLAN.md")
+    current_plan = plan_md.with_name("PLAN.md")
     return current_plan if current_plan.exists() else plan_md
 
 

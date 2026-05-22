@@ -2,7 +2,7 @@
 
 INCREMENT 1 of B3 Stage B3.1. The corpus is the set of distinct plan-input
 literals harvested by ``.scratch/harvest_plans.py`` from every ``write_text``
-call against a PLAN.md / CURRENT_PLAN.md / master / current receiver in
+call against a PLAN.md / PLAN.md / master / current receiver in
 ``tests/``. Each literal is auto-labeled by the harvester based on whether
 the source text contains an incomplete checkbox (``- [ ]``) and whether it
 contains a ``## Stage`` / ``## Phase`` header. The labels are the oracle

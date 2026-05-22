@@ -34,11 +34,10 @@ def _init_git(tmp_path: Path) -> None:
 def test_helper_rejects_phase_bearing_plan_without_task_ids(tmp_path: Path) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_ID_LESS_PHASE_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
     bugs = tmp_path / "BUGS.md"
 
     with pytest.raises(PlanNotCanonicalError) as ei:
-        _enforce_canonical_inputs(master, current_plan, bugs)
+        _enforce_canonical_inputs(master, bugs)
 
     assert "stable T-NNNNNN ids" in str(ei.value)
     assert ei.value.source_path == master
@@ -48,7 +47,7 @@ def test_run_loop_rejects_id_less_phase_plan_before_retry_mutation(tmp_path: Pat
     _init_git(tmp_path)
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
+    current_plan = tmp_path / "PLAN.md"
     current_text = (
         "## Stage 1: Setup\n"
         "<!-- phase_id: phase_001 -->\n"
@@ -71,8 +70,7 @@ def test_run_loop_rejects_id_less_phase_plan_before_retry_mutation(tmp_path: Pat
 def test_helper_accepts_phase_bearing_plan_with_task_ids(tmp_path: Path) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
     bugs = tmp_path / "BUGS.md"
     bugs.write_text(_CANONICAL_BUGS)
 
-    _enforce_canonical_inputs(master, current_plan, bugs)
+    _enforce_canonical_inputs(master, bugs)

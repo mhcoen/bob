@@ -4,7 +4,7 @@ enumerated in ``.scratch/B3_INCREMENT2_PATH_ENUM.md``.
 
 Cases:
   (a) ``--retry`` clear (``mcloop/main.py`` ~700-711): a non-canonical
-      CURRENT_PLAN.md / BUGS.md must be REJECTED before
+      PLAN.md / BUGS.md must be REJECTED before
       ``clear_failed_markers`` runs — the file content must be byte-
       preserved across the failed run.
   (b) ``_check_interrupted`` skip (``mcloop/lifecycle.py`` ~178,
@@ -12,10 +12,10 @@ Cases:
       must be REJECTED before lifecycle's ``mark_failed`` /
       ``_write_ruledout_to_plan`` runs — the PLAN.md is byte-preserved
       and ``interrupted.json`` is still present.
-  (c) ``ensure_current_plan`` split (``mcloop/main.py`` ~977 →
-      ``mcloop/plan_split.py`` ~204): a non-canonical master PLAN.md
-      with no CURRENT_PLAN.md on disk must be REJECTED before the
-      extraction writes CURRENT_PLAN.md — CURRENT_PLAN.md must NOT be
+  (c) ``plan startup`` split (``mcloop/main.py`` ~977 →
+      ``mcloop/plan.py`` ~204): a non-canonical master PLAN.md
+      with no PLAN.md on disk must be REJECTED before the
+      extraction writes PLAN.md — PLAN.md must NOT be
       created.
 
 Plus a permissive baseline:
@@ -63,24 +63,21 @@ _NON_CANONICAL = "- [ ] Do something\n"  # phaseless; classic R1 trap
 def test_helper_rejects_phaseless_master(tmp_path: Path) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_NON_CANONICAL)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
     bugs = tmp_path / "BUGS.md"
     with pytest.raises(PlanNotCanonicalError) as ei:
-        _enforce_canonical_inputs(master, current_plan, bugs)
+        _enforce_canonical_inputs(master, bugs)
     assert "bob-plan migrate" in str(ei.value)
 
 
-def test_helper_rejects_phaseless_current_plan_even_if_master_canonical(
+def test_helper_rejects_phaseless_plan(
     tmp_path: Path,
 ) -> None:
     master = tmp_path / "PLAN.md"
-    master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
-    current_plan.write_text(_NON_CANONICAL)  # left over from a pre-B3 run
+    master.write_text(_NON_CANONICAL)
     bugs = tmp_path / "BUGS.md"
     with pytest.raises(PlanNotCanonicalError) as ei:
-        _enforce_canonical_inputs(master, current_plan, bugs)
-    assert "CURRENT_PLAN.md" in str(ei.value.source_path)
+        _enforce_canonical_inputs(master, bugs)
+    assert "PLAN.md" in str(ei.value.source_path)
 
 
 def test_helper_rejects_phaseless_bugs_even_if_master_canonical(
@@ -88,11 +85,10 @@ def test_helper_rejects_phaseless_bugs_even_if_master_canonical(
 ) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"
     bugs = tmp_path / "BUGS.md"
     bugs.write_text("- [ ] some bug\n")  # no ## Bugs header
     with pytest.raises(PlanNotCanonicalError) as ei:
-        _enforce_canonical_inputs(master, current_plan, bugs)
+        _enforce_canonical_inputs(master, bugs)
     assert "BUGS.md" in str(ei.value.source_path)
 
 
@@ -101,10 +97,9 @@ def test_helper_passes_canonical_master_with_canonical_bugs(
 ) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"  # absent on first run
     bugs = tmp_path / "BUGS.md"
     bugs.write_text(_CANONICAL_BUGS)
-    _enforce_canonical_inputs(master, current_plan, bugs)  # MUST NOT raise
+    _enforce_canonical_inputs(master, bugs)  # MUST NOT raise
 
 
 def test_helper_passes_canonical_master_with_no_bugs_no_current(
@@ -112,9 +107,8 @@ def test_helper_passes_canonical_master_with_no_bugs_no_current(
 ) -> None:
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)
-    current_plan = tmp_path / "CURRENT_PLAN.md"  # absent
     bugs = tmp_path / "BUGS.md"  # absent
-    _enforce_canonical_inputs(master, current_plan, bugs)  # MUST NOT raise
+    _enforce_canonical_inputs(master, bugs)  # MUST NOT raise
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +127,7 @@ def _init_git(tmp_path: Path) -> None:
 
 def test_a_retry_clear_does_not_mutate_when_gate_rejects(tmp_path: Path) -> None:
     """(a) --retry must not run clear_failed_markers on a non-canonical
-    CURRENT_PLAN.md / BUGS.md — the gate fires first.
+    PLAN.md / BUGS.md — the gate fires first.
 
     Fixture carries both a ``- [ ]`` (so the canonical-form gate
     triggers REJECT on the phaseless input) and a ``- [!]`` (so
@@ -143,7 +137,7 @@ def test_a_retry_clear_does_not_mutate_when_gate_rejects(tmp_path: Path) -> None
     _init_git(tmp_path)
     master = tmp_path / "PLAN.md"
     master.write_text(_CANONICAL_PLAN)  # master is canonical
-    current_plan = tmp_path / "CURRENT_PLAN.md"
+    current_plan = tmp_path / "PLAN.md"
     current_plan_text = "- [ ] pending task\n- [!] previously failed task\n"
     current_plan.write_text(current_plan_text)
     bugs = tmp_path / "BUGS.md"
@@ -153,7 +147,7 @@ def test_a_retry_clear_does_not_mutate_when_gate_rejects(tmp_path: Path) -> None
         run_loop(master, retry=True, no_audit=True)
 
     # The pre-loop --retry clear at main.py:701 would have rewritten
-    # CURRENT_PLAN.md to flip [!] -> [ ]. The gate must have stopped
+    # PLAN.md to flip [!] -> [ ]. The gate must have stopped
     # that before it ran. Byte-equal proves no mutation occurred.
     assert current_plan.read_text() == current_plan_text
 
@@ -198,24 +192,19 @@ def test_b_check_interrupted_does_not_mutate_when_gate_rejects(
     assert interrupted_path.exists()
 
 
-def test_c_ensure_current_plan_does_not_write_when_gate_rejects(
+def test_c_plan_startup_preserves_plan_when_gate_rejects(
     tmp_path: Path,
 ) -> None:
-    """(c) ensure_current_plan must not extract+write CURRENT_PLAN.md
-    from a non-canonical master PLAN.md — the gate fires first."""
+    """(c) plan startup must not mutate PLAN.md when the gate fires first."""
     _init_git(tmp_path)
     master = tmp_path / "PLAN.md"
     master.write_text("# Plan\n\n- [ ] Do task\n")  # phaseless master
-    current_plan = tmp_path / "CURRENT_PLAN.md"
-    assert not current_plan.exists()  # precondition
+    before = master.read_text()
 
     with pytest.raises(PlanNotCanonicalError):
         run_loop(master, no_audit=True)
 
-    # ensure_current_plan at main.py:977 would have written
-    # CURRENT_PLAN.md from the master's first incomplete phase. The
-    # gate must have stopped that before it ran.
-    assert not current_plan.exists()
+    assert master.read_text() == before
 
 
 def test_d_gate_runs_before_parse_description_too(tmp_path: Path) -> None:

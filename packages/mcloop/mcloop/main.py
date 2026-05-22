@@ -16,10 +16,12 @@ import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
 from mcloop._planfile_compat import (
     check_off,
+    clear_failed_markers,
     count_unchecked,
     find_next,
     find_parent,
     get_batch_children,
+    get_eliminated,
     has_unchecked_bugs,
     is_auto_task,
     is_batch_task,
@@ -27,6 +29,7 @@ from mcloop._planfile_compat import (
     mark_failed,
     parse,
     parse_auto_task,
+    purge_completed_bugs,
     user_task_instructions,
 )
 from mcloop._planfile_compat import (
@@ -40,10 +43,7 @@ from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checklist import (
     PlanCorruptionError,
     Task,
-    clear_failed_markers,
-    get_eliminated,
     parse_description,
-    purge_completed_bugs,
 )
 from mcloop.checks import (
     detect_build,
@@ -113,14 +113,6 @@ from mcloop.output import (
     _print_summary,
     _snapshot_notes,
     _tail,
-)
-from mcloop.plan_split import (
-    BUGS_FILE,
-    CURRENT_PLAN,
-    ensure_bugs_file,
-    ensure_current_plan,
-    get_current_phase_name,
-    transition_phase,
 )
 from mcloop.pytest_optimizations import ensure_pytest_optimizations
 from mcloop.ratelimit import (
@@ -216,30 +208,18 @@ _READONLY_TASK_PHRASES: tuple[str, ...] = (
 )
 
 
-def _enforce_canonical_inputs(
-    master_path: Path,
-    current_plan_path: Path,
-    bugs_path: Path,
-) -> None:
+def _enforce_canonical_inputs(plan_path: Path, bugs_path: Path) -> None:
     """B3 increment-3 wire-in: canonical-plan precondition gate.
 
-    Runs at ``run_loop`` entry, before any of the three pre-loop mutation
-    sites enumerated in ``.scratch/B3_INCREMENT2_PATH_ENUM.md``:
+    Runs at ``run_loop`` entry, before pre-loop mutation sites:
 
-      * the ``--retry`` ``clear_failed_markers`` calls (main.py ~700)
+      * the ``--retry`` ``clear_failed_markers`` calls
       * the ``_check_interrupted`` skip / describe mutation
-        (lifecycle.py ~178, 217-261)
-      * the ``ensure_current_plan`` split-plan write
-        (plan_split.py ~204)
+        (lifecycle.py)
 
-    Validates each plan-bearing file that exists on disk at the moment
-    of the gate. ``current_plan_path`` is checked only if it already
-    exists; the master is the source of truth for split-plan
-    extraction, so a missing CURRENT_PLAN.md is not a precondition
-    failure here — it is handled normally by
-    ``ensure_current_plan`` later in the loop. ``bugs_path`` is checked
-    only if it exists (``ensure_bugs_file`` creates it later with a
-    canonical ``## Bugs`` header on first run).
+    Validates each plan-bearing file that exists on disk at the moment of the
+    gate. ``bugs_path`` is checked only if it exists; the loop creates it later
+    with a canonical ``## Bugs`` header on first run.
 
     Raises ``PlanNotCanonicalError`` on the first non-canonical input,
     which the top-level ``main()`` handler catches and translates to
@@ -248,12 +228,26 @@ def _enforce_canonical_inputs(
     """
     from bob_tools.planfile import parse_plan as _bt_parse_plan
 
-    for path in (master_path, bugs_path, current_plan_path):
+    for path in (plan_path, bugs_path):
         if not path.exists():
             continue
         text = path.read_text()
         plan = _bt_parse_plan(text, source_path=path)
         enforce_canonical(text, plan, source_path=path)
+
+
+def _ensure_bugs_file(bugs_path: Path) -> None:
+    """Create BUGS.md with an empty header if it does not exist."""
+    if not bugs_path.exists():
+        bugs_path.write_text("## Bugs\n\n")
+
+
+def _next_plan_phase_name(tasks: list[Task]) -> str | None:
+    """Return the stage name for the next plan task, or None when complete."""
+    task = find_next(tasks)
+    if task is None or task.stage == "Bugs":
+        return None
+    return task.stage
 
 
 def _is_readonly_task(task_text: str) -> bool:
@@ -844,31 +838,24 @@ def run_loop(
     _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
 
-    # Split-plan paths
-    master_path = checklist_path  # PLAN.md (the full roadmap)
-    current_plan_path = project_dir / CURRENT_PLAN
-    bugs_path = project_dir / BUGS_FILE
+    plan_path = checklist_path
+    bugs_path = project_dir / "BUGS.md"
 
     # B3 increment 3: canonical-plan precondition gate. Runs before
-    # parse_description, --retry's clear_failed_markers, the interrupt
-    # check, and ensure_current_plan — i.e. before every pre-loop
-    # mutation site enumerated in
-    # .scratch/B3_INCREMENT2_PATH_ENUM.md. Raises PlanNotCanonicalError
-    # on non-canonical input; main()'s handler translates that to
-    # exit 3.
-    _enforce_canonical_inputs(master_path, current_plan_path, bugs_path)
+    # parse_description, --retry's clear_failed_markers, and the interrupt
+    # check. Raises PlanNotCanonicalError on non-canonical input; main()'s
+    # handler translates that to exit 3.
+    _enforce_canonical_inputs(plan_path, bugs_path)
 
-    description = parse_description(master_path)
+    description = parse_description(plan_path)
 
     # --retry: flip every [!] back to [ ] in the active files so
     # previously-failed tasks are eligible again this run. Runs before
-    # ensure_current_plan so a freshly extracted CURRENT_PLAN.md is
-    # already clean, and before the interrupt check so skipped tasks
-    # from a prior Ctrl-C also get reset.
+    # the interrupt check so skipped tasks from a prior Ctrl-C also get reset.
     if retry:
-        cleared_current = clear_failed_markers(current_plan_path)
+        cleared_plan = clear_failed_markers(plan_path)
         cleared_bugs = clear_failed_markers(bugs_path)
-        cleared_total = cleared_current + cleared_bugs
+        cleared_total = cleared_plan + cleared_bugs
         if cleared_total:
             print(
                 formatting.system_msg(
@@ -878,13 +865,9 @@ def run_loop(
                 flush=True,
             )
 
-    # Check for interrupted state from a previous Ctrl-C. Pass the
-    # split-plan files in priority order so skip/describe actions mark
-    # the task in the file the loop actually reads from, not just the
-    # master PLAN.md.
-    _interrupt_active_paths = [
-        p for p in (bugs_path, current_plan_path, master_path) if p.exists()
-    ]
+    # Check for interrupted state from a previous Ctrl-C. Pass active files in
+    # priority order so bug tasks are marked in BUGS.md and plan tasks in PLAN.md.
+    _interrupt_active_paths = [p for p in (bugs_path, plan_path) if p.exists()]
     interrupt_action = _check_interrupted(
         project_dir,
         checklist_path,
@@ -929,8 +912,8 @@ def run_loop(
 
     _push_or_die(project_dir)
 
-    # Split-plan: ensure BUGS.md exists before anything tries to write to it
-    ensure_bugs_file(bugs_path)
+    # Ensure BUGS.md exists before anything tries to write to it.
+    _ensure_bugs_file(bugs_path)
 
     # Check for crash errors from previous runs
     if not _check_errors_json(project_dir, model=model):
@@ -987,7 +970,7 @@ def run_loop(
 
     _pl_settings = load_plan_ledger_settings(
         project_dir=project_dir,
-        plan_path=master_path,
+        plan_path=plan_path,
         cli_no_plan_ledger=no_plan_ledger,
         cli_no_auto_reauthor=no_auto_reauthor,
     )
@@ -1138,18 +1121,13 @@ def run_loop(
     if current_model:
         warn_unknown_model(cli, current_model)
 
-    # Split-plan: extract current phase from master if needed.
-    # Bug check first: even if all phases are complete, unchecked
-    # bugs must still be worked before the run is allowed to exit.
-    _phases_exhausted = False
-    if not ensure_current_plan(master_path, current_plan_path):
-        _phases_exhausted = True
-
-    # Parse bugs now so the bug-only check can gate the early exit.
+    # Parse bugs and PLAN.md now so bug-only work can gate the early exit.
     _early_bug_tasks = parse(bugs_path) if bugs_path.exists() else []
+    _early_plan_tasks = parse(plan_path) if plan_path.exists() else []
     _early_has_bugs = has_unchecked_bugs(_early_bug_tasks)
+    _early_next_phase = _next_plan_phase_name(_early_plan_tasks)
 
-    if _phases_exhausted and not _early_has_bugs:
+    if _early_next_phase is None and not _early_has_bugs:
         # All phases already complete and no bugs to work.
         total = time.monotonic() - run_start_mono
         _build_and_write_summary(
@@ -1178,7 +1156,7 @@ def run_loop(
         return None
 
     initial_bug_tasks = parse(bugs_path)
-    initial_plan_tasks = parse(current_plan_path) if current_plan_path.exists() else []
+    initial_plan_tasks = parse(plan_path) if plan_path.exists() else []
     bug_only = has_unchecked_bugs(initial_bug_tasks)
     _run_mode = "bug-only" if bug_only else "plan"
     if bug_only:
@@ -1195,9 +1173,7 @@ def run_loop(
             )
             stop_after_stage = False
 
-    active_phase_name = (
-        get_current_phase_name(current_plan_path) if current_plan_path.exists() else ""
-    )
+    active_phase_name = _next_plan_phase_name(initial_plan_tasks)
 
     # Count remaining tasks for the startup notification
     remaining_count = count_unchecked(initial_bug_tasks) + count_unchecked(initial_plan_tasks)
@@ -1209,9 +1185,8 @@ def run_loop(
     notify(start_msg)
     print(
         formatting.system_msg(
-            "Do not edit CURRENT_PLAN.md or BUGS.md while mcloop is running."
+            "Do not edit PLAN.md or BUGS.md while mcloop is running."
             " Kill mcloop first, make edits, then restart."
-            " PLAN.md (the master) is safe to edit during a run."
         ),
         flush=True,
     )
@@ -1221,9 +1196,9 @@ def run_loop(
         if reviewer_config:
             _collect_review_findings(project_dir, bugs_path, ctx)
 
-        # Parse both split-plan files
+        # Parse both active plan-bearing files.
         bug_tasks = parse(bugs_path)
-        plan_tasks = parse(current_plan_path) if current_plan_path.exists() else []
+        plan_tasks = parse(plan_path) if plan_path.exists() else []
 
         # If any task has failed, stop the entire run.
         # A failed task is fatal: do not attempt other tasks.
@@ -1257,19 +1232,27 @@ def run_loop(
             )
             return RunStatus("failure", detail=_detail)
 
-        # Find next task: bugs have priority over plan tasks
+        # Find next task: bugs have priority over plan tasks.
         task = find_next(bug_tasks)
         if task is not None:
             tasks = bug_tasks
             active_file = bugs_path
         else:
-            task = find_next(plan_tasks)
-            if task is not None:
-                tasks = plan_tasks
-                active_file = current_plan_path
+            next_plan_task = find_next(plan_tasks)
+            next_phase = next_plan_task.stage if next_plan_task is not None else None
+            phase_advanced = (
+                not bug_only and active_phase_name is not None and next_phase != active_phase_name
+            )
+            if phase_advanced:
+                task = None
+            else:
+                task = next_plan_task
+                if task is not None:
+                    tasks = plan_tasks
+                    active_file = plan_path
 
-        # Phase transition: current plan fully checked, try next phase
-        if task is None and not bug_only:
+        # Phase boundary: the first incomplete PLAN.md phase advanced or ended.
+        if task is None and not bug_only and active_phase_name is not None:
             if (
                 active_phase_name
                 and active_phase_name not in acceptance_evidence_phases
@@ -1328,15 +1311,13 @@ def run_loop(
                 terminal_failure = f"Build failed at phase boundary: {build_result.command}"
                 break
 
-            # Transition to next phase. Default behavior: advance and
-            # continue the outer loop, which re-parses CURRENT_PLAN.md
-            # at the top of the next iteration and picks up the
-            # refreshed phase tasks. ``--stop-after-stage`` overrides
-            # to break at the boundary; ``next_phase is None`` means
-            # all phases are complete and the post-loop audit/summary
-            # path runs.
+            # Default behavior: advance and continue the outer loop, which
+            # re-parses PLAN.md at the top of the next iteration and picks up
+            # the next phase's tasks. ``--stop-after-stage`` overrides to break
+            # at the boundary; ``next_phase is None`` means all phases are
+            # complete and the post-loop audit/summary path runs.
             completed_phase = active_phase_name
-            next_phase = transition_phase(master_path, current_plan_path)
+            next_phase = _next_plan_phase_name(parse(plan_path))
             completed_stage = completed_phase
             if next_phase is None:
                 break
@@ -1384,7 +1365,7 @@ def run_loop(
                 notify(f"[AUTO:{action}] failed: {args[:60]}", level="error")
                 break
             check_off(active_file, task)
-            if active_file == current_plan_path and active_phase_name:
+            if active_file == plan_path and active_phase_name:
                 acceptance_evidence_phases.add(active_phase_name)
             completed.append(f"{label}) {format_task_id(task)}{task.text}")
             ctx.add(label, task.text, "0s", response)
@@ -1413,7 +1394,7 @@ def run_loop(
                 passed = True  # No observation = user skipped
             if passed:
                 check_off(active_file, task)
-                if active_file == current_plan_path and active_phase_name:
+                if active_file == plan_path and active_phase_name:
                     acceptance_evidence_phases.add(active_phase_name)
                 completed.append(f"{label}) {format_task_id(task)}{task.text}")
                 ctx.add(label, task.text, "0s", response)
@@ -1496,7 +1477,7 @@ def run_loop(
                     if batch_handled == "success":
                         break
                 if batch_handled == "success":
-                    if active_file == current_plan_path and active_phase_name:
+                    if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)
                     continue
                 # Batch exhausted its retries. Mark the parent and every
@@ -1633,8 +1614,7 @@ def run_loop(
                             completed,
                             None,
                             "",
-                            parse(bugs_path)
-                            + (parse(current_plan_path) if current_plan_path.exists() else []),
+                            parse(bugs_path) + (parse(plan_path) if plan_path.exists() else []),
                             total,
                             project_dir,
                             notes_snapshot,
@@ -1738,7 +1718,7 @@ def run_loop(
                             time.monotonic() - task_start,
                         )
                         check_off(active_file, task)
-                        if active_file == current_plan_path and active_phase_name:
+                        if active_file == plan_path and active_phase_name:
                             acceptance_evidence_phases.add(active_phase_name)
                         completed.append(f"{label}) {format_task_id(task)}{task.text}")
                         print(
@@ -1764,7 +1744,7 @@ def run_loop(
                             time.monotonic() - task_start,
                         )
                         check_off(active_file, task)
-                        if active_file == current_plan_path and active_phase_name:
+                        if active_file == plan_path and active_phase_name:
                             acceptance_evidence_phases.add(active_phase_name)
                         completed.append(f"{label}) {format_task_id(task)}{task.text}")
                         task_entries.append(
@@ -1915,7 +1895,7 @@ def run_loop(
                     _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
                     check_off(active_file, task)
-                    if active_file == current_plan_path and active_phase_name:
+                    if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)
                     elapsed = _format_elapsed(
                         time.monotonic() - task_start,
@@ -2042,8 +2022,7 @@ def run_loop(
                 completed,
                 None,
                 "",
-                parse(bugs_path)
-                + (parse(current_plan_path) if current_plan_path.exists() else []),
+                parse(bugs_path) + (parse(plan_path) if plan_path.exists() else []),
                 total,
                 project_dir,
                 notes_snapshot,
@@ -2097,7 +2076,7 @@ def run_loop(
             completed,
             failed_task,
             failed_reason,
-            parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else []),
+            parse(bugs_path) + (parse(plan_path) if plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -2165,7 +2144,7 @@ def run_loop(
             completed,
             None,
             "",
-            parse(bugs_path) + (parse(current_plan_path) if current_plan_path.exists() else []),
+            parse(bugs_path) + (parse(plan_path) if plan_path.exists() else []),
             total,
             project_dir,
             notes_snapshot,
@@ -2191,18 +2170,15 @@ def run_loop(
     _summary_audit: str | None = None
 
     if terminal_failure is None:
-        phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
-        if stopped_early == "stage" or phase_done_more_remain:
+        if stopped_early == "stage":
             # Phase completed, full suite + build already ran in-loop.
             summary_remaining_tasks = parse(bugs_path) + (
-                parse(current_plan_path) if current_plan_path.exists() else []
+                parse(plan_path) if plan_path.exists() else []
             )
             _summary_full_suite = True  # Passed in-loop (otherwise terminal_failure would be set)
             _summary_build = True
             msg = f"{completed_stage} complete."
-            next_stg = (
-                get_current_phase_name(current_plan_path) if current_plan_path.exists() else None
-            )
+            next_stg = active_phase_name
             if next_stg:
                 msg += f" Run mcloop again to start {next_stg}."
             success_msg = msg
@@ -2210,7 +2186,7 @@ def run_loop(
             # All phases done. Full suite + build already ran at last
             # phase boundary. Run audit.
             summary_remaining_tasks = parse(bugs_path) + (
-                parse(current_plan_path) if current_plan_path.exists() else []
+                parse(plan_path) if plan_path.exists() else []
             )
             _summary_full_suite = True
             _summary_build = True
@@ -2255,18 +2231,17 @@ def run_loop(
     else:
         # Task/commit failure: show remaining tasks in summary
         summary_remaining_tasks = parse(bugs_path) + (
-            parse(current_plan_path) if current_plan_path.exists() else []
+            parse(plan_path) if plan_path.exists() else []
         )
 
     # --- Single exit point for all non-bug-only paths ---
     _checkpoint(project_dir)
     total = time.monotonic() - run_start
-    _phase_done_more_remain = bool(completed_stage) and current_plan_path.exists()
     # Use success_msg as the summary's stop_reason whenever it is
     # set. Under the phase-transition contract, success_msg may be
     # "All tasks completed!" (loop advanced through every phase and
     # exited via next_phase is None) OR "<phase> complete. Run mcloop
-    # again..." (--stop-after-stage / phase_done_more_remain). In all
+    # again..." (--stop-after-stage). In all
     # cases we want the message to appear verbatim in the summary
     # rather than letting _print_summary fall back to the "Run mcloop
     # again for the next stage" template — which is wrong when the
@@ -2399,7 +2374,7 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Reset failed-task markers ([!] back to [ ]) in"
-            " CURRENT_PLAN.md and BUGS.md before starting the loop"
+            " PLAN.md and BUGS.md before starting the loop"
         ),
     )
     parser.add_argument(

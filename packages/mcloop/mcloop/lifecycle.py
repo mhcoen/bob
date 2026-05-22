@@ -159,7 +159,7 @@ def _check_interrupted(
     """Check for interrupted.json and prompt the user.
 
     ``active_paths`` is a priority-ordered list of files that may
-    contain the interrupted task (e.g. BUGS.md, CURRENT_PLAN.md,
+    contain the interrupted task (e.g. BUGS.md, PLAN.md,
     PLAN.md). The skip/describe actions mutate the first file that
     contains the task as unchecked. When omitted, falls back to
     ``[checklist_path]`` for backward compatibility.
@@ -245,7 +245,7 @@ def _check_interrupted(
         # Mark task as failed in the first split-plan file that contains
         # it as unchecked. The master PLAN.md is only consulted as a
         # fallback; marking [!] there has no effect because run_loop
-        # reads from CURRENT_PLAN.md / BUGS.md.
+        # reads from PLAN.md / BUGS.md.
         for p in search_paths:
             if not p.exists():
                 continue

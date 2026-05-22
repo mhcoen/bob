@@ -13,14 +13,14 @@ from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 def _make_project(tmp_path, checklist_text):
     """Set up a minimal project dir with a checklist file.
 
-    Under the split-plan design, run_loop operates on CURRENT_PLAN.md
+    Under the split-plan design, run_loop operates on PLAN.md
     (the active phase); PLAN.md is the master roadmap. We pre-create
-    CURRENT_PLAN.md with the same content so tests can observe
+    PLAN.md with the same content so tests can observe
     check-offs and failure markers directly.
     """
     md = tmp_path / "PLAN.md"
     md.write_text(canonical_plan_text(checklist_text))
-    (tmp_path / "CURRENT_PLAN.md").write_text(canonical_plan_text(checklist_text))
+    (tmp_path / "PLAN.md").write_text(canonical_plan_text(checklist_text))
     (tmp_path / "logs").mkdir()
     return md
 
@@ -186,8 +186,8 @@ def test_max_retries_exhausted_stops_loop(
 
     assert not result.ok
     assert mock_run.call_count == 3
-    # Under split-plan, task marker is written to CURRENT_PLAN.md (the active file)
-    content = (md.parent / "CURRENT_PLAN.md").read_text()
+    # Under split-plan, task marker is written to PLAN.md (the active file)
+    content = (md.parent / "PLAN.md").read_text()
     assert_canonical_checkbox(content, "!", "Hopeless task")
     assert_canonical_checkbox(content, " ", "Next task")
 
@@ -313,7 +313,7 @@ def test_noop_task_checks_fail_treated_as_failure(
     mock_commit.assert_not_called()
     mock_checks.assert_not_called()
     content = md.read_text()
-    assert_canonical_checkbox(content, " ", "Already done task")
+    assert_canonical_checkbox(content, "!", "Already done task")
     assert "- [x] T-" not in content
 
     calls = _notify_calls(mock_notify)
@@ -342,7 +342,7 @@ def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
     mock_commit.assert_not_called()
     mock_checks.assert_not_called()
     content = md.read_text()
-    assert_canonical_checkbox(content, " ", "Already done task")
+    assert_canonical_checkbox(content, "!", "Already done task")
     assert "- [x] T-" not in content
 
     calls = _notify_calls(mock_notify)
@@ -454,7 +454,7 @@ def test_single_task_noop_false_positive_does_not_check_off_without_acceptance_e
     mock_checks.assert_not_called()
     mock_commit.assert_not_called()
     content = md.read_text()
-    assert_canonical_checkbox(content, " ", "Already done plan task")
+    assert_canonical_checkbox(content, "!", "Already done plan task")
     assert "- [x] T-" not in content
 
 
@@ -479,7 +479,7 @@ def test_noop_then_checks_fail_is_terminal(
     assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    content = (md.parent / "CURRENT_PLAN.md").read_text()
+    content = (md.parent / "PLAN.md").read_text()
     assert_canonical_checkbox(content, "!", "Retry task")
 
     calls = _notify_calls(mock_notify)
@@ -506,7 +506,7 @@ def test_noop_with_max_retries_one(
     assert not result.ok
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    content = (md.parent / "CURRENT_PLAN.md").read_text()
+    content = (md.parent / "PLAN.md").read_text()
     assert_canonical_checkbox(content, "!", "One-shot task")
 
     # Only "giving up" — no per-retry notifications
@@ -660,7 +660,7 @@ def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock
     # Only the final "all done" notification
     calls = _notify_calls(mock_notify)
     assert len(calls) == 1
-    assert calls[0] == ("All tasks completed!", "info")
+    assert calls[0] == ("All phases already complete", "info")
 
 
 # --- _checkpoint unit tests ---
