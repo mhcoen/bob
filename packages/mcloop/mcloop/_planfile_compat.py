@@ -14,6 +14,7 @@ from pathlib import Path
 from bob_tools.planfile import (
     ConcurrentUpdateError,
     Plan,
+    PlanSyntaxError,
     TaskStatus,
     clear_failed,
     complete_task,
@@ -26,6 +27,12 @@ from bob_tools.planfile import (
 from bob_tools.planfile import Task as PlanTask
 
 from mcloop.checklist import Task
+
+# Alias so callers that historically caught
+# ``mcloop.checklist.PlanCorruptionError`` keep working. The behavior
+# (parser rejection of structurally corrupt plans) is preserved by
+# planfile's PlanSyntaxError — only the exception identity changes.
+PlanCorruptionError = PlanSyntaxError
 
 CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 _STAGE_NUM_RE = re.compile(r"\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
