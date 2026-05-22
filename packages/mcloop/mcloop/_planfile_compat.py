@@ -7,13 +7,11 @@ the current ``mcloop.checklist`` contract visible in one place.
 
 from __future__ import annotations
 
-import dataclasses
 import re
 from collections.abc import Callable
 from pathlib import Path
 
 from bob_tools.planfile import (
-    BugsSection,
     ConcurrentUpdateError,
     Plan,
     TaskStatus,
@@ -22,6 +20,7 @@ from bob_tools.planfile import (
     fail_task,
     load,
     parse_plan,
+    purge_done_bug_tasks,
     update,
 )
 from bob_tools.planfile import Task as PlanTask
@@ -433,16 +432,6 @@ def clear_failed_markers(path: str | Path) -> int:
     return count
 
 
-def _drop_done_bug_tasks(plan: Plan) -> Plan:
-    if plan.bugs is None:
-        return plan
-    open_tasks = tuple(task for task in plan.bugs.tasks if task.status is not TaskStatus.DONE)
-    return dataclasses.replace(
-        plan,
-        bugs=BugsSection(tasks=open_tasks, line_number=plan.bugs.line_number),
-    )
-
-
 def purge_completed_bugs(path: str | Path) -> None:
     """Delete DONE bug entries using planfile atomic update (§D3).
 
@@ -451,4 +440,4 @@ def purge_completed_bugs(path: str | Path) -> None:
     Standalone BUGS.md remains a loose bug queue, not a canonical PLAN.md, so
     id-less bug entries must not be rejected by PLAN.md canonical validation.
     """
-    _update_with_retry(Path(path), _drop_done_bug_tasks, validation="unchecked")
+    update(Path(path), purge_done_bug_tasks, validation="unchecked")
