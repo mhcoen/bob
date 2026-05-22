@@ -3945,7 +3945,9 @@ def test_run_loop_user_task_skips_claude(tmp_path):
     assert "Fix the bug" in call_args[0][0]
 
     # The [USER] task should be checked off
-    tasks = __import__("mcloop.checklist", fromlist=["parse"]).parse(plan)
+    from mcloop._planfile_compat import parse
+
+    tasks = parse(plan)
     assert tasks[0].checked
 
 
