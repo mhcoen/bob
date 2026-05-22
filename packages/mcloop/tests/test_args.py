@@ -4296,7 +4296,7 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
     assert "Fix the bug" in call_args[0][0]
 
     # The AUTO task should be checked off
-    from mcloop.checklist import parse as parse_checklist
+    from mcloop._planfile_compat import parse as parse_checklist
 
     tasks = parse_checklist(plan)
     assert tasks[0].checked
@@ -4329,7 +4329,7 @@ def test_run_loop_auto_task_nonzero_fails_and_leaves_task_unchecked(tmp_path):
     mock_run_task.assert_not_called()
     mock_checks.assert_not_called()
 
-    from mcloop.checklist import parse as parse_checklist
+    from mcloop._planfile_compat import parse as parse_checklist
 
     tasks = parse_checklist(plan)
     assert not tasks[0].checked
@@ -5970,7 +5970,7 @@ def test_run_loop_bug_only_skips_audit_and_stages(tmp_path):
 
     mock_audit.assert_not_called()
     # The feature task should NOT have been worked on
-    from mcloop.checklist import parse as cl_parse
+    from mcloop._planfile_compat import parse as cl_parse
 
     tasks = cl_parse(plan)
     feature = [t for t in tasks if t.stage != "Bugs"][0]
@@ -6245,7 +6245,7 @@ def test_run_loop_no_bugs_runs_normally(tmp_path):
 
 def test_all_tasks_flat():
     """Flattens a flat list of tasks."""
-    from mcloop.checklist import Task
+    from mcloop._planfile_compat import Task
 
     tasks = [
         Task("A", False, False, 0, 0),
@@ -6257,7 +6257,7 @@ def test_all_tasks_flat():
 
 def test_all_tasks_nested():
     """Flattens nested tasks depth-first."""
-    from mcloop.checklist import Task
+    from mcloop._planfile_compat import Task
 
     child1 = Task("C1", False, False, 2, 2)
     child2 = Task("C2", False, False, 3, 2)
@@ -6581,7 +6581,7 @@ def test_write_eliminated_json_corrupt_starts_fresh(tmp_path):
 
 def _make_batch_args(tmp_path, children=None):
     """Helper to create common _run_batch arguments."""
-    from mcloop.checklist import Task
+    from mcloop._planfile_compat import Task
     from mcloop.ratelimit import RateLimitState
 
     project_dir = tmp_path / "proj"
@@ -9899,7 +9899,7 @@ def test_stop_after_one_exits_after_single_task(tmp_path):
     assert result.ok
     assert result.detail == "Stopped after one task as requested"
     # Only the first task should have been checked off (in active PLAN.md)
-    from mcloop.checklist import parse as cl_parse
+    from mcloop._planfile_compat import parse as cl_parse
 
     tasks = cl_parse(tmp_path / "PLAN.md")
     assert tasks[0].checked
@@ -9950,7 +9950,7 @@ def test_stop_after_one_bypasses_batch(tmp_path):
     # run_task should have been called once (single child)
     mock_run.assert_called_once()
     # Only Child A should be checked off (in active PLAN.md)
-    from mcloop.checklist import parse as cl_parse
+    from mcloop._planfile_compat import parse as cl_parse
 
     tasks = cl_parse(tmp_path / "PLAN.md")
     parent = tasks[0]
@@ -9996,7 +9996,7 @@ def test_stop_after_one_works_in_bug_only_mode(tmp_path):
     assert result.ok
     assert result.detail == "Stopped after one task as requested"
     # Only first bug fixed (bugs live in the standalone BUGS.md)
-    from mcloop.checklist import parse as cl_parse
+    from mcloop._planfile_compat import parse as cl_parse
 
     bugs = cl_parse(tmp_path / "BUGS.md")
     bug_items = [t for t in bugs if t.stage == "Bugs"]

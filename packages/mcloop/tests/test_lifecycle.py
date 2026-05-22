@@ -27,7 +27,7 @@ from mcloop.lifecycle import (
 
 
 def _task(text, children=None):
-    from mcloop.checklist import Task
+    from mcloop._planfile_compat import Task
 
     return Task(
         text=text,

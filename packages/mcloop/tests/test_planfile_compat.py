@@ -263,6 +263,32 @@ def test_classifier_text_fallback_matches_checklist_on_hand_built_tasks() -> Non
     assert shim.is_batch_task(batch_task)
 
 
+def test_parse_description_extracts_prose_before_first_checkbox_matches_checklist(
+    tmp_path: Path,
+) -> None:
+    """The shim must reproduce checklist.parse_description exactly so the
+    runtime's project-blurb extraction (mcloop/main.py:850) survives D1's
+    deletion of mcloop/checklist.py.
+    """
+    md = (
+        "# My Project\n\n"
+        "Build a REST API for managing widgets.\n"
+        "Use Flask and SQLite.\n\n"
+        "- [ ] Set up project structure\n"
+        "- [ ] Add widget CRUD endpoints\n"
+    )
+    path = tmp_path / "tasks.md"
+    path.write_text(md)
+    assert shim.parse_description(path) == checklist.parse_description(path)
+
+
+def test_parse_description_empty_when_first_line_is_checkbox(tmp_path: Path) -> None:
+    path = tmp_path / "tasks.md"
+    path.write_text("- [ ] First task\n- [ ] Second task\n")
+    assert shim.parse_description(path) == ""
+    assert shim.parse_description(path) == checklist.parse_description(path)
+
+
 def test_purge_completed_bugs_removes_done_bug_entries_atomically(tmp_path: Path) -> None:
     path = tmp_path / "BUGS.md"
     path.write_text("## Bugs\n\n- [x] Fixed crash\n- [ ] Open crash\n")

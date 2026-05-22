@@ -28,7 +28,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from mcloop.checklist import Task
+from mcloop._planfile_compat import Task
 from mcloop.formatting import format_task_id
 
 # ---------------------------------------------------------------------------

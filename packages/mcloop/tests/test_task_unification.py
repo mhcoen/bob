@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from mcloop import _planfile_compat as shim
-from mcloop.checklist import Task
+from mcloop._planfile_compat import Task
 
 
 def test_legacy_shape_task_gets_structured_fields_with_safe_defaults() -> None:

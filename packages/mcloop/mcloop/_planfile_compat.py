@@ -102,6 +102,23 @@ def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
     return _tasks_from_plan(parse_plan(p.read_text(), source_path=p))
 
 
+def parse_description(path: str | Path) -> str:
+    """Extract prose before the first checkbox as a project description.
+
+    Matches ``mcloop.checklist.parse_description`` exactly: read all
+    lines, stop at the first ``- [ ]/[x]/[X]/[!]`` checkbox line, join
+    the preceding lines and strip. Used by mcloop runtime to surface a
+    project blurb to the LLM session prompt.
+    """
+    lines = Path(path).read_text().splitlines()
+    desc_lines: list[str] = []
+    for line in lines:
+        if CHECKBOX_RE.match(line):
+            break
+        desc_lines.append(line)
+    return "\n".join(desc_lines).strip()
+
+
 def count_unchecked(tasks: list[Task]) -> int:
     return sum(
         (0 if task.checked or task.failed else 1) + count_unchecked(task.children)
