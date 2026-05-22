@@ -8,21 +8,48 @@ from pathlib import Path
 
 from mcloop import formatting
 from mcloop._planfile_compat import (
+    Task,
     count_unchecked,
     find_next,
-)
-from mcloop.checklist import (
-    Task,
-    current_stage,
-    get_stages,
 )
 from mcloop.checks import detect_run
 from mcloop.formatting import format_elapsed as _format_elapsed
 
 
+def _get_stages(tasks: list[Task]) -> list[str]:
+    seen: set[str] = set()
+    stages: list[str] = []
+
+    def _collect(task_list: list[Task]) -> None:
+        for task in task_list:
+            if task.stage and task.stage != "Bugs" and task.stage not in seen:
+                seen.add(task.stage)
+                stages.append(task.stage)
+            _collect(task.children)
+
+    _collect(tasks)
+    return stages
+
+
+def _stage_complete(tasks: list[Task], stage: str) -> bool:
+    for task in tasks:
+        if task.stage == stage and not task.checked:
+            return False
+        if not _stage_complete(task.children, stage):
+            return False
+    return True
+
+
+def _current_stage(tasks: list[Task]) -> str | None:
+    for stage in _get_stages(tasks):
+        if not _stage_complete(tasks, stage):
+            return stage
+    return None
+
+
 def _dry_run(tasks) -> None:
     """Print the task tree without executing anything."""
-    stages = get_stages(tasks)
+    stages = _get_stages(tasks)
     last_stage = ""
 
     def _print(task_list, depth=0):
@@ -37,7 +64,7 @@ def _dry_run(tasks) -> None:
                 _print(t.children, depth + 1)
 
     _print(tasks)
-    active = current_stage(tasks)
+    active = _current_stage(tasks)
     next_task = find_next(tasks)
     if next_task:
         label = f" (in {active})" if active else ""
