@@ -1011,3 +1011,29 @@ Audit artifacts:
 
 The audit converges. Consolidation planning starts from this verified
 base.
+
+### 6.1 MC-2 follow-up (2026-05-22)
+
+Stream B's MC-2 finding surfaced that the actual landed stage order
+differed from this document's §5 forced ordering: B2 (`7bf086e`)
+landed before B1+B3, and B1 was further split from B3 — PLAN.md
+canonicalization landed at `10046288` ("B1 re-fold") roughly 3.1
+days before the B1+B3 import-swap cutover at `49b6739`. §5 had
+specified B1 and B3 as indivisible.
+
+This created a 3-day window between `10046288` and `49b6739` in
+which mcloop ran pre-cutover code (still using `mcloop.checklist`)
+against a post-canonicalization PLAN.md. Per §2(d), the linchpin
+defect — `checklist.is_user_task` returns False on T-NNNNNN-prefixed
+text — was structurally present throughout that window. No USER
+tasks were scheduled during the window (confirmed by Michael:
+no user requests were issued in the interval), so the latent
+defect never manifested. Audit Stream A's pre-B1 → post-D1
+equivalence check (item 1) remains valid because both endpoints
+are correct; only the intermediate state had the gap, and the
+intermediate state was not exercised.
+
+Finding closed as documentation: §5's specified ordering would have
+prevented even the latent risk; the actual ordering opened the
+window; the window did not execute. The audit verdict
+(CONVERGE WITH MECHANICAL CORRECTIONS) stands.
