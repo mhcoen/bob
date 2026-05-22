@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -10,8 +11,13 @@ from pathlib import Path
 from typing import Any
 
 from mcloop import formatting
-from mcloop.checklist import CHECKBOX_RE
 from mcloop.checks import get_check_commands
+
+# MAINTAIN.md uses the same checkbox grammar as PLAN.md but is parsed
+# entirely locally — no planfile/Plan structure, just an ordered list
+# of invariants. Keeping the regex local avoids coupling maintain to
+# the planfile shim.
+CHECKBOX_RE = re.compile(r"^(\s*)- \[([ xX!])\] (.+)$")
 from mcloop.git_ops import (
     _checkpoint,
     _commit,
