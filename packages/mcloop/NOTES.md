@@ -86,3 +86,5 @@ cba4873: Changed how user-reported failures are recorded in BUGS.md: instead of 
 5e6fe77: Added automatic archiving of completed bug reports. When bug entries are marked as done, they are now moved to a separate "BUGS-resolved.md" file instead of being deleted. This preserves historical resolution records while keeping the active bug queue concise. The resolved file is created only when there are done bugs to archive.
 
 e8df686: Added safety check to refuse git init inside a uv workspace package subdirectory, preventing nested repository creation that would break cross-package operations. Updated README to clarify phase boundary behavior and exit notifications for stop flags.
+
+9b9ae06: Added a new WorkspaceContext class to manage workspace and scope adaptation during migration. It enforces a compatibility-mode invariant for standalone repo runs, ensuring workspace_root, scope_root, and execution_cwd are identical when scope is "root". Includes comprehensive tests for the dataclass behavior and invariant validation.
