@@ -84,3 +84,5 @@ e60af39: Improved error handling for screencapture failures and bug verification
 cba4873: Changed how user-reported failures are recorded in BUGS.md: instead of flattening and truncating the observation, it now preserves the full multi-line observation verbatim inside a fenced code block. Updated tests to verify the new behavior and removed unnecessary line breaks in test data strings.
 
 5e6fe77: Added automatic archiving of completed bug reports. When bug entries are marked as done, they are now moved to a separate "BUGS-resolved.md" file instead of being deleted. This preserves historical resolution records while keeping the active bug queue concise. The resolved file is created only when there are done bugs to archive.
+
+e8df686: Added safety check to refuse git init inside a uv workspace package subdirectory, preventing nested repository creation that would break cross-package operations. Updated README to clarify phase boundary behavior and exit notifications for stop flags.
