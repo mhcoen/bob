@@ -401,14 +401,55 @@ def _worktree_status(project_dir: Path) -> str:
     Unlike :func:`_changed_files`, this includes *all* uncommitted changes —
     logs/, .mcloop/, PLAN.md, etc.  Used for before/after comparisons to
     detect whether a checker or autofix step introduced new changes.
+
+    ``git status --porcelain`` emits paths relative to the repo root and
+    does not accept ``--relative``. On a consolidated workspace layout
+    where *project_dir* is a package subdirectory (e.g. cwd =
+    ``workspace/packages/mcloop`` and the repo root is ``workspace``),
+    the porcelain prefix is stripped so paths remain package-relative,
+    matching the ``--relative`` behavior of the sibling diff helpers.
     """
+    prefix_result = _git(
+        ["git", "rev-parse", "--show-prefix"],
+        cwd=project_dir,
+        label="worktree status prefix",
+        silent=True,
+    )
+    prefix = ""
+    if prefix_result.returncode == 0:
+        prefix = prefix_result.stdout.rstrip("\n")
     result = _git(
         ["git", "status", "--porcelain"],
         cwd=project_dir,
         label="worktree status",
         silent=True,
     )
-    return result.stdout.strip() if result.returncode == 0 else ""
+    if result.returncode != 0:
+        return ""
+    # Trim only trailing whitespace; the porcelain format is column-
+    # positional (status chars at 0-1, space at 2, path at 3+), so
+    # stripping leading whitespace would shift the first line and break
+    # the prefix-based path slicing below.
+    output = result.stdout.rstrip()
+    if not prefix or not output:
+        return output
+    stripped_lines: list[str] = []
+    for line in output.splitlines():
+        # A status line is "XY <path>"; the path begins at index 3.
+        if len(line) > 3 and line[3:].startswith(prefix):
+            rest = line[3 + len(prefix) :]
+            # Rename entries are "ORIG -> NEW"; strip the prefix from
+            # the destination path too so both sides stay relative.
+            arrow = " -> "
+            if arrow in rest:
+                before, after = rest.split(arrow, 1)
+                if after.startswith(prefix):
+                    after = after[len(prefix) :]
+                rest = before + arrow + after
+            stripped_lines.append(line[:3] + rest)
+        else:
+            stripped_lines.append(line)
+    return "\n".join(stripped_lines)
 
 
 def _changed_files(project_dir: Path) -> list[str]:
@@ -435,9 +476,12 @@ def _changed_files(project_dir: Path) -> list[str]:
 
     # Tracked files: modified, staged, or deleted relative to HEAD.
     # --name-only emits one clean path per line (handles renames by
-    # emitting only the new name).
+    # emitting only the new name). --relative scopes output to the
+    # subprocess cwd and emits paths relative to it, so on a
+    # consolidated workspace layout (cwd = packages/mcloop, repo root
+    # = workspace), paths stay package-relative.
     diff_result = _git(
-        ["git", "diff", "--name-only", "HEAD"],
+        ["git", "diff", "--name-only", "--relative", "HEAD"],
         cwd=project_dir,
         label="changed files (diff)",
         silent=True,
@@ -446,7 +490,7 @@ def _changed_files(project_dir: Path) -> list[str]:
     # (fresh repo with no commits).
     if diff_result.returncode != 0:
         diff_result = _git(
-            ["git", "diff", "--name-only"],
+            ["git", "diff", "--name-only", "--relative"],
             cwd=project_dir,
             label="changed files (diff, no HEAD)",
             silent=True,
@@ -470,9 +514,22 @@ def _changed_files(project_dir: Path) -> list[str]:
 
 
 def _committed_files(project_dir: Path, commit_sha: str) -> list[str]:
-    """Return list of files changed in *commit_sha*, excluding logs and metadata."""
+    """Return list of files changed in *commit_sha*, excluding logs and metadata.
+
+    ``--relative`` keeps paths relative to the subprocess cwd, so on a
+    consolidated workspace layout the returned filenames are package-relative
+    rather than rooted at the workspace.
+    """
     result = _git(
-        ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
+        [
+            "git",
+            "diff-tree",
+            "--no-commit-id",
+            "--name-only",
+            "--relative",
+            "-r",
+            commit_sha,
+        ],
         cwd=project_dir,
         label="committed files",
         silent=True,
@@ -488,9 +545,14 @@ def _committed_files(project_dir: Path, commit_sha: str) -> list[str]:
 
 
 def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
-    """Return the diff introduced by *commit_sha*."""
+    """Return the diff introduced by *commit_sha*.
+
+    ``--relative`` keeps the diff header paths relative to the subprocess
+    cwd, so package-scoped callers see package-relative paths even when
+    the repo root is a workspace ancestor.
+    """
     result = _git(
-        ["git", "diff", f"{commit_sha}~1", commit_sha],
+        ["git", "diff", "--relative", f"{commit_sha}~1", commit_sha],
         cwd=project_dir,
         label="committed diff",
         silent=True,
@@ -508,7 +570,7 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     modified: list[str] = []
     untracked: list[str] = []
     diff_result = _git(
-        ["git", "diff", "--name-only"],
+        ["git", "diff", "--name-only", "--relative"],
         cwd=project_dir,
         label="snapshot modified",
     )
