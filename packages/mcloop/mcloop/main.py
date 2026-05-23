@@ -1400,13 +1400,14 @@ def run_loop(
             else:
                 # User reported failure: file a bug from the observation
                 # and leave the USER task unchecked for re-verification
-                # after the bug is fixed.
-                flat_obs = response.replace("\n", " | ")
-                short_obs = flat_obs[:200]
-                if len(flat_obs) > 200:
-                    short_obs += "..."
-                bug_desc = f"Fix issue reported during task {label}: {short_obs}"
-                _insert_bugs_section(bugs_path, [f"- [ ] {bug_desc}"])
+                # after the bug is fixed. The observation is preserved
+                # verbatim as a fenced block under the checkbox header so
+                # multi-line context is not flattened or truncated.
+                bug_header = (
+                    f"- [ ] Fix issue reported during task {label} (see observation below):"
+                )
+                fenced_obs = "```\n" + response.rstrip("\n") + "\n```"
+                _insert_bugs_section(bugs_path, [bug_header + "\n" + fenced_obs])
                 print(
                     formatting.system_msg("Bug filed from user observation -> BUGS.md"),
                     flush=True,

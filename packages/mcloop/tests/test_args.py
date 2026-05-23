@@ -3852,9 +3852,7 @@ def test_investigation_failed_all_completed(tmp_path, capsys):
     wt_path = tmp_path / "worktree"
     wt_path.mkdir()
 
-    (wt_path / "PLAN.md").write_text(
-        "# Plan\n\n## Stage 1: Tasks\n\n- [x] Done task\n"
-    )
+    (wt_path / "PLAN.md").write_text("# Plan\n\n## Stage 1: Tasks\n\n- [x] Done task\n")
 
     _investigation_failed(wt_path, "investigate-bug")
 
@@ -3949,6 +3947,81 @@ def test_run_loop_user_task_skips_claude(tmp_path):
 
     tasks = parse(plan)
     assert tasks[0].checked
+
+
+def test_run_loop_user_task_failure_files_full_observation_to_bugs(tmp_path):
+    """Failed [USER] observations file to BUGS.md untruncated and unflattened."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        canonical_plan_text(
+            "- [ ] [USER] Launch the app and verify the window appears\n- [ ] Fix the bug\n"
+        )
+    )
+    (tmp_path / ".git").mkdir()
+
+    # Multi-line observation longer than 200 chars to prove no truncation.
+    obs_lines = [
+        "Window opens but title bar shows wrong text.",
+        "Reproduction steps:",
+        "  1. Launch app",
+        "  2. Click 'Open' in the toolbar",
+        "  3. Title now reads 'Untitled' instead of the filename",
+        "Additional context: this regressed sometime after the toolbar refactor "
+        "landed; on the previous build the title reflected the document path.",
+        "Expected: window title reflects the opened file path.",
+    ]
+    multi_line_obs = "\n".join(obs_lines)
+    assert len(multi_line_obs) > 200
+    assert "\n" in multi_line_obs
+
+    # _handle_user_task reads observation lines until EOF, then prompts y/N.
+    inputs = iter([*obs_lines, "", "n"])
+
+    with (
+        patch("builtins.input", side_effect=inputs),
+        patch("mcloop.main.run_task") as mock_run_task,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._commit"),
+    ):
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.output = ""
+        mock_result.exit_code = 0
+        mock_run_task.return_value = mock_result
+
+        mock_check_result = MagicMock()
+        mock_check_result.passed = True
+        mock_checks.return_value = mock_check_result
+
+        run_loop(plan, no_audit=True)
+
+    bugs_path = tmp_path / "BUGS.md"
+    assert bugs_path.exists(), "BUGS.md should be created when user task fails"
+    bugs_text = bugs_path.read_text()
+
+    # The observation must appear verbatim with newlines preserved.
+    assert multi_line_obs in bugs_text, (
+        "Full multi-line observation should be preserved in BUGS.md; got:\n" + bugs_text
+    )
+    # Old flattening behavior must be gone.
+    assert " | " not in bugs_text
+    # Old truncation marker must be gone.
+    assert "..." not in bugs_text
+    # The observation should be inside a fenced block.
+    assert "```" in bugs_text
+    # The [USER] task should remain unchecked (left for re-verification).
+    from mcloop._planfile_compat import parse
+
+    tasks = parse(plan)
+    assert not tasks[0].checked
 
 
 # --- _check_user_input ---

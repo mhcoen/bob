@@ -98,11 +98,7 @@ def test_print_notes_update_missing_file(tmp_path, capsys):
 def test_dry_run_flat(tmp_path, capsys):
     from mcloop._planfile_compat import parse
 
-    md = (
-        "# Demo\n\n"
-        "## Stage 1: Core\n\n"
-        "- [ ] Task one\n- [x] Task two\n- [ ] Task three\n"
-    )
+    md = "# Demo\n\n## Stage 1: Core\n\n- [ ] Task one\n- [x] Task two\n- [ ] Task three\n"
     f = tmp_path / "tasks.md"
     f.write_text(md)
     tasks = parse(f)
@@ -117,11 +113,7 @@ def test_dry_run_flat(tmp_path, capsys):
 def test_dry_run_all_complete(tmp_path, capsys):
     from mcloop._planfile_compat import parse
 
-    md = (
-        "# Demo\n\n"
-        "## Stage 1: Core\n\n"
-        "- [x] Task one\n- [x] Task two\n"
-    )
+    md = "# Demo\n\n## Stage 1: Core\n\n- [x] Task one\n- [x] Task two\n"
     f = tmp_path / "tasks.md"
     f.write_text(md)
     tasks = parse(f)

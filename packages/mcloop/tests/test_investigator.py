@@ -108,8 +108,7 @@ def test_generated_plan_parses_through_planfile_compat_shim(tmp_path):
     tasks = shim_parse(plan_path)
 
     assert len(tasks) == 8, (
-        f"expected 8 stage-1 tasks, got {len(tasks)}: "
-        f"{[t.text[:40] for t in tasks]}"
+        f"expected 8 stage-1 tasks, got {len(tasks)}: {[t.text[:40] for t in tasks]}"
     )
     assert all(t.stage == "Stage 1: Steps" for t in tasks)
     assert all(not t.checked for t in tasks)
