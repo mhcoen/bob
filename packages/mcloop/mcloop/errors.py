@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json as _json
 import subprocess
 from pathlib import Path
@@ -12,25 +11,6 @@ from mcloop.prompts import parse_diagnostic_output
 from mcloop.runner import run_diagnostic
 
 _MAX_FIX_ATTEMPTS = 3
-
-
-def _error_signature_hash(entry: dict) -> str:
-    """Compute a stable hash for an error entry's signature.
-
-    Uses exception_type + source_file + line as the signature.
-    Falls back to stack_trace or description if location fields
-    are missing.
-    """
-    exc_type = entry.get("exception_type", "")
-    source = entry.get("source_file", "")
-    line_num = str(entry.get("line", ""))
-    if exc_type and (source or line_num):
-        sig = f"{exc_type}:{source}:{line_num}"
-    elif entry.get("stack_trace"):
-        sig = entry["stack_trace"]
-    else:
-        sig = f"{exc_type}:{entry.get('description', '')}"
-    return hashlib.sha256(sig.encode()).hexdigest()[:16]
 
 
 def _check_errors_json(
@@ -46,9 +26,9 @@ def _check_errors_json(
     fixing bugs). Returns False if all errors are unresolvable or
     input was interrupted (EOFError/KeyboardInterrupt).
 
-    Tracks fix_attempts per error via a hash of the error signature.
-    If any error has been diagnosed ``_MAX_FIX_ATTEMPTS`` or more times,
-    it is marked unresolvable and skipped. If ALL errors are unresolvable,
+    Each error entry carries its own ``fix_attempts`` counter. If any
+    error has been diagnosed ``_MAX_FIX_ATTEMPTS`` or more times, it is
+    treated as unresolvable and skipped. If ALL errors are unresolvable,
     prints context and returns False.
     """
     errors_path = project_dir / ".mcloop" / "errors.json"

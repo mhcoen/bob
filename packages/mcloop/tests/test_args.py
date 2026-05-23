@@ -13,7 +13,6 @@ from mcloop.audit import AuditResult, _run_audit_fix_cycle, _run_single_audit_ro
 from mcloop.errors import (
     _MAX_FIX_ATTEMPTS,
     _check_errors_json,
-    _error_signature_hash,
     _insert_bugs_section,
 )
 from mcloop.git_ops import _snapshot_worktree, _worktree_status
@@ -5705,42 +5704,6 @@ def test_check_errors_signal_entry_display(tmp_path, capsys):
     assert "Signal" in out
     assert "Received signal 6" in out
     assert "main.swift:55" in out
-
-
-# --- _error_signature_hash ---
-
-
-def test_error_signature_hash_basic():
-    """Hash uses exception_type + source_file + line."""
-    entry = {"exception_type": "ValueError", "source_file": "app.py", "line": 42}
-    h = _error_signature_hash(entry)
-    assert isinstance(h, str)
-    assert len(h) == 16
-    # Same input produces same hash
-    assert _error_signature_hash(entry) == h
-
-
-def test_error_signature_hash_different_errors():
-    """Different errors produce different hashes."""
-    e1 = {"exception_type": "ValueError", "source_file": "app.py", "line": 42}
-    e2 = {"exception_type": "TypeError", "source_file": "app.py", "line": 42}
-    e3 = {"exception_type": "ValueError", "source_file": "lib.py", "line": 42}
-    assert _error_signature_hash(e1) != _error_signature_hash(e2)
-    assert _error_signature_hash(e1) != _error_signature_hash(e3)
-
-
-def test_error_signature_hash_fallback_stack_trace():
-    """Falls back to stack_trace when location fields missing."""
-    entry = {"stack_trace": "Traceback...\n  File app.py\nValueError"}
-    h = _error_signature_hash(entry)
-    assert len(h) == 16
-
-
-def test_error_signature_hash_fallback_description():
-    """Falls back to exception_type + description as last resort."""
-    entry = {"exception_type": "RuntimeError", "description": "oops"}
-    h = _error_signature_hash(entry)
-    assert len(h) == 16
 
 
 # --- _check_errors_json loop limit ---
