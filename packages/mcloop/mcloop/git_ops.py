@@ -83,23 +83,33 @@ def _ensure_git(project_dir: Path) -> None:
     """Initialize a git repo if one does not exist.
 
     Mcloop depends on git for checkpointing, commits, and
-    change detection. If the project directory has no ``.git``
-    this creates one with an initial commit so all subsequent
-    git operations work.
+    change detection. If neither ``project_dir`` nor any of
+    its ancestors has a ``.git`` entry, this creates one with
+    an initial commit so all subsequent git operations work.
 
-    Before doing anything, ``_refuse_nested_init`` blocks the
-    case where mcloop is running inside a uv workspace package
-    subdirectory; creating a nested ``.git`` there would shadow
-    the workspace repository.
+    Walks upward from ``project_dir`` looking for ``.git``
+    (file or directory -- ``.git`` is a file inside worktrees).
+    If any strict ancestor has ``.git``, mcloop is running
+    inside a parent repository (e.g. a consolidated workspace
+    checkout) and uses that repo without creating a nested one.
+
+    ``_refuse_nested_init`` remains as a defense-in-depth
+    backstop: if execution reaches the initialization path
+    inside a uv workspace package subdirectory (no ``.git``
+    anywhere up the tree), the guard refuses to create a
+    nested ``.git`` that would shadow the workspace repo.
 
     Prints a prominent warning and notifies via Telegram if
     git init fails, since mcloop cannot function safely
     without version control.
     """
-    _refuse_nested_init(project_dir)
     git_dir = project_dir / ".git"
     if git_dir.exists():
         return
+    for ancestor in Path(project_dir).resolve().parents:
+        if (ancestor / ".git").exists():
+            return
+    _refuse_nested_init(project_dir)
     print(
         formatting.error_msg("No git repository found. Initializing one now..."),
         flush=True,

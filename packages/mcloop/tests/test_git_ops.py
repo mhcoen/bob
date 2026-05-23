@@ -52,19 +52,65 @@ def test_ensure_git_existing_git_returns_early(tmp_path):
     mock_run.assert_not_called()
 
 
+def test_ensure_git_consolidated_layout_returns_early(tmp_path):
+    """workspace/.git exists, project_dir is workspace/packages/mcloop.
+
+    No nested ``.git`` is created and ``git init`` is not invoked --
+    the ancestor walk in ``_ensure_git`` finds ``workspace/.git`` and
+    returns early.
+    """
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / ".git").mkdir()
+    project = workspace / "packages" / "mcloop"
+    project.mkdir(parents=True)
+
+    with (
+        patch("mcloop.git_ops.subprocess.run") as mock_run,
+        patch("mcloop.git_ops.notify"),
+    ):
+        _ensure_git(project)
+
+    mock_run.assert_not_called()
+    assert not (project / ".git").exists()
+
+
+def test_ensure_git_ancestor_dotgit_file_returns_early(tmp_path):
+    """``.git`` as a FILE at an ancestor (worktree layout) also returns early."""
+    workspace = tmp_path / "wt_workspace"
+    workspace.mkdir()
+    (workspace / ".git").write_text("gitdir: /some/other/path\n")
+    project = workspace / "packages" / "mcloop"
+    project.mkdir(parents=True)
+
+    with (
+        patch("mcloop.git_ops.subprocess.run") as mock_run,
+        patch("mcloop.git_ops.notify"),
+    ):
+        _ensure_git(project)
+
+    mock_run.assert_not_called()
+    assert not (project / ".git").exists()
+
+
 def test_ensure_git_blocks_inside_uv_workspace_package(tmp_path):
-    """bob-style workspace layout -> SystemExit(1), no nested .git created.
+    """Defense-in-depth: uv workspace ancestor with no ``.git`` anywhere
+    up the tree -> SystemExit(1), no nested ``.git`` created.
+
+    With the ancestor-walk in ``_ensure_git``, a consolidated workspace
+    with a real ``.git`` returns early before reaching the guard. This
+    test deliberately omits ``workspace/.git`` so the guard path is
+    exercised; it is the scenario the guard is designed to backstop
+    (a workspace whose git repo has not yet been initialized).
 
     Layout::
 
-        tmp/bob/                       <- workspace root
+        tmp/bob/                       <- workspace root (no .git)
             pyproject.toml             <- declares [tool.uv.workspace]
-            .git/                      <- workspace repository
             packages/orchestra/        <- project_dir (no .git)
     """
     workspace = tmp_path / "bob"
     workspace.mkdir()
-    (workspace / ".git").mkdir()
     (workspace / "pyproject.toml").write_text(
         "[project]\nname = 'bob'\n\n[tool.uv.workspace]\nmembers = ['packages/*']\n"
     )
