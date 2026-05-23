@@ -161,6 +161,21 @@ def _ensure_git(project_dir: Path) -> None:
         sys.exit(1)
 
 
+def _has_git_repo(project_dir: Path) -> bool:
+    """Return True if ``project_dir`` is inside a git repo.
+
+    Recognizes the consolidated workspace layout where ``.git`` lives at
+    a strict ancestor of ``project_dir`` (e.g. a uv-workspace package
+    subdirectory). Matches the discovery logic in :func:`_ensure_git`.
+    """
+    if (project_dir / ".git").exists():
+        return True
+    for ancestor in Path(project_dir).resolve().parents:
+        if (ancestor / ".git").exists():
+            return True
+    return False
+
+
 def _sanitize_commit_msg(text: str, max_len: int = 200) -> str:
     """Strip characters that break shell quoting in git commit messages."""
     cleaned = text.replace("`", "").replace("\u2014", "--").replace("\u2192", "->")
@@ -181,7 +196,7 @@ def _checkpoint(
     (except logs/ and .mcloop/) so orphaned files from
     failed runs get committed before the next task.
     """
-    if not (project_dir / ".git").exists():
+    if not _has_git_repo(project_dir):
         print(
             formatting.error_msg("Git checkpoint skipped: no .git directory"),
             flush=True,
@@ -222,7 +237,7 @@ def _push_or_die(project_dir: Path) -> None:
     of an un-pushed state. If there is no remote, this is a no-op.
     If the push fails, mcloop exits immediately.
     """
-    if not (project_dir / ".git").exists():
+    if not _has_git_repo(project_dir):
         return
     result = _git(
         ["git", "remote"],
@@ -265,7 +280,7 @@ def _stage_safe(project_dir: Path, *, label: str = "") -> None:
 
 def _commit(project_dir: Path, task_text: str, *, raw_message: bool = False) -> str:
     """Stage all changes, commit, and push. Returns the new HEAD hash."""
-    if not (project_dir / ".git").exists():
+    if not _has_git_repo(project_dir):
         print(
             formatting.error_msg("Git commit skipped: no .git directory"),
             flush=True,
@@ -594,7 +609,7 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
 
 def _get_git_hash(project_dir: Path) -> str:
     """Return current HEAD commit hash."""
-    if not (project_dir / ".git").exists():
+    if not _has_git_repo(project_dir):
         return ""
     result = _git(
         ["git", "rev-parse", "HEAD"],
