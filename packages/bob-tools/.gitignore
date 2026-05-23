@@ -7,7 +7,7 @@ logs/
 *.lock
 
 # mcloop runtime state
-.mcloop/active-pid
+.mcloop/
 
 # claude CLI auto-installer staging (never commit)
 claude/
