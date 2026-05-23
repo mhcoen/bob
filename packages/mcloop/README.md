@@ -2,12 +2,23 @@
 
 McLoop lets you run AI coding agents for hours at a time without babysitting them. You write a task list in `PLAN.md`. McLoop works through it continuously, launching a fresh CLI session per task. Each session writes unit tests for the code it generates, runs your tests and linter, and fixes any failures before moving on. Only clean, passing code is committed. After all tasks complete, McLoop audits the entire codebase for bugs, verifies each finding, and fixes confirmed defects. You get notified of progress throughout. When it needs authorization to run a command, it sends you a Telegram message with Approve and Deny buttons so you can respond from your phone. McLoop supports Claude Code and OpenAI Codex as backends.
 
+## What makes McLoop different
+
+Every other agent runner treats the task file as a hint to the model. McLoop treats it as a specification.
+
+`PLAN.md` is a formal document with a defined grammar, canonical structure, and machine-enforced consistency rules. Tasks carry stable identifiers (`T-NNNNNN`) that persist across edits and are how the system refers to them in commits, logs, and the audit trail. Phases have IDs and provenance. Mutations go through a deterministic API that refuses invalid states — you cannot accidentally check off a task whose children are incomplete, introduce a duplicate ID, or break a phase boundary, because the operations reject those moves. The file round-trips through its canonical form on every save, so diffs between runs are semantically meaningful rather than noise from whitespace or reordering.
+
+What this buys you: the agent's stochastic output is forced through a deterministic gate before any state changes. The agent can be confused, can produce edits that look right but aren't, can hallucinate completion — none of that matters at the plan layer, because the plan layer doesn't trust the agent's word for anything. It trusts the diff, the tests, the commit, and the canonical structure of the file. Stochastic agent on top, deterministic control plane underneath.
+
+You still author `PLAN.md` as a markdown checklist with prose descriptions. The hand-written surface is unchanged. What's changed is what happens once McLoop touches the file: on first run it canonicalizes the document (assigns task IDs, normalizes structure), and from that point forward the file is a structured artifact that the system reasons about precisely. Most users don't need to think about that day-to-day. The point is that it's true, and it's why McLoop works on real projects of real size, where naive agent runners produce confident garbage.
+
 ### Features at a glance
 
-- **Continuous task execution** with a fresh context per session and rolling summaries between tasks
+- **Continuous task execution** against a formally structured plan, with a fresh context per session and rolling summaries between tasks
+- **Deterministic mutation** of plan state — task completion, phase advancement, bug filing, and retry resets all go through validated API calls that refuse invalid moves
 - **Automatic bug audit** after all tasks complete: find, verify, and fix confirmed defects in two rounds
 - **Telegram notifications** for progress, failures, and remote command approval from your phone
-- **Interrupt and resume** with state capture: Ctrl-C saves what was happening so the next run can pick up where you left off
+- **Interrupt and resume** from structured state: Ctrl-C captures what was happening and the next run picks up exactly where you left off, identified by task ID
 - **Investigation mode** for runtime bugs that survive the build/test cycle
 - **Builds self-healing apps** with automatic crash instrumentation (Swift and Python)
 - **Task batching** with `[BATCH]` to combine well-specified subtasks into a single session
@@ -29,25 +40,35 @@ Because McLoop runs CLI sessions continuously, it will use
 your plan allowance faster than if you used the agent interactively. See
 [Best practices](#best-practices) for how to get the most from it.
 
-Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task, and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. This also keeps token usage low, since each session pays only for the current task's context rather than accumulating conversation history from every previous task. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
+Each session starts with a clean context, with no memory of previous sessions. The CLI sees your project description, the current task (identified by its task ID), and whatever is in your codebase: source files, markdown docs, tests, configuration. That's it. This also keeps token usage low, since each session pays only for the current task's context rather than accumulating conversation history from every previous task. Good results depend on the code and docs in your repo being the source of truth, not on conversation history.
 
-McLoop creates a few files in the project that serve as shared memory
+## Where McLoop fits
+
+McLoop is part of the [bob ecosystem](https://github.com/mhcoen/bob), a deterministic control plane for stochastic agents. The other components:
+
+- **[bob-tools](https://github.com/mhcoen/bob/tree/main/packages/bob-tools)** provides the `planfile` library that defines `PLAN.md`'s formal grammar, the canonical-form validator, the mutation API, and the everything log that captures every action the system takes. McLoop is built on this foundation.
+- **[duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo)** generates plans from product specifications and re-authors plans against accumulated execution evidence. McLoop calls into duplo when re-author thresholds fire.
+- **[orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra)** is the workflow runtime McLoop uses for multi-model coding patterns (draft-then-adjudicate, council, anonymous reviewers).
+
+McLoop runs against your project. The rest of the bob stack runs under it. You can install McLoop standalone (`pip install mcloop`) or get the full ecosystem by cloning the bob workspace and running `uv sync`.
+
+## State files
+
+McLoop maintains files in your project that serve as shared memory
 between sessions:
 
+- **PLAN.md**: The authoritative build document. A formal structured plan after McLoop canonicalizes it (assigns task IDs, normalizes structure), but it remains hand-editable — you can add tasks, reorder them, write `[RULEDOUT]` lines, change descriptions. McLoop re-validates on every load and refuses to operate on a malformed file.
+- **BUGS.md**: A standalone bug backlog with checkbox items, populated by
+  the reviewer (when enabled) and by the crash-handler diagnostic flow.
+  When BUGS.md has unchecked items, McLoop enters bug-only mode and works
+  those tasks before any feature work in PLAN.md. Same formal-document
+  semantics as PLAN.md.
 - **CLAUDE.md**: A manifest describing every source file. Sessions read
   it first to understand the codebase without searching, and update it
   when they add or change files.
 - **NOTES.md**: Observations, edge cases, and design decisions that
   sessions notice during tasks. Accumulates across sessions for you to
   review.
-- **CURRENT_PLAN.md**: The active phase of PLAN.md, extracted automatically
-  at startup or at phase transitions. Each session works against this file
-  rather than the full master roadmap, which keeps per-session token usage
-  low. Do not edit it while mcloop is running.
-- **BUGS.md**: A standalone bug backlog with checkbox items, populated by
-  the reviewer (when enabled) and by the crash-handler diagnostic flow.
-  When BUGS.md has unchecked items, mcloop enters bug-only mode and works
-  those tasks before any feature work in CURRENT_PLAN.md.
 - **`.mcloop/audit-report.md`**: The structured prose output written by the
   audit cycle for human review. Distinct from BUGS.md (the audit does not
   use the checklist mechanism).
@@ -56,8 +77,8 @@ between sessions:
   IDEAS.md during runs — it is purely human-owned state. Use
   `mcloop idea "some text"` to append a timestamped entry from the
   command line, or edit the file directly. When an idea matures, pipe
-  it into [Duplo](https://github.com/mhcoen/duplo) to generate an
-  implementable PLAN.md
+  it into [duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo)
+  to generate an implementable PLAN.md
   (`echo "idea text" | duplo init --from-description -`,
   then `duplo`), or move it into PLAN.md as a task by hand.
 - **MAINTAIN.md**: A list of invariants — statements of desired state
@@ -105,19 +126,19 @@ reading it, whether or not they use Claude Code.
 
 McLoop is designed for the long haul. Start with a few tasks, let it run
 while you do something else, add more tasks when you think of them, re-run.
-It's a persistent task queue backed by a text file, not a one-shot build
-script. All state lives in the repository: PLAN.md, source code,
-documentation, configuration, and git history. If McLoop is interrupted,
-killed, or hits a rate limit, just run `mcloop` again. It finds the next
+It's a persistent task queue backed by a formally structured document,
+not a one-shot build script. All state lives in the repository: PLAN.md,
+source code, documentation, configuration, and git history. If McLoop is
+interrupted, killed, or hits a rate limit, just run `mcloop` again. It
+reads its own structured state, finds the next unchecked task by ID, and
+picks up exactly where it left off. No session files, no databases,
+nothing to reset.
 
-**Do not edit CURRENT_PLAN.md or BUGS.md while mcloop is running.** McLoop
+**Do not edit PLAN.md or BUGS.md while mcloop is running.** McLoop
 reads, modifies, and commits these files during execution (checking off
 tasks, auto-checking parents, safety checkpoints). Edits made while mcloop
-is running will be silently overwritten. Kill mcloop first, make your
-edits, then restart. PLAN.md (the master roadmap) is safe to edit during
-a run; mcloop only writes to it at phase transitions.
-unchecked task and picks up exactly where it left off. No session files, no
-databases, nothing to reset.
+is running can be silently overwritten by an in-progress mutation. Kill
+mcloop first, make your edits, then restart.
 
 ## Design first, then execute
 
@@ -148,14 +169,14 @@ to create one:
   AI-generated plan and reshape it. You decide the decomposition, the
   ordering, the constraints. The AI coding tool is purely an executor
   of your design decisions.
-- **Automated extraction with [Duplo](https://github.com/mhcoen/duplo).**
-  Point Duplo at a product URL and it scrapes the site, downloading
+- **Automated extraction with [duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo).**
+  Point duplo at a product URL and it scrapes the site, downloading
   text, images, and demo videos. It extracts frames from videos at
   scene-change points, analyzes screenshots for visual design details
   (colors, fonts, layout), pulls features from documentation, and
   generates a phased PLAN.md for McLoop to execute. This lets you
   reproduce existing software, SaaS products, or websites by letting
-  Duplo do the design extraction and plan generation automatically.
+  duplo do the design extraction and plan generation automatically.
 - **Hybrid.** Start with AI-generated plans, edit them, add your own
   tasks, remove what you don't want, reorder priorities. The plan is a
   living text file you own completely.
@@ -177,23 +198,15 @@ clearly enough for a person to follow, McLoop can execute it.
 pip install mcloop
 ```
 
-## Test setup
-
-McLoop's tests import `orchestra`, `bob_tools`, and `duplo`
-(`auto_reauthor` lazily imports `duplo.reauthor`). All three are
-sibling repos, not on PyPI; install them editable into McLoop's
-venv before running pytest:
+For the full bob ecosystem (McLoop plus duplo, orchestra, and bob-tools as a single workspace), clone the bob repo and use `uv`:
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e /Users/mhcoen/proj/orchestra
-.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
-.venv/bin/pip install -e /Users/mhcoen/proj/duplo
-.venv/bin/pip install -e '.[dev]'
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
 ```
 
-After this, `pytest -q` from the repo root works without any
-`PYTHONPATH=` prefix.
+This installs every workspace package in editable mode with internal cross-package dependencies resolved locally. `mcloop`, `duplo`, and the other CLIs land on `PATH`.
 
 ## Quickstart
 
@@ -322,6 +335,12 @@ produce no file changes, and fail as a no-op. If specific test
 coverage matters, include it in the implementation task (e.g.
 "Implement X with unit tests covering Y and Z").
 
+### Task identifiers
+
+The first time McLoop processes a PLAN.md, it assigns each task a stable identifier of the form `T-NNNNNN`. The identifier persists across edits — you can reorder, rephrase, or recategorize tasks and the ID stays the same. Commits reference tasks by ID. Every entry in McLoop's audit log tags back to the task ID that produced it. The ID is the durable name for a unit of work.
+
+You don't write the IDs yourself. McLoop assigns them on the first canonical save. You can see them in the file afterward; if you add new tasks by hand, the next canonicalization pass assigns IDs to those too.
+
 ### Subtasks
 
 Nest subtasks with indentation. McLoop completes children before
@@ -338,6 +357,8 @@ tasks) are executed.
 - [ ] Write login endpoint
 ```
 
+The deterministic API behind McLoop refuses to manually check off a parent whose subtasks are incomplete. Parents auto-check when (and only when) all their children check off.
+
 ### Task markers
 
 | Marker | Meaning |
@@ -347,36 +368,36 @@ tasks) are executed.
 | `- [!]` | Failed. McLoop gave up after max retries. |
 | `[USER]` | Requires human action. McLoop pauses and sends a Telegram notification. |
 | `[AUTO:<action>]` | Automated observation (process monitor, app interaction). |
+| `[BATCH]` | Combines a parent and its subtasks into a single session. |
 | `[RULEDOUT]` | Records a failed approach so it is not repeated. |
 
-You can manually edit any marker. To retry a failed task, change `[!]` back to
-`[ ]` and re-run.
+Markers must appear at the beginning of the task description, immediately after the task ID. Inline mentions in prose are not interpreted as markers; the grammar is strictly leading-position. You can manually edit the checkbox state. To retry a failed task, change `[!]` back to `[ ]` and re-run, or use `mcloop --retry` to reset all failed tasks at once.
 
 ## How McLoop works
 
 ```
 1. Safety commit all tracked modified files (skipped if clean)
-   Extract the next unchecked phase from PLAN.md into CURRENT_PLAN.md
-   if not already present.
-while unchecked items remain in CURRENT_PLAN.md or BUGS.md:
-    2. Find next unchecked item (BUGS.md first, then CURRENT_PLAN.md)
+while unchecked items remain in PLAN.md or BUGS.md:
+    2. Find next unchecked item (BUGS.md first, then PLAN.md)
     3. Launch a fresh CLI session with a clean context.
        The agent receives: project description + current task + your codebase.
        On retries, the previous error output is included so Claude can fix it.
     4. Verify the session produced meaningful file changes
     5. Run targeted checks (lint + tests for changed files only)
-    6. If checks pass  -> commit, push, check the box, notify, continue
+    6. If checks pass  -> commit, push, check the box (via the deterministic
+                          mutation API), notify, continue
     7. If checks fail  -> retry with error context (up to --max-retries)
     8. If retries exhausted -> mark [!], notify, stop
     9. If rate-limited -> pause, wait for reset, resume
        If session-limited -> poll every 10 minutes, resume when limit resets
-   10. At the phase boundary (CURRENT_PLAN.md fully checked):
+   10. At a phase boundary (current phase fully checked):
        run full test suite, run build, mark phase complete in PLAN.md,
-       extract the next phase into CURRENT_PLAN.md (or unlink it if no
-       phases remain), and break. Re-run mcloop to start the next phase.
+       and break. Re-run mcloop to start the next phase.
 11. When all phases are complete, run bug audit/fix cycle (unless --no-audit)
 12. Print summary with elapsed time and whitelist suggestions
 ```
+
+Checking off a task is not a string replacement. It's a mutation through the deterministic planfile API: the task's state field is updated, the canonical form is rewritten, the audit log records the transition with the task ID, and the file is committed. The agent never writes to PLAN.md directly; only McLoop's mutation path does, and that path enforces every invariant the grammar requires.
 
 Tasks within a single run share a rolling session context. After each task
 completes, McLoop summarizes what changed, including which files were
@@ -402,8 +423,8 @@ task, since tasks may have implicit dependencies.
 When you press Ctrl-C (or Ctrl-Z, or send SIGTERM), McLoop
 immediately acknowledges the interrupt, saves its state to
 `.mcloop/interrupted.json`, kills the child process group, and
-exits. The state includes which task was running, how long it had
-been active, the last 20 lines of output, and what phase McLoop
+exits. The state includes the task ID of what was running, how long it
+had been active, the last 20 lines of output, and what phase McLoop
 was in (task session, checks, audit, or user prompt).
 
 The next time you run `mcloop`, it detects the saved state and
@@ -411,7 +432,7 @@ prompts you:
 
 ```
   Previous run was interrupted during task phase (2026-03-13T11:02:44)
-  Task 14.2: Add unit conversion parser
+  T-000142: Add unit conversion parser
   Running for 3m 12s
   Last output:
     Running pytest... 8 tests failed in test_parser.py
@@ -419,12 +440,14 @@ prompts you:
   (r)etry / (d)escribe what went wrong / (s)kip / (q)uit
 ```
 
-**Retry** proceeds normally, picking up the unchecked task.
+**Retry** proceeds normally, picking up the unchecked task by ID.
 **Describe** lets you type what went wrong. McLoop records your
 description as a `[RULEDOUT]` entry in PLAN.md under the task and
 appends it to `.mcloop/eliminated.json`, so the next attempt knows
 not to repeat the same approach. **Skip** marks the task as failed
 (`[!]`) and moves on. **Quit** exits.
+
+Resumption uses structured task state, not text matching. The interrupted task's ID identifies it precisely; McLoop looks up that task in the canonical PLAN.md and resumes against it regardless of any edits you made to the surrounding tasks while McLoop was stopped.
 
 The prompt adapts to the interrupted phase. Audit interruptions
 offer resume/skip/quit. User prompt interruptions resume
@@ -459,8 +482,8 @@ mcloop --stop-after-one     # Run exactly one task, then exit
 ```
 
 **`--retry`** resets all failed-task markers (`[!]` back to `[ ]`) in
-CURRENT_PLAN.md and BUGS.md before starting, so previously failed tasks
-are retried. Use after fixing the underlying cause of a failure.
+PLAN.md and BUGS.md before starting, so previously failed tasks
+are retried. Use after fixing the underlying cause of a failure. The reset goes through the planfile API and is recorded in the audit log.
 
 **`--stop-after-stage`** runs the current stage to completion (including
 the full-suite check and build at the stage boundary), then exits with
@@ -725,7 +748,7 @@ stages and give feedback before continuing.
 - [ ] Add playback
 ```
 
-Without stage headers, McLoop runs all tasks in one go as before.
+Stages are part of the formal grammar. Each stage has a stable phase identifier that McLoop's audit log records against every action taken during that stage. Without stage headers, McLoop runs all tasks in one go as before.
 
 McLoop also verifies that each task produces meaningful file changes beyond
 PLAN.md and logs. If a session completes without writing any code, the task
@@ -953,7 +976,7 @@ Fix these bugs before continuing? [Y/n]
 
 If you say yes, McLoop runs a diagnostic session per error, inserts
 fix tasks into BUGS.md, and works only those tasks. It does not touch
-feature tasks in CURRENT_PLAN.md, start the next phase, or run the
+feature tasks in PLAN.md, start the next phase, or run the
 audit cycle. It fixes, verifies (by relaunching the app to confirm the
 error no longer occurs), and exits. You run `mcloop` again for feature
 work once bugs are clear.
@@ -977,7 +1000,7 @@ Bug tasks (from BUGS.md) are treated differently from feature tasks:
   a zero-diff session means the fix wasn't applied.
 
 BUGS.md has absolute priority. If it contains unchecked items,
-`find_next` returns those before any feature tasks in CURRENT_PLAN.md.
+`find_next` returns those before any feature tasks in PLAN.md.
 
 ### How it works
 
@@ -1043,7 +1066,7 @@ medium-confidence findings are added to the rolling session context so
 the next task is aware of them. If a single commit produces three or
 more high-confidence error-severity findings, McLoop escalates by
 appending a fix task to BUGS.md, which has absolute priority over
-feature tasks in CURRENT_PLAN.md.
+feature tasks in PLAN.md.
 
 The reviewer sends both the diff and the enclosing functions from
 each changed file (imports plus only the functions containing
@@ -1121,13 +1144,13 @@ hours are cleaned up automatically.
 ## Multi-model coding patterns via Orchestra
 
 McLoop can route the per-edit invocation through
-[Orchestra](https://github.com/mhcoen/orchestra), a deterministic
-runner that coordinates multiple models per coding decision. Instead
-of one model writing each fix, two or three text models advise on
-the approach before a single edit-capable model performs the actual
-file changes. The outer loop (retry, rate-limit detection, success
-classification, Telegram approval, audit cycle) is unchanged. Only
-the inner edit invocation goes through Orchestra.
+[Orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra),
+a deterministic runner that coordinates multiple models per coding
+decision. Instead of one model writing each fix, two or three text
+models advise on the approach before a single edit-capable model
+performs the actual file changes. The outer loop (retry, rate-limit
+detection, success classification, Telegram approval, audit cycle) is
+unchanged. Only the inner edit invocation goes through Orchestra.
 
 Three patterns ship out of the box:
 
@@ -1208,11 +1231,11 @@ returns on the next run until you re-acknowledge.
 
 Prerequisites:
 
-- Install orchestra in the same Python environment as mcloop:
-  `pip install -e /path/to/orchestra` (or whatever installer is
-  appropriate). McLoop imports orchestra directly via
-  `from orchestra import run_workflow`. There is no subprocess
-  boundary; orchestra has to be importable.
+- Install orchestra in the same Python environment as mcloop. If you
+  cloned the bob workspace, `uv sync` already handles this; otherwise
+  `pip install -e /path/to/orchestra`. McLoop imports orchestra
+  directly via `from orchestra import run_workflow`. There is no
+  subprocess boundary; orchestra has to be importable.
 - A populated `~/.orchestra/config.json` with role bindings and the
   workflow pattern you want.
 
@@ -1395,7 +1418,9 @@ existing plan, then:
    that have drifted from what the code actually does.
 
 Before writing, McLoop shows a diff of the proposed changes and asks for
-confirmation. No existing items are deleted.
+confirmation. No existing items are deleted, and all mutations go through the
+deterministic planfile API so the file's canonical structure and task IDs are
+preserved.
 
 Use `mcloop sync --dry-run` to see the proposed changes without modifying
 PLAN.md.
@@ -1436,7 +1461,7 @@ Requires macOS Screen Recording permission (granted once).
 During each task session, the agent may notice edge cases, design decisions,
 assumptions, potential issues, or anything worth revisiting later. When it
 does, it appends a note to `NOTES.md` with the current date and a reference
-to the task being worked on (e.g., "[3.2] Parse Markdown to HTML").
+to the task being worked on (e.g., "[T-000034] Parse Markdown to HTML").
 
 McLoop does not act on NOTES.md. It is purely for you to review between runs.
 Notes accumulate chronologically across sessions, giving you a running log of
@@ -1474,12 +1499,12 @@ The summary schema:
 | `terminal_status` | string | `"success"`, `"failure"`, `"interrupted"`, or `"stopped"` |
 | `failure_detail` | string | Why the run failed (empty on success) |
 | `stop_reason` | string | `"stop_after_stage"` or `"stop_after_one"` when `terminal_status == "stopped"`; empty otherwise |
-| `stuck` | array | Task texts that could not be completed |
+| `stuck` | array | Task IDs and texts that could not be completed |
 | `commit_hashes` | array | Git hashes for all commits produced |
 
-Each task entry contains: `label`, `text`, `outcome` (`"success"` or
-`"failed"`), `elapsed` (seconds), `model`, `attempts`, and
-`commit_hash` (empty if the task did not produce a commit).
+Each task entry contains: `task_id`, `label`, `text`, `outcome`
+(`"success"` or `"failed"`), `elapsed` (seconds), `model`, `attempts`,
+and `commit_hash` (empty if the task did not produce a commit).
 
 Each check entry contains: `command`, `passed`, and `elapsed`
 (seconds).
@@ -1702,10 +1727,7 @@ matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 ## Requirements
 
 - Python >= 3.11
-- `git` on PATH (McLoop requires git for checkpointing and recovery.
-  If no `.git` directory exists, McLoop initializes one automatically
-  before the first task. All git errors are reported to the terminal
-  and via Telegram.)
+- `git` on PATH (McLoop requires git for checkpointing and recovery)
 - `claude` CLI on PATH (or `codex` CLI when using `--cli codex`)
 - `gh` CLI on PATH (for automatic GitHub repo creation)
 - macOS for iMessage notifications (Telegram works anywhere)
@@ -1731,7 +1753,7 @@ writes during a run:
   are written with mode 0600.
 
 McLoop's own run summaries at `.mcloop/runs/latest.json` and the
-dated archives record task labels, outcomes, elapsed times, model
+dated archives record task IDs, labels, outcomes, elapsed times, model
 names, commit hashes, and changed-file lists. They do not contain
 prompt or model-output content.
 
@@ -1741,12 +1763,26 @@ what gets persisted and where.
 
 ## Development
 
+If you're working on McLoop itself, the bob workspace is the natural
+development environment:
+
+```bash
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
+```
+
+McLoop, its sibling packages, and all dev dependencies are then
+installed editable in a single `.venv/` at the workspace root.
+
+If you need to develop against McLoop standalone:
+
 ```bash
 git clone https://github.com/mhcoen/mcloop.git
 cd mcloop
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
 ```
 
 ```bash
