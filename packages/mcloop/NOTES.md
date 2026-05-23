@@ -67,6 +67,23 @@ files (e.g. duplicated between BUGS.md and CURRENT_PLAN.md), only the
 first unchecked hit is marked. The bug-priority ordering matches how
 find_next picks tasks in run_loop, so behavior stays consistent.
 
+### [12.2] [T-000380] resolve_workspace_context edge case: consolidated root scope with cwd outside workspace_root (2026-05-22)
+Rule (5) says ``execution_cwd = cwd`` in the consolidated case. When
+``plan_path`` is explicit and points at the workspace root itself
+(scope resolves to ``"root"``) but ``cwd`` is somewhere else (e.g.
+``/tmp``), the resolver constructs a ``WorkspaceContext`` with
+``workspace_root == scope_root != execution_cwd``, which trips the
+compatibility-mode invariant in ``__post_init__`` and surfaces as an
+``AssertionError`` rather than a ``WorkspaceResolutionError``. Rule (3)
+does not catch this because the ambiguity check only fires when
+``cwd`` is inside a *different* workspace, not when it is in no
+workspace at all. T-000381's listed cases do not exercise this path
+(its consolidated root case uses ``cwd == workspace_root``), so the
+behavior is accepted as-is for now. If a future stage needs a
+friendlier error here, the resolver should either coerce
+``execution_cwd`` to ``workspace_root`` when ``scope == "root"`` in
+the consolidated case or raise a structured error pre-construction.
+
 ## Hypotheses
 
 ## Eliminated
