@@ -2,14 +2,6 @@
 
 from __future__ import annotations
 
-from mcloop.investigator import (
-    DEBUGGING_INSTRUCTION,
-    DEBUGGING_PLAYBOOK,
-    PROBES_INSTRUCTION,
-    TESTING_INSTRUCTION,
-    WEB_SEARCH_INSTRUCTION,
-)
-
 
 def build_sync_prompt() -> str:
     """Build the prompt for the sync Claude session."""
@@ -280,51 +272,6 @@ def build_post_fix_review_prompt(
         "Do not modify any files. This is a read-only "
         "review."
     )
-
-
-def build_investigation_plan_description(
-    bug_context: str,
-    failure_history: str = "",
-) -> str:
-    """Build the description for an investigation PLAN.md.
-
-    This description is prepended to generated investigation plans
-    so that every investigation session enforces structured note-taking.
-    """
-    parts = [
-        "You are investigating a bug. Follow the debugging playbook:\n" + DEBUGGING_PLAYBOOK,
-    ]
-    parts.append(PROBES_INSTRUCTION)
-    parts.append(WEB_SEARCH_INSTRUCTION)
-    parts.append(TESTING_INSTRUCTION)
-    parts.append(DEBUGGING_INSTRUCTION)
-    if bug_context:
-        parts.append(f"Bug context:\n{bug_context}")
-    if failure_history:
-        parts.append(f"## What has been tried\n\n{failure_history}")
-    else:
-        parts.append("## What has been tried\n\nNothing yet.")
-    parts.append(
-        "NOTES.md must use three sections:"
-        " ## Observations (confirmed facts from"
-        " runtime, docs, logs, or experiments),"
-        " ## Hypotheses (candidate explanations not"
-        " yet confirmed), and ## Eliminated (things"
-        " ruled out, with the experiment that ruled"
-        " them out). Place each note under the"
-        " appropriate section."
-    )
-    parts.append(
-        "Before proposing any approach, read the"
-        " ## Eliminated section of NOTES.md. Do not"
-        " repeat an eliminated approach unless you"
-        " have new evidence that contradicts the"
-        " original elimination. If you find yourself"
-        " about to try something already eliminated,"
-        " stop and explain what new evidence would"
-        " justify revisiting it."
-    )
-    return "\n\n".join(parts)
 
 
 def build_diagnostic_prompt(

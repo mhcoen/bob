@@ -15,7 +15,6 @@ from mcloop.prompts import (
     build_audit_prompt,
     build_bug_fix_prompt,
     build_bug_verify_prompt,
-    build_investigation_plan_description,
     build_post_fix_review_prompt,
     build_sync_prompt,
     parse_bugs_md,
@@ -798,98 +797,6 @@ def test_run_task_accessibility_instruction_present_for_non_ui_task(tmp_path):
 
     prompt = captured_prompt["prompt"]
     assert "accessibilityIdentifier" in prompt
-
-
-def test_investigation_plan_description_has_three_sections():
-    """Investigation plan description requires Observations, Hypotheses, Eliminated."""
-    desc = build_investigation_plan_description("App crashes on launch")
-    assert "## Observations" in desc
-    assert "## Hypotheses" in desc
-    assert "## Eliminated" in desc
-    assert "confirmed facts" in desc
-    assert "candidate explanations" in desc
-    assert "ruled out" in desc
-
-
-def test_investigation_plan_description_includes_bug_context():
-    """Investigation plan description includes the bug context."""
-    desc = build_investigation_plan_description("Segfault in parser")
-    assert "Segfault in parser" in desc
-
-
-def test_investigation_plan_description_includes_playbook():
-    """Investigation plan description includes the debugging playbook."""
-    desc = build_investigation_plan_description("")
-    assert "Reproduce the problem" in desc
-    assert "Isolate subsystems" in desc
-    assert "patch production code" in desc
-
-
-def test_investigation_plan_description_checks_eliminated_before_proposing():
-    """Investigation plan description requires checking Eliminated before proposing."""
-    desc = build_investigation_plan_description("App crashes")
-    assert "read the ## Eliminated section" in desc
-    assert "Do not repeat an eliminated approach" in desc
-    assert "new evidence" in desc
-    assert "contradicts" in desc
-
-
-def test_investigation_plan_description_empty_context():
-    """Investigation plan description works with empty bug context."""
-    desc = build_investigation_plan_description("")
-    assert "Bug context" not in desc
-    assert "## Observations" in desc
-
-
-def test_investigation_plan_description_includes_probes_instruction():
-    """Investigation plan description instructs creating standalone probes."""
-    desc = build_investigation_plan_description("")
-    assert "standalone probe script" in desc
-    assert "exercises just that subsystem" in desc
-
-
-def test_investigation_plan_description_includes_web_search():
-    """Investigation plan description instructs searching the web."""
-    desc = build_investigation_plan_description("")
-    assert "search the web" in desc
-    assert "working examples" in desc
-
-
-def test_investigation_plan_description_includes_failure_history():
-    """Investigation plan description populates What has been tried."""
-    desc = build_investigation_plan_description(
-        "App crashes", failure_history="Tried null check, still crashes"
-    )
-    assert "## What has been tried" in desc
-    assert "Tried null check, still crashes" in desc
-
-
-def test_investigation_plan_description_nothing_tried_when_no_history():
-    """Investigation plan description says nothing tried when empty."""
-    desc = build_investigation_plan_description("")
-    assert "## What has been tried" in desc
-    assert "Nothing yet." in desc
-
-
-def test_investigation_plan_description_includes_testing_instruction():
-    """Investigation plan description instructs real-code testing."""
-    desc = build_investigation_plan_description("")
-    assert "exercise real code" in desc
-    assert "Do not mock the core logic" in desc
-    assert "deadlocks" in desc
-    assert "timeout" in desc
-    assert "permission" in desc.lower()
-    assert "gracefully" in desc
-
-
-def test_investigation_plan_description_includes_debugging_instruction():
-    """Investigation plan description instructs decompose-first debugging."""
-    desc = build_investigation_plan_description("")
-    assert "decompose the problem before patching" in desc
-    assert "working examples" in desc
-    assert "question your assumptions" in desc
-    assert "Three failed attempts" in desc
-    assert "strategy is wrong" in desc
 
 
 def test_run_task_passes_allowed_tools(tmp_path):
