@@ -107,3 +107,5 @@ e8df686: Added safety check to refuse git init inside a uv workspace package sub
 9b9ae06: Added a new WorkspaceContext class to manage workspace and scope adaptation during migration. It enforces a compatibility-mode invariant for standalone repo runs, ensuring workspace_root, scope_root, and execution_cwd are identical when scope is "root". Includes comprehensive tests for the dataclass behavior and invariant validation.
 
 b751f8f: Fixed an edge case in workspace resolution where specifying a plan at the workspace root while the current directory is outside the workspace would cause an assertion error. Added structured error handling with WorkspaceResolutionError to provide clearer diagnostics instead of crashing.
+
+5e92f65: Updated git initialization to walk up the directory tree and use an existing parent repository if found, preventing nested git repos in consolidated workspaces. The existing guard against uv workspace packages remains as a defense-in-depth measure. Added corresponding tests for consolidated layouts and worktree scenarios.
