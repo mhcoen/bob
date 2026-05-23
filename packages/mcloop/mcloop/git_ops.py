@@ -46,6 +46,39 @@ def _git(
     return result
 
 
+def _refuse_nested_init(project_dir: Path) -> None:
+    """Refuse to run ``git init`` inside a uv-workspace package.
+
+    Walks strict ancestors of *project_dir* looking for a
+    ``pyproject.toml`` whose contents declare ``[tool.uv.workspace]``.
+    The presence of that table at an ancestor proves *project_dir* is
+    inside a bob-style consolidated workspace (the workspace pyproject
+    declaration is the only authoritative signal -- ancestor names like
+    ``packages`` are not used). Creating a nested ``.git`` in a package
+    subdirectory would shadow the workspace repository and break
+    cross-package git operations, so the guard prints a structured
+    error naming the workspace root, notifies, and exits 1.
+    """
+    for ancestor in Path(project_dir).resolve().parents:
+        pyproject = ancestor / "pyproject.toml"
+        if not pyproject.is_file():
+            continue
+        try:
+            content = pyproject.read_text()
+        except OSError:
+            continue
+        if "[tool.uv.workspace]" in content:
+            msg = (
+                "CRITICAL: refusing to run `git init` because mcloop is "
+                f"running inside the uv workspace rooted at {ancestor}. "
+                f"Re-run mcloop from the workspace root ({ancestor}) "
+                "instead of a package subdirectory."
+            )
+            print(formatting.error_msg(msg), flush=True)
+            notify(msg, level="error")
+            sys.exit(1)
+
+
 def _ensure_git(project_dir: Path) -> None:
     """Initialize a git repo if one does not exist.
 
@@ -54,10 +87,16 @@ def _ensure_git(project_dir: Path) -> None:
     this creates one with an initial commit so all subsequent
     git operations work.
 
+    Before doing anything, ``_refuse_nested_init`` blocks the
+    case where mcloop is running inside a uv workspace package
+    subdirectory; creating a nested ``.git`` there would shadow
+    the workspace repository.
+
     Prints a prominent warning and notifies via Telegram if
     git init fails, since mcloop cannot function safely
     without version control.
     """
+    _refuse_nested_init(project_dir)
     git_dir = project_dir / ".git"
     if git_dir.exists():
         return

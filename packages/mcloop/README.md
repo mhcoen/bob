@@ -391,8 +391,10 @@ while unchecked items remain in PLAN.md or BUGS.md:
     9. If rate-limited -> pause, wait for reset, resume
        If session-limited -> poll every 10 minutes, resume when limit resets
    10. At a phase boundary (current phase fully checked):
-       run full test suite, run build, mark phase complete in PLAN.md,
-       and break. Re-run mcloop to start the next phase.
+       run full test suite, run build. If both pass, advance to the
+       next phase and continue. If `--stop-after-stage` is set, break
+       here instead. If the completed phase was the last phase, break
+       and fall through to the audit cycle.
 11. When all phases are complete, run bug audit/fix cycle (unless --no-audit)
 12. Print summary with elapsed time and whitelist suggestions
 ```
@@ -491,9 +493,8 @@ success instead of advancing to the next stage. Use this for overnight
 runs where you want to review the output of each stage before continuing,
 or to validate that a stage passes before committing to the next one.
 This flag is ignored in bug-only mode (no stages); mcloop prints a
-warning and proceeds normally. Note: every phase boundary now ends the
-run regardless of this flag (see [How McLoop works](#how-mcloop-works));
-the flag's only effect is the exit notification text.
+warning and proceeds normally. Without this flag, mcloop's default at
+a phase boundary is to advance to the next phase and continue.
 
 **`--stop-after-one`** runs exactly one checkable leaf task and exits.
 If the next task is part of a `[BATCH]` parent, the batching logic is
@@ -503,10 +504,9 @@ first task in a plan works before letting mcloop run the rest. This flag
 works in all modes including bug-only and maintain.
 
 Both flags produce a distinct exit notification. `--stop-after-one`
-emits "Stopped after one task as requested". A natural phase boundary
-(reached either by `--stop-after-stage` or by completing the last task
-of a phase normally) emits "{phase name} complete. Run mcloop again to
-start {next phase}." so you can distinguish a phase exit from a normal
+emits "Stopped after one task as requested". `--stop-after-stage`
+emits "{phase name} complete. Run mcloop again to start {next phase}."
+so you can distinguish a stage-checkpoint exit from a normal
 completion or a failure. The stop check happens at a clean boundary:
 after a successful commit and check-off, before pulling the next task.
 
