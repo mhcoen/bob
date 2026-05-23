@@ -43,13 +43,12 @@ class WorkspaceContext:
 
     def __post_init__(self) -> None:
         if self.scope == "root":
-            assert self.workspace_root == self.scope_root == self.execution_cwd, (
+            assert self.workspace_root == self.scope_root, (
                 "WorkspaceContext compatibility-mode invariant violated: "
-                "when scope == 'root', workspace_root, scope_root, and "
-                "execution_cwd must be the same directory "
+                "when scope == 'root', workspace_root and scope_root "
+                "must be the same directory "
                 f"(workspace_root={self.workspace_root!s}, "
-                f"scope_root={self.scope_root!s}, "
-                f"execution_cwd={self.execution_cwd!s})"
+                f"scope_root={self.scope_root!s})"
             )
 
 

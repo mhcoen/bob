@@ -109,3 +109,5 @@ e8df686: Added safety check to refuse git init inside a uv workspace package sub
 b751f8f: Fixed an edge case in workspace resolution where specifying a plan at the workspace root while the current directory is outside the workspace would cause an assertion error. Added structured error handling with WorkspaceResolutionError to provide clearer diagnostics instead of crashing.
 
 5e92f65: Updated git initialization to walk up the directory tree and use an existing parent repository if found, preventing nested git repos in consolidated workspaces. The existing guard against uv workspace packages remains as a defense-in-depth measure. Added corresponding tests for consolidated layouts and worktree scenarios.
+
+733d88e: Updated git helpers to support consolidated workspace layouts by ensuring all file paths are returned relative to the current working directory. Added `--relative` flags to git diff commands and adjusted `_worktree_status` to strip workspace prefixes, maintaining consistent package-relative paths across functions. Added comprehensive tests for both standalone and consolidated workspace scenarios.

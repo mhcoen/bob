@@ -73,15 +73,16 @@ def test_root_scope_invariant_violation_workspace_vs_scope_root() -> None:
         )
 
 
-def test_root_scope_invariant_violation_execution_cwd() -> None:
-    with pytest.raises(AssertionError):
-        WorkspaceContext(
-            workspace_root=Path("/repo"),
-            scope="root",
-            scope_root=Path("/repo"),
-            execution_cwd=Path("/repo/packages/orchestra"),
-            plan_path=Path("/repo/PLAN.md"),
-        )
+def test_root_scope_allows_execution_cwd_in_subdir() -> None:
+    ctx = WorkspaceContext(
+        workspace_root=Path("/repo"),
+        scope="root",
+        scope_root=Path("/repo"),
+        execution_cwd=Path("/repo/packages/orchestra"),
+        plan_path=Path("/repo/PLAN.md"),
+    )
+    assert ctx.workspace_root == ctx.scope_root == Path("/repo")
+    assert ctx.execution_cwd == Path("/repo/packages/orchestra")
 
 
 def test_non_root_scope_skips_invariant() -> None:
