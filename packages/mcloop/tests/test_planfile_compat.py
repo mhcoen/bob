@@ -50,6 +50,40 @@ def test_purge_completed_bugs_removes_done_bug_entries_atomically(tmp_path: Path
     text = path.read_text()
     assert "Fixed crash" not in text
     assert "Open crash" in text
+    resolved = tmp_path / "BUGS-resolved.md"
+    assert resolved.exists()
+    resolved_text = resolved.read_text()
+    assert "- [x] Fixed crash" in resolved_text
+    assert "Open crash" not in resolved_text
+
+
+def test_purge_completed_bugs_appends_verbatim_to_resolved_history(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [x] First fixed\n- [ ] Still open\n- [x] Second fixed\n")
+    shim.purge_completed_bugs(path)
+    resolved = tmp_path / "BUGS-resolved.md"
+    resolved_text = resolved.read_text()
+    assert resolved_text.startswith("## Resolved Bugs\n\n")
+    assert "- [x] First fixed\n" in resolved_text
+    assert "- [x] Second fixed\n" in resolved_text
+    assert "Still open" not in resolved_text
+
+    path.write_text("## Bugs\n\n- [x] Third fixed\n- [ ] Still open\n")
+    shim.purge_completed_bugs(path)
+    resolved_text_2 = resolved.read_text()
+    assert resolved_text_2.startswith(resolved_text)
+    assert "- [x] Third fixed\n" in resolved_text_2
+
+
+def test_purge_completed_bugs_no_done_entries_does_not_create_resolved_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [ ] Still open\n")
+    shim.purge_completed_bugs(path)
+    assert not (tmp_path / "BUGS-resolved.md").exists()
 
 
 def test_mutation_requires_migrated_task_ids(tmp_path: Path) -> None:

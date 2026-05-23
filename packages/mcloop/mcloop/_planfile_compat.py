@@ -472,12 +472,103 @@ def clear_failed_markers(path: str | Path) -> int:
     return count
 
 
-def purge_completed_bugs(path: str | Path) -> None:
-    """Delete DONE bug entries using planfile atomic update (§D3).
+RESOLVED_BUGS_FILENAME = "BUGS-resolved.md"
+_RESOLVED_HEADER = "## Resolved Bugs\n\n"
 
-    Delete-vs-retain history is intentionally out of scope here; this preserves
-    the current live-queue semantics and moves only the write primitive.
+
+def _iter_bug_tasks_with_spans(plan: Plan, total_lines: int) -> list[tuple[PlanTask, int, int]]:
+    """Return DFS-ordered ``(task, start_line, end_line_exclusive)`` for bug tasks.
+
+    ``start_line`` is 1-indexed and matches ``PlanTask.line_number``.
+    ``end_line_exclusive`` is the start of the next task in source order, or
+    ``total_lines + 1`` for the last task in the bugs section. This lets the
+    caller slice raw file lines verbatim, including any sub-bullets and
+    trailing prose carried by the parser as ``trailing_lines``.
+    """
+    if plan.bugs is None or not plan.bugs.tasks:
+        return []
+
+    flat: list[PlanTask] = []
+
+    def walk(tasks: tuple[PlanTask, ...]) -> None:
+        for task in tasks:
+            flat.append(task)
+            if task.children:
+                walk(task.children)
+
+    walk(plan.bugs.tasks)
+    flat.sort(key=lambda t: t.line_number)
+
+    spans: list[tuple[PlanTask, int, int]] = []
+    for idx, task in enumerate(flat):
+        start = task.line_number
+        end = flat[idx + 1].line_number if idx + 1 < len(flat) else total_lines + 1
+        spans.append((task, start, end))
+    return spans
+
+
+def _collect_done_bug_text(plan: Plan, original_text: str) -> str:
+    """Slice DONE bug entries from ``original_text`` verbatim.
+
+    DONE subtrees are archived once at the topmost DONE ancestor: planfile's
+    ``_purge_done_tasks`` drops the entire subtree of a DONE parent, so
+    archiving children separately would double-record them. DONE children of
+    TODO parents have no DONE ancestor and are archived standalone.
+    """
+    lines = original_text.splitlines(keepends=True)
+    spans = _iter_bug_tasks_with_spans(plan, len(lines))
+    if not spans:
+        return ""
+
+    chunks: list[str] = []
+    skip_until = 0
+    for task, start, end in spans:
+        if start < skip_until:
+            continue
+        if task.status == TaskStatus.DONE:
+            chunks.append("".join(lines[start - 1 : end - 1]))
+            skip_until = end
+    return "".join(chunks)
+
+
+def _append_resolved(resolved_path: Path, archived_text: str) -> None:
+    """Append ``archived_text`` to ``resolved_path`` (creating it if missing).
+
+    On creation, write a one-line section header so the file is
+    self-describing for humans browsing the repo; the loop never parses
+    this file, so the header has no operational meaning.
+    """
+    if not resolved_path.exists():
+        resolved_path.write_text(_RESOLVED_HEADER + archived_text)
+        return
+    existing = resolved_path.read_text()
+    prefix = "" if not existing or existing.endswith("\n") else "\n"
+    with resolved_path.open("a") as fp:
+        fp.write(prefix + archived_text)
+
+
+def purge_completed_bugs(path: str | Path) -> None:
+    """Move DONE bug entries out of ``path`` into ``BUGS-resolved.md``.
+
+    The live queue (``BUGS.md``) shrinks to only TODO/FAILED entries so the
+    loop's hot-path token cost does not grow. Resolved entries are appended
+    verbatim — extracted from the original source text by line range, not
+    re-rendered — to a sibling ``BUGS-resolved.md`` file before the purge
+    rewrites the queue. The resolved file is git-tracked durability;
+    callers (and the loop) never parse it.
+
     Standalone BUGS.md remains a loose bug queue, not a canonical PLAN.md, so
     id-less bug entries must not be rejected by PLAN.md canonical validation.
     """
-    update(Path(path), purge_done_bug_tasks, validation="unchecked")
+    p = Path(path)
+    archived_text = ""
+    if p.exists():
+        original_text = p.read_text()
+        plan = parse_plan(original_text, source_path=p)
+        archived_text = _collect_done_bug_text(plan, original_text)
+
+    update(p, purge_done_bug_tasks, validation="unchecked")
+
+    if archived_text:
+        resolved_path = p.parent / RESOLVED_BUGS_FILENAME
+        _append_resolved(resolved_path, archived_text)
