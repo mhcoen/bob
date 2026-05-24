@@ -350,11 +350,6 @@ detects new files and appends tasks for anything missing.
   text files) into `.duplo/references/` to keep the project directory
   clean. `REFERENCES_DIR` constant (`.duplo/references`).
 
-- `initializer.py`: Creates target project directory with git init,
-  a `.duplo/` subdirectory for Duplo's working state, and a
-  `.gitignore` that excludes `.duplo/`.
-  `project_name_from_url()` derives name from hostname.
-
 - `roadmap.py`: Generates a phased build roadmap via ``Codex -p``.
   `generate_roadmap()` produces a JSON array of phases (phase number,
   title, goal, features, test criteria). `format_roadmap()` renders

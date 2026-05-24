@@ -9711,44 +9711,6 @@ class TestNoAskPreferencesInPipeline:
         ap_mock.assert_not_called()
 
 
-class TestNoInitializerImportsInPipeline:
-    """Phase 7.5.5: after _first_run was deleted in 7.2.1, no production
-    module on the ``duplo`` pipeline should import ``create_project_dir``
-    or ``project_name_from_url`` from ``duplo.initializer``. The user now
-    creates their own project directory before running ``duplo init``,
-    and ``derive_app_name`` in ``duplo.saver`` resolves app names without
-    hostname-derived naming.
-
-    The functions still exist in ``duplo/initializer.py`` (retained per
-    the project's no-delete rule), but this test pins the invariant that
-    they are not wired into any live pipeline module.
-    """
-
-    def test_main_module_has_no_initializer_symbols(self):
-        import duplo.main
-
-        assert not hasattr(duplo.main, "create_project_dir")
-        assert not hasattr(duplo.main, "project_name_from_url")
-
-    def test_init_module_has_no_initializer_symbols(self):
-        import duplo.init
-
-        assert not hasattr(duplo.init, "create_project_dir")
-        assert not hasattr(duplo.init, "project_name_from_url")
-
-    def test_orchestrator_module_has_no_initializer_symbols(self):
-        import duplo.orchestrator
-
-        assert not hasattr(duplo.orchestrator, "create_project_dir")
-        assert not hasattr(duplo.orchestrator, "project_name_from_url")
-
-    def test_saver_module_has_no_initializer_symbols(self):
-        import duplo.saver
-
-        assert not hasattr(duplo.saver, "create_project_dir")
-        assert not hasattr(duplo.saver, "project_name_from_url")
-
-
 class TestReadLocalMd:
     """Unit tests for _read_local_md helper."""
 
@@ -9841,16 +9803,3 @@ class TestLocalMdWiring:
 
         assert mock_claude.call_args.kwargs["local_md_content"] == ""
 
-
-class TestInitializerLocalMdGitignore:
-    """Phase 8.8: create_project_dir ignores local.md."""
-
-    def test_gitignore_includes_local_md(self, tmp_path):
-        from duplo.initializer import create_project_dir
-
-        target = tmp_path / "proj"
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(returncode=0, stderr="")
-            create_project_dir(target)
-        gitignore = (target / ".gitignore").read_text(encoding="utf-8")
-        assert "local.md" in gitignore.splitlines()

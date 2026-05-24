@@ -61,7 +61,7 @@ Duplo operates on the current working directory; it does not create a project di
   app state against reference frames, SPEC behavior contracts, and user complaints.
 - `orchestrator.py`, `fetcher.py`, `scanner.py`, `frame_*`, `video_extractor.py`,
   `pdf_extractor.py`, `docs_extractor.py` — ingest reference materials from `ref/`.
-- `init.py`, `initializer.py` — `duplo init` subcommand (starter SPEC.md + `ref/`).
+- `init.py` — `duplo init` subcommand (starter SPEC.md + `ref/`).
 - `gap_detector.py`, `roadmap.py`, `selector.py`, `extractor.py` — feature extraction,
   phase planning, and gap detection between SPEC and current build.
 - `claude_cli.py` — single wrapper for Claude CLI / Anthropic API calls.
