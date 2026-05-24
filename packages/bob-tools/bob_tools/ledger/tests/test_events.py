@@ -47,6 +47,7 @@ from bob_tools.ledger import (
 )
 from bob_tools.ledger._uuid7 import uuid7
 from bob_tools.ledger.events import (
+    PAYLOAD_BUILDERS,
     make_assumption_declared_payload,
     make_assumption_falsified_payload,
     make_commit_landed_payload,
@@ -70,6 +71,11 @@ from bob_tools.ledger.events import (
 # ---------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------
+
+
+def test_payload_builders_remains_module_level_lookup() -> None:
+    assert PAYLOAD_BUILDERS[EventType.PHASE_STARTED] == "make_phase_started_payload"
+    assert PAYLOAD_BUILDERS[EventType.PLAN_REAUTHORED] == "make_plan_reauthored_payload"
 
 
 def _envelope(

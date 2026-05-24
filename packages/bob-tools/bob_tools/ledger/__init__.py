@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from bob_tools.ledger.events import (
     ACTIVE_EVENT_TYPES,
-    PAYLOAD_BUILDERS,
     RESERVED_EVENT_TYPES,
     SCHEMA_VERSION,
     AssumptionConfidence,
@@ -68,7 +67,6 @@ __all__ = [
     "ENVELOPE_SCHEMA",
     "EVENTS_FILENAME",
     "EVENT_SCHEMA",
-    "PAYLOAD_BUILDERS",
     "PAYLOAD_SCHEMAS",
     "RESERVED_EVENT_TYPES",
     "SCHEMA_VERSION",
