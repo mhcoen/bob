@@ -395,23 +395,6 @@ detects new files and appends tasks for anything missing.
   Called automatically by `fetch_site()` on each crawled page;
   results stored in .duplo/duplo.json via `save_doc_structures()`.
 
-- `test_generator.py`: Turns extracted documentation examples into
-  unit test files. `detect_target_language()` checks the target
-  project directory for build-system files (pyproject.toml → Python,
-  Package.swift → Swift, Cargo.toml → Rust, go.mod → Go,
-  package.json → JS/TS) and returns the language name or "unknown".
-  `main.py` calls this before test generation; if the target is not
-  Python (or unknown), `generate_test_source` and `save_test_file`
-  are skipped with a message. `load_code_examples()` reads examples
-  from .duplo/duplo.json. `generate_test_source()` produces a test
-  file with one test function per example calling a `run_example()`
-  stub, grouped into classes by source URL for easy failure diagnosis.
-  `generate_parametrized_test_source()` produces a compact
-  pytest-parametrized variant, also grouped by source URL.
-  `_category_class_name()` derives a class name from a URL.
-  `_group_by_source()` groups examples by source URL preserving
-  original indices. `save_test_file()` writes the generated file.
-
 - (To be created) Update module. `duplo update` re-scrapes the
   product, compares against existing features and PLAN.md, appends
   new unchecked tasks for anything missing. Never modifies existing
@@ -523,7 +506,7 @@ test_questioner.py, test_saver.py, test_initializer.py,
 test_planner.py, test_screenshotter.py, test_appshot.py,
 test_comparator.py, test_issuer.py, test_collector.py,
 test_notifier.py, test_runner.py, test_doc_examples.py,
-test_doc_tables.py, test_test_generator.py, test_scanner.py,
+test_doc_tables.py, test_scanner.py,
 test_validator.py, test_design_extractor.py,
 test_pdf_extractor.py, test_hasher.py, test_gap_detector.py,
 test_frame_filter.py, test_frame_describer.py, test_video_extractor.py,
