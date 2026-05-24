@@ -496,7 +496,7 @@ New:
   scrapeable sources (`format_scrapeable_sources` output),
   not just one URL.
 - `spec_text` continues to use SPEC.md content via
-  `format_spec_for_prompt` — but per PARSER-design.md, that
+  `format_spec_for_prompt` — but per design/PARSER-design.md, that
   function now serializes from dataclasses and excludes
   unreviewed entries. The LLM never sees `proposed:`,
   `discovered:`, or counter-example content.
@@ -990,7 +990,7 @@ formatters.
 Specified in "BuildPreferences and app_name" below. Lives in
 `questioner.py` (which currently owns the
 `ask_preferences` interactive flow being replaced) or a new
-`build_prefs.py` module. NOT in `spec_reader.py` — PARSER-design.md
+`build_prefs.py` module. NOT in `spec_reader.py` — design/PARSER-design.md
 explicitly forbids LLM calls in the parser, and this is an
 LLM call.
 
@@ -1003,7 +1003,7 @@ changes, re-parse. A whole-file SPEC.md hash would re-parse
 on any edit anywhere; section-scoped is precise.
 
 **Exact bytes hashed: the comment-stripped section body.**
-Per PARSER-design.md, `_strip_comments` is applied to section
+Per design/PARSER-design.md, `_strip_comments` is applied to section
 bodies before they're stored in the dataclass — so
 `spec.architecture` contains the user's prose with
 `<!-- ... -->` comments already removed. Hashing this value
@@ -1325,7 +1325,7 @@ Three-phase transition (matches REDESIGN-overview.md numbering):
 
 **Phase 2 (migration detection ships first):** Old projects
 get a printed migration message on first `duplo` invocation
-(per `MIGRATION-design.md`) and exit. The user manually
+(per `design/MIGRATION-design.md`) and exit. The user manually
 creates `ref/`, moves files, and authors SPEC.md by hand.
 This lands BEFORE pipeline integration so that the new code
 paths in Phase 3 never run against an unmigrated project.
@@ -1410,7 +1410,7 @@ Within Phase 3, the work is:
    new `raw_pages` return value (5-tuple instead of today's
    4-tuple). Tests.
 2. Add per-stage formatters in `spec_reader` (already in
-   PARSER-design.md). Tests.
+   design/PARSER-design.md). Tests.
 3. Refactor `scanner.scan_directory` to point at `ref/`.
    Update existing callers. Tests.
 4. Update `extract_design` callers to use

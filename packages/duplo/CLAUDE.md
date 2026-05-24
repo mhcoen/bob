@@ -69,10 +69,12 @@ Duplo operates on the current working directory; it does not create a project di
 
 ## Design docs
 
-Longform design references live in the repo root and are authoritative when in
-doubt: `INIT-design.md`, `PIPELINE-design.md`, `PARSER-design.md`,
-`DRAFTER-design.md`, `MIGRATION-design.md`, `REDESIGN-overview.md`,
-`SPEC-guide.md`, `SPEC-template.md`. `AGENTS.md` describes the agent contracts.
+Longform design references are authoritative when in doubt: delivered design
+notes live under `design/`, while active in-progress notes remain at the repo
+root. See `design/INIT-design.md`, `PIPELINE-design.md`,
+`design/PARSER-design.md`, `design/DRAFTER-design.md`,
+`design/MIGRATION-design.md`, `REDESIGN-overview.md`, `SPEC-guide.md`, and
+`SPEC-template.md`. `AGENTS.md` describes the agent contracts.
 
 ## Architectural rules
 

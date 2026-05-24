@@ -53,21 +53,21 @@ In suggested reading order:
    contract, the relationship between SPEC.md and
    `.duplo/duplo.json`. The user-facing reference doc.
 
-3. **`PARSER-design.md`** — how `spec_reader.py` evolves to
+3. **`design/PARSER-design.md`** — how `spec_reader.py` evolves to
    parse the new schema. Dataclasses, validation rules,
    per-stage formatters, migration path from the existing
    parser, test plan, open questions.
 
-4. **`DRAFTER-design.md`** — the new `spec_drafter.py`
+4. **`design/DRAFTER-design.md`** — the new `spec_drafter.py`
    module that writes SPEC.md. Drafting from inputs,
    appending proposed/discovered entries, AUTO-GENERATED
    block management, edit safety.
 
-5. **`INIT-design.md`** — the new `duplo init` subcommand.
+5. **`design/INIT-design.md`** — the new `duplo init` subcommand.
    Command surface, output for each input combination,
    error handling, the `ref/README.md` content.
 
-6. **`MIGRATION-design.md`** — minimal manual migration for
+6. **`design/MIGRATION-design.md`** — minimal manual migration for
    existing projects. Detection plus a printed instructions
    message. No auto-move, no auto-generated SPEC.md.
 

@@ -201,19 +201,19 @@ This phase added feature annotations in generated plans, deterministic status tr
 
 The SPEC.md / `ref/` redesign restructures duplo's input contract so user intent lives in a typed, reviewable spec rather than in interactive prompts and ambient directory scanning. This phase implemented the data layer only: parser, dataclasses, validation, role-filtered formatters, and the rewrite of `format_spec_for_prompt` that closes the prompt-injection leak. No pipeline behavior changes; existing callers continued to work via a compatibility layer.
 
-Design reference: `PARSER-design.md` (authoritative), with `SPEC-template.md` and `SPEC-guide.md` defining the on-disk schema and `REDESIGN-overview.md` providing context.
+Design reference: `design/PARSER-design.md` (authoritative), with `SPEC-template.md` and `SPEC-guide.md` defining the on-disk schema and `REDESIGN-overview.md` providing context.
 
 Critical safety invariant introduced in this phase: **no LLM call ever sees raw SPEC.md text.** `format_spec_for_prompt` was rewritten to serialize from parsed dataclasses with role/flag filtering. Without this, `proposed:`, `discovered:`, and `counter-example` entries would leak into every LLM prompt despite the role-filter helpers. The invariant has its own dedicated test that pins the property.
 
 - [x] [BATCH] Add new dataclasses and the comment-stripping helper to `spec_reader.py`
-  - [x] Add `SourceEntry` dataclass with fields `url`, `role`, `scrape`, `notes`, `proposed`, `discovered`. Per PARSER-design.md § SourceEntry.
-  - [x] Add `ReferenceEntry` dataclass with fields `path`, `roles` (list[str]), `notes`, `proposed`. Per PARSER-design.md § ReferenceEntry. Note `roles` is plural to support multiple-roles-per-entry.
-  - [x] Add `DesignBlock` dataclass with fields `user_prose`, `auto_generated`, `has_fill_in_marker`. Per PARSER-design.md § DesignBlock.
-  - [x] Add `_HTML_COMMENT_RE` and `_strip_comments(body)` helper. Per PARSER-design.md § `<FILL IN>` detection.
+  - [x] Add `SourceEntry` dataclass with fields `url`, `role`, `scrape`, `notes`, `proposed`, `discovered`. Per design/PARSER-design.md § SourceEntry.
+  - [x] Add `ReferenceEntry` dataclass with fields `path`, `roles` (list[str]), `notes`, `proposed`. Per design/PARSER-design.md § ReferenceEntry. Note `roles` is plural to support multiple-roles-per-entry.
+  - [x] Add `DesignBlock` dataclass with fields `user_prose`, `auto_generated`, `has_fill_in_marker`. Per design/PARSER-design.md § DesignBlock.
+  - [x] Add `_HTML_COMMENT_RE` and `_strip_comments(body)` helper. Per design/PARSER-design.md § `<FILL IN>` detection.
   - [x] Tests: dataclass field defaults, `_strip_comments` removes single-line and multi-line HTML comment blocks, comment-stripping leaves non-comment content intact.
 
 - [x] [BATCH] Add `<FILL IN>` detection for required sections
-  - [x] Add the `_FILL_IN_RE` regex per PARSER-design.md (matches `<FILL IN>` permissively on whitespace and trailing hint text).
+  - [x] Add the `_FILL_IN_RE` regex per design/PARSER-design.md (matches `<FILL IN>` permissively on whitespace and trailing hint text).
   - [x] Apply `_strip_comments` to a section body before regex matching, so commented-out template hints don't trigger detection.
   - [x] Wire detection into `_parse_spec` to set `spec.fill_in_purpose` after parsing `## Purpose`.
   - [x] Wire detection into `_parse_spec` to set `spec.fill_in_architecture` after parsing `## Architecture`.
@@ -221,7 +221,7 @@ Critical safety invariant introduced in this phase: **no LLM call ever sees raw 
   - [x] Tests: marker present in body sets flag; marker present only in an HTML comment does NOT set flag; absent marker keeps flag false; `fill_in_design` rule covers both required conditions.
 
 - [x] Add `## Sources` parser
-  - [x] Add `_SOURCE_ENTRY_START` and `_FIELD_LINE` regexes per PARSER-design.md § `## Sources` parser. Entry start matches a list-item line containing an http(s) URL; field lines match indented `key: value` pairs.
+  - [x] Add `_SOURCE_ENTRY_START` and `_FIELD_LINE` regexes per design/PARSER-design.md § `## Sources` parser. Entry start matches a list-item line containing an http(s) URL; field lines match indented `key: value` pairs.
   - [x] Implement entry-block parser: scan section line-by-line, accumulate field lines until next entry or section end, support multi-line `notes:` continuations indented further than the field name.
   - [x] Validation per `SourceEntry`: drop entries with invalid URL; DROP entries with unknown role (do NOT default — typo `role: doc` must not silently widen authority); default unknown `scrape` to `none` (not `deep`); accept both `proposed` and `discovered` set without diagnostic.
   - [x] Diagnostic emission via existing `duplo.diagnostics.record_failure`.
@@ -234,7 +234,7 @@ Critical safety invariant introduced in this phase: **no LLM call ever sees raw 
   - [x] Tests: present section captured verbatim; absent section yields empty string; comment blocks stripped before storage.
 
 - [x] Convert `## References` parser from prose to structured entries
-  - [x] Add bare and quoted entry-start regexes per PARSER-design.md § `## References` parser. Bare form matches list-item lines starting with `ref/` followed by a path with non-greedy whitespace handling (paths with spaces are common; macOS screenshots default to names like `Screen Shot 2025-10-12 at 14.30.png`). Quoted form matches `- "ref/..."` and strips the quotes after match (for paths with unusual characters).
+  - [x] Add bare and quoted entry-start regexes per design/PARSER-design.md § `## References` parser. Bare form matches list-item lines starting with `ref/` followed by a path with non-greedy whitespace handling (paths with spaces are common; macOS screenshots default to names like `Screen Shot 2025-10-12 at 14.30.png`). Quoted form matches `- "ref/..."` and strips the quotes after match (for paths with unusual characters).
   - [x] Implement entry parser sharing `_FIELD_LINE` with the Sources parser.
   - [x] Parse `role:` as comma-separated list into `roles: list[str]`. Support multiple roles per entry (the dual-use case for behavioral-and-visual videos).
   - [x] Validation per `ReferenceEntry`: drop entries with paths not under `ref/` (after quote-stripping); drop unknown roles from the comma-separated list with diagnostic; if all roles unknown, default to `["ignore"]`.
@@ -243,7 +243,7 @@ Critical safety invariant introduced in this phase: **no LLM call ever sees raw 
   - [x] Migration test: old prose-form `## References` parses to empty `references` list, prose preserved in `spec.raw`, diagnostic emitted suggesting migration.
 
 - [x] Add AUTO-GENERATED block parsing in `## Design`
-  - [x] Add the `_AUTOGEN_RE` regex per PARSER-design.md § `## Design` parser (matches the BEGIN/END comment markers with DOTALL).
+  - [x] Add the `_AUTOGEN_RE` regex per design/PARSER-design.md § `## Design` parser (matches the BEGIN/END comment markers with DOTALL).
   - [x] If block present: split body into `user_prose` (text before block) and `auto_generated` (block contents, markers stripped).
   - [x] If block absent: entire comment-stripped body becomes `user_prose`; `auto_generated` is empty.
   - [x] Set `has_fill_in_marker` by checking `user_prose` (after comment stripping) against `_FILL_IN_RE`.
@@ -288,7 +288,7 @@ Critical safety invariant introduced in this phase: **no LLM call ever sees raw 
 - [x] Add `validate_for_run(spec) -> list[str]` and wire into `main.py`
   - [x] Returns list of human-readable error messages; empty list means OK to run.
   - [x] Errors: purpose-fill-in, architecture-fill-in, and the no-source-and-no-ref-and-sparse-purpose condition (no scrapeable sources AND no non-ignore references AND `## Purpose` shorter than 50 characters).
-  - [x] `fill_in_design` produces a WARNING (not an error) per PARSER-design.md § Validation API. The "URL alone" common pattern is valid even when `## Design` has no user prose and no visual-target references — duplo can still proceed by inferring design from scraped product-reference pages. Warnings print but do not block execution.
+  - [x] `fill_in_design` produces a WARNING (not an error) per design/PARSER-design.md § Validation API. The "URL alone" common pattern is valid even when `## Design` has no user prose and no visual-target references — duplo can still proceed by inferring design from scraped product-reference pages. Warnings print but do not block execution.
   - [x] Warnings for unreviewed entries: count `proposed: true` references and `discovered: true` sources, emit one warning each summarizing counts and what to do.
   - [x] Wire `validate_for_run` into `main.py` so it runs after `read_spec` and before any pipeline work. If errors returned, print them to stderr and exit 1. Warnings print to stdout but do not block.
   - [x] Tests: each error condition produces the expected message; valid spec returns empty list; `fill_in_design` produces warning not error; warnings include correct counts.
@@ -308,7 +308,7 @@ Critical safety invariant introduced in this phase: **no LLM call ever sees raw 
 
 This phase added a single gate at the start of `duplo` (no-subcommand path) that detects pre-redesign projects and prints manual-migration instructions instead of running the pipeline against them. Intentionally small: a detection function, a wrapper that prints and exits, dispatch wiring in `main()`, and tests. The pipeline refactor itself is Phase 5 and is NOT part of this phase.
 
-Design reference: `MIGRATION-design.md` (authoritative).
+Design reference: `design/MIGRATION-design.md` (authoritative).
 
 This phase shipped the Phase-2-message-text version ("author a SPEC.md by hand" — `duplo init` does not exist yet). Phase 6 will replace it with the `duplo init` version as a one-line change.
 
@@ -329,9 +329,9 @@ This phase shipped the Phase-2-message-text version ("author a SPEC.md by hand" 
     - [x] `## Sources` check uses multiline anchor so an `## Sources` line mid-document matches, but a line like `My sources` or `### Sources` does not
 
 - [x] Add the migration message constant and `_check_migration` wrapper
-  - [x] Define `_MIGRATION_MESSAGE` as a module-level constant in `duplo/migration.py` containing the migration message text verbatim per MIGRATION-design.md § Behavior (the "Phase 2 message" block — the version that says "Author a SPEC.md by hand using SPEC-template.md"). Do NOT use the Phase 4 version (which references `duplo init`); `duplo init` does not exist yet.
+  - [x] Define `_MIGRATION_MESSAGE` as a module-level constant in `duplo/migration.py` containing the migration message text verbatim per design/MIGRATION-design.md § Behavior (the "Phase 2 message" block — the version that says "Author a SPEC.md by hand using SPEC-template.md"). Do NOT use the Phase 4 version (which references `duplo init`); `duplo init` does not exist yet.
   - [x] Message lists the five steps: create `ref/`, move reference files, hand-author SPEC.md using SPEC-template.md with minimum fields (Purpose, Architecture, Sources, References), run `duplo` again. Mentions that PLAN.md, `.duplo/duplo.json`, and source code are unchanged.
-  - [x] Implement `_check_migration(target_dir: Path) -> None` per MIGRATION-design.md § Implementation. If `needs_migration(target_dir)` returns True, print `_MIGRATION_MESSAGE` and `sys.exit(1)`. Otherwise return without doing anything.
+  - [x] Implement `_check_migration(target_dir: Path) -> None` per design/MIGRATION-design.md § Implementation. If `needs_migration(target_dir)` returns True, print `_MIGRATION_MESSAGE` and `sys.exit(1)`. Otherwise return without doing anything.
   - [x] Tests:
     - [x] `_check_migration` on an old-layout directory: patches `sys.exit` and `print` (or captures via `capsys`), confirms the message is printed and exit is called with code 1
     - [x] `_check_migration` on a new-format directory: no output, no exit, function returns None
@@ -339,7 +339,7 @@ This phase shipped the Phase-2-message-text version ("author a SPEC.md by hand" 
     - [x] Message text test: pin the exact message content by snapshot comparison to a fixture file. This protects against accidental wording drift.
 
 - [x] Wire `_check_migration` into `main.py` dispatch
-  - [x] Per MIGRATION-design.md § Implementation "Phase 2 dispatch order": at the top of `main()`, after argv parsing but before any other work, branch on subcommand. If subcommand is `fix` or `investigate`, dispatch to the existing handlers WITHOUT calling `_check_migration` (those subcommands work on already-initialized projects regardless of layout and should not be blocked by migration).
+  - [x] Per design/MIGRATION-design.md § Implementation "Phase 2 dispatch order": at the top of `main()`, after argv parsing but before any other work, branch on subcommand. If subcommand is `fix` or `investigate`, dispatch to the existing handlers WITHOUT calling `_check_migration` (those subcommands work on already-initialized projects regardless of layout and should not be blocked by migration).
   - [x] If there is no subcommand (the default `duplo` invocation), call `_check_migration(Path.cwd())` FIRST, before any other work. If `_check_migration` exits, nothing else in `main()` runs.
   - [x] If `_check_migration` returns, proceed with the existing no-subcommand code path unchanged. `_first_run` and `_subsequent_run` are NOT touched in this phase.
   - [x] Do NOT add an `init` branch — `duplo init` does not exist yet; that lands in Phase 6. If the user types `duplo init` today, argparse should reject it with an unknown-subcommand error as it does now.
@@ -363,7 +363,7 @@ This phase shipped the Phase-2-message-text version ("author a SPEC.md by hand" 
 
 ### Manual verification (all complete)
 
-- [x] Create a scratch directory that looks like a pre-redesign duplo project (`mkdir -p scratch/.duplo && echo '{}' > scratch/.duplo/duplo.json`). Do NOT create a SPEC.md. Run `duplo` from that directory. Confirm the migration message prints and the command exits with status 1. Confirm the message contents match MIGRATION-design.md's Phase 2 message exactly.
+- [x] Create a scratch directory that looks like a pre-redesign duplo project (`mkdir -p scratch/.duplo && echo '{}' > scratch/.duplo/duplo.json`). Do NOT create a SPEC.md. Run `duplo` from that directory. Confirm the migration message prints and the command exits with status 1. Confirm the message contents match design/MIGRATION-design.md's Phase 2 message exactly.
 - [x] In the same scratch directory, author a minimal new-format SPEC.md by hand: `## Purpose`, `## Architecture`, and an empty `## Sources` section (just the heading). Run `duplo` again. Confirm it does NOT print the migration message and instead proceeds into the existing pipeline (which will likely error on other grounds like missing purpose content — that's expected; the point is that the migration gate no longer fires).
 - [x] In a completely empty directory (no `.duplo/` at all), run `duplo`. Confirm `needs_migration` returns False and `duplo` proceeds to its existing no-duplo-project behavior. No migration message should appear.
 - [x] In a pre-redesign scratch directory, run `duplo fix` and `duplo investigate`. Confirm neither prints the migration message — they dispatch to their existing handlers unchanged.
@@ -499,16 +499,16 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] `append_sources(existing_spec_text: str, new_entries: list[SourceEntry]) -> str` returns modified spec text with new entries appended to `## Sources`.
   - [x] Dedup-by-canonical: skip entries whose canonical URL already exists in the spec's `## Sources` (regardless of whether the existing entry has `proposed:` or `discovered:` flags). Use `url_utils.canonicalize_url` for comparison; the parser stores canonical URLs in `SourceEntry.url` already (per Phase 3) so existing entries are already canonical.
   - [x] Idempotent: calling `append_sources(s, [])` returns `s` unchanged. Calling `append_sources(append_sources(s, [e]), [e])` returns the same string as `append_sources(s, [e])` (the second call's `e` is dedup'd).
-  - [x] Format new entries with their flags: `discovered: true` and/or `proposed: true` lines appear as field lines under the entry per PARSER-design.md § `## Sources` parser format.
+  - [x] Format new entries with their flags: `discovered: true` and/or `proposed: true` lines appear as field lines under the entry per design/PARSER-design.md § `## Sources` parser format.
   - [x] If `## Sources` section does not exist in `existing_spec_text`, create it (heading + entries) appended to the spec. Place it after `## Architecture` if present, else at end of file. Maintain the same blank-line conventions as the rest of SPEC.md.
   - [x] Tests: append single new entry; append multiple; dedup against existing canonical URL (entry not added); dedup against existing URL with different trailing slash (canonicalization in action); dedup is case-insensitive on host; idempotent (double-call returns same result); empty new_entries returns input unchanged; missing `## Sources` section is created; flags `discovered: true` and `proposed: true` written correctly.
 
 - [x] [BATCH] Add `update_design_autogen(spec_text, body) -> str` to `duplo/spec_drafter.py`
   - [x] `update_design_autogen(existing_spec_text: str, body: str) -> str` returns modified spec text with the AUTO-GENERATED block in `## Design` populated.
   - [x] Write-once-never-replace semantics per PIPELINE-design.md § "Note on the autogen-cache divergence": if a well-formed AUTO-GENERATED block already exists with non-empty body, return `existing_spec_text` unchanged. The orchestrator is responsible for checking and skipping the Vision call when an autogen block already exists; this function is a defense-in-depth no-op in that case rather than an overwrite.
-  - [x] If `## Design` section exists with no AUTO-GENERATED block: append the block (with BEGIN/END comment markers per PARSER-design.md § `## Design` parser) at the end of the section, after any existing user prose.
+  - [x] If `## Design` section exists with no AUTO-GENERATED block: append the block (with BEGIN/END comment markers per design/PARSER-design.md § `## Design` parser) at the end of the section, after any existing user prose.
   - [x] If `## Design` section does not exist: create it with the AUTO-GENERATED block. Place after `## Architecture` (or after `## Sources` if both present). Maintain blank-line conventions.
-  - [x] BEGIN/END markers: use the EXACT same comment-marker form that the parser's `_AUTOGEN_RE` matches (per PARSER-design.md). Pin with a test that round-trips through the parser.
+  - [x] BEGIN/END markers: use the EXACT same comment-marker form that the parser's `_AUTOGEN_RE` matches (per design/PARSER-design.md). Pin with a test that round-trips through the parser.
   - [x] Tests: empty `## Design` gets autogen block appended; existing user prose in `## Design` preserved with autogen appended after it; existing autogen block with non-empty body NOT replaced (write-once); existing autogen block with empty body is replaced (allows regeneration after user clears the block); missing `## Design` section is created; round-trip: `update_design_autogen` output parses back to a spec where `spec.design.auto_generated` equals the body.
 
 ## Save_raw_content update
@@ -523,11 +523,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## BuildPreferences and app_name
 
 - [x] Implement `parse_build_preferences(architecture_prose) -> BuildPreferences` in `duplo/build_prefs.py` (new module)
-  - [x] Per PIPELINE-design.md § BuildPreferences. New module per the "new module over extending long files" preference. NOT in `spec_reader.py` (PARSER-design.md forbids LLM calls there) and NOT in `questioner.py` (which is being replaced).
+  - [x] Per PIPELINE-design.md § BuildPreferences. New module per the "new module over extending long files" preference. NOT in `spec_reader.py` (design/PARSER-design.md forbids LLM calls there) and NOT in `questioner.py` (which is being replaced).
   - [x] Calls `claude -p` with structured-output prompt asking for `{platform, language, framework, dependencies: list[str], other_constraints: list[str]}` extracted from the prose. Returns `BuildPreferences` with whatever fields the LLM populated; missing fields stay at default.
   - [x] Section-scoped hash invalidation per design: the bytes hashed are `spec.architecture` (the parsed, comment-stripped content of `## Architecture`), NOT the whole SPEC.md file. Stored in `.duplo/duplo.json` under `architecture_hash`. Re-parse only when the hash changes.
   - [x] When the LLM returns no usable fields, return `BuildPreferences()` (all defaults). Surface as a WARNING via `validate_for_run`, not an error — plan generation handles all-defaults gracefully.
-  - [x] Tests: parse with a typical architecture prose (Swift macOS app etc.); fields populated correctly; missing fields default; hash invalidation works (changing architecture re-triggers parse); commented-out content in `## Architecture` does NOT change hash (per PARSER-design.md `_strip_comments` runs before storage); cache hit avoids the LLM call; all-defaults BuildPreferences emits warning via `validate_for_run`.
+  - [x] Tests: parse with a typical architecture prose (Swift macOS app etc.); fields populated correctly; missing fields default; hash invalidation works (changing architecture re-triggers parse); commented-out content in `## Architecture` does NOT change hash (per design/PARSER-design.md `_strip_comments` runs before storage); cache hit avoids the LLM call; all-defaults BuildPreferences emits warning via `validate_for_run`.
 
 - [x] [BATCH] Implement app_name derivation logic in `duplo/orchestrator.py`
   - [x] Per PIPELINE-design.md § app_name. New function `derive_app_name(spec, target_dir) -> str`.
@@ -705,7 +705,7 @@ The manual run of the URL-only scenario (against numi.app) before this rewrite s
 
 Adds duplo init and the full spec-drafter that creates SPEC.md entries from URL scrapes, prose descriptions, and existing reference files (via Vision). Updates the migration message from Phase 4 to reference duplo init.
 
-Design references: DRAFTER-design.md (authoritative for spec_writer.py extensions), INIT-design.md (authoritative for duplo init UX and behavior). When a task description and the design doc disagree, the design doc wins; flag the discrepancy for resolution rather than silently picking one interpretation.
+Design references: design/DRAFTER-design.md (authoritative for spec_writer.py extensions), design/INIT-design.md (authoritative for duplo init UX and behavior). When a task description and the design doc disagree, the design doc wins; flag the discrepancy for resolution rather than silently picking one interpretation.
 
 The module the design docs call spec_drafter.py is implemented as duplo/spec_writer.py. Phase 5 already shipped append_sources and update_design_autogen there. This phase adds the remaining drafter functions: format_spec, append_references, _draft_from_inputs, draft_spec, and the role-inference helpers.
 
@@ -714,11 +714,11 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Drafter: DraftInputs and format_spec
 
 - [x] [BATCH] Add DraftInputs dataclass to duplo/spec_writer.py
-  - [x] Add DraftInputs dataclass with fields: url (str or None), url_scrape (str or None), description (str or None), existing_ref_files (list[Path], default empty), vision_proposals (dict[Path, str], default empty). Per DRAFTER-design.md section DraftInputs.
+  - [x] Add DraftInputs dataclass with fields: url (str or None), url_scrape (str or None), description (str or None), existing_ref_files (list[Path], default empty), vision_proposals (dict[Path, str], default empty). Per design/DRAFTER-design.md section DraftInputs.
   - [x] Tests: dataclass construction with all fields; default values for optional fields; field types enforced.
 
 - [x] Implement format_spec(spec: ProductSpec) -> str in duplo/spec_writer.py
-  - [x] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per DRAFTER-design.md section format_spec.
+  - [x] Serialize a ProductSpec to SPEC.md format. The inverse of the parser. Per design/DRAFTER-design.md section format_spec.
   - [x] Start with the standard top-matter comment block (the same block from SPEC-template.md, including the "How the pieces fit together:" marker string).
   - [x] Render sections in canonical order: Purpose, Sources, References, Architecture, Design, Scope, Behavior, Notes.
   - [x] For empty required sections (Purpose, Architecture): write the FILL IN marker from the template.
@@ -732,16 +732,16 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Tests: empty ProductSpec produces template-like output with FILL IN markers on required sections; fully populated ProductSpec serializes all sections; Sources and References entries formatted correctly with flags; Design section with user_prose and auto_generated renders both in order; Scope include/exclude rendered; Behavior contracts rendered; empty optional sections get heading and comment only.
 
 - [x] Implement round-trip property test for format_spec
-  - [x] Per DRAFTER-design.md section "Round-trip testing". Property: parse(format_spec(spec)) equals spec for all surviving fields.
-  - [x] Implement _spec_equal_for_round_trip comparator that excludes raw, dropped_sources, and dropped_references fields per DRAFTER-design.md.
+  - [x] Per design/DRAFTER-design.md section "Round-trip testing". Property: parse(format_spec(spec)) equals spec for all surviving fields.
+  - [x] Implement _spec_equal_for_round_trip comparator that excludes raw, dropped_sources, and dropped_references fields per design/DRAFTER-design.md.
   - [x] Use hand-rolled fixture generation (not Hypothesis) to cover: empty spec, spec with all sections filled, spec with mixed filled/empty sections, spec with Sources and References containing proposed/discovered flags, spec with DesignBlock containing both user_prose and auto_generated, spec with scope_include and scope_exclude, spec with behavior_contracts.
-  - [x] Add a separate test pinning that dropped_sources and dropped_references round-trip as empty lists (documenting the asymmetry per DRAFTER-design.md).
+  - [x] Add a separate test pinning that dropped_sources and dropped_references round-trip as empty lists (documenting the asymmetry per design/DRAFTER-design.md).
   - [x] Tests: each fixture round-trips; dropped fields excluded from comparison; round-tripped spec has empty dropped lists.
 
 ## Drafter: append_references
 
 - [x] [BATCH] Implement append_references(existing: str, new_entries: list[ReferenceEntry]) -> str in duplo/spec_writer.py
-  - [x] Same pattern as append_sources but for the References section. Per DRAFTER-design.md section append_references.
+  - [x] Same pattern as append_sources but for the References section. Per design/DRAFTER-design.md section append_references.
   - [x] Deduplication is path-only: two entries with the same path (after normalization) are duplicates regardless of role. First-write-wins.
   - [x] Path normalization: compare paths as-is (no resolve, no symlink following). Paths are always relative to project root and start with ref/. Comparison is string equality after stripping any trailing slash.
   - [x] If References section does not exist, create it after Sources (if present), else after Purpose (if present), else at end of file.
@@ -752,15 +752,15 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Drafter: role inference helpers
 
 - [x] [BATCH] Implement URL role inference heuristics in duplo/spec_writer.py
-  - [x] Per DRAFTER-design.md section "Inferring URL roles". Regex-based, not LLM-based.
+  - [x] Per design/DRAFTER-design.md section "Inferring URL roles". Regex-based, not LLM-based.
   - [x] Add _infer_url_role(context: str) -> str function. Takes the surrounding prose context where a URL was mentioned.
   - [x] Rules: "like X" / "such as X" / "inspired by X" returns product-reference. "see also X" / "X for reference" returns docs. "not like X" / "unlike X" / "avoid X" returns counter-example. Default: product-reference.
   - [x] Case-insensitive matching.
   - [x] Tests: each pattern produces the expected role; default when no pattern matches; case-insensitive; multiple patterns in same context uses the first match.
 
 - [x] [BATCH] Implement Vision-based file role inference in duplo/spec_writer.py
-  - [x] Per DRAFTER-design.md section "Inferring file roles via Vision". Add _propose_file_role(path: Path) -> tuple[str, str] returning (description, role).
-  - [x] For image files (.png, .jpg, .gif, .webp): call claude -p with the Vision prompt from DRAFTER-design.md that asks for description and role from the enum (visual-target, behavioral-target, docs, counter-example, ignore). Parse JSON response.
+  - [x] Per design/DRAFTER-design.md section "Inferring file roles via Vision". Add _propose_file_role(path: Path) -> tuple[str, str] returning (description, role).
+  - [x] For image files (.png, .jpg, .gif, .webp): call claude -p with the Vision prompt from design/DRAFTER-design.md that asks for description and role from the enum (visual-target, behavioral-target, docs, counter-example, ignore). Parse JSON response.
   - [x] For non-image files: use extension-based defaults. PDFs default to docs. Text/markdown files default to docs. Videos (.mp4, .mov, .webm, .avi) default to behavioral-target.
   - [x] All results are proposals (proposed: true is set by the caller, not by this function).
   - [x] Retry logic: two retry attempts with backoff on LLM failure, then fall back to ignore role with a diagnostic.
@@ -769,19 +769,19 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Drafter: _draft_from_inputs and draft_spec
 
 - [x] Implement _draft_from_inputs(inputs: DraftInputs) -> ProductSpec in duplo/spec_writer.py
-  - [x] Per DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
-  - [x] Build structured-output prompt for claude -p per DRAFTER-design.md: request JSON with fields purpose, architecture, design, behavior_contracts, scope_include, scope_exclude.
-  - [x] Architecture is filled ONLY when description prose explicitly states a stack/platform/language. URL scrapes do NOT inform architecture. Per DRAFTER-design.md and INIT-design.md.
+  - [x] Per design/DRAFTER-design.md section "Drafting from inputs". The only LLM call in the drafter.
+  - [x] Build structured-output prompt for claude -p per design/DRAFTER-design.md: request JSON with fields purpose, architecture, design, behavior_contracts, scope_include, scope_exclude.
+  - [x] Architecture is filled ONLY when description prose explicitly states a stack/platform/language. URL scrapes do NOT inform architecture. Per design/DRAFTER-design.md and design/INIT-design.md.
   - [x] notes is deliberately NOT in the LLM schema (populated by draft_spec from raw description prose).
   - [x] Parse JSON response. Strip code fences before parsing (reuse strip_fences from duplo/parsing.py).
   - [x] Construct ProductSpec with: filled fields from JSON (when not null/empty); FILL IN markers for required fields the LLM returned null for; empty content for optional fields the LLM returned null for.
-  - [x] Retry logic: two retry attempts with backoff on LLM failure or JSON parse error, then fall back to empty ProductSpec (template-only draft) with a diagnostic per DRAFTER-design.md section "Error handling".
-  - [x] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
+  - [x] Retry logic: two retry attempts with backoff on LLM failure or JSON parse error, then fall back to empty ProductSpec (template-only draft) with a diagnostic per design/DRAFTER-design.md section "Error handling".
+  - [x] Tests (all with mocked claude -p): URL-only input produces purpose from scrape, architecture null; prose-only input produces purpose and architecture when prose states a stack; prose that does not state a stack produces architecture null; both URL and prose merges them (prose wins on conflicts per design/INIT-design.md); neither URL nor prose produces empty ProductSpec; LLM returns malformed JSON triggers retry then fallback; LLM returns null for all fields produces template-like spec.
 
 - [x] Implement draft_spec(inputs: DraftInputs) -> str in duplo/spec_writer.py
-  - [x] Per DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
+  - [x] Per design/DRAFTER-design.md section draft_spec. Orchestrates _draft_from_inputs and format_spec.
   - [x] Step 1: call _draft_from_inputs(inputs) to get a ProductSpec.
-  - [x] Step 2: if inputs.description was provided, copy the original prose verbatim into spec.notes under a labeled header per DRAFTER-design.md: "Original description provided to duplo init:" followed by the verbatim prose. The LLM does NOT write notes.
+  - [x] Step 2: if inputs.description was provided, copy the original prose verbatim into spec.notes under a labeled header per design/DRAFTER-design.md: "Original description provided to duplo init:" followed by the verbatim prose. The LLM does NOT write notes.
   - [x] Step 3: add SourceEntry for the URL (if any) with role product-reference and scrape deep. No proposed/discovered flag (user provided the URL explicitly).
   - [x] Step 4: add ReferenceEntry for each existing ref/ file with proposed: true and the role from inputs.vision_proposals.
   - [x] Step 5: call format_spec(spec) to serialize.
@@ -791,7 +791,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## Drafter: error handling
 
 - [x] [BATCH] Add drafter exception classes to duplo/spec_writer.py
-  - [x] Per DRAFTER-design.md section "Error handling". Add SectionNotFound(name: str), MalformedSpec(reason: str), DraftingFailed(reason: str) exception classes.
+  - [x] Per design/DRAFTER-design.md section "Error handling". Add SectionNotFound(name: str), MalformedSpec(reason: str), DraftingFailed(reason: str) exception classes.
   - [x] SectionNotFound: raised by append/update functions when the target section is not in the file.
   - [x] MalformedSpec: raised when parse-during-modify fails because the existing file is not valid SPEC.md format.
   - [x] DraftingFailed: raised when the LLM call in _draft_from_inputs fails after retries. Caller falls back to template-only draft.
@@ -799,7 +799,7 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 
 ## Edit-safety property test
 
-- [x] Add edit-safety property test per DRAFTER-design.md section "Round-trip testing"
+- [x] Add edit-safety property test per design/DRAFTER-design.md section "Round-trip testing"
   - [x] Property: for any well-formed ProductSpec and any new SourceEntry, append_sources(format_spec(spec), [new_entry]) produces a spec where every field other than sources is unchanged after re-parsing.
   - [x] Same property for append_references with ReferenceEntry.
   - [x] Same property for update_design_autogen: all fields other than design.auto_generated unchanged.
@@ -808,63 +808,63 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
 ## duplo init: argument parsing
 
 - [x] [BATCH] Add init subcommand to argument parser in duplo/main.py
-  - [x] Per INIT-design.md section "Command surface". Add init as a recognized subcommand alongside fix and investigate.
+  - [x] Per design/INIT-design.md section "Command surface". Add init as a recognized subcommand alongside fix and investigate.
   - [x] Positional argument: url (optional). Validated as starting with http:// or https://.
   - [x] Flag: --from-description PATH (or - for stdin). Path to a text file containing prose description.
   - [x] Flag: --deep (boolean, default false). Opt-in to deep scraping during init.
   - [x] Flag: --force (boolean, default false). Overwrite existing SPEC.md.
   - [x] Dispatch to duplo.init.run_init(args) when subcommand is init.
-  - [x] init subcommand bypasses migration check (same as fix and investigate). Per MIGRATION-design.md: migration check applies only to the no-subcommand path.
+  - [x] init subcommand bypasses migration check (same as fix and investigate). Per design/MIGRATION-design.md: migration check applies only to the no-subcommand path.
   - [x] Tests: argparse accepts duplo init with no args; accepts duplo init URL; accepts duplo init --from-description FILE; accepts duplo init URL --from-description FILE; accepts --deep and --force flags; rejects invalid URL (not http/https); init dispatches to run_init (mock and assert called).
 
 ## duplo init: core implementation
 
 - [x] Create duplo/init.py with run_init(args) entry point
-  - [x] Per INIT-design.md section "Implementation shape". New module with a single run_init entry point.
+  - [x] Per design/INIT-design.md section "Implementation shape". New module with a single run_init entry point.
   - [x] Dependencies: duplo.spec_writer (for draft_spec, format_spec), duplo.fetcher (for fetch_site with scrape_depth), duplo.validator (for validate_product_url), duplo.scanner (for scan_directory on ref/).
 
 - [x] Implement run_init for the no-arguments case
-  - [x] Per INIT-design.md section "duplo init (no arguments)".
-  - [x] Check for existing SPEC.md: if present and --force not set, print error message per INIT-design.md and exit 1.
+  - [x] Per design/INIT-design.md section "duplo init (no arguments)".
+  - [x] Check for existing SPEC.md: if present and --force not set, print error message per design/INIT-design.md and exit 1.
   - [x] Create ref/ directory if it does not exist.
-  - [x] Write ref/README.md with the static content from INIT-design.md section "ref/README.md content". Write-once: do not overwrite if ref/README.md already exists.
+  - [x] Write ref/README.md with the static content from design/INIT-design.md section "ref/README.md content". Write-once: do not overwrite if ref/README.md already exists.
   - [x] Write SPEC.md with the static SPEC-template.md content (via format_spec on an empty ProductSpec).
-  - [x] Print the output message per INIT-design.md: "Created ref/...", "Wrote SPEC.md (template, no inputs).", and the "Next steps:" block.
+  - [x] Print the output message per design/INIT-design.md: "Created ref/...", "Wrote SPEC.md (template, no inputs).", and the "Next steps:" block.
   - [x] Exit 0.
-  - [x] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match INIT-design.md.
+  - [x] Tests: SPEC.md written with template content; ref/ created; ref/README.md written; existing SPEC.md without --force exits 1 with error message; existing SPEC.md with --force overwrites; existing ref/ not recreated; existing ref/README.md not overwritten; output messages match design/INIT-design.md.
 
 - [x] Implement run_init for the URL-only case
-  - [x] Per INIT-design.md section "duplo init URL".
-  - [x] Canonicalize URL via url_canon.canonicalize_url before any use (per INIT-design.md error cases).
+  - [x] Per design/INIT-design.md section "duplo init URL".
+  - [x] Canonicalize URL via url_canon.canonicalize_url before any use (per design/INIT-design.md error cases).
   - [x] Call fetch_site(url, scrape_depth="shallow") for product identity. If --deep flag set, use scrape_depth="deep" instead.
   - [x] On fetch success: extract product identity from scraped content. Build DraftInputs with url and url_scrape populated. Call draft_spec(inputs).
-  - [x] On fetch failure (network error, NXDOMAIN, timeout): per INIT-design.md section "URL fetch fails", continue with template-only setup. Write URL to Sources with scrape: none. Print failure message. Exit 0 (not 1).
-  - [x] On fetch success but no product identified: per INIT-design.md section "URL fetch succeeds but identifies nothing", pre-fill Sources only. Leave Purpose as FILL IN.
-  - [x] Scan existing ref/ files (if ref/ exists and has files): call _propose_file_role for each image, use extension defaults for non-images. Populate DraftInputs.vision_proposals. Per INIT-design.md section "ref/ already exists with files".
+  - [x] On fetch failure (network error, NXDOMAIN, timeout): per design/INIT-design.md section "URL fetch fails", continue with template-only setup. Write URL to Sources with scrape: none. Print failure message. Exit 0 (not 1).
+  - [x] On fetch success but no product identified: per design/INIT-design.md section "URL fetch succeeds but identifies nothing", pre-fill Sources only. Leave Purpose as FILL IN.
+  - [x] Scan existing ref/ files (if ref/ exists and has files): call _propose_file_role for each image, use extension defaults for non-images. Populate DraftInputs.vision_proposals. Per design/INIT-design.md section "ref/ already exists with files".
   - [x] Write SPEC.md from draft_spec output. Create ref/ and ref/README.md as in the no-arguments case.
-  - [x] Print output per INIT-design.md (shallow scrape message, product identity, pre-filled sections, next steps).
+  - [x] Print output per design/INIT-design.md (shallow scrape message, product identity, pre-filled sections, next steps).
   - [x] Tests (all with mocked fetch_site and claude -p): successful scrape produces pre-filled Purpose and Sources; failed scrape writes URL with scrape: none and exits 0; unidentified product fills Sources only; existing ref/ files get role proposals with proposed: true; --deep flag passes scrape_depth="deep" to fetch_site; --force overwrites existing SPEC.md; URL canonicalized before writing to Sources.
 
 - [x] Implement run_init for the --from-description case
-  - [x] Per INIT-design.md section "duplo init --from-description description.txt".
-  - [x] Read description from file path or stdin (- argument). If file not found, print error per INIT-design.md and exit 1.
+  - [x] Per design/INIT-design.md section "duplo init --from-description description.txt".
+  - [x] Read description from file path or stdin (- argument). If file not found, print error per design/INIT-design.md and exit 1.
   - [x] If stdin: print "Reading description from stdin. Press Ctrl-D when done." when stdin is a TTY.
   - [x] Build DraftInputs with description populated. Call draft_spec(inputs).
-  - [x] Per DRAFTER-design.md: if prose mentions a URL, extract it and add to Sources with proposed: true and role inferred via _infer_url_role.
+  - [x] Per design/DRAFTER-design.md: if prose mentions a URL, extract it and add to Sources with proposed: true and role inferred via _infer_url_role.
   - [x] Write SPEC.md, create ref/, write ref/README.md.
-  - [x] Print output per INIT-design.md (character count, pre-filled sections, next steps).
+  - [x] Print output per design/INIT-design.md (character count, pre-filled sections, next steps).
   - [x] Tests: description from file read correctly; description from stdin (mocked) read correctly; file not found exits 1; URL extracted from prose added to Sources with proposed: true; inferred role correct; Notes section contains verbatim prose.
 
 - [x] Implement run_init for the combined URL + --from-description case
-  - [x] Per INIT-design.md section "duplo init URL --from-description description.txt".
+  - [x] Per design/INIT-design.md section "duplo init URL --from-description description.txt".
   - [x] Build DraftInputs with both url/url_scrape and description populated.
-  - [x] Prose wins on conflicts per INIT-design.md.
-  - [x] Both error conditions checked: invalid URL and missing description file. Both errors reported if both fail per INIT-design.md.
+  - [x] Prose wins on conflicts per design/INIT-design.md.
+  - [x] Both error conditions checked: invalid URL and missing description file. Both errors reported if both fail per design/INIT-design.md.
   - [x] Tests: combined inputs produce merged SPEC.md; prose-stated architecture overrides (URL-only would leave it as FILL IN); both errors reported simultaneously when both inputs are bad.
 
 ## duplo init: output discipline
 
-- [x] [BATCH] Ensure all init output follows INIT-design.md section "Output discipline"
+- [x] [BATCH] Ensure all init output follows design/INIT-design.md section "Output discipline"
   - [x] Present-tense or simple-past for actions: "Fetched X.", "Pre-filled Y.", "Created Z."
   - [x] Indented bullets with arrow for sub-results: "  -> Identified product: Numi"
   - [x] "Next steps" sections with numbered items at the end of successful runs.
@@ -886,7 +886,7 @@ All Phase 6 end-to-end behaviors are verified by automated pytest integration te
 
 - [x] Add tests/test_phase6_integration.py with test_init_no_args_produces_template
   - [x] Run run_init with no URL, no description in a tmpdir.
-  - [x] Assert: SPEC.md exists and contains the marker string "How the pieces fit together:"; SPEC.md contains FILL IN markers for Purpose and Architecture; ref/ directory exists; ref/README.md exists and matches INIT-design.md content; needs_migration returns False for this directory.
+  - [x] Assert: SPEC.md exists and contains the marker string "How the pieces fit together:"; SPEC.md contains FILL IN markers for Purpose and Architecture; ref/ directory exists; ref/README.md exists and matches design/INIT-design.md content; needs_migration returns False for this directory.
 
 - [x] Add test_init_url_produces_prefilled_spec
   - [x] Mock fetch_site to return a fixture scrape with identifiable product name.
@@ -1055,10 +1055,10 @@ Python 3.11+, depends on McLoop. Uses Claude Code via McLoop for all code genera
   - [x] Document the safety invariant: no raw SPEC.md text in LLM prompts.
 
 - [USER] Decide on design document archival strategy
-  - [x] The design documents (PARSER-design.md, DRAFTER-design.md, INIT-design.md, PIPELINE-design.md, MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Options: (a) move to docs/design/ as historical reference, (b) keep in place, (c) delete. User decides.
+  - [x] The design documents (design/PARSER-design.md, design/DRAFTER-design.md, design/INIT-design.md, PIPELINE-design.md, design/MIGRATION-design.md, REDESIGN-overview.md) were authoritative during implementation. Options: (a) move to docs/design/ as historical reference, (b) keep in place, (c) delete. User decides.
 
 - [x] Execute the design document archival strategy decided above
-  - [x] If archiving: create docs/design/ directory and move all design docs there. Update any remaining cross-references in CLAUDE.md or README.md.
+  - [x] If archiving: create design/ directory and move delivered design docs there. Update any remaining cross-references in CLAUDE.md or README.md.
   - [x] If keeping in place: no action needed.
   - [x] If deleting: remove the files. Confirm no remaining cross-references.
 
