@@ -56,7 +56,7 @@ Compare reply shape.
 
 ### Test 2: Critique under uncertainty (medium)
 
-Prompt: paste plan-ledger.md from /Users/mhcoen/proj/bob/design/.
+Prompt: paste plan-ledger.md from /Users/mhcoen/proj/bob-tools/design/.
 Ask: "Three weakest assumptions in this design and how would each
 fail in practice. Audit-friendly, terse."
 
