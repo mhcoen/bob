@@ -145,9 +145,8 @@ endpoints. Re-evaluate before relying on any specific binding.
 
 ## The architectures
 
-These are the patterns that ship today, plus two designs currently
-under development. All of them are concrete `.orc` files (or will be)
-and all of them run on the same executor.
+These are the patterns that ship today. All of them are concrete
+`.orc` files and all of them run on the same executor.
 
 ### Single
 
@@ -206,7 +205,7 @@ without knowing which model or which role produced each one.
   <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
 </p>
 
-### Iterate Until Acceptable *(under development)*
+### Iterate Until Acceptable
 
 A responder writes a draft. A judge decides whether it is good
 enough. If not, the judge sends it back with feedback for another
@@ -219,7 +218,7 @@ the point.
   <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
 </p>
 
-### Parallel Thinking *(under development)*
+### Parallel Thinking
 
 N models analyze the input in parallel. A reconciler digests their
 outputs into a single response. The slots are deliberately
