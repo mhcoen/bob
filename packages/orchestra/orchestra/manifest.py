@@ -1,22 +1,14 @@
-"""Run-time integrity manifest for resumable workflows.
+"""Legacy prompt-manifest helper for resumable workflows.
 
-Pass-3 fix #3 hashed the .orc file at run_start so cmd_resume could
-refuse to replay against a workflow whose semantics drifted between
-the original run and the resume invocation. That signal misses
-file-backed prompt sources (templates/*.md and config-supplied
-instruction templates), which are read from disk at invocation time;
-editing one between crash and resume changes the actor input while
-the workflow digest still matches.
+Pass-4 runs recorded a sha256 digest for each file-backed prompt
+source in ``prompt_manifest``. Current runs use prompt snapshots
+instead; ``cli.cmd_resume`` retains an inline compatibility gate for
+old logs that have ``prompt_manifest`` but no snapshot manifest.
 
-This module computes a manifest of every file-backed prompt source
-the executor would read at run time, after instruction-template
-overrides resolve. Both cmd_run and api.run_workflow stamp the
-manifest into the run_start record; cmd_resume recomputes the
-manifest against the current files and refuses on any mismatch.
-
-Manifest shape: ``{"<absolute path>": "<sha256 hex>"}``. The path is
-normalized via ``Path.resolve()`` so symlinks and relative-from
-differences do not produce spurious mismatches across runs.
+This module preserves the old manifest computation for regression
+tests that construct legacy run_start records. Manifest shape is
+``{"<absolute path>": "<sha256 hex>"}``; paths are normalized via
+``Path.resolve()`` to match the historical format.
 """
 
 from __future__ import annotations
@@ -91,31 +83,3 @@ def compute_prompt_manifest(workflow: Workflow) -> dict[str, str]:
         out[key] = _digest_file(path)
     return out
 
-
-def diff_prompt_manifests(
-    recorded: dict[str, str],
-    current: dict[str, str],
-) -> list[str]:
-    """Return a human-readable list of differences between two
-    manifests. Empty list means the manifests match.
-
-    The list contains one entry per drift, naming the path and the
-    direction of the change (added, removed, content changed). The
-    caller passes this to the user so they can find the file that
-    drifted.
-    """
-    lines: list[str] = []
-    for path, recorded_digest in sorted(recorded.items()):
-        current_digest = current.get(path)
-        if current_digest is None:
-            lines.append(f"  removed: {path}")
-            continue
-        if current_digest != recorded_digest:
-            lines.append(
-                f"  changed: {path} "
-                f"(was {recorded_digest[:12]}..., "
-                f"now {current_digest[:12]}...)"
-            )
-    for path in sorted(current.keys() - recorded.keys()):
-        lines.append(f"  added:   {path}")
-    return lines
