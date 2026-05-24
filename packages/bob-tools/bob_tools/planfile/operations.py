@@ -1537,19 +1537,6 @@ def _get_batch_children(parent: Task) -> tuple[Task, ...]:
     return tuple(batch)
 
 
-def _surface_batch_parent(parent: Task) -> Task:
-    """Return a copy of ``parent`` whose ``children`` is the batch unit.
-
-    Per design doc section 6: a ``[BATCH]`` parent surfaces as one unit
-    with its actionable children joined. The surfaced Task carries the
-    same id, text, status, tags, deps, and source position as the
-    parent — only ``children`` is replaced with the result of
-    :func:`_get_batch_children` so callers receive the batchable
-    children directly without recomputing them.
-    """
-    return dataclasses.replace(parent, children=_get_batch_children(parent))
-
-
 def _walk_actionable(
     tasks: tuple[Task, ...],
     *,

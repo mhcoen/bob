@@ -1,10 +1,11 @@
-"""Plan Ledger threshold evaluator.
+"""Plan Ledger threshold evaluator and crossing recorder.
 
-Pure on-demand classifier. Given a ``PlanState`` and the events that
-produced it, returns the list of thresholds that have been crossed
-since an opaque cursor (``since``). Slice B does not write back to
-the ledger and does not auto-trigger re-authoring; that is Slice B
-part 2 / Slice C.
+The evaluator is a pure on-demand classifier. Given a ``PlanState``
+and the events that produced it, it returns the list of thresholds
+that have been crossed since an opaque cursor (``since``).
+``record_crossings`` is the side-effecting companion: it appends one
+``threshold_crossed`` event per new crossing. Re-authoring is owned by
+callers that consume those crossings.
 
 Seven rules ship in Slice B at ``severity=trigger_reauthor``:
 

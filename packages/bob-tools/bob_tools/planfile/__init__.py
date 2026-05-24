@@ -8,10 +8,7 @@ machine-owned structurally while remaining hand-editable.
 Authoritative design reference: /Users/mhcoen/proj/bob/design/planfile.md.
 
 The ``__all__`` list below is the library's intended public surface.
-Names are uncommented as the stage that implements them lands; a
-commented name is specified but not yet built. As of Stage 2 the
-parser and the typed model are live; renderer, operations, file I/O,
-and the CLI are subsequent stages.
+All exported names are implemented and live.
 """
 
 from __future__ import annotations

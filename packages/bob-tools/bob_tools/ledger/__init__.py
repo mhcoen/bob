@@ -5,9 +5,9 @@ lifecycle. Slice A ships the event schema and validators; Slice B-D
 build threshold rules, re-author mode, and McLoop pause-on-threshold
 on top.
 
-See ``bob/design/plan-ledger.md`` (in the sibling ``bob`` repo) for
-the design doc, and ``bob_tools/ledger/SCHEMA.md`` for the
-human-readable schema reference.
+See ``design/plan-ledger.md`` for the design doc, and
+``bob_tools/ledger/SCHEMA.md`` for the human-readable schema
+reference.
 """
 
 from __future__ import annotations

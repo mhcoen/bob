@@ -65,10 +65,6 @@ def _int(*, minimum: int | None = None) -> dict[str, Any]:
     return schema
 
 
-def _bool() -> dict[str, Any]:
-    return {"type": "boolean"}
-
-
 def _nullable_string(*, min_length: int = 1) -> dict[str, Any]:
     return {"type": ["string", "null"], "minLength": min_length}
 

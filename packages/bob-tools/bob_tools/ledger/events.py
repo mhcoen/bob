@@ -488,7 +488,11 @@ def make_threshold_crossed_payload(
     triggering_event_ids: Sequence[str],
     summary: str,
 ) -> dict[str, Any]:
-    """Reserved for Slice B. Schema validates; projector ignores at A."""
+    """Build a ``threshold_crossed`` payload.
+
+    The schema validates this event type. Projection treats it as a
+    no-op for state shape, advancing only the last-event bookkeeping.
+    """
     return {
         "rule_id": rule_id,
         "triggering_event_ids": list(triggering_event_ids),
@@ -504,7 +508,11 @@ def make_plan_reauthored_payload(
     trigger_event_id: str,
     council_run_id: str | None = None,
 ) -> dict[str, Any]:
-    """Reserved for Slice B. Schema validates; projector ignores at A."""
+    """Build a ``plan_reauthored`` payload.
+
+    The schema validates this event type. Projection treats it as a
+    no-op for state shape, advancing only the last-event bookkeeping.
+    """
     return {
         "from_plan_commit": from_plan_commit,
         "to_plan_commit": to_plan_commit,

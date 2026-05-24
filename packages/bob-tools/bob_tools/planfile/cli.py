@@ -57,13 +57,6 @@ EXIT_TASK_NOT_FOUND = 2
 EXIT_OTHER = 3
 
 
-def _parse_validated(path: Path) -> object:
-    """Return a parsed and validated Plan, or raise the original exception."""
-    plan = load(path)
-    validate_plan(plan)
-    return plan
-
-
 def _settlements_to_json(settlements: Sequence[Settlement]) -> str:
     return json.dumps([dataclasses.asdict(s) for s in settlements], indent=2)
 
