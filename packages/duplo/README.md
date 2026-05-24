@@ -3,7 +3,8 @@
 Duplo builds software from reference material. Point it at a product
 URL, drop in screenshots or a demo video, write a sentence about
 what you want — and it produces a phased build plan that
-[McLoop](https://github.com/mhcoen/mcloop) executes autonomously.
+[McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
+executes autonomously.
 
 It is a clone-anything tool: give it whatever you have (a website, a
 screenshot, a PDF of docs, a video walkthrough, a prose description)
@@ -32,6 +33,54 @@ what a user can see: the UI, the documentation, the behavior. It
 extracts features, visual design details, and behavioral contracts,
 then hands everything to an AI coding agent.
 
+## What Duplo produces
+
+Duplo writes a `PLAN.md` — but not a casual markdown checklist. The
+PLAN.md duplo produces is a formal document with a defined grammar:
+stable task identifiers (`T-NNNNNN`) on every task, structured
+annotations (`[feat: "Feature Name"]` linking tasks to feature
+records, `[fix: "description"]` linking tasks to known issues),
+phase boundaries marked with `## Stage N:` headers, and the canonical
+structure that the bob-tools planfile library enforces and McLoop
+operates against deterministically.
+
+The annotations are how phase completion tracks status without
+guessing. When McLoop checks off a task carrying `[feat: "Color
+picker"]`, duplo's next run records that feature as implemented and
+will not generate it again. When McLoop checks off a task carrying
+`[fix: "evaluation broken in v2"]`, the matching issue closes. The
+structure is machine-verifiable, which is why phase completion is
+deterministic rather than approximate.
+
+You can still read the file as a markdown checklist. The
+hand-readable surface is unchanged. What's changed is what happens
+underneath: the file is parsed by the planfile library before any
+LLM call, validated against the grammar, and refused if malformed.
+Duplo cannot accidentally produce a PLAN.md that confuses McLoop.
+
+## Where Duplo fits
+
+Duplo is part of the [bob ecosystem](https://github.com/mhcoen/bob),
+a deterministic control plane for stochastic agents. The other
+components:
+
+- **[bob-tools](https://github.com/mhcoen/bob/tree/main/packages/bob-tools)**
+  provides the `planfile` library that defines `PLAN.md`'s formal
+  grammar and the canonical-form validator. Duplo writes plans
+  through this API so every plan it produces is structurally valid
+  by construction.
+- **[McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)**
+  executes the plans Duplo writes. McLoop also calls into Duplo's
+  `reauthor` entry point when its threshold rules fire — the
+  build-drift signal Duplo's Plan Ledger tracks.
+- **[orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra)**
+  is the multi-model workflow runtime. Duplo's council mode for
+  plan generation and reauthoring routes through orchestra.
+
+Duplo runs against your project to author the plan. McLoop runs
+against your project to execute it. Bob-tools is the deterministic
+substrate both rely on.
+
 ## How it works
 
 Duplo reads a `SPEC.md` in the project root, analyzes any reference
@@ -46,25 +95,27 @@ colors, a PDF of the full docs), update `SPEC.md` if needed, and run
 `duplo` again. It detects the new files, re-scrapes any URLs
 declared in SPEC.md to pick up site changes, re-extracts features
 from the updated content, and appends tasks to the plan for anything
-that was missed.
+that was missed. All appends go through the planfile API, so task
+IDs are assigned and the canonical structure is preserved.
 
-## Test setup
-
-Duplo's tests import `orchestra` and `bob_tools`, which are sibling
-repos cloned into `/Users/mhcoen/proj/orchestra` and
-`/Users/mhcoen/proj/bob-tools`. They are not on PyPI; install them
-editable into Duplo's venv before running pytest:
+## Install
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e /Users/mhcoen/proj/orchestra
-.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
-.venv/bin/pip install -e '.[dev]'
+pip install duplo
 ```
 
-After this, `pytest -q` from the repo root works without any
-`PYTHONPATH=` prefix. Editable installs propagate source changes
-in the sibling repos automatically.
+For the full bob ecosystem (Duplo plus McLoop, orchestra, and
+bob-tools as a single workspace), clone the bob repo and use `uv`:
+
+```bash
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
+```
+
+This installs every workspace package in editable mode with internal
+cross-package dependencies resolved locally. `duplo`, `mcloop`, and
+the other CLIs land on `PATH`.
 
 ## Getting started
 
@@ -276,9 +327,13 @@ All forms accept the `--deep` and `--force` flags below.
     `SPEC.md` contains behavior contracts, those become
     additional verification tasks.
 
-12. **Generates all phase plans.** Loops over every phase in the
-    roadmap and generates a plan for each, appending them all to
-    PLAN.md. Platform rules are injected into every plan. Scaffold
+12. **Generates all phase plans through the planfile API.** Loops
+    over every phase in the roadmap and generates a plan for each,
+    writing them through bob-tools' planfile API so every task
+    receives a stable `T-NNNNNN` identifier and the file lands in
+    canonical form. Each task carries a `[feat: ...]` or
+    `[fix: ...]` annotation linking it to a feature record or
+    issue. Platform rules are injected into every plan. Scaffold
     artifacts (run.sh, .gitignore) are created before Phase 0.
     CLAUDE.md is written with platform rules for Claude Code.
     Prints "Plan ready for all N phases." and exits.
@@ -330,16 +385,17 @@ count.
 When Duplo detects that all tasks in PLAN.md are checked off, it
 runs the phase-completion flow:
 
-1. **Track implemented features.** Generated plans include
-   `[feat: "Feature Name"]` annotations on each task line linking
-   it to features in `duplo.json`. Duplo parses checked lines and
-   marks annotated features as `implemented`. Bug fix tasks carry
-   `[fix: "description"]` annotations and resolve matching issues.
-   Unannotated tasks (added by the user or from pre-annotation
-   plans) are matched against the feature list via a single
-   `claude -p` call. Matched features are marked as implemented.
-   Genuinely new items are added to `duplo.json` as new features
-   with `status: "implemented"`.
+1. **Track implemented features.** Duplo parses checked lines from
+   the canonical PLAN.md and reads the `[feat: ...]` and
+   `[fix: ...]` annotations directly — because the annotations are
+   part of the formal grammar, this is a structural lookup, not a
+   regex match. Annotated features are marked as `implemented`. Bug
+   fix tasks carry `[fix: "description"]` annotations and resolve
+   matching issues. Unannotated tasks (added by the user or from
+   pre-annotation plans) are matched against the feature list via a
+   single `claude -p` call. Matched features are marked as
+   implemented. Genuinely new items are added to `duplo.json` as
+   new features with `status: "implemented"`.
 
 2. **Collect issues.** Duplo prompts for known problems with the
    completed phase (bugs, incomplete wiring, UI issues). Each
@@ -380,7 +436,9 @@ the next phase:
    all specific enough to execute without design decisions are
    marked with `[BATCH]` so McLoop combines the subtasks into a
    single session for efficiency. See [Task batching](#task-batching)
-   for how Duplo decides when to batch.
+   for how Duplo decides when to batch. All writes go through the
+   planfile API; task IDs are assigned and the canonical form is
+   preserved.
 
 ### Non-destructive updates
 
@@ -391,6 +449,9 @@ removes or overwrites existing code, plans, or configuration:
   file. Bug-fix tasks are inserted into the ``## Bugs`` section
   (created automatically on first plan generation). Existing
   checked and unchecked items are preserved exactly as they are.
+  Appends go through the planfile API, so task IDs are unique
+  across the file and the canonical structure is preserved across
+  edits.
 - **CLAUDE.md:** Overwritten on every run that produces it.
   CLAUDE.md is a derived artifact owned by duplo (the file header
   reads "Auto-generated by duplo -- do not edit manually."). For
@@ -450,7 +511,9 @@ implemented it. Features come from three sources:
 
 - **Plan annotations.** When a generated plan includes
   `[feat: "Feature Name"]` on a task line, phase completion
-  marks that feature as implemented.
+  marks that feature as implemented. Because the annotation is a
+  structured element of the plan grammar, the lookup is exact —
+  there is no fuzzy matching, no text drift to recover from.
 
 - **User additions.** Any task line in PLAN.md without an
   annotation is treated as user-added. At phase completion,
@@ -479,7 +542,10 @@ by what you know about the bug:
   finds.
 
 Both verbs end up writing fix tasks into the ``## Bugs`` section
-of PLAN.md; the difference is what runs before that.
+of PLAN.md; the difference is what runs before that. Both writes go
+through the planfile API, so the resulting bug tasks have stable
+task IDs and McLoop can reference them in commits, logs, and the
+audit trail.
 
 ### `duplo fix`
 
@@ -504,8 +570,8 @@ line per bug with a ``[fix: "..."]`` annotation so phase
 completion can still track resolution.
 
 The ``## Bugs`` section is created automatically by ``save_plan()``
-on first plan generation and aligns with mcloop's contract:
-mcloop prioritises unchecked items in ``## Bugs`` before any
+on first plan generation and aligns with McLoop's contract:
+McLoop prioritises unchecked items in ``## Bugs`` before any
 feature tasks.
 
 ### `duplo investigate`
@@ -549,6 +615,12 @@ three more. Duplo tracks these signals in a **Plan Ledger** at
 regenerate the remaining roadmap and PLAN.md against the current
 reality, preserving everything already shipped.
 
+McLoop calls into `duplo.reauthor` automatically when its own
+threshold rules fire during a run, so reauthor is invoked
+end-to-end without manual intervention in the common case. The
+command form below is for manual invocation, debugging, and
+recovery.
+
 ```bash
 duplo reauthor abc123                  # use defaults: PLAN.md + .duplo/ledger/
 duplo reauthor abc123 \
@@ -574,9 +646,12 @@ Arguments and flags:
   the re-author run (see *Council mode* below).
 
 The ledger and reauthor flow are designed to be safe: the input
-plan is never destroyed until the new plan validates, and shipped
-phases are carried forward verbatim. Only the unshipped tail is
-regenerated.
+plan is never destroyed until the new plan validates through the
+planfile API, and shipped phases are carried forward verbatim with
+their task IDs intact. Only the unshipped tail is regenerated. New
+tasks in the regenerated tail receive fresh task IDs; tasks
+preserved from the prior plan keep their original IDs so the
+audit trail continues to resolve them.
 
 ### Council mode
 
@@ -585,7 +660,10 @@ through a **council** — a small panel of LLM roles (drafter,
 critics, chair) that produce, critique, and synthesize the plan
 rather than relying on a single model. This is most useful when
 the stakes are high (large rewrites, expensive missing scope) and
-the cost of more model calls is acceptable.
+the cost of more model calls is acceptable. Council mode runs on
+top of [orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra)
+— the same workflow runtime McLoop uses for multi-model coding
+patterns.
 
 Flags on bare `duplo`:
 
@@ -727,7 +805,7 @@ gitignored by default.
 ## Requirements
 
 - Python 3.11+
-- [McLoop](https://github.com/mhcoen/mcloop) (`pip install -e ~/proj/mcloop`)
+- [McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
 - `claude` CLI on PATH
 - macOS for appshot screenshot verification
 - [Playwright](https://playwright.dev/) for reference screenshots
@@ -737,17 +815,29 @@ gitignored by default.
   (optional). Install with `brew install ffmpeg`. If not installed,
   video files are skipped with a warning.
 
-## Install
+## Development
+
+If you're working on Duplo itself, the bob workspace is the natural
+development environment:
+
+```bash
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
+```
+
+Duplo, its sibling packages, and all dev dependencies are then
+installed editable in a single `.venv/` at the workspace root.
+
+If you need to develop against Duplo standalone:
 
 ```bash
 git clone https://github.com/mhcoen/duplo.git
 cd duplo
 python -m venv .venv
 source .venv/bin/activate
-pip install -e .
+pip install -e '.[dev]'
 ```
-
-## Development
 
 ```bash
 ruff check .              # Lint
