@@ -1,8 +1,9 @@
 """Checklist-shaped adapter backed by ``bob_tools.planfile``.
 
-This module is intentionally additive and unused by runtime code in Stage B0.2.
-It gives the later de-split cutover a checklist-compatible surface while keeping
-the current ``mcloop.checklist`` contract visible in one place.
+This is McLoop's runtime adapter between its historical checklist-shaped
+task contract and ``bob_tools.planfile``. Callers continue to work with
+``Task`` objects and checklist-style helper functions while PLAN.md parsing,
+rendering, and mutation are delegated to the shared planfile package.
 """
 
 from __future__ import annotations
