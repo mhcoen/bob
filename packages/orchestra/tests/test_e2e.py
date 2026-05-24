@@ -1570,7 +1570,7 @@ def test_cmd_resume_refuses_when_prompt_template_changed(tmp_path: Path) -> None
     workflow = load_workflow(src, reg)
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
-    from orchestra.manifest import compute_prompt_manifest
+    from tests.helpers.legacy_prompt_manifest import compute_prompt_manifest
     log.write(
         "run_start",
         fields={
@@ -1630,7 +1630,7 @@ def test_cmd_resume_refuses_when_prompt_template_removed(tmp_path: Path) -> None
     workflow = load_workflow(src, reg)
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
-    from orchestra.manifest import compute_prompt_manifest
+    from tests.helpers.legacy_prompt_manifest import compute_prompt_manifest
     log.write(
         "run_start",
         fields={
