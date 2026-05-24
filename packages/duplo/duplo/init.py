@@ -5,9 +5,8 @@ INIT-design.md § "Implementation shape": a single module exposing
 one :func:`run_init` entry point. ``duplo/main.py`` dispatches here
 when ``sys.argv[1] == "init"``.
 
-Currently covers the no-arguments flow and the URL-only flow. The
-``--from-description`` and combined cases are fleshed out in
-subsequent subphases.
+Supports no-argument, URL-only, description-only, and combined
+URL-plus-description initialization flows.
 """
 
 from __future__ import annotations

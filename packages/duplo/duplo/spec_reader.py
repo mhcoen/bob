@@ -513,8 +513,9 @@ class DesignBlock:
 class ProductSpec:
     """Parsed product specification.
 
-    All fields are optional.  ``raw`` always contains the full text of
-    SPEC.md for injection into LLM prompts.
+    All fields are optional. ``raw`` stores the original SPEC.md text for
+    diagnostics and compatibility; prompt formatters serialize from parsed
+    fields instead.
     """
 
     raw: str = ""
