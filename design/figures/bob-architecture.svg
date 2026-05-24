@@ -1,0 +1,145 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 820" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14">
+  <rect width="1100" height="820" fill="#0d1117"/>
+
+  <text x="550" y="36" text-anchor="middle" fill="#e6edf3" font-size="18" font-weight="600">The bob ecosystem: a deterministic control plane for stochastic agents</text>
+  <text x="550" y="58" text-anchor="middle" fill="#7d8590" font-size="12" font-style="italic">vroom closes the loop. everything else is mechanism.</text>
+
+  <text x="22" y="116" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="1">CONTROL</text>
+  <text x="22" y="276" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="1">AGENTS</text>
+  <text x="22" y="436" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="1">PATTERNS</text>
+  <text x="22" y="596" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="1">STATE &amp; EXECUTION</text>
+  <text x="22" y="756" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="1">EVIDENCE</text>
+
+  <g>
+    <rect x="380" y="80" width="340" height="80" rx="10" fill="#1f2d3d" stroke="#58a6ff" stroke-width="2"/>
+    <text x="550" y="108" text-anchor="middle" fill="#e6edf3" font-size="16" font-weight="700">vroom</text>
+    <text x="550" y="128" text-anchor="middle" fill="#79c0ff" font-size="12">recursive controller</text>
+    <text x="550" y="146" text-anchor="middle" fill="#7d8590" font-size="11">diagnose · repair · extend · dispatch</text>
+  </g>
+
+  <g>
+    <rect x="120" y="240" width="240" height="80" rx="8" fill="#1c2128" stroke="#d2a8ff" stroke-width="1.6"/>
+    <text x="240" y="268" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">mcloop</text>
+    <text x="240" y="288" text-anchor="middle" fill="#d2a8ff" font-size="12">autonomous build loop</text>
+    <text x="240" y="306" text-anchor="middle" fill="#7d8590" font-size="11">drives editor agents through tasks</text>
+  </g>
+
+  <g>
+    <rect x="430" y="240" width="240" height="80" rx="8" fill="#1c2128" stroke="#d2a8ff" stroke-width="1.6"/>
+    <text x="550" y="268" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">duplo</text>
+    <text x="550" y="288" text-anchor="middle" fill="#d2a8ff" font-size="12">spec → plan / re-author</text>
+    <text x="550" y="306" text-anchor="middle" fill="#7d8590" font-size="11">writes PLAN.md from sources</text>
+  </g>
+
+  <g>
+    <rect x="740" y="240" width="240" height="80" rx="8" fill="#1c2128" stroke="#d2a8ff" stroke-width="1.6"/>
+    <text x="860" y="268" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">bob-tools</text>
+    <text x="860" y="288" text-anchor="middle" fill="#d2a8ff" font-size="12">planfile + ledger library</text>
+    <text x="860" y="306" text-anchor="middle" fill="#7d8590" font-size="11">deterministic API · the foundation</text>
+  </g>
+
+  <g>
+    <rect x="380" y="400" width="340" height="68" rx="8" fill="#1c2128" stroke="#a5d6ff" stroke-width="1.4"/>
+    <text x="550" y="426" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">orchestra</text>
+    <text x="550" y="446" text-anchor="middle" fill="#a5d6ff" font-size="12">multi-model workflows</text>
+    <text x="550" y="462" text-anchor="middle" fill="#7d8590" font-size="11">draft-then-adjudicate · council · anonymous reviewers</text>
+  </g>
+
+  <g>
+    <ellipse cx="180" cy="568" rx="80" ry="14" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <rect x="100" y="568" width="160" height="42" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <ellipse cx="180" cy="610" rx="80" ry="14" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <line x1="100" y1="568" x2="100" y2="610" stroke="#7ee787" stroke-width="1.4"/>
+    <line x1="260" y1="568" x2="260" y2="610" stroke="#7ee787" stroke-width="1.4"/>
+    <text x="180" y="595" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">PLAN.md</text>
+  </g>
+
+  <g>
+    <ellipse cx="400" cy="568" rx="70" ry="14" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <rect x="330" y="568" width="140" height="42" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <ellipse cx="400" cy="610" rx="70" ry="14" fill="#1c2128" stroke="#7ee787" stroke-width="1.4"/>
+    <line x1="330" y1="568" x2="330" y2="610" stroke="#7ee787" stroke-width="1.4"/>
+    <line x1="470" y1="568" x2="470" y2="610" stroke="#7ee787" stroke-width="1.4"/>
+    <text x="400" y="595" text-anchor="middle" fill="#e6edf3" font-size="14" font-weight="700">BUGS.md</text>
+  </g>
+
+  <g>
+    <rect x="600" y="552" width="380" height="76" rx="8" fill="#1c2128" stroke="#ffa657" stroke-width="1.6"/>
+    <text x="790" y="580" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">user software execution</text>
+    <text x="790" y="600" text-anchor="middle" fill="#ffa657" font-size="12">run · test · build · verify</text>
+    <text x="790" y="618" text-anchor="middle" fill="#7d8590" font-size="11" font-style="italic">ground truth</text>
+  </g>
+
+  <g>
+    <ellipse cx="550" cy="730" rx="180" ry="16" fill="#1c2128" stroke="#f0883e" stroke-width="2"/>
+    <rect x="370" y="730" width="360" height="48" fill="#1c2128" stroke="#f0883e" stroke-width="2"/>
+    <ellipse cx="550" cy="778" rx="180" ry="16" fill="#1c2128" stroke="#f0883e" stroke-width="2"/>
+    <line x1="370" y1="730" x2="370" y2="778" stroke="#f0883e" stroke-width="2"/>
+    <line x1="730" y1="730" x2="730" y2="778" stroke="#f0883e" stroke-width="2"/>
+    <text x="550" y="758" text-anchor="middle" fill="#e6edf3" font-size="15" font-weight="700">the everything log</text>
+    <text x="550" y="774" text-anchor="middle" fill="#f0883e" font-size="11" font-style="italic">every action · every commit · every outcome · tagged to PLAN.md</text>
+  </g>
+
+  <defs>
+    <marker id="arrowMech" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7d8590"/>
+    </marker>
+    <marker id="arrowDispatch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#58a6ff"/>
+    </marker>
+    <marker id="arrowReflect" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0883e"/>
+    </marker>
+    <marker id="arrowEvidence" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#6e7681"/>
+    </marker>
+  </defs>
+
+  <path d="M 450 160 Q 350 200 280 240" stroke="#58a6ff" stroke-width="2.2" fill="none" marker-end="url(#arrowDispatch)"/>
+  <path d="M 550 160 L 550 240" stroke="#58a6ff" stroke-width="2.2" fill="none" marker-end="url(#arrowDispatch)"/>
+  <text x="385" y="200" fill="#58a6ff" font-size="11" font-style="italic">dispatch</text>
+  <text x="558" y="205" fill="#58a6ff" font-size="11" font-style="italic">dispatch</text>
+
+  <path d="M 360 285 L 430 285" stroke="#d2a8ff" stroke-width="1.6" fill="none" marker-end="url(#arrowMech)"/>
+  <text x="395" y="278" text-anchor="middle" fill="#d2a8ff" font-size="10" font-style="italic">re-author</text>
+
+  <path d="M 340 260 Q 600 220 740 260" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+  <path d="M 670 270 L 740 270" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+
+  <path d="M 280 320 Q 350 380 430 415" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+  <path d="M 550 320 L 550 400" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+
+  <path d="M 220 320 Q 200 440 195 560" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+  <path d="M 280 320 Q 340 440 395 560" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+  <path d="M 300 320 Q 500 440 700 552" stroke="#7d8590" stroke-width="1.4" fill="none" marker-end="url(#arrowMech)"/>
+  <text x="540" y="445" fill="#7d8590" font-size="10" font-style="italic">execute</text>
+
+  <path d="M 470 320 Q 300 440 235 560" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)"/>
+  <text x="320" y="445" fill="#7d8590" font-size="10" font-style="italic">writes</text>
+
+  <path d="M 620 320 Q 720 440 800 552" stroke="#7d8590" stroke-width="1.2" fill="none" marker-end="url(#arrowMech)" stroke-dasharray="5 4"/>
+  <text x="745" y="445" fill="#7d8590" font-size="10" font-style="italic">diagnostic</text>
+
+  <path d="M 240 320 Q 230 500 430 728" stroke="#6e7681" stroke-width="1" fill="none" marker-end="url(#arrowEvidence)" opacity="0.7"/>
+  <path d="M 560 320 Q 530 500 510 720" stroke="#6e7681" stroke-width="1" fill="none" marker-end="url(#arrowEvidence)" opacity="0.7"/>
+  <path d="M 790 628 Q 730 680 660 725" stroke="#6e7681" stroke-width="1.2" fill="none" marker-end="url(#arrowEvidence)" opacity="0.85"/>
+  <path d="M 180 610 Q 200 670 400 728" stroke="#6e7681" stroke-width="1" fill="none" marker-end="url(#arrowEvidence)" opacity="0.7"/>
+  <path d="M 400 610 Q 430 670 530 716" stroke="#6e7681" stroke-width="1" fill="none" marker-end="url(#arrowEvidence)" opacity="0.7"/>
+
+  <path d="M 730 740 Q 1020 480 720 160" stroke="#f0883e" stroke-width="2.8" fill="none" marker-end="url(#arrowReflect)"/>
+  <text x="1010" y="430" text-anchor="end" fill="#f0883e" font-size="13" font-weight="700">reflection</text>
+  <text x="1010" y="448" text-anchor="end" fill="#f0883e" font-size="10" font-style="italic">M1 diagnose · M2 repair</text>
+  <text x="1010" y="462" text-anchor="end" fill="#f0883e" font-size="10" font-style="italic">M3 extend</text>
+
+  <g transform="translate(40, 660)">
+    <text x="0" y="0" fill="#7d8590" font-size="11" font-weight="600" letter-spacing="0.5">LEGEND</text>
+    <line x1="0" y1="14" x2="24" y2="14" stroke="#58a6ff" stroke-width="2.2"/>
+    <text x="30" y="18" fill="#7d8590" font-size="10">vroom dispatch</text>
+    <line x1="0" y1="30" x2="24" y2="30" stroke="#f0883e" stroke-width="2.6"/>
+    <text x="30" y="34" fill="#7d8590" font-size="10">reflection (the loop)</text>
+    <line x1="0" y1="46" x2="24" y2="46" stroke="#7d8590" stroke-width="1.4"/>
+    <text x="30" y="50" fill="#7d8590" font-size="10">mechanism call</text>
+    <line x1="0" y1="62" x2="24" y2="62" stroke="#6e7681" stroke-width="1" opacity="0.7"/>
+    <text x="30" y="66" fill="#7d8590" font-size="10">evidence emission</text>
+  </g>
+</svg>
