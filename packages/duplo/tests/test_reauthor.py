@@ -59,8 +59,8 @@ def _wrap_synth_plan(text: str) -> str:
     """Return ``text`` unchanged as a bob_tools.planfile-canonical synth body.
 
     Before T-000192, this helper prepended an ``# {project} — Phase N:
-    {title}`` envelope above each H2 because the duplo.plan_document
-    parser required H1-wrapped phase units. Phase C Increment 12
+    {title}`` envelope above each H2 because the legacy reauthor parser
+    required H1-wrapped phase units. Phase C Increment 12
     migrated reauthor onto :mod:`bob_tools.planfile`, which parses
     bare ``## Phase phase_NNN: ...`` fragments natively. The helper is
     retained so existing call sites read clearly; it is now a no-op.
