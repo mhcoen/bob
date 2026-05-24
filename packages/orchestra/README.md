@@ -15,10 +15,13 @@ library, and it has a CLI for direct interactive use.
 
 **As a library, embedded in other tools.** Other systems call
 `orchestra.run_workflow(...)` at decision points where one model is
-not enough. McLoop (an autonomous coding loop) uses Orchestra to
-route each per-edit invocation through a draft-then-adjudicate pair
-or a propose-critique-synthesize trio instead of a single model.
-Duplo (a planning tool) uses it for plan-extraction decisions.
+not enough.
+[McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
+(an autonomous coding loop) uses Orchestra to route each per-edit
+invocation through a draft-then-adjudicate pair or a
+propose-critique-synthesize trio instead of a single model.
+[Duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo)
+(a planning tool) uses it for plan-extraction decisions.
 Anything that calls into Orchestra inherits the same workflow library
 and configuration surface.
 
@@ -62,6 +65,27 @@ design, and debugging tasks — does not produce maintainable code.
 
 Orchestra exists because this is the difference between LLM tools
 you can ship with and LLM tools you cannot.
+
+## Where Orchestra fits
+
+Orchestra is designed to be embeddable in any tool that needs
+multi-model coordination, with the configuration surface shared
+across all consumers. It ships as a standalone package and runs
+fine in isolation — the CLI and REPL are first-class surfaces, not
+afterthoughts on a library.
+
+Orchestra is also one of the four packages in the
+[bob ecosystem](https://github.com/mhcoen/bob), a deterministic
+control plane for stochastic agents. Inside that ecosystem, McLoop
+routes per-edit invocations through Orchestra's `code_edit`
+workflow, and Duplo routes plan-generation and plan-reauthoring work
+through Orchestra's council mode. Both consumers share the global
+`~/.orchestra/config.json`, so bindings authored once apply
+everywhere.
+
+Nothing about Orchestra requires the rest of bob. Embed it in
+anything you build; the workflow library and the configuration
+schema are self-contained.
 
 ## Models and providers
 
@@ -226,26 +250,20 @@ three models, with which prompts, for this problem."
 
 ## Quick start
 
-Install:
+Standalone install:
 
-```
+```bash
 pip install -e '.[dev]'
 ```
 
-## Test setup
-
-Orchestra's tests import `bob_tools` (sibling repo at
-`/Users/mhcoen/proj/bob-tools`, not on PyPI). Install it editable
-into Orchestra's venv before running pytest:
+Or, as part of the bob workspace (which installs Orchestra editable
+alongside McLoop, Duplo, and bob-tools in a single `.venv/`):
 
 ```bash
-python -m venv .venv
-.venv/bin/pip install -e /Users/mhcoen/proj/bob-tools
-.venv/bin/pip install -e '.[dev]'
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
 ```
-
-After this, `pytest -q` from the repo root works without any
-`PYTHONPATH=` prefix.
 
 Create `~/.orchestra/config.json`:
 
