@@ -1,5 +1,11 @@
 # Planfile build notes
 
+> **Update 2026-05-24:** Entries below that reference `duplo.plan_document`
+> as still on disk were accurate when written. The module and its tests
+> were subsequently deleted in Duplo commit `f047808`. See
+> `history/migration-log.md` for the migration summary. The original
+> entries are preserved unchanged for historical accuracy.
+
 ## Observations
 
 - 2026-05-21 [23.2] [T-000197] Stage 23 gate verification. The gate's
