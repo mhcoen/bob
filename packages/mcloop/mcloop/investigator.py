@@ -8,54 +8,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mcloop.checks import detect_app_type, detect_run
-
-DEBUGGING_PLAYBOOK = (
-    "1. Reproduce the problem.\n"
-    "2. Instrument at stage boundaries.\n"
-    "3. Isolate subsystems with standalone probes.\n"
-    "4. Inspect live runtime behavior.\n"
-    "5. Only then patch production code.\n"
-    "6. Clean up temporary scaffolding after the fix."
-)
-
-PROBES_INSTRUCTION = (
-    "For any subsystem whose behavior is unclear, create a standalone"
-    " probe script that exercises just that subsystem in isolation."
-    " The probe should print or log enough to confirm or rule out"
-    " the hypothesis. Delete probe scripts after the investigation."
-)
-
-WEB_SEARCH_INSTRUCTION = (
-    "Before writing code to fix or work around the issue, search the"
-    " web for known issues, working examples, and upstream fixes."
-    " Prefer proven solutions over ad-hoc patches."
-)
-
-
-TESTING_INSTRUCTION = (
-    "When writing tests during an investigation, exercise real code"
-    " with real inputs. Do not mock the core logic under test — only"
-    " mock external boundaries (network, filesystem, system APIs)."
-    " For threaded or async code, write tests that detect deadlocks"
-    " by running with a timeout. For system APIs that may fail due"
-    " to permissions (e.g., macOS accessibility, screen recording),"
-    " handle the permission-denied case gracefully in tests: skip"
-    " or assert the expected error rather than letting the test crash."
-)
-
-DEBUGGING_INSTRUCTION = (
-    "When debugging, decompose the problem before patching."
-    " Break the symptom into smaller questions: what changed,"
-    " what subsystem is involved, what are the inputs and outputs"
-    " at the boundary. Answer each question with evidence (logs,"
-    " probes, tests) before writing a fix."
-    " Search the web for working examples of the API or pattern"
-    " you are using — do not assume your mental model of the API"
-    " is correct. When the same approach fails twice, stop and"
-    " question your assumptions: re-read the documentation, check"
-    " version differences, and verify that the environment matches"
-    " what you expect. Three failed attempts at the same strategy"
-    " means the strategy is wrong, not the execution."
+from mcloop.prompts import (
+    DEBUGGING_INSTRUCTION,
+    DEBUGGING_PLAYBOOK,
+    PROBES_INSTRUCTION,
+    TESTING_INSTRUCTION,
+    WEB_SEARCH_INSTRUCTION,
 )
 
 
