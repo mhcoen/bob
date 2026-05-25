@@ -26,7 +26,7 @@ You still author `PLAN.md` as a markdown checklist with prose descriptions. The 
 - **Model fallback** from a cheaper model to a stronger one when tasks fail or hit rate limits
 - **Stages** for phased execution with testing between stages
 - **Continuous code review** of every commit via a second AI model, without blocking the main loop
-- **Multi-model coding patterns** via [Orchestra](https://github.com/mhcoen/orchestra) integration: opt-in per project to route each edit attempt through a draft-then-adjudicate or propose-critique-synthesize pattern instead of a single-model invocation
+- **Multi-model coding patterns** via [Orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra) integration: opt-in per project to route each edit attempt through a draft-then-adjudicate or propose-critique-synthesize pattern instead of a single-model invocation
 - **Targeted testing** after each task (full suite only at stage boundaries)
 - **Syncing** PLAN.md with the codebase after manual changes
 - **Visual verification** with deterministic app screenshots
@@ -1164,7 +1164,7 @@ Three patterns ship out of the box:
   performs the edit. Four model calls per edit attempt.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/draft_then_adjudicate.png" alt="Draft then Adjudicate architecture" width="75%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/draft_then_adjudicate.png" alt="Draft then Adjudicate architecture" width="75%">
 </p>
 
 Draft then Adjudicate, illustrated above, is the natural default for
@@ -1191,14 +1191,14 @@ file is touched.
 A small example illustrates the idea:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/mcloop/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="75%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/mcloop/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="75%">
 </p>
 
 In this one example, Kimi and Opus surfaced different bugs, which is the kind of
 complementarity `draft_then_adjudicate` is meant to exploit. One run on one
 codebase is not evidence that any particular pairing generalizes; rerun before
 relying on it. The orchestra README has the longer discussion at
-[Choosing model bindings](https://github.com/mhcoen/orchestra#choosing-model-bindings).
+[Choosing model bindings](https://github.com/mhcoen/bob/tree/main/packages/orchestra#choosing-model-bindings).
 
 ### Enabling Orchestra
 
@@ -1373,7 +1373,7 @@ roles known and synthesizes a verdict. Seven model calls per
 invocation.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/council.png" alt="Council architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/council.png" alt="Council architecture" width="85%">
 </p>
 
 **Anonymous Reviewers.** A framer reformulates the question. Five
@@ -1386,7 +1386,7 @@ substance of competing answers without knowing which model or which
 role produced each one.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
 </p>
 
 **Iterate Until Acceptable** *(under development)*. A responder
@@ -1397,7 +1397,7 @@ council can play the responder, a draft-then-adjudicate pair can play
 the judge. The substitutability is the point.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
 </p>
 
 These exist to illustrate that the per-edit patterns McLoop uses
