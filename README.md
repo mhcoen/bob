@@ -19,7 +19,7 @@ Vibe coding does not have Bob.
 
 This is the umbrella for four tools that put Bob back.
 
-Duplo is Bob creating the spec. Tell Duplo what you want, point it at a
+[Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
 product URL, drop in screenshots, PDFs, or a demo video, whatever you
 have. Duplo produces a phased build plan. The quality of the output is
 a direct function of the quality of the plan — and that is on purpose.
@@ -29,7 +29,7 @@ vague code, plainly, with nowhere for the model to hide it. That is
 the incentive to design carefully, which the field has been busy
 losing.
 
-McLoop is Bob running, testing, and debugging the build while you
+[McLoop](packages/mcloop/) is Bob running, testing, and debugging the build while you
 sleep or binge Netflix. Autonomous coding sessions for hours or days:
 fresh context per task, tests and lint after every change, only clean
 code committed, automatic audit when the queue is done. Fresh context
@@ -39,7 +39,7 @@ private conversation only the model has seen, which is why a `kill -9`
 is a shrug instead of a catastrophe. McLoop builds what Duplo
 designed, and it never lets the model decide what happens next.
 
-Orchestra is grumpy Bob fighting LLM slop. Any single LLM can fail
+[Orchestra](packages/orchestra/) is grumpy Bob fighting LLM slop. Any single LLM can fail
 spectacularly and sound delighted doing it. Bob doesn't like that.
 Orchestra hands different models different jobs and makes them argue,
 interact, and sing harmonies before anything touches the workspace.
