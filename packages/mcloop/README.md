@@ -45,7 +45,7 @@ Each session starts with a clean context, with no memory of previous sessions. T
 ## Where McLoop fits
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/triad.png" alt="McLoop architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/triad.png" alt="McLoop architecture" width="60%">
 </p>
 
 The diagram is McLoop's runtime shape. Each labeled element corresponds to a real code path:
