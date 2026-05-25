@@ -90,8 +90,8 @@ tests."
 
 0.5 **Not independently audited here** (stated as "believed true" in
 the brief; outside the read-only source surface): the specific mcloop
-defect-fix commit SHAs (18206df, 7b8a8d0, 3ac67dd, 3dd7e06, 5b5b03d)
-and the bob-tools HEAD 0767951. The *behaviors* those commits claim
+defect-fix commit SHAs (8df958b, fcffa26, 400b5f7, a393c02, b038dae)
+and the bob-tools HEAD 5d2f2a9. The *behaviors* those commits claim
 to produce were verified from current source where the parity audit
 depends on them (notably the Defect-C anchored `is_user_task`, §2(d)).
 
@@ -287,7 +287,7 @@ task.flag_tags`; AUTO = `task.action_tag is not None`; BATCH =
   differs in classification. This is the §2 pre-cutover freeze
   invariant; the swap intentionally adopts the corrected
   classification. Note: this premise was corrected during
-  B0.2 (`117f3ac`); the earlier audit wording incorrectly implied
+  B0.2 (`fd9518a`); the earlier audit wording incorrectly implied
   prose-mention `[BATCH]` tasks were absent rather than present-but-DONE.
 - **HIGH-SEVERITY interaction with task IDs.** `is_user_task` checks
   raw `task.text`. After `migrate()` prepends `T-000NNN:`, the line
@@ -559,18 +559,18 @@ from `bob/design/planfile.md` §8.
 
 ### Stage B0 — Pre-cutover, no mcloop behavior change
 
-B0.1 **DONE in bob-tools commit `f2acceb`**: added
+B0.1 **DONE in bob-tools commit `85b4524`**: added
 `bob_tools.planfile.clear_failed(plan: Plan) -> Plan`
 (bulk FAILED→TODO, mirrors `checklist.clear_failed_markers`
 semantics: no event, idempotent). Pure planfile change; covered by
 planfile's own tests. Resolves §2(f). Verification on commit
-`f2acceb`: `ruff check .` clean; `ruff format --check .` → `39 files
+`85b4524`: `ruff check .` clean; `ruff format --check .` → `39 files
 already formatted`; `mypy --strict bob_tools` → `Success: no issues
 found in 39 source files`; `pytest -q` → `567 passed, 2 skipped in
 1.12s`; `check_cli_end_to_end` exit 0; `check_duplo_generated_fmt`
 exit 0; `test_mcloop_parity.py` → `3 passed in 0.76s`. *(Decision:
 deterministic API addition — Codex/Claude, not routed.)*
-B0.2 **DONE in mcloop commit `117f3ac`**: built the mcloop
+B0.2 **DONE in mcloop commit `fd9518a`**: built the mcloop
 scheduler/mutation shim module `mcloop/_planfile_compat.py` but did
 not wire it into `run_loop`. It exposes checklist-shaped functions
 backed by planfile: `parse`, `find_next`, `check_off`, `mark_failed`,
@@ -583,13 +583,13 @@ normalization (2c); `ConcurrentUpdateError` bounded-retry wrapper
 (2g; two retries, three total attempts); retry-exhaustion-only
 `fail_task` boundary (2e); USER/AUTO/BATCH classified via
 `flag_tags`/`action_tag` (2d).
-B0.3 **DONE for the B0.2 shim in mcloop commit `117f3ac`**:
+B0.3 **DONE for the B0.2 shim in mcloop commit `fd9518a`**:
 `tests/test_planfile_compat.py` adds operation-level parity tests on
 copies of `mcloop/PLAN.md` and `mcloop/PLAN.EXAMPLE.md` for
 `find_next`, `check_off`, `mark_failed`, `clear_failed_markers`,
 classification, `get_batch_children`, `count_unchecked`,
 `find_parent`, ID-required mutation, `purge_completed_bugs`, and the
-additive-only import proof. Verification on commit `117f3ac`: `ruff
+additive-only import proof. Verification on commit `fd9518a`: `ruff
 check .` clean; `ruff format --check .` → `99 files already
 formatted`; `mypy --config-file pyproject.toml mcloop` → `Success:
 no issues found in 45 source files`; `pytest -q` → `1745 passed, 38
@@ -624,26 +624,26 @@ nothing else.
 
 ### Stage B2 — ledger phase-id resolver shim (independent, pre-cutover-safe)
 
-B2.1 **DONE in mcloop commit `7bf086e`**: replaced
+B2.1 **DONE in mcloop commit `0c4d6b7`**: replaced
 `ledger_emit.resolve_phase_id`'s body with a
 `planfile.resolve_task_context` shim (design §7.1): maps
 `phase_id_source` `explicit_comment`/`explicit_header → "explicit"`,
 `ordinal → "ordinal"` only when the existing `ordinal_index` argument
 is supplied, and `none → "none"`; carries `plan_phase_count`.
-B2.2 **DONE in mcloop commit `7bf086e`**: Decision D2 preserved.
+B2.2 **DONE in mcloop commit `0c4d6b7`**: Decision D2 preserved.
 `main._ledger_settle` still calls `resolve_phase_id` without
 `ordinal_index` (`main.py:903-906`), so a no-explicit-id plan still
 returns `source="none"`, `phase_id=None`, and
 `record_phase_id_fallback` does not fire. The existing
 `ordinal_index` parameter is the opt-in switch for ordinal attribution;
 enabling that path remains deferred to Stage B6.
-B2.3 **DONE in mcloop commit `7bf086e`**:
+B2.3 **DONE in mcloop commit `0c4d6b7`**:
 `tests/test_ledger_emit.py` now covers explicit header resolution,
 explicit `<!-- phase_id -->` comment resolution, no-explicit-id
 collapse to `("none", None)`, explicit ordinal opt-in, exact task-ID
 matching (`T-000001` does not match `T-0000010`), and a no-fallback
 event-stream replay that emits only the expected `test_failed` event.
-Verification on commit `7bf086e`: `tests/test_ledger_emit.py` → `27
+Verification on commit `0c4d6b7`: `tests/test_ledger_emit.py` → `27
 passed in 0.99s`; `tests/test_ledger_emit.py
 tests/test_integration_slice_d.py tests/test_ledger_pause.py` → `55
 passed in 1.03s`; full gate: `ruff check .` clean; `ruff format
@@ -761,7 +761,7 @@ exactly one migrated checkbox line; and a representative ledger
 event-stream replay for identical inputs produced byte-identical
 `test_failed` payloads.
 
-Recorded-replay harness repair (commit `3cd8165`): the harness is now
+Recorded-replay harness repair (commit `4516983`): the harness is now
 hermetic without production/runtime changes. Root cause was test-side:
 `runner.run_task` dispatches Claude/default calls through
 `code_edit.invoke_code_edit`, whose `_select_backend(project_dir)` may
@@ -907,7 +907,7 @@ re-home: `::test_purge_completed_bugs_no_checked` (`:1668`),
     (whether resolved bugs are erased, checked-off-in-place, or
     moved to an append-only history). That is a *separate major
     modification* already filed as an mcloop defect (commit
-    `5c7c714`, fix direction: move checked-off entries to a
+    `de7e7fd`, fix direction: move checked-off entries to a
     git-tracked append-only `BUGS-resolved.md`) and is owned by the
     deferred deterministic-bugfile layer (`bob-tools/PLAN.md`
     Stage 9 DEFERRED; `bob/design/BACKLOG.md` 2026-05-16, schema incl.
@@ -943,7 +943,7 @@ schema bump, explicitly **out of scope** and not part of this plan.
   routed.
 - **D5 — `purge_completed_bugs` re-home (Stage D3).** Option A
   decided: behavior-preserving re-home only; **delete-vs-retain is
-  out of scope**, owned by the already-filed mcloop defect `5c7c714`
+  out of scope**, owned by the already-filed mcloop defect `de7e7fd`
   and the deferred deterministic-bugfile layer. This is a *major
   modification* (touches `checklist.py`, the `main.py:1838` call
   site, and the purge tests at
@@ -989,9 +989,9 @@ state.
 Frozen refs:
 
 - `mcloop` `desplit-complete` =
-  `a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3`
+  `901a0aff09329743c3f9a11c8667f59563cb8248`
 - `bob-tools` `desplit-complete` =
-  `3cc32e11125491f51281cd2eb5ad6b9c1115134b`
+  `c30bdf71fe54404ad5fb7c2a8b8847b601c9adff`
 
 Audit artifacts:
 
@@ -1015,13 +1015,13 @@ base.
 ### 6.1 MC-2 follow-up (2026-05-22)
 
 Stream B's MC-2 finding surfaced that the actual landed stage order
-differed from this document's §5 forced ordering: B2 (`7bf086e`)
+differed from this document's §5 forced ordering: B2 (`0c4d6b7`)
 landed before B1+B3, and B1 was further split from B3 — PLAN.md
-canonicalization landed at `10046288` ("B1 re-fold") roughly 3.1
-days before the B1+B3 import-swap cutover at `49b6739`. §5 had
+canonicalization landed at `31ec2433` ("B1 re-fold") roughly 3.1
+days before the B1+B3 import-swap cutover at `eb80d13`. §5 had
 specified B1 and B3 as indivisible.
 
-This created a 3-day window between `10046288` and `49b6739` in
+This created a 3-day window between `31ec2433` and `eb80d13` in
 which mcloop ran pre-cutover code (still using `mcloop.checklist`)
 against a post-canonicalization PLAN.md. Per §2(d), the linchpin
 defect — `checklist.is_user_task` returns False on T-NNNNNN-prefixed

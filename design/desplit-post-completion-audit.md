@@ -35,19 +35,19 @@ work lands during the audit window.
 0.1 Create and push tags on both repos before any audit step begins:
 
 ```
-cd /Users/mhcoen/proj/mcloop && git tag desplit-complete a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3 && git push origin desplit-complete
-cd /Users/mhcoen/proj/bob-tools && git tag desplit-complete 3cc32e11125491f51281cd2eb5ad6b9c1115134b && git push origin desplit-complete
+cd /Users/mhcoen/proj/mcloop && git tag desplit-complete 901a0aff09329743c3f9a11c8667f59563cb8248 && git push origin desplit-complete
+cd /Users/mhcoen/proj/bob-tools && git tag desplit-complete c30bdf71fe54404ad5fb7c2a8b8847b601c9adff && git push origin desplit-complete
 ```
 
 Verify both tags resolve in their respective origins before proceeding.
 
 0.2 Reference SHAs (pinned, do not re-derive):
 
-- **Pre-B1 mcloop reference**: `02bcfd8e9c3a153e4bedadf736f46621cb259f23`
-  (immediate parent of `49b6739`, the B1+B3 cutover commit).
-- **Post-D1 mcloop reference**: `a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3`
+- **Pre-B1 mcloop reference**: `d7ab3ae040a4a43633409d2f5f8271000878904a`
+  (immediate parent of `eb80d13`, the B1+B3 cutover commit).
+- **Post-D1 mcloop reference**: `901a0aff09329743c3f9a11c8667f59563cb8248`
   (tagged `desplit-complete`).
-- **Post-D3 bob-tools reference**: `3cc32e11125491f51281cd2eb5ad6b9c1115134b`
+- **Post-D3 bob-tools reference**: `c30bdf71fe54404ad5fb7c2a8b8847b601c9adff`
   (tagged `desplit-complete`).
 
 0.3 Scratch path for all artifacts (rehearsals, captures, intermediate
@@ -134,7 +134,7 @@ The same five modes used in the B5 baseline equivalence:
 
 1. Set up two git worktrees of mcloop:
    - `.scratch/desplit-post-audit/worktree-pre-b1/` checked out at
-     `02bcfd8e`.
+     `d7ab3ae0`.
    - `.scratch/desplit-post-audit/worktree-post-d1/` checked out at
      `desplit-complete`.
 2. Install each worktree's dependencies into its own `.venv`. The
@@ -266,7 +266,7 @@ task completion.
 
 Per §4 D2 and §2(e) Decision D2, `main._ledger_settle` calls
 `ledger_emit.resolve_phase_id` **without** the optional
-`ordinal_index` argument. Per the shim at commit `7bf086e`, this
+`ordinal_index` argument. Per the shim at commit `0c4d6b7`, this
 makes ordinal-source resolution collapse to `("none", None)` and
 suppresses `record_phase_id_fallback`.
 
@@ -282,7 +282,7 @@ without an explicit-source basis.
 
 ### 4.3 D3 — `--retry` routes through `planfile.clear_failed`
 
-Per §4 D3 (the bob-tools commit `f2acceb` addition) and §2(f),
+Per §4 D3 (the bob-tools commit `85b4524` addition) and §2(f),
 `--retry` clears FAILED tasks across both PLAN.md and BUGS.md via
 `bob_tools.planfile.clear_failed` (called through the
 `_planfile_compat.clear_failed_markers` shim).
@@ -296,7 +296,7 @@ one file is cleared, or if a checklist-era code path survives.
 
 ### 4.4 D4 — B1 canonicalization diff was routed to Michael
 
-Historical / settled. The B1+B3 cutover commit `49b6739` landed
+Historical / settled. The B1+B3 cutover commit `eb80d13` landed
 after Michael reviewed the diff. No active code check; the report
 records this as a one-line acknowledgment that the historical
 decision-gate was honored.
@@ -307,7 +307,7 @@ PASS by construction (the commit exists). Recorded for completeness.
 
 Per §4 D5 and the §2(h) D3 sub-stage description, the
 `purge_done_bug_tasks` operation added to bob-tools at commit
-`3cc32e1` filters DONE bug tasks out of `plan.bugs.tasks`. The
+`c30bdf7` filters DONE bug tasks out of `plan.bugs.tasks`. The
 delete-vs-retain question (whether resolved bugs are erased,
 checked-off-in-place, or moved to an append-only history) is
 explicitly **out of scope**; the de-split's purge re-home preserves
@@ -365,7 +365,7 @@ For each row, the verdict and the evidence (file existence,
 | `tests/test_plan_split.py` | DELETED (B5) | `ls tests/test_plan_split.py` → no such file |
 | `tests/test_checklist.py` | DELETED (D2) | `ls tests/test_checklist.py` → no such file |
 | `tests/test_planfile_compat.py` | 4 shim-only tests retained (D1 Option 2) | 4 test functions present, zero `from mcloop import checklist`, zero `from mcloop.checklist` |
-| `tests/test_args.py` | Imports retargeted to `_planfile_compat` (D2 + D2-completion `8b4dafa`) | zero `checklist` imports including dynamic forms |
+| `tests/test_args.py` | Imports retargeted to `_planfile_compat` (D2 + D2-completion `1ea7a3e`) | zero `checklist` imports including dynamic forms |
 | `tests/test_lifecycle.py` | Imports retargeted | zero `checklist` imports |
 | `tests/test_output.py` | Imports retargeted | zero `checklist` imports |
 | `tests/test_r4_task_id_surfacing.py` | Imports retargeted (D2) | zero `checklist` imports |
@@ -484,7 +484,7 @@ These are explicitly **not** part of this audit:
   under a separate prompt.
 - The bob-tools `purge_done_bug_tasks` op's design itself; only its
   semantic preservation (item 4.5).
-- The lifecycle.py atexit-shutdown fix (commit `0fc5da1`, B4); it
+- The lifecycle.py atexit-shutdown fix (commit `831bf7a`, B4); it
   landed and is covered by the item 5 row for lifecycle.py.
 - Consolidation planning. The audit's outcome is the gate; planning
   starts only after both this charter's stream and the Kimi stream

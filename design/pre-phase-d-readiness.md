@@ -178,7 +178,7 @@ command.
 bob-tools' PLAN.md. mcloop's `changed_files` detector looks only inside
 `project_dir` (bob-tools). Every duplo edit was invisible to the
 no-op gate; we worked around it with the log-aware evidence fix
-(`3fd894c`) and manual commits. That's a workaround, not a solution.
+(`4ec259c`) and manual commits. That's a workaround, not a solution.
 
 **Why it matters for Phase D.** Phase D tasks span mcloop, orchestra,
 and bob-tools. The default project_dir will be bob-tools or one of the

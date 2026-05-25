@@ -9,8 +9,8 @@ and the implemented stages it records (B0.1, B0.2/B0.3, B2, B3 harness,
 B1 pre-flight).
 
 Repos as inspected:
-- bob-tools HEAD `68cbffb` (doc says `0767951`; one ahead, .mcloop gitignore commit, no behavior delta)
-- mcloop HEAD `3cd8165` (matches doc)
+- bob-tools HEAD `3b75300` (doc says `5d2f2a9`; one ahead, .mcloop gitignore commit, no behavior delta)
+- mcloop HEAD `4516983` (matches doc)
 
 ---
 

@@ -24,9 +24,9 @@ audit step began. Both tags resolved on origin before §1 started.
 
 | Ref | Repo | SHA | Tag |
 |---|---|---|---|
-| Post-D1 mcloop | `mhcoen/mcloop` | `a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3` | `desplit-complete` |
-| Post-D3 bob-tools | `mhcoen/bob-tools` | `3cc32e11125491f51281cd2eb5ad6b9c1115134b` | `desplit-complete` |
-| Pre-B1 mcloop reference | `mhcoen/mcloop` | `02bcfd8e9c3a153e4bedadf736f46621cb259f23` | (parent of B1+B3 cutover `49b6739`) |
+| Post-D1 mcloop | `mhcoen/mcloop` | `901a0aff09329743c3f9a11c8667f59563cb8248` | `desplit-complete` |
+| Post-D3 bob-tools | `mhcoen/bob-tools` | `c30bdf71fe54404ad5fb7c2a8b8847b601c9adff` | `desplit-complete` |
+| Pre-B1 mcloop reference | `mhcoen/mcloop` | `d7ab3ae040a4a43633409d2f5f8271000878904a` | (parent of B1+B3 cutover `eb80d13`) |
 
 Scratch path for capture artifacts (rehearsals, fixtures, intermediate
 diffs):
@@ -43,12 +43,12 @@ Two `git worktree` checkouts of mcloop:
 
 | Worktree | HEAD | Purpose |
 |---|---|---|
-| `worktree-pre-b1` | `02bcfd8e` (immediate parent of B1+B3 cutover) | drives `run_loop` against the pre-B1 fixture under pre-B1 `mcloop.checklist` parser |
-| `worktree-post-d1` | `desplit-complete` = `a0c6acc` | drives `run_loop` against the post-D1 fixture under the planfile-backed `_planfile_compat` shim |
+| `worktree-pre-b1` | `d7ab3ae0` (immediate parent of B1+B3 cutover) | drives `run_loop` against the pre-B1 fixture under pre-B1 `mcloop.checklist` parser |
+| `worktree-post-d1` | `desplit-complete` = `901a0af` | drives `run_loop` against the post-D1 fixture under the planfile-backed `_planfile_compat` shim |
 
 A single mcloop venv at `/Users/mhcoen/proj/mcloop/.venv` drove both
 worktrees via `sys.path.insert(0, MCLOOP_SOURCE)`; the venv's editable
-bob-tools install resolves to `3cc32e1` (= `desplit-complete`).
+bob-tools install resolves to `c30bdf7` (= `desplit-complete`).
 Worktree selection verified by inspecting `mcloop.__file__` and
 `mcloop.main.__file__` at runtime in each capture pass.
 
@@ -160,7 +160,7 @@ correction (recorded as a deviation in §6) clarifying gate (e) to
   B5 is preserved.
 - **Gate (a) label-mapping unnecessary.** The charter at `§1.5`
   reserved a `T-NNNNNN:` prefix-strip for the label comparison. The
-  pre-B1 reference at `02bcfd8e` already had canonical T-NNNNNN ids
+  pre-B1 reference at `d7ab3ae0` already had canonical T-NNNNNN ids
   (per B3 R2 landing earlier in the May work), so both sequences
   carry the same id-bearing labels and the prefix-strip was not
   exercised. Documented so future audits do not inherit the
@@ -248,7 +248,7 @@ recorded for completeness, not as defects).
 
 All four active decisions (D1, D2, D3, D5) verified against current
 source at `desplit-complete`. D4 is historical (B1+B3 cutover diff
-was routed to Michael for review before `49b6739` landed); no active
+was routed to Michael for review before `eb80d13` landed); no active
 check.
 
 ### 4.1 D1 — AUTO/USER `work_observed` not emitted
@@ -286,7 +286,7 @@ PASS.
 
 ### 4.4 D4 — B1 canonicalization diff was routed to Michael
 
-Historical. The B1+B3 cutover commit `49b6739` landed after Michael
+Historical. The B1+B3 cutover commit `eb80d13` landed after Michael
 reviewed the diff. No active code check. **PASS by construction.**
 
 ### 4.5 D5 — purge re-home preserves DELETE semantics (not RETAIN)
@@ -332,7 +332,7 @@ fail).
 | `tests/test_plan_split.py` | DELETED (B5) | absent | PASS |
 | `tests/test_checklist.py` | DELETED (D2) | absent | PASS |
 | `tests/test_planfile_compat.py` | 4 shim-only tests retained (D1 Option 2) | 4 test functions; 0 `from mcloop import checklist` or `from mcloop\.checklist` hits | PASS |
-| `tests/test_args.py` | Imports retargeted (D2 + D2-completion `8b4dafa`) | imports=0 across all forms (literal + dynamic) | PASS |
+| `tests/test_args.py` | Imports retargeted (D2 + D2-completion `1ea7a3e`) | imports=0 across all forms (literal + dynamic) | PASS |
 | `tests/test_lifecycle.py` | Imports retargeted | imports=0 | PASS |
 | `tests/test_output.py` | Imports retargeted | imports=0 | PASS |
 | `tests/test_r4_task_id_surfacing.py` | Imports retargeted (D2) | imports=0 | PASS |
@@ -417,16 +417,16 @@ followed by the same label. The equivalence check strips the
 `T-NNNNNN:` prefix from post-D1 labels before comparison. Document
 this mapping explicitly in the report."*
 
-**Observed evidence**: the pre-B1 reference at `02bcfd8e` already
+**Observed evidence**: the pre-B1 reference at `d7ab3ae0` already
 had canonical `T-NNNNNN` ids per B3 R2 landing earlier in the May
 work (B3 R2 added `T-NNNNNN` id enforcement to
 `_planfile_precondition.enforce_canonical`, which exists at
-`02bcfd8e:mcloop/_planfile_precondition.py:60`). Both pre-B1 and
+`d7ab3ae0:mcloop/_planfile_precondition.py:60`). Both pre-B1 and
 post-D1 captures therefore produce identical id-bearing labels; the
 prefix-strip was not needed and was not exercised.
 
 **Documentation note**: future audits should not carry the
-label-mapping assumption forward. The B1+B3 cutover at `49b6739`
+label-mapping assumption forward. The B1+B3 cutover at `eb80d13`
 moved the parser backend (checklist → planfile-backed shim) but not
 the canonical-id requirement, which had already been in place. The
 charter's label-mapping concern was structurally unnecessary for

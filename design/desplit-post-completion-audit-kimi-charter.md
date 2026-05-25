@@ -25,9 +25,9 @@ consequential findings, then any design-level decisions).
 Tags are pushed and stable:
 
 - `mcloop` `desplit-complete` →
-  `a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3` (post-D1 HEAD).
+  `901a0aff09329743c3f9a11c8667f59563cb8248` (post-D1 HEAD).
 - `bob-tools` `desplit-complete` →
-  `3cc32e11125491f51281cd2eb5ad6b9c1115134b` (post-D3 HEAD).
+  `c30bdf71fe54404ad5fb7c2a8b8847b601c9adff` (post-D3 HEAD).
 
 All claims re-derived against these tags. Resolve before reading
 anything.

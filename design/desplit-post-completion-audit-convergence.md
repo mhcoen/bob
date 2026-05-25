@@ -5,7 +5,7 @@
 
 Stream A: `bob/design/desplit-post-completion-audit-claudecode.md` (Claude Code; charter `bob/design/desplit-post-completion-audit.md`).
 Stream B: `bob/design/desplit-post-completion-audit-kimi.md` (Kimi K2.6; charter `bob/design/desplit-post-completion-audit-kimi-charter.md`).
-Audit refs: `mcloop` `desplit-complete = a0c6acc7c8e3b55ad666753c35e5f61c2e214ad3`; `bob-tools` `desplit-complete = 3cc32e11125491f51281cd2eb5ad6b9c1115134b`.
+Audit refs: `mcloop` `desplit-complete = 901a0aff09329743c3f9a11c8667f59563cb8248`; `bob-tools` `desplit-complete = c30bdf71fe54404ad5fb7c2a8b8847b601c9adff`.
 
 ---
 
@@ -50,7 +50,7 @@ Stream B's independent observation: Stream B's item 19 cited exactly the same re
 
 ### Correction MC-2 — stage-ordering re-derivation (surfaced by Stream B)
 
-Stream B's item 29 reports the actual landed stage order from `git log` as `B0.2 → B2 → B3 → B1+B3 → D3 → D2 → D1a → D1`. The Kimi charter §1.13 had stated the forced ordering as `B0 → B1+B3 → B2 → B4 → B5 → D3 → D2 → D1a → D1`, which Stream B re-derived and corrected: B2 in fact preceded B1+B3 rather than following it. All load-bearing dependencies (B0.1 before B0.2, B1+B3 atomic, D3 before D2 before D1a before D1) are preserved by the actual landed order. Cross-checked here against `git log` independently: B2 commit `7bf086e` (route phase-id resolution through planfile context shim) lands before B1+B3 commit `49b6739` (cutover) — Stream B's claim is correct.
+Stream B's item 29 reports the actual landed stage order from `git log` as `B0.2 → B2 → B3 → B1+B3 → D3 → D2 → D1a → D1`. The Kimi charter §1.13 had stated the forced ordering as `B0 → B1+B3 → B2 → B4 → B5 → D3 → D2 → D1a → D1`, which Stream B re-derived and corrected: B2 in fact preceded B1+B3 rather than following it. All load-bearing dependencies (B0.1 before B0.2, B1+B3 atomic, D3 before D2 before D1a before D1) are preserved by the actual landed order. Cross-checked here against `git log` independently: B2 commit `0c4d6b7` (route phase-id resolution through planfile context shim) lands before B1+B3 commit `eb80d13` (cutover) — Stream B's claim is correct.
 
 This is a documentation correction to the charter's stated ordering, not a code defect. The charter listed an idealized planning order that the actual implementation didn't strictly follow; the implementation took a valid ordering that the charter's stated ordering didn't capture.
 
