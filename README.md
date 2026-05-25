@@ -9,6 +9,8 @@
 </video>
 </p>
 
+Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here is how.
+
 Software engineering used to have a guy named Bob. Bob's job was to
 look at what you were doing, ask why, and tell you to slow the hell
 down. Bob read the spec before the code. Bob read the code before the
@@ -16,8 +18,6 @@ commit. Bob read the commit before the deploy. Bob was annoying. Bob
 was correct. I miss Bob.
 
 Vibe coding does not have Bob.
-
-Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here is how.
 
 ## What Bob actually believes
 
