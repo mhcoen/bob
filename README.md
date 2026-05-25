@@ -86,9 +86,9 @@ design meets the same requirements with a database, a session manager,
 and an orchestration framework, and then cannot survive being killed
 mid-run. The restraint is the point.
 
-## The four tools
+## Bob's four main interacting components
 
-Each of the four is the rule above applied at a different scale.
+Each is the rule above applied at a different scale. They interact: McLoop runs against plans Duplo authored, Orchestra wraps McLoop's per-task edits, and McLoop calls Duplo back to re-author the plan when the ledger says the current approach is not working.
 
 [Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
 product URL, drop in screenshots, PDFs, or a demo video, whatever you
