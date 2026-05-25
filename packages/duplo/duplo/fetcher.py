@@ -1,0 +1,525 @@
+"""Fetch a product URL and extract its text content, following priority links."""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Literal
+from urllib.parse import urljoin, urlparse
+
+import httpx
+from bs4 import BeautifulSoup, Tag
+
+from duplo._bs4_helpers import str_attr
+from duplo.diagnostics import record_failure
+from duplo.doc_examples import CodeExample, extract_code_examples
+from duplo.doc_tables import DocStructures, extract_doc_structures
+from duplo.url_canon import canonicalize_url
+
+
+@dataclass
+class PageRecord:
+    """Record of a single URL consulted during scraping."""
+
+    url: str
+    fetched_at: str  # ISO 8601 UTC timestamp
+    content_hash: str  # SHA-256 hex digest of response body
+
+
+_NOISE_TAGS = {"script", "style", "noscript", "nav", "footer", "header", "aside"}
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_VIDEO_EXTS = {".mp4", ".mov", ".webm"}
+
+# Path suffixes the fetcher will not request. The fetcher targets
+# HTML pages; binary installers, archives, audio, and the like
+# cannot contain a product narrative and previously cost a full
+# HTTP round trip before being rejected on Content-Type.
+# Suffix match is case-insensitive on the URL path (before query/
+# fragment); a URL with no recognized suffix is treated as HTML
+# because most CMS routes have no file extension.
+_NON_HTML_PATH_EXTS: frozenset[str] = frozenset({
+    # Installers / OS packages
+    ".dmg", ".exe", ".msi", ".pkg", ".deb", ".rpm", ".apk",
+    ".appimage", ".snap", ".flatpak",
+    # Archives
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz",
+    ".txz", ".7z", ".rar", ".iso", ".cab",
+    # Documents handled elsewhere or not by this fetcher
+    ".pdf", ".epub", ".mobi", ".doc", ".docx", ".xls", ".xlsx",
+    ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf",
+    # Audio
+    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
+    # Images / video / icons. These have their own pipeline via
+    # extract_media_urls / download_media and must not enter the
+    # HTML crawl queue.
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
+    ".bmp", ".tiff",
+    ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v",
+    # Source / data blobs not worth crawling for product narrative
+    ".json", ".xml", ".yaml", ".yml", ".toml", ".csv", ".tsv",
+    ".js", ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
+    ".eot",
+})
+
+# Path suffixes the fetcher explicitly accepts as HTML. The empty
+# string covers extensionless CMS routes (e.g. /docs/intro). Any
+# suffix not in _NON_HTML_PATH_EXTS that also isn't in this set
+# is accepted by default to avoid being overly conservative; the
+# denylist is the authoritative gate.
+_HTML_PATH_EXTS: frozenset[str] = frozenset({
+    "", ".html", ".htm", ".xhtml", ".shtml",
+    ".php", ".aspx", ".asp", ".jsp", ".cfm",
+    ".md", ".markdown",
+})
+
+
+def _path_suffix(url: str) -> str:
+    """Return the lowercased path suffix for *url*, or empty string."""
+    path = urlparse(url).path
+    # ``Path(path).suffix`` returns the final ".ext" or "" — exactly
+    # what we want. Handles trailing slashes (returns "").
+    return Path(path).suffix.lower()
+
+
+def _is_fetchable_html_url(url: str) -> bool:
+    """Return True iff *url* is plausibly an HTML page worth fetching.
+
+    Authoritative denylist on file extensions known to be binary
+    or non-HTML (see ``_NON_HTML_PATH_EXTS``). Extensionless paths
+    and explicit HTML suffixes pass; anything else also passes
+    (we are not strict about exotic CMS suffixes), so the only
+    URLs rejected are those that match the denylist.
+    """
+    suffix = _path_suffix(url)
+    if suffix in _NON_HTML_PATH_EXTS:
+        return False
+    return True
+_MIN_IMAGE_BYTES = 10_000  # skip tiny icons/favicons
+_TIMEOUT = 30.0
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+_HEADERS = {"User-Agent": _USER_AGENT}
+
+# Paths/anchors that indicate high-value technical content
+_HIGH_PRIORITY = re.compile(
+    r"(docs?|documentation|features?|guides?|changelog|changelogs?|"
+    r"api|apis|reference|tutorial|tutorials|manual|manuals|"
+    r"getting.started|quickstart|overview|faq|help)",
+    re.IGNORECASE,
+)
+
+# Paths/anchors that indicate low-value pages for product understanding
+_LOW_PRIORITY = re.compile(
+    r"(blog|pricing|price|legal|login|signin|sign.in|signup|sign.up|"
+    r"privacy|terms|contact|about|careers?|jobs?|press|news)",
+    re.IGNORECASE,
+)
+
+
+def _is_html_content_type(ct: str) -> bool:
+    """Return True if the Content-Type header indicates HTML content."""
+    ct_lower = ct.lower().split(";")[0].strip()
+    return ct_lower in ("text/html", "application/xhtml+xml")
+
+
+def score_link(url: str, anchor: str) -> int:
+    """Return a priority score for a link.
+
+    Returns 1 for high-priority (docs, features, guides, changelog, API),
+    -1 for low-priority (marketing, blog, pricing, legal, login),
+    and 0 for neutral links.
+    """
+    path = urlparse(url).path
+    text = f"{path} {anchor}"
+    if _LOW_PRIORITY.search(text):
+        return -1
+    if _HIGH_PRIORITY.search(text):
+        return 1
+    return 0
+
+
+def extract_links(html: str, base_url: str) -> list[tuple[str, str]]:
+    """Return (absolute_url, anchor_text) pairs extracted from *html*.
+
+    Relative URLs are resolved against *base_url*. Fragment-only links,
+    mailto: and javascript: hrefs are excluded.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    links: list[tuple[str, str]] = []
+    for tag in soup.find_all("a", href=True):
+        if not isinstance(tag, Tag):
+            continue
+        href = str_attr(tag, "href").strip()
+        if not href or href.startswith(("#", "mailto:", "javascript:")):
+            continue
+        absolute = urljoin(base_url, href).split("#")[0]
+        anchor = str(tag.get_text(separator=" ")).strip()
+        links.append((absolute, anchor))
+    return links
+
+
+def _same_origin(url_a: str, url_b: str) -> bool:
+    """Return True if *url_a* and *url_b* share scheme, host, and port."""
+    a = urlparse(url_a)
+    b = urlparse(url_b)
+    return (
+        a.scheme.lower() == b.scheme.lower()
+        and (a.hostname or "").lower() == (b.hostname or "").lower()
+        and a.port == b.port
+    )
+
+
+def fetch_site(
+    url: str,
+    *,
+    scrape_depth: Literal["deep", "shallow", "none"] = "deep",
+) -> tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]]:
+    """Fetch *url* and return extracted artifacts plus raw HTML.
+
+    *scrape_depth* controls how aggressively the fetcher follows links:
+
+    * ``"deep"`` — fetch the entry URL and follow **same-origin** links
+      (same scheme + host + port).  High-priority links (docs, features,
+      guides, changelog, API references) are visited before neutral links.
+      Low-priority links (marketing, blog, pricing, legal, login) are
+      skipped.  Cross-origin links are **not** followed; they are
+      recorded for the orchestrator to discover separately.
+    * ``"shallow"`` — fetch only the entry URL, no link-following.
+    * ``"none"`` — don't fetch anything; return empty results.
+
+    Returns a tuple of
+    ``(text, code_examples, doc_structures, page_records, raw_pages)``
+    where *text* is concatenated text content from all visited pages,
+    *code_examples* is a list of :class:`CodeExample` objects,
+    *doc_structures* is a :class:`DocStructures` with feature tables,
+    operation lists, unit lists, and function references,
+    *page_records* is a list of :class:`PageRecord` with URL, timestamp,
+    and content hash for every successfully fetched page, and
+    *raw_pages* is a dict mapping each fetched URL to its raw HTML
+    content so re-runs can diff against what changed on the product
+    site.  For every URL in *raw_pages* there is a corresponding
+    :class:`PageRecord`; failed fetches appear in neither.
+    """
+    empty: tuple[str, list[CodeExample], DocStructures, list[PageRecord], dict[str, str]] = (
+        "",
+        [],
+        DocStructures(),
+        [],
+        {},
+    )
+
+    if scrape_depth == "none":
+        return empty
+
+    # --- shallow: single page, no link-following ---
+    if scrape_depth == "shallow":
+        if not _is_fetchable_html_url(url):
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Refusing to fetch non-HTML URL: {url}",
+                context={"url": url, "reason": "non_html_extension"},
+            )
+            return empty
+        try:
+            resp = httpx.get(
+                url,
+                follow_redirects=True,
+                timeout=_TIMEOUT,
+                headers=_HEADERS,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Failed to fetch {url}: {exc}",
+                context={"url": url},
+            )
+            return empty
+
+        ct = resp.headers.get("content-type", "")
+        if not _is_html_content_type(ct):
+            # Server returned non-HTML for a URL whose suffix
+            # passed the pre-fetch filter. This is uncommon enough
+            # that callers seeing empty results can investigate;
+            # logging every occurrence drowns out real failures.
+            return empty
+
+        html = resp.content.decode("utf-8", errors="replace")
+
+        canon = canonicalize_url(str(resp.url))
+        record = PageRecord(
+            url=canon,
+            fetched_at=datetime.now(tz=timezone.utc).isoformat(),
+            content_hash=hashlib.sha256(html.encode()).hexdigest(),
+        )
+        text = extract_text(html)
+        text_out = f"=== {canon} ===\n{text}" if text else ""
+        examples = extract_code_examples(html, url)
+        structures = extract_doc_structures(html, url)
+        return text_out, examples, structures, [record], {canon: html}
+
+    # --- deep: same-origin BFS crawl ---
+    visited: set[str] = set()
+    queued: set[str] = set()
+    results: list[str] = []
+    all_examples: list[CodeExample] = []
+    all_structures = DocStructures()
+    all_records: list[PageRecord] = []
+    raw_pages: dict[str, str] = {}
+
+    seed_norm = canonicalize_url(url)
+    queue: list[tuple[int, str]] = [(2, url)]  # seed at highest priority
+    queued.add(seed_norm)
+
+    while queue:
+        queue.sort(key=lambda x: x[0])
+        _, current_url = queue.pop()
+
+        norm = canonicalize_url(current_url)
+        if norm in visited:
+            continue
+
+        visited.add(norm)
+
+        if not _is_fetchable_html_url(current_url):
+            # Belt and suspenders: link-discovery already filters
+            # these, but defend against future callers that enqueue
+            # URLs without going through the filter.
+            continue
+
+        try:
+            resp = httpx.get(
+                current_url,
+                follow_redirects=True,
+                timeout=_TIMEOUT,
+                headers=_HEADERS,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            record_failure(
+                "fetcher:fetch_site",
+                "fetch",
+                f"Failed to fetch {current_url}: {exc}",
+                context={"url": current_url},
+            )
+            continue
+
+        ct = resp.headers.get("content-type", "")
+        if not _is_html_content_type(ct):
+            # Suffix said HTML, server said otherwise; skip without
+            # noise. Network errors and parse errors continue to be
+            # logged below.
+            continue
+
+        html = resp.content.decode("utf-8", errors="replace")
+
+        final_norm = canonicalize_url(str(resp.url))
+        if final_norm != norm:
+            visited.add(final_norm)
+
+        record = PageRecord(
+            url=final_norm,
+            fetched_at=datetime.now(tz=timezone.utc).isoformat(),
+            content_hash=hashlib.sha256(html.encode()).hexdigest(),
+        )
+        all_records.append(record)
+        raw_pages[final_norm] = html
+
+        text = extract_text(html)
+        if text:
+            results.append(f"=== {current_url} ===\n{text}")
+
+        page_examples = extract_code_examples(html, current_url)
+        all_examples.extend(page_examples)
+
+        page_structures = extract_doc_structures(html, current_url)
+        all_structures.merge(page_structures)
+
+        for link_url, anchor in extract_links(html, current_url):
+            link_norm = canonicalize_url(link_url)
+            if link_norm in visited or link_norm in queued:
+                continue
+            # Only follow same-origin links; cross-origin links are
+            # recorded by the orchestrator, not fetched here.
+            if not _same_origin(link_url, url):
+                continue
+            # Skip URLs whose path suffix says they are not HTML
+            # (installers, archives, media, source/data blobs).
+            # Silent skip: these are routine on product sites and
+            # would otherwise dominate the failure log.
+            if not _is_fetchable_html_url(link_url):
+                continue
+            link_score = score_link(link_url, anchor)
+            if link_score >= 0:
+                queue.append((link_score, link_url))
+                queued.add(link_norm)
+
+    return "\n\n".join(results), all_examples, all_structures, all_records, raw_pages
+
+
+def fetch_text(url: str) -> str:
+    """Fetch *url* and return its visible text content."""
+    response = httpx.get(url, follow_redirects=True, timeout=_TIMEOUT, headers=_HEADERS)
+    response.raise_for_status()
+    return extract_text(response.content.decode("utf-8", errors="replace"))
+
+
+def extract_text(html: str) -> str:
+    """Parse *html* and return visible text with noise tags removed."""
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup.find_all(_NOISE_TAGS):
+        tag.decompose()
+    text = soup.get_text(separator="\n")
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
+def extract_media_urls(html: str, base_url: str) -> tuple[list[str], list[str]]:
+    """Extract image and video URLs from *html*.
+
+    Looks for ``<img>``, ``<video>``, ``<source>``, and ``<picture>``
+    tags. Returns ``(image_urls, video_urls)`` with absolute URLs.
+    Deduplicates within each list.
+    """
+    soup = BeautifulSoup(html, "lxml")
+    images: list[str] = []
+    videos: list[str] = []
+    seen: set[str] = set()
+
+    def _add(url: str, target: list[str]) -> None:
+        absolute = urljoin(base_url, url).split("?")[0].split("#")[0]
+        if absolute not in seen:
+            seen.add(absolute)
+            target.append(absolute)
+
+    # Video sources
+    for tag in soup.find_all("video"):
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src")
+        if src:
+            _add(src, videos)
+        poster = str_attr(tag, "poster")
+        if poster:
+            _add(poster, images)
+    for tag in soup.find_all("source"):
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src")
+        if not src:
+            continue
+        media_type = str_attr(tag, "type")
+        if "video" in media_type or any(src.lower().endswith(e) for e in _VIDEO_EXTS):
+            _add(src, videos)
+
+    # Images (skip tiny icons, data URIs, SVGs)
+    for tag in soup.find_all("img"):
+        if not isinstance(tag, Tag):
+            continue
+        src = str_attr(tag, "src") or str_attr(tag, "data-src")
+        if not src or src.startswith("data:"):
+            continue
+        if src.lower().endswith(".svg"):
+            continue
+        _add(src, images)
+    for tag in soup.find_all("picture"):
+        if not isinstance(tag, Tag):
+            continue
+        for source in tag.find_all("source"):
+            if not isinstance(source, Tag):
+                continue
+            srcset = str_attr(source, "srcset")
+            if srcset:
+                # Take the first URL from srcset
+                first = srcset.split(",")[0].strip().split()[0]
+                if not first.lower().endswith(".svg"):
+                    _add(first, images)
+
+    return images, videos
+
+
+def download_media(
+    image_urls: list[str],
+    video_urls: list[str],
+    output_dir: Path,
+) -> tuple[list[Path], list[Path]]:
+    """Download images and videos to *output_dir*.
+
+    Returns ``(images, videos)`` containing local paths for ALL
+    embedded media — both files newly downloaded during this call
+    AND files already present from previous runs.  Callers receive
+    a complete media inventory regardless of cache state.
+
+    Skips images smaller than ``_MIN_IMAGE_BYTES`` (newly downloaded
+    tiny images are deleted; previously cached tiny images that
+    somehow slipped through are excluded from the returned list).
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    images: list[Path] = []
+    videos: list[Path] = []
+
+    for url in video_urls:
+        path, is_new = _download_file(url, output_dir)
+        if path:
+            videos.append(path)
+
+    for url in image_urls:
+        path, is_new = _download_file(url, output_dir)
+        if path and path.stat().st_size >= _MIN_IMAGE_BYTES:
+            images.append(path)
+        elif path and is_new:
+            # Too small, likely icon — remove newly downloaded junk
+            path.unlink(missing_ok=True)
+
+    return images, videos
+
+
+def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:
+    """Download a single file.
+
+    Returns ``(path, is_new)`` where *is_new* is False if the file
+    already existed locally (cache hit).
+    """
+    parsed = urlparse(url)
+    filename = Path(parsed.path).name
+    if not filename:
+        return None, False
+    # Reject obvious binary installer / archive URLs that slipped
+    # in via media-URL extraction. Image and video URLs are
+    # whitelisted upstream by extract_media_urls against
+    # _IMAGE_EXTS / _VIDEO_EXTS, so this gate is defensive.
+    suffix = _path_suffix(url)
+    _ALLOWED_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
+    if suffix and suffix not in _ALLOWED_MEDIA_EXTS:
+        return None, False
+    # Avoid collisions by prefixing with domain
+    domain = parsed.netloc.replace(".", "_")
+    dest = output_dir / f"{domain}_{filename}"
+    if dest.exists():
+        return dest, False
+    try:
+        with httpx.stream(
+            "GET", url, follow_redirects=True, timeout=60.0, headers=_HEADERS
+        ) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                for chunk in resp.iter_bytes(chunk_size=8192):
+                    f.write(chunk)
+        return dest, True
+    except Exception as exc:
+        record_failure(
+            "fetcher:_download_file",
+            "fetch",
+            f"Failed to download {url}: {exc}",
+            context={"url": url},
+        )
+        dest.unlink(missing_ok=True)
+        return None, False

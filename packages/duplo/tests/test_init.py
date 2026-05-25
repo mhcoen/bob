@@ -1,0 +1,1559 @@
+"""Tests for duplo.init."""
+
+from __future__ import annotations
+
+import argparse
+from unittest.mock import patch
+
+import pytest
+
+from duplo.doc_tables import DocStructures
+from duplo.fetcher import PageRecord
+from duplo.init import (
+    _COMBINED_NEXT_STEPS,
+    _DESCRIPTION_FILE_NOT_FOUND,
+    _DESCRIPTION_NEXT_STEPS,
+    _NO_ARGS_NEXT_STEPS,
+    _REF_README_CONTENT,
+    _SPEC_EXISTS_ERROR,
+    _STDIN_TTY_PROMPT,
+    _URL_FETCH_FAILED_PRELUDE,
+    _URL_NEXT_STEPS_FETCH_FAILED,
+    _URL_NEXT_STEPS_IDENTIFIED,
+    _URL_NEXT_STEPS_UNIDENTIFIED,
+    run_init,
+)
+from duplo.spec_reader import ProductSpec
+from duplo.spec_writer import format_spec
+from duplo.validator import ValidationResult
+
+
+def _make_args(**overrides) -> argparse.Namespace:
+    defaults = {
+        "url": None,
+        "from_description": None,
+        "deep": False,
+        "force": False,
+    }
+    defaults.update(overrides)
+    return argparse.Namespace(**defaults)
+
+
+class TestRunInitNoArgsExistingSpec:
+    """Per INIT-design.md § 'duplo init against an existing SPEC.md'."""
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing user content\n")
+
+        with pytest.raises(SystemExit) as exc_info:
+            run_init(_make_args())
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert _SPEC_EXISTS_ERROR in captured.err
+        # Existing SPEC.md must not be clobbered.
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing user content\n"
+
+    def test_existing_spec_with_force_overwrites(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing user content\n")
+
+        run_init(_make_args(force=True))
+
+        new_content = (tmp_path / "SPEC.md").read_text()
+        assert new_content != "pre-existing user content\n"
+        assert "How the pieces fit together:" in new_content
+
+    def test_error_message_matches_init_design(self):
+        # INIT-design.md pins this exact wording.
+        assert "SPEC.md already exists in this directory." in _SPEC_EXISTS_ERROR
+        assert "`duplo init --force`" in _SPEC_EXISTS_ERROR
+        assert "`duplo`" in _SPEC_EXISTS_ERROR
+
+    def test_no_existing_spec_no_force_proceeds(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / "SPEC.md").exists()
+
+        run_init(_make_args())
+
+        assert (tmp_path / "SPEC.md").exists()
+        assert "How the pieces fit together:" in (tmp_path / "SPEC.md").read_text()
+
+
+class TestRunInitNoArgsRefDir:
+    """Per INIT-design.md § 'duplo init (no arguments)': ref/ creation."""
+
+    def test_creates_ref_dir_when_absent(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / "ref").exists()
+
+        run_init(_make_args())
+
+        ref_dir = tmp_path / "ref"
+        assert ref_dir.is_dir()
+        captured = capsys.readouterr()
+        assert "Created ref/ (empty)." in captured.out
+
+    def test_skips_creation_when_ref_dir_exists(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        # Pre-existing user file must not be touched.
+        user_file = ref_dir / "mockup.png"
+        user_file.write_bytes(b"user data")
+
+        run_init(_make_args())
+
+        assert ref_dir.is_dir()
+        assert user_file.read_bytes() == b"user data"
+        captured = capsys.readouterr()
+        assert "Created ref/ (empty)." not in captured.out
+
+
+class TestRunInitNoArgsRefReadme:
+    """Per INIT-design.md § 'ref/README.md content': write-once semantics."""
+
+    def test_writes_readme_when_absent(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        readme = tmp_path / "ref" / "README.md"
+        assert readme.is_file()
+        assert readme.read_text() == _REF_README_CONTENT
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." in captured.out
+
+    def test_content_matches_init_design(self):
+        # INIT-design.md § "ref/README.md content" pins this text.
+        assert _REF_README_CONTENT.startswith("# ref/\n")
+        assert "Accepted file types:" in _REF_README_CONTENT
+        assert "**This directory can be empty.**" in _REF_README_CONTENT
+        assert "visual-target, behavioral-target, docs," in _REF_README_CONTENT
+        assert "See SPEC-guide.md (in the project root)" in _REF_README_CONTENT
+
+    def test_does_not_overwrite_existing_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        existing = "user-authored README\n"
+        readme = ref_dir / "README.md"
+        readme.write_text(existing)
+
+        run_init(_make_args())
+
+        assert readme.read_text() == existing
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." not in captured.out
+
+    def test_writes_readme_even_when_ref_dir_preexists(self, tmp_path, capsys, monkeypatch):
+        # ref/ exists but README.md does not — still write it.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "ref").mkdir()
+
+        run_init(_make_args())
+
+        readme = tmp_path / "ref" / "README.md"
+        assert readme.read_text() == _REF_README_CONTENT
+        captured = capsys.readouterr()
+        assert "Created ref/README.md." in captured.out
+
+
+class TestRunInitNoArgsSpecWrite:
+    """Per INIT-design.md § 'duplo init (no arguments)': SPEC.md is the
+    template produced by format_spec on an empty ProductSpec."""
+
+    def test_spec_matches_format_spec_of_empty_product_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert written == format_spec(ProductSpec())
+
+    def test_spec_has_fill_in_markers_for_required_sections(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Required sections must carry the template's <FILL IN> markers
+        # so the user knows where to author content.
+        assert "## Purpose" in written
+        assert "<FILL IN: one or two sentences" in written
+        assert "## Architecture" in written
+        assert "<FILL IN: language, framework, platform, constraints>" in written
+
+    def test_prints_wrote_spec_message(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        captured = capsys.readouterr()
+        assert "Wrote SPEC.md (template, no inputs)." in captured.out
+
+
+class TestRunInitNoArgsOutputMessage:
+    """Per INIT-design.md § 'duplo init (no arguments)': full output
+    including the 'Next steps:' block."""
+
+    def test_prints_next_steps_block(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        captured = capsys.readouterr()
+        assert _NO_ARGS_NEXT_STEPS in captured.out
+
+    def test_next_steps_content_matches_init_design(self):
+        # INIT-design.md § "duplo init (no arguments)" pins this text.
+        assert _NO_ARGS_NEXT_STEPS.startswith("Next steps:\n")
+        assert "1. Open SPEC.md in your editor." in _NO_ARGS_NEXT_STEPS
+        assert "<FILL IN> marker" in _NO_ARGS_NEXT_STEPS
+        assert "2. (Optional) Drop reference files into ref/" in _NO_ARGS_NEXT_STEPS
+        assert "3. (Optional) Add a URL to ## Sources" in _NO_ARGS_NEXT_STEPS
+        assert "4. Run `duplo` to extract features" in _NO_ARGS_NEXT_STEPS
+
+    def test_output_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        # Created ref/, Created ref/README.md, Wrote SPEC.md, blank
+        # line, then Next steps — in that order.
+        monkeypatch.chdir(tmp_path)
+
+        run_init(_make_args())
+
+        out = capsys.readouterr().out
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md (template, no inputs).")
+        idx_next = out.index("Next steps:")
+        assert idx_ref < idx_readme < idx_spec < idx_next
+        # Blank line separates the "Wrote SPEC.md" line from "Next steps:".
+        between = out[idx_spec:idx_next]
+        assert "\n\n" in between
+
+
+def _fetch_site_success(
+    text: str = "=== https://numi.app ===\nNumi — a calculator.",
+    url: str = "https://numi.app",
+):
+    """Build a fetch_site return tuple that looks like a successful shallow fetch."""
+    record = PageRecord(
+        url=url,
+        fetched_at="2026-04-17T00:00:00+00:00",
+        content_hash="deadbeef",
+    )
+    return (text, [], DocStructures(), [record], {url: "<html></html>"})
+
+
+_FETCH_SITE_FAILURE = ("", [], DocStructures(), [], {})
+
+
+class TestRunInitUrlSuccess:
+    """Per INIT-design.md § 'duplo init <url>' happy path."""
+
+    def test_identified_product_prints_identity_and_drafts_spec(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                    unclear_boundaries=False,
+                ),
+            ) as mock_val,
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nNumi.\n## Sources\n\n- https://numi.app\n",
+            ) as mock_draft,
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="shallow")
+        mock_val.assert_called_once()
+        mock_draft.assert_called_once()
+        inputs = mock_draft.call_args.args[0]
+        assert inputs.url == "https://numi.app"
+        assert inputs.url_scrape  # non-empty
+
+        out = capsys.readouterr().out
+        assert "Fetched https://numi.app (shallow scrape for product identity)." in out
+        assert "→ Identified product: Numi" in out
+        assert "→ Pre-filled ## Purpose, ## Sources" in out
+        assert "Wrote SPEC.md." in out  # no "(template)" suffix
+        assert "deep-crawl https://numi.app on the next run" in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "Numi" in written
+
+    def test_deep_flag_passes_deep_depth(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app", deep=True))
+
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="deep")
+        out = capsys.readouterr().out
+        assert "deep scrape for product identity" in out
+        # --deep means the scrape is already done; the deferred-deep note
+        # should not be printed.
+        assert "deep-crawl" not in out
+
+    def test_url_canonicalized_before_fetch_and_write(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch(
+                "duplo.init.fetch_site",
+                return_value=_fetch_site_success(url="https://Numi.App/"),
+            ) as mock_fetch,
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nX\n## Sources\n\n- https://numi.app\n",
+            ) as mock_draft,
+        ):
+            run_init(_make_args(url="https://Numi.App/"))
+
+        # fetch_site gets the canonical form, not the raw trailing-slash input.
+        mock_fetch.assert_called_once_with("https://numi.app", scrape_depth="shallow")
+        inputs = mock_draft.call_args.args[0]
+        assert inputs.url == "https://numi.app"
+
+    def test_force_overwrites_existing_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init.draft_spec",
+                return_value="## Purpose\n\nNumi.\n",
+            ),
+        ):
+            run_init(_make_args(url="https://numi.app", force=True))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "pre-existing" not in written
+        assert "Numi" in written
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init.draft_spec") as mock_draft,
+        ):
+            with pytest.raises(SystemExit) as exc_info:
+                run_init(_make_args(url="https://numi.app"))
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_draft.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        # Existing SPEC.md must not be clobbered.
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+
+class TestRunInitUrlUnidentified:
+    """Per INIT-design.md § 'URL fetch succeeds but identifies nothing'."""
+
+    def test_unidentified_prefills_sources_only_and_leaves_purpose_fill_in(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+            patch("duplo.init.draft_spec") as mock_draft,
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        # Per INIT-design.md: when URL fetch succeeds but no product is
+        # identified, skip the drafter entirely — Purpose stays FILL IN.
+        mock_draft.assert_not_called()
+        out = capsys.readouterr().out
+        assert "Fetched https://example.com." in out
+        assert "Could not identify a specific product" in out
+        assert "Pre-filled ## Sources only." in out
+        assert "Wrote SPEC.md." in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "https://example.com" in written
+        assert "scrape: deep" in written
+        # Purpose must remain a FILL IN marker (not pre-filled from the scrape).
+        purpose_block = written.split("## Purpose", 1)[1].split("##", 1)[0]
+        assert "FILL IN" in purpose_block
+
+    def test_unidentified_threads_existing_refs_into_references(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Files in ref/ appear as ``proposed: true`` entries even when the
+        URL flow skips the drafter because the product is unidentified."""
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "shot.png").write_bytes(b"")
+        (ref_dir / "notes.pdf").write_bytes(b"")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+            patch("duplo.init.draft_spec") as mock_draft,
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=lambda p: (
+                    ("screenshot", "visual-target") if p.suffix == ".png" else ("", "docs")
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        # The drafter must still be bypassed in the unidentified branch.
+        mock_draft.assert_not_called()
+        capsys.readouterr()
+
+        written = (tmp_path / "SPEC.md").read_text()
+        refs_block = written.split("\n## References\n", 1)[1].split("\n## ", 1)[0]
+        assert "- ref/shot.png" in refs_block
+        assert "- ref/notes.pdf" in refs_block
+        assert "role: visual-target" in refs_block
+        assert "role: docs" in refs_block
+        assert refs_block.count("proposed: true") == 2
+
+
+class TestRunInitUrlFetchFailure:
+    """Per INIT-design.md § 'URL fetch fails'."""
+
+    def test_fetch_failure_writes_template_with_scrape_none(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch("duplo.init.draft_spec") as mock_draft,
+        ):
+            # Must not raise; exit 0 (normal return).
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        # Fetch failure → no validator call, no drafter call.
+        mock_val.assert_not_called()
+        mock_draft.assert_not_called()
+
+        out = capsys.readouterr().out
+        assert "Fetching https://does-not-exist.invalid ..." in out
+        assert "Failed" in out
+        assert "template-only setup" in out
+        assert "Wrote SPEC.md (template)." in out
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # URL is in Sources with scrape: none and product-reference role.
+        assert "- https://does-not-exist.invalid" in written
+        assert "role: product-reference" in written
+        assert "scrape: none" in written
+        # No proposed/discovered flag on the entry — user provided the URL.
+        # (The template top-matter mentions "proposed: true" as example
+        # text, so check the entry itself.)
+        entry_start = written.index("- https://does-not-exist.invalid")
+        next_heading = written.index("\n## ", entry_start)
+        entry_block = written[entry_start:next_heading]
+        assert "proposed:" not in entry_block
+        assert "discovered:" not in entry_block
+        # Required sections left as FILL IN markers.
+        assert "<FILL IN: one or two sentences" in written
+        assert "<FILL IN: language, framework, platform, constraints>" in written
+
+    def test_fetch_failure_threads_existing_refs_into_references(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        """Files in ref/ appear as ``proposed: true`` entries even when
+        URL fetch fails and the flow falls back to a template-only draft."""
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "shot.png").write_bytes(b"")
+        (ref_dir / "notes.pdf").write_bytes(b"")
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch("duplo.init.draft_spec") as mock_draft,
+            patch(
+                "duplo.init._propose_file_role",
+                side_effect=lambda p: (
+                    ("screenshot", "visual-target") if p.suffix == ".png" else ("", "docs")
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        mock_val.assert_not_called()
+        mock_draft.assert_not_called()
+        capsys.readouterr()
+
+        written = (tmp_path / "SPEC.md").read_text()
+        refs_block = written.split("\n## References\n", 1)[1].split("\n## ", 1)[0]
+        assert "- ref/shot.png" in refs_block
+        assert "- ref/notes.pdf" in refs_block
+        assert "role: visual-target" in refs_block
+        assert "role: docs" in refs_block
+        assert refs_block.count("proposed: true") == 2
+
+    def test_fetch_failure_canonicalizes_url_before_writing(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://Numi.App/"))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Canonical form (lowercase host, trailing slash stripped).
+        assert "- https://numi.app" in written
+        assert "- https://Numi.App/" not in written
+
+
+class TestRunInitUrlOutputOrdering:
+    """Per INIT-design.md § 'Output discipline' and § 'duplo init <url>':
+    lock the output layout for each URL-flow outcome so future edits do
+    not drift from the design doc's example shapes."""
+
+    def test_identified_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nNumi.\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        out = capsys.readouterr().out
+        idx_fetched = out.index("Fetched https://numi.app (shallow scrape for product identity).")
+        idx_identified = out.index("→ Identified product: Numi")
+        idx_prefilled = out.index("→ Pre-filled ## Purpose, ## Sources")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_next = out.index(_URL_NEXT_STEPS_IDENTIFIED)
+        idx_note = out.index("Note: duplo will deep-crawl https://numi.app")
+        assert (
+            idx_fetched
+            < idx_identified
+            < idx_prefilled
+            < idx_ref
+            < idx_readme
+            < idx_spec
+            < idx_next
+            < idx_note
+        )
+        # Blank line separates the pre-filled sub-results from the
+        # "Created ref/" block, matching INIT-design.md.
+        assert "\n\n" in out[idx_prefilled:idx_ref]
+        # Blank line separates "Wrote SPEC.md." from "Next steps:".
+        assert "\n\n" in out[idx_spec:idx_next]
+        # Blank line separates "Next steps:" block from the deferred-deep note.
+        assert "\n\n" in out[idx_next:idx_note]
+
+    def test_unidentified_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        out = capsys.readouterr().out
+        idx_fetched = out.index("Fetched https://example.com.")
+        idx_reason = out.index("→ Could not identify a specific product")
+        idx_sources = out.index("→ Pre-filled ## Sources only.")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_next = out.index(_URL_NEXT_STEPS_UNIDENTIFIED)
+        assert idx_fetched < idx_reason < idx_sources < idx_ref < idx_readme < idx_spec < idx_next
+        assert "\n\n" in out[idx_sources:idx_ref]
+        assert "\n\n" in out[idx_spec:idx_next]
+
+    def test_fetch_failure_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        out = capsys.readouterr().out
+        idx_fetching = out.index("Fetching https://does-not-exist.invalid ...")
+        idx_failed = out.index("→ Failed:")
+        idx_prelude = out.index(_URL_FETCH_FAILED_PRELUDE)
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md (template).")
+        idx_next = out.index(_URL_NEXT_STEPS_FETCH_FAILED)
+        assert idx_fetching < idx_failed < idx_prelude < idx_ref < idx_readme < idx_spec < idx_next
+        assert "\n\n" in out[idx_failed:idx_prelude]
+        assert "\n\n" in out[idx_prelude:idx_ref]
+        assert "\n\n" in out[idx_spec:idx_next]
+
+
+class TestRunInitUrlRefScaffolding:
+    """Per INIT-design.md § 'duplo init <url>': the URL flow must create
+    ref/ and ref/README.md the same way as the no-arguments case, and
+    write SPEC.md from draft_spec output (task 6.14.8)."""
+
+    def test_identified_flow_writes_draft_spec_output_verbatim(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        drafted = "## Purpose\n\nNumi — a calculator.\n\n## Sources\n\n- https://numi.app\n"
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value=drafted),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        assert (tmp_path / "SPEC.md").read_text() == drafted
+
+    def test_identified_flow_creates_ref_dir_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        ref_dir = tmp_path / "ref"
+        readme = ref_dir / "README.md"
+        assert ref_dir.is_dir()
+        assert readme.read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." in out
+        assert "Created ref/README.md." in out
+
+    def test_unidentified_flow_creates_ref_dir_and_readme(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic landing page",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+
+    def test_fetch_failure_flow_creates_ref_dir_and_readme(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+        ):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+
+    def test_url_flow_preserves_existing_ref_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        existing = "user-authored README\n"
+        (ref_dir / "README.md").write_text(existing)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nX\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+
+        assert (ref_dir / "README.md").read_text() == existing
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." not in out
+        assert "Created ref/README.md." not in out
+
+
+def _stub_build_draft_spec(**fields):
+    """Return a stub callable that yields a ProductSpec with *fields* set.
+
+    Used to avoid real LLM calls from ``_build_draft_spec`` (which
+    internally calls ``_draft_from_inputs`` -> ``query`` -> ``claude -p``)
+    while still exercising the description flow's inspection logic.
+    """
+    from duplo.spec_reader import DesignBlock
+
+    def _stub(inputs):
+        spec = ProductSpec(
+            purpose=fields.get("purpose", ""),
+            architecture=fields.get("architecture", ""),
+            design=DesignBlock(user_prose=fields.get("design", "")),
+            behavior_contracts=fields.get("behavior_contracts", []),
+            scope_include=fields.get("scope_include", []),
+            scope_exclude=fields.get("scope_exclude", []),
+        )
+        if inputs.description:
+            spec.notes = "Original description provided to `duplo init`:\n\n" + inputs.description
+        return spec
+
+    return _stub
+
+
+class TestRunInitDescriptionFile:
+    """Per INIT-design.md § 'duplo init --from-description description.txt'."""
+
+    def test_reads_description_from_file_and_writes_spec(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "Build a SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A SwiftUI calculator."),
+        ) as mock_build:
+            run_init(_make_args(from_description=str(desc_path)))
+
+        mock_build.assert_called_once()
+        inputs = mock_build.call_args.args[0]
+        assert inputs.description == prose
+        assert inputs.url is None
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "A SwiftUI calculator." in written
+        # Verbatim prose lands in ## Notes.
+        notes_idx = written.index("Original description provided to `duplo init`:")
+        assert prose in written[notes_idx:]
+
+        out = capsys.readouterr().out
+        assert f"Read {len(prose)} chars of description from {desc_path}." in out
+        assert "Drafted SPEC.md from description." in out
+        assert "Wrote SPEC.md." in out
+
+    def test_prints_next_steps_block(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert _DESCRIPTION_NEXT_STEPS in capsys.readouterr().out
+
+    def test_missing_file_prints_error_and_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+
+        with (
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(from_description=str(missing)))
+
+        assert exc_info.value.code == 1
+        mock_build.assert_not_called()
+        assert _DESCRIPTION_FILE_NOT_FOUND.format(path=str(missing)) in capsys.readouterr().err
+        assert not (tmp_path / "SPEC.md").exists()
+
+    def test_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with (
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert exc_info.value.code == 1
+        mock_build.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+    def test_force_overwrites_existing_spec(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="Something."),
+        ):
+            run_init(_make_args(from_description=str(desc_path), force=True))
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "pre-existing" not in written
+        assert "Something." in written
+
+    def test_creates_ref_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a thing.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert (tmp_path / "ref").is_dir()
+        assert (tmp_path / "ref" / "README.md").read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert "Created ref/ (empty)." in out
+        assert "Created ref/README.md." in out
+
+
+class TestRunInitDescriptionStdin:
+    """Per INIT-design.md § 'duplo init --from-description -'."""
+
+    def test_reads_description_from_stdin_pipe(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator."
+        # Piped stdin: isatty() is False, no prompt emitted.
+        import io
+
+        monkeypatch.setattr("sys.stdin", io.StringIO(prose))
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="Calc."),
+        ) as mock_build:
+            run_init(_make_args(from_description="-"))
+
+        inputs = mock_build.call_args.args[0]
+        assert inputs.description == prose
+        out = capsys.readouterr().out
+        assert f"Read {len(prose)} chars of description from stdin." in out
+        # No TTY prompt when stdin is not a terminal.
+        assert _STDIN_TTY_PROMPT not in out
+
+    def test_tty_stdin_prints_prompt(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+
+        class _TtyStdin:
+            def isatty(self):
+                return True
+
+            def read(self):
+                return "Interactive prose."
+
+        monkeypatch.setattr("sys.stdin", _TtyStdin())
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description="-"))
+
+        out = capsys.readouterr().out
+        assert _STDIN_TTY_PROMPT in out
+        assert "Read 18 chars of description from stdin." in out
+
+
+class TestRunInitDescriptionUrlExtraction:
+    """Per DRAFTER-design.md § 'Inferring URL roles': URLs in prose
+    become Sources entries with proposed: true and the inferred role.
+
+    The extraction happens inside ``draft_spec`` /
+    ``_build_draft_spec`` (spec_writer).  These tests run the real
+    drafter path with a mocked ``_draft_from_inputs`` so the LLM is
+    bypassed but URL extraction still runs."""
+
+    def test_like_url_in_prose_becomes_proposed_product_reference(
+        self, tmp_path, capsys, monkeypatch
+    ):
+        from duplo.spec_reader import DesignBlock
+
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator like Numi at https://numi.app."
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text(prose)
+
+        # Bypass the LLM call inside _build_draft_spec while leaving
+        # the real URL extraction path intact.
+        def fake_draft_from_inputs(inputs):
+            return ProductSpec(
+                purpose="A calculator.",
+                architecture="",
+                design=DesignBlock(user_prose=""),
+            )
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            fake_draft_from_inputs,
+        )
+
+        run_init(_make_args(from_description=str(desc_path)))
+
+        from duplo.spec_reader import _parse_spec
+
+        written = (tmp_path / "SPEC.md").read_text()
+        spec = _parse_spec(written)
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        assert entry.url == "https://numi.app"
+        assert entry.role == "product-reference"
+        assert entry.proposed is True
+        # User-provided no URL flag, so discovered is not set either.
+        assert entry.discovered is False
+
+    def test_unlike_url_in_prose_becomes_proposed_counter_example_scrape_none(
+        self, tmp_path, monkeypatch
+    ):
+        from duplo.spec_reader import DesignBlock
+
+        monkeypatch.chdir(tmp_path)
+        prose = "Build a calculator, unlike https://bad-calc.example/."
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text(prose)
+
+        monkeypatch.setattr(
+            "duplo.spec_writer._draft_from_inputs",
+            lambda inputs: ProductSpec(
+                purpose="",
+                architecture="",
+                design=DesignBlock(user_prose=""),
+            ),
+        )
+
+        run_init(_make_args(from_description=str(desc_path)))
+
+        from duplo.spec_reader import _parse_spec
+
+        written = (tmp_path / "SPEC.md").read_text()
+        spec = _parse_spec(written)
+        assert len(spec.sources) == 1
+        entry = spec.sources[0]
+        # Canonicalized (trailing slash stripped).
+        assert entry.url == "https://bad-calc.example"
+        assert entry.role == "counter-example"
+        assert entry.scrape == "none"
+        assert entry.proposed is True
+
+
+class TestRunInitDescriptionBullets:
+    """Per INIT-design.md § 'duplo init --from-description': the
+    per-section bullets printed after 'Wrote SPEC.md.' must reflect
+    what the drafter actually pre-filled."""
+
+    def test_architecture_filled_when_prose_states_stack(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("SwiftUI calculator.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(architecture="SwiftUI on macOS."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Architecture filled from prose" in out
+        assert "## Architecture left as <FILL IN>" not in out
+
+    def test_architecture_fill_in_when_prose_silent_on_stack(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A calculator."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Architecture left as <FILL IN>" in out
+        assert "Pre-filled ## Purpose from prose." in out
+
+    def test_notes_bullet_always_present(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Anything.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        assert "## Notes contains the verbatim original description." in capsys.readouterr().out
+
+    def test_behavior_bullet_reports_empty_when_no_contracts(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Calc.")
+
+        with patch("duplo.init._build_draft_spec", side_effect=_stub_build_draft_spec()):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "## Behavior left empty (no input/output pairs detected)." in out
+
+    def test_design_bullet_when_design_filled(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Monospaced dark theme.")
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(
+                purpose="A calculator.",
+                design="Monospaced, dark theme.",
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        assert "Pre-filled ## Purpose, ## Design from prose." in out
+
+
+class TestRunInitDescriptionOutputOrdering:
+    """Per INIT-design.md § 'duplo init --from-description description.txt':
+    lock the output layout so future edits do not drift from the design
+    doc's example shape (character count → drafted → ref/ scaffolding →
+    Wrote SPEC.md → bullets → next steps)."""
+
+    def test_description_flow_ordering_matches_init_design(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "Build a SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(
+                purpose="A calculator.",
+                architecture="SwiftUI on macOS.",
+            ),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+
+        out = capsys.readouterr().out
+        idx_read = out.index(f"Read {len(prose)} chars of description from {desc_path}.")
+        idx_drafted = out.index("Drafted SPEC.md from description.")
+        idx_ref = out.index("Created ref/ (empty).")
+        idx_readme = out.index("Created ref/README.md.")
+        idx_spec = out.index("Wrote SPEC.md.")
+        idx_bullet = out.index("Pre-filled ## Purpose from prose.")
+        idx_next = out.index(_DESCRIPTION_NEXT_STEPS)
+        assert idx_read < idx_drafted < idx_ref < idx_readme < idx_spec < idx_bullet < idx_next
+        # Blank line separates "Wrote SPEC.md." from the bullets.
+        assert "\n\n" in out[idx_spec:idx_bullet]
+        # Blank line separates the last bullet from "Next steps:".
+        assert "\n\n" in out[idx_bullet:idx_next]
+
+
+class TestRunInitCombined:
+    """Per INIT-design.md § 'duplo init <url> --from-description description.txt'.
+
+    Combined flow: URL scrape + prose. Drafter merges both, with prose
+    winning on conflicts.  Errors stack (bad URL AND missing file
+    both reported)."""
+
+    def test_combined_inputs_produce_merged_spec(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        prose = "SwiftUI calculator with inline results."
+        desc_path.write_text(prose)
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="A SwiftUI calculator inspired by Numi.",
+                    architecture="SwiftUI on macOS.",
+                ),
+            ) as mock_build,
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        mock_build.assert_called_once()
+        inputs = mock_build.call_args.args[0]
+        # Both channels populate DraftInputs; the drafter is in charge
+        # of merging them per DRAFTER-design.md § "Drafting from inputs".
+        assert inputs.url == "https://numi.app"
+        assert inputs.url_scrape
+        assert inputs.description == prose
+
+        written = (tmp_path / "SPEC.md").read_text()
+        assert "A SwiftUI calculator inspired by Numi." in written
+        # Prose wins for architecture — URL-only would leave it FILL IN.
+        assert "SwiftUI on macOS." in written
+        # Verbatim prose preserved in ## Notes.
+        notes_idx = written.index("Original description provided to `duplo init`:")
+        assert prose in written[notes_idx:]
+
+    def test_prose_architecture_overrides_url_only(self, tmp_path, monkeypatch):
+        # Control: URL-only leaves Architecture as FILL IN.  Combined
+        # with prose that states a stack fills Architecture.
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Qt desktop app in C++.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="Calc.",
+                    architecture="Qt, C++.",
+                ),
+            ),
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # Architecture populated, not FILL IN.
+        arch_idx = written.index("## Architecture")
+        next_heading = written.index("\n## ", arch_idx + 1)
+        arch_block = written[arch_idx:next_heading]
+        assert "Qt, C++." in arch_block
+        assert "FILL IN" not in arch_block
+
+    def test_both_errors_reported_simultaneously(self, tmp_path, capsys, monkeypatch):
+        # Invalid URL AND missing description file → both errors printed
+        # to stderr, nothing written, exit 1.
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(_make_args(url="not-a-url", from_description=str(missing)))
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_build.assert_not_called()
+        err = capsys.readouterr().err
+        assert "not a valid URL" in err
+        assert _DESCRIPTION_FILE_NOT_FOUND.format(path=str(missing)) in err
+        # Nothing written to disk when validation fails.
+        assert not (tmp_path / "SPEC.md").exists()
+
+    def test_combined_fetch_failure_falls_back_to_description(self, tmp_path, capsys, monkeypatch):
+        # URL fetch fails but description is valid → draft from
+        # description alone, record URL as scrape: none.
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE),
+            patch("duplo.init.validate_product_url") as mock_val,
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(purpose="A calculator."),
+            ) as mock_build,
+        ):
+            run_init(
+                _make_args(
+                    url="https://does-not-exist.invalid",
+                    from_description=str(desc_path),
+                ),
+            )
+
+        mock_val.assert_not_called()
+        inputs = mock_build.call_args.args[0]
+        # Fetch failure → no URL scrape passed to the drafter.
+        assert inputs.url is None
+        assert inputs.url_scrape is None
+        assert inputs.description == "Build a calculator."
+
+        written = (tmp_path / "SPEC.md").read_text()
+        # URL recorded with scrape: none.
+        assert "- https://does-not-exist.invalid" in written
+        assert "scrape: none" in written
+        assert "A calculator." in written
+
+    def test_combined_creates_ref_dir_and_readme(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(purpose="Calc."),
+            ),
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        ref_dir = tmp_path / "ref"
+        assert ref_dir.is_dir()
+        assert (ref_dir / "README.md").read_text() == _REF_README_CONTENT
+        out = capsys.readouterr().out
+        assert _COMBINED_NEXT_STEPS in out
+
+    def test_combined_existing_spec_without_force_exits_1(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build something.")
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+
+        with (
+            patch("duplo.init.fetch_site") as mock_fetch,
+            patch("duplo.init._build_draft_spec") as mock_build,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            run_init(
+                _make_args(url="https://numi.app", from_description=str(desc_path)),
+            )
+
+        assert exc_info.value.code == 1
+        mock_fetch.assert_not_called()
+        mock_build.assert_not_called()
+        assert _SPEC_EXISTS_ERROR in capsys.readouterr().err
+        assert (tmp_path / "SPEC.md").read_text() == "pre-existing\n"
+
+
+class TestOutputDiscipline:
+    """Per INIT-design.md § 'Output discipline'.
+
+    Covers the five formatting rules uniformly across every init
+    input combination (no args, URL identified, URL unidentified,
+    URL fetch failure, description from file, combined URL + prose).
+    """
+
+    # Disallowed codepoint ranges for rule 5 "No emoji".  Covers the
+    # Unicode blocks where pictographic emoji live.  Typographic
+    # punctuation (→, —, en/em dashes, smart quotes) is out of scope
+    # — they are not emoji and duplo's copy legitimately uses some
+    # of them.
+    _EMOJI_RANGES = (
+        (0x1F000, 0x1FFFF),  # Supplementary pictographs (most emoji)
+        (0x1F300, 0x1F5FF),  # Misc Symbols and Pictographs
+        (0x1F600, 0x1F64F),  # Emoticons
+        (0x1F680, 0x1F6FF),  # Transport & Map
+        (0x1F900, 0x1F9FF),  # Supplemental Symbols and Pictographs
+        (0x2600, 0x26FF),  # Misc Symbols (☀ ☂ ★ etc.)
+        (0x2700, 0x27BF),  # Dingbats (✓ ✗ ✨ etc.)
+    )
+
+    # Action-tense rule (rule 1) is pinned case-by-case by the
+    # existing class-per-flow tests (e.g. "Fetched X.", "Wrote X.",
+    # "Created X.", "Read N chars", "Drafted SPEC.md").  Rather than
+    # repeat that with a whitelist here, we spot-check one forbidden
+    # first-person form ("I " prefix) that would signal the LLM-style
+    # phrasing INIT-design.md § "Output discipline" bans.
+    @staticmethod
+    def _assert_no_first_person(stdout: str) -> None:
+        for line in stdout.splitlines():
+            assert not line.startswith(("I ", "I've ", "I'll ")), (
+                f"First-person narration in action output: {line!r}"
+            )
+
+    @staticmethod
+    def _assert_no_color_codes(text: str) -> None:
+        # ANSI color/style escape sequences start with ESC (\x1b).
+        assert "\x1b" not in text, f"ANSI escape code in output: {text!r}"
+
+    @classmethod
+    def _assert_no_emoji(cls, text: str) -> None:
+        for ch in text:
+            cp = ord(ch)
+            for low, high in cls._EMOJI_RANGES:
+                if low <= cp <= high:
+                    raise AssertionError(
+                        f"Disallowed emoji codepoint U+{cp:04X} ({ch!r}) in output"
+                    )
+
+    @staticmethod
+    def _assert_next_steps_numbered(stdout: str) -> None:
+        # Rule 3: success runs end with a "Next steps:" block whose
+        # items are numbered (1., 2., ...), not bulleted.
+        assert "Next steps:" in stdout
+        tail = stdout.split("Next steps:", 1)[1]
+        # First non-blank line after the header must start with "  1.".
+        for line in tail.splitlines():
+            if not line.strip():
+                continue
+            assert line.startswith("  1."), (
+                f"Next steps block does not start with '  1.': {line!r}"
+            )
+            break
+
+    @staticmethod
+    def _assert_bullets_use_arrow(stdout: str) -> None:
+        # Rule 2: sub-result lines are indented and prefixed with "→ ".
+        # Any line that begins with two-space indent and a non-digit,
+        # non-space next char must be an arrow bullet.
+        for line in stdout.splitlines():
+            if not line.startswith("  "):
+                continue
+            rest = line[2:]
+            if not rest:
+                continue
+            first = rest[0]
+            if first.isdigit() or first == " ":
+                # "  1. ..." (next-step items) and "  continuation" lines
+                # are fine.
+                continue
+            assert rest.startswith("→ "), (
+                f"Indented non-numeric line does not use '→ ' bullet: {line!r}"
+            )
+
+    @classmethod
+    def _assert_all_rules(cls, stdout: str, stderr: str, *, is_success: bool) -> None:
+        cls._assert_no_color_codes(stdout)
+        cls._assert_no_color_codes(stderr)
+        cls._assert_no_emoji(stdout)
+        cls._assert_no_emoji(stderr)
+        cls._assert_no_first_person(stdout)
+        cls._assert_bullets_use_arrow(stdout)
+        if is_success:
+            cls._assert_next_steps_numbered(stdout)
+            # Rule 4: successful runs emit nothing to stderr.
+            assert stderr == "", f"Successful run wrote to stderr: {stderr!r}"
+
+    def test_no_args_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        run_init(_make_args())
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_identified_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch("duplo.init.draft_spec", return_value="## Purpose\n\nNumi.\n"),
+        ):
+            run_init(_make_args(url="https://numi.app"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_unidentified_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=False,
+                    product_name="",
+                    products=[],
+                    reason="generic",
+                    unclear_boundaries=True,
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://example.com"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_url_fetch_failure_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        with patch("duplo.init.fetch_site", return_value=_FETCH_SITE_FAILURE):
+            run_init(_make_args(url="https://does-not-exist.invalid"))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_description_file_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("Build a calculator.")
+        with patch(
+            "duplo.init._build_draft_spec",
+            side_effect=_stub_build_draft_spec(purpose="A calculator."),
+        ):
+            run_init(_make_args(from_description=str(desc_path)))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_combined_flow(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        desc_path = tmp_path / "description.txt"
+        desc_path.write_text("SwiftUI calculator.")
+        with (
+            patch("duplo.init.fetch_site", return_value=_fetch_site_success()),
+            patch(
+                "duplo.init.validate_product_url",
+                return_value=ValidationResult(
+                    single_product=True,
+                    product_name="Numi",
+                    products=[],
+                    reason="ok",
+                ),
+            ),
+            patch(
+                "duplo.init._build_draft_spec",
+                side_effect=_stub_build_draft_spec(
+                    purpose="Calc.",
+                    architecture="SwiftUI.",
+                ),
+            ),
+        ):
+            run_init(_make_args(url="https://numi.app", from_description=str(desc_path)))
+        out, err = capsys.readouterr()
+        self._assert_all_rules(out, err, is_success=True)
+
+    def test_error_flow_existing_spec_to_stderr_only(self, tmp_path, capsys, monkeypatch):
+        # Rule 4 (negative): error path writes only to stderr; stdout
+        # carries no action text.
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "SPEC.md").write_text("pre-existing\n")
+        with pytest.raises(SystemExit):
+            run_init(_make_args())
+        out, err = capsys.readouterr()
+        self._assert_no_color_codes(out)
+        self._assert_no_color_codes(err)
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert err.startswith("Error:")
+        # No action lines on stdout when init aborts at the SPEC-exists check.
+        for token in ("Created ", "Wrote ", "Fetched ", "Drafted "):
+            assert token not in out
+
+    def test_error_flow_missing_description_to_stderr_only(self, tmp_path, capsys, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+        with pytest.raises(SystemExit):
+            run_init(_make_args(from_description=str(missing)))
+        out, err = capsys.readouterr()
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert err.startswith("Error: file not found:")
+        for token in ("Created ", "Wrote ", "Drafted "):
+            assert token not in out
+
+    def test_combined_stacked_errors_both_to_stderr(self, tmp_path, capsys, monkeypatch):
+        # Invalid URL + missing file: both messages on stderr, stdout empty.
+        monkeypatch.chdir(tmp_path)
+        missing = tmp_path / "missing.txt"
+        with pytest.raises(SystemExit):
+            run_init(_make_args(url="not-a-url", from_description=str(missing)))
+        out, err = capsys.readouterr()
+        self._assert_no_emoji(out)
+        self._assert_no_emoji(err)
+        assert "not a valid URL" in err
+        assert "file not found" in err
+        assert out == ""

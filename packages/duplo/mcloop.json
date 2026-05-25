@@ -1,0 +1,8 @@
+{
+  "checks": [
+    "ruff check .",
+    "ruff format --check .",
+    "pytest -x -n auto"
+  ],
+  "check_timeout": 600
+}
