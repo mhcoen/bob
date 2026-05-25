@@ -64,7 +64,7 @@ McLoop is part of the [bob ecosystem](https://github.com/mhcoen/bob), a determin
 - **[duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo)** generates plans from product specifications and re-authors plans against accumulated execution evidence. McLoop calls into duplo when re-author thresholds fire.
 - **[orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra)** is the workflow runtime McLoop uses for multi-model coding patterns (draft-then-adjudicate, council, anonymous reviewers).
 
-McLoop runs against your project. The rest of the bob stack runs under it. You can install McLoop standalone (`pip install mcloop`) or get the full ecosystem by cloning the bob workspace and running `uv sync`.
+McLoop runs against your project. The rest of the bob stack runs under it. Install the full ecosystem by cloning the bob workspace and running `uv sync`.
 
 ## State files
 
@@ -208,11 +208,7 @@ clearly enough for a person to follow, McLoop can execute it.
 
 ## Install
 
-```bash
-pip install mcloop
-```
-
-For the full bob ecosystem (McLoop plus duplo, orchestra, and bob-tools as a single workspace), clone the bob repo and use `uv`:
+McLoop is part of the bob workspace and is not installable standalone. Clone the bob repo and run `uv sync`:
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
@@ -220,7 +216,7 @@ cd bob
 uv sync
 ```
 
-This installs every workspace package in editable mode with internal cross-package dependencies resolved locally. `mcloop`, `duplo`, and the other CLIs land on `PATH`.
+This installs every workspace package (McLoop, Duplo, Orchestra, bob-tools) in editable mode with internal cross-package dependencies resolved locally. The `mcloop`, `duplo`, `orchestra`, and `bob-plan` CLIs land on `PATH`.
 
 ## Quickstart
 
@@ -1740,7 +1736,7 @@ matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 
 ## Requirements
 
-- Python >= 3.11
+- Python >= 3.12
 - `git` on PATH (McLoop requires git for checkpointing and recovery)
 - `claude` CLI on PATH (or `codex` CLI when using `--cli codex`)
 - `gh` CLI on PATH (for automatic GitHub repo creation)
@@ -1777,8 +1773,7 @@ what gets persisted and where.
 
 ## Development
 
-If you're working on McLoop itself, the bob workspace is the natural
-development environment:
+McLoop lives in the bob workspace alongside its sibling packages (Duplo, Orchestra, bob-tools) and cannot be developed against in isolation — its dependencies (`orchestra`, `bob-tools`, `duplo`) resolve through the workspace, not PyPI.
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
@@ -1786,20 +1781,10 @@ cd bob
 uv sync
 ```
 
-McLoop, its sibling packages, and all dev dependencies are then
-installed editable in a single `.venv/` at the workspace root.
-
-If you need to develop against McLoop standalone:
+McLoop, its sibling packages, and all dev dependencies are installed editable in a single `.venv/` at the workspace root. Run lint, format, and tests from the McLoop package directory:
 
 ```bash
-git clone https://github.com/mhcoen/mcloop.git
-cd mcloop
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-```
-
-```bash
+cd packages/mcloop
 ruff check .              # Lint
 ruff format --check .     # Format check
 pytest                    # Tests
