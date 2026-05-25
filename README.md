@@ -200,21 +200,38 @@ and that framework, not the actors inside it, is where every
 correctness guarantee in this system lives. Bob is that framework.
 Also, Bob would have caught that bug in review.
 
-## Repositories
+## Packages
 
-- **Duplo** — design extraction and phased plan generation —
-  <https://github.com/mhcoen/duplo>
-- **McLoop** — the autonomous execution loop —
-  <https://github.com/mhcoen/mcloop>
-- **Orchestra** — the declarative multi-model workflow runner —
-  <https://github.com/mhcoen/orchestra>
-- **bob-tools** — shared infrastructure; the Plan Ledger lives here —
-  <https://github.com/mhcoen/bob-tools>
+The bob ecosystem lives in this repository as a uv workspace. Each
+tool is a package under `packages/`:
+
+- **[Duplo](packages/duplo/)** — design extraction and phased plan
+  generation.
+- **[McLoop](packages/mcloop/)** — the autonomous execution loop.
+- **[Orchestra](packages/orchestra/)** — the declarative multi-model
+  workflow runner.
+- **[bob-tools](packages/bob-tools/)** — shared infrastructure; the
+  Plan Ledger and the formal `PLAN.md` library live here.
 - **Vroom** — post-ship audit and the closing of the loop — part of
   the ecosystem, not yet public.
 
-Each tool repository carries its own README with the full surface and
-its own honest status.
+Each package carries its own README with the full surface and its own
+honest status.
+
+## Installation
+
+Bob is a uv workspace. Clone the repo and run `uv sync`:
+
+```bash
+git clone https://github.com/mhcoen/bob.git
+cd bob
+uv sync
+```
+
+This installs every package — Duplo, McLoop, Orchestra, bob-tools —
+in editable mode, with internal cross-package dependencies resolved
+locally. The CLIs (`duplo`, `mcloop`, `orchestra`, `bob-plan`) land
+on `PATH`.
 
 ## Subscribe
 
@@ -237,14 +254,14 @@ His current work focuses on hardening AI systems and working toward
 1,000 useful commits/day on GitHub.
 
 Bob is built with Bob. The system is its own existence proof: a
-non-trivial multi-repository codebase carried through the
+non-trivial multi-package codebase carried through the
 Duplo → McLoop → Orchestra path is the most direct evidence available
 that a deterministic framework around stochastic actors produces code
 good enough to build the framework.
 
 ## License
 
-Each tool repository carries its own license. The narrative and
-coordination material in this umbrella repository, including the
-abstract, the loop description, and the framing of the Bob toolchain,
-is copyright 2026 Michael Coen, all rights reserved.
+Each package carries its own license. The narrative and coordination
+material in this workspace, including the abstract, the loop
+description, and the framing of the Bob toolchain, is copyright 2026
+Michael Coen, all rights reserved.
