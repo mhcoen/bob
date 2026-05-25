@@ -154,7 +154,7 @@ One model answers. Useful as a parity baseline and for queries where
 deliberation is not worth the latency.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/single.png" alt="Single architecture" width="50%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/single.png" alt="Single architecture" width="50%">
 </p>
 
 ### Draft then Adjudicate
@@ -164,7 +164,7 @@ The adjudicator catches the drafter's obvious mistakes before they
 ship. Three model calls.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/draft_then_adjudicate.png" alt="Draft then Adjudicate architecture" width="70%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/draft_then_adjudicate.png" alt="Draft then Adjudicate architecture" width="70%">
 </p>
 
 ### Propose, Critique, Synthesize
@@ -175,7 +175,7 @@ questions where the value comes from the disagreement, not the
 agreement. Four model calls.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/propose_critique_synthesize.png" alt="Propose, Critique, Synthesize architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/propose_critique_synthesize.png" alt="Propose, Critique, Synthesize architecture" width="85%">
 </p>
 
 ### Council
@@ -188,7 +188,7 @@ high-leverage decisions where the value comes from a structured
 set of named perspectives.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/council.png" alt="Council architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/council.png" alt="Council architecture" width="85%">
 </p>
 
 ### Anonymous Reviewers
@@ -202,7 +202,7 @@ when the goal is to evaluate the substance of competing answers
 without knowing which model or which role produced each one.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/anonymous_reviewers.png" alt="Anonymous Reviewers architecture" width="85%">
 </p>
 
 ### Iterate Until Acceptable
@@ -215,7 +215,7 @@ draft-then-adjudicate pair can play the judge. The substitutability is
 the point.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
 </p>
 
 ### Parallel Thinking
@@ -230,7 +230,7 @@ paraphrase of another's. The shape is fan-out then fan-in; the
 behavior comes from the prompts in the configuration.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/figures/parallel_thinking.png" alt="Parallel Thinking architecture (N=2 and N=3)" width="70%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/parallel_thinking.png" alt="Parallel Thinking architecture (N=2 and N=3)" width="70%">
 </p>
 
 ### Custom architectures
@@ -636,7 +636,7 @@ illustrates the kind of model-complementarity these patterns are
 designed to exploit:
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mhcoen/orchestra/main/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="60%">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/images/model-bug-finding-matrix.png" alt="Bug-finding scorecard" width="60%">
 </p>
 
 In this one example, four models each looked for bugs in the McLoop
