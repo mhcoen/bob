@@ -9,7 +9,7 @@
 </video>
 </p>
 
-Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here is how.
+Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here's how.
 
 Software engineering used to have a guy named Bob. Bob's job was to
 look at what you were doing, ask why, and tell you to slow the hell
