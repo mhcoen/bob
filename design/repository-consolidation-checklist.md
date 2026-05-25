@@ -6,9 +6,8 @@ Goal: merge mcloop, duplo, orchestra, bob-tools into the bob repo as
 ## Prereqs (one-time, 5 minutes)
 
 1. `pip install git-filter-repo`.
-2. Confirm `git config user.signingkey` is set and `git config commit.gpgsign true`.
-3. All five repos clean (`git status` empty) and pushed to origin.
-4. Make source repo histories read-only at the filesystem level —
+2. All five repos clean (`git status` empty) and pushed to origin.
+3. Make source repo histories read-only at the filesystem level —
    forecloses the entire class of "checklist bug accidentally touches
    the original":
    ```bash
@@ -17,12 +16,17 @@ Goal: merge mcloop, duplo, orchestra, bob-tools into the bob repo as
    done
    ```
    Locks `.git/` only; working trees stay writable. `git clone` reads
-   `.git/objects/` without needing write access, so step 5 still works.
+   `.git/objects/` without needing write access, so step 4 still works.
    Intent is permanent; restore later with `chmod -R u+w` only if you
    ever need to unfreeze.
-5. Disk: clone each source repo to a scratch directory under
+4. Disk: clone each source repo to a scratch directory under
    `/Users/mhcoen/proj/bob-tools/.scratch/consolidation/` so filter-repo
    operates on a copy, not your working repos.
+
+Commits are not signed in this ecosystem and won't be re-signed by the
+consolidation. Rewritten commits preserve `user.name` and `user.email`
+from the original commits, which is all the authorship metadata that
+matters for a solo project.
 
 ## Per-source-repo rewrite (mcloop, duplo, orchestra, bob-tools)
 
@@ -31,14 +35,11 @@ cd /Users/mhcoen/proj/bob-tools/.scratch/consolidation
 git clone /Users/mhcoen/proj/mcloop mcloop-import
 cd mcloop-import
 git remote remove origin
-git filter-repo --to-subdirectory-filter packages/mcloop \
-  --commit-callback 'commit.gpgsig = b""'
+git filter-repo --to-subdirectory-filter packages/mcloop
 cd ..
 ```
 
-Repeat for `duplo`, `orchestra`, `bob-tools`. The `gpgsig = b""`
-callback combined with `commit.gpgsign=true` causes filter-repo to
-re-sign each rewritten commit on emit.
+Repeat for `duplo`, `orchestra`, `bob-tools`.
 
 filter-repo writes `.git/filter-repo/commit-map` in each rewritten
 clone. Save these — they map old SHA → new SHA, needed for citation
@@ -83,8 +84,8 @@ done
     converging into bob's seed.
 11. `uv sync && uv run pytest` — full workspace test suite green.
 12. Spot-check: `git log -- packages/mcloop/mcloop/main.py` shows
-    historical commits with `--follow`; `git verify-commit HEAD` and
-    a few rewritten historical commits return valid signatures.
+    historical commits with `--follow`; commit timestamps and
+    `user.name`/`user.email` on rewritten commits match the originals.
 
 ## Archive
 
