@@ -27,6 +27,48 @@ structured annotations (`[feat: ...]`, `[fix: ...]`, `[BATCH]`,
 renderer agree on byte-for-byte. The library is the single owner of
 that grammar.
 
+A small canonical plan, after the library has assigned task IDs and
+rendered it through `render_plan`:
+
+```markdown
+<!-- bob-plan-format: 1 -->
+
+# Build a thing
+
+A one-paragraph project description. Everything from the H1 down to
+the first `## Stage` heading is prose and survives canonicalization.
+
+## Stage 1: Scaffolding
+<!-- phase_id: phase_001 -->
+
+- [x] T-000001: create the package layout
+- [ ] T-000002: [BATCH] wire the CLI entry point
+  - [x] T-000003: add `__main__.py`
+  - [ ] T-000004: register the console_script in pyproject.toml
+    @deps T-000003
+- [ ] T-000005: [USER] verify `pip install -e .` works on a clean venv
+
+## Stage 2: First feature
+<!-- phase_id: phase_002 -->
+
+- [ ] T-000006: parse the input file [feat: "input parsing"]
+  [RULEDOUT] regex-based parser — fails on nested quotes
+- [!] T-000007: render the output [feat: "output rendering"]
+
+## Bugs
+
+- [ ] T-000099: crash on empty input file [fix: "empty-file guard"]
+```
+
+Every element above is part of the grammar, not convention: the
+magic-line comment, the H1, the phase headings with their `phase_id`
+comments, the `T-NNNNNN` identifiers, the checkbox markers
+(`- [ ]` / `- [x]` / `- [!]`), the in-task tags (`[USER]`, `[BATCH]`,
+`[AUTO:...]`), the `[feat: ...]` and `[fix: ...]` annotations, the
+`[RULEDOUT]` sibling lines, the `@deps` sibling lines, the
+`## Bugs` section. The parser recognises each by position and form
+and rejects anything outside the grammar.
+
 What the planfile API guarantees:
 
 - **Parse-then-validate.** `parse_plan` reads markdown and produces a
