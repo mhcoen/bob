@@ -9,12 +9,51 @@ libraries that live here: `bob_tools.planfile`, which owns the formal
 evaluator that captures execution evidence and signals when plans need
 re-authoring.
 
-Anything that does not belong to one specific tool but is needed across
-two or more lives here. The premise: if `PLAN.md` is going to be a
-machine-owned formal document rather than a casual checklist, exactly
-one library has to own its syntax, validation, and mutation — otherwise
-every consumer reimplements the same parsing slightly differently and
-LLM-corruption resistance dissolves. bob-tools is that one library.
+## Why bob-tools exists
+
+The bob ecosystem's central claim is that a deterministic framework
+around stochastic actors is what makes autonomous coding work. A
+language model produces fluent, confident output that is wrong often
+enough to matter; the framework's job is to make sure nothing the
+model produces becomes state until something that is not a model has
+checked it. That promise depends on two artifacts being precise: the
+plan the system is executing, and the log of what it actually did.
+
+`PLAN.md` is the writable surface — what the system is supposed to
+do. If `PLAN.md` is a casual markdown checklist, every consumer
+(McLoop running tasks, Duplo authoring phases, Orchestra coordinating
+multi-model edits) reimplements the same parsing slightly differently
+and the boundary between "agent stochastic" and "control plane
+deterministic" dissolves at every consumer. `bob_tools.planfile`
+refuses that outcome: there is one parser, one validator, one
+canonical-form renderer, and one set of sanctioned mutation
+operations. A consumer that wants to mark a task complete cannot do
+it by rewriting markdown — it calls `complete_task`, which refuses
+invalid transitions and returns a `Settlement` record describing
+exactly what changed. The agent never edits `PLAN.md` directly;
+only the library's mutation path does, and that path enforces every
+invariant the grammar requires.
+
+The Plan Ledger is the append-only witness — what the system
+actually did. Every meaningful action — a task completion, a commit,
+a check outcome, a phase transition, a re-author event — is recorded
+as a typed event with a stable id, tagged back to the `PLAN.md`
+element that caused it. A deterministic projector turns the event
+stream into a `PlanState` snapshot, so the projection is replayable
+and auditable; the ledger is the substrate Vroom stands on. Threshold
+rules evaluate the stream and emit `threshold_crossed` events when
+the plan needs re-authoring, so the decision to regenerate a plan is
+made from explicit signals rather than a heuristic.
+
+Both libraries live here together because neither belongs to one
+specific tool, and splitting them would force every consumer to pull
+two packages that already share assumptions about identity (`T-NNNNNN`
+task ids, `phase_NNN` phase ids), about canonicalization (the
+rendered form a tool can re-parse and reason about), and about what
+counts as evidence (the Settlement records the planfile API returns
+are what the ledger consumes). Anything else that does not belong to
+one specific tool but is needed across two or more — shared
+schemas, cross-cutting utilities — lives here too.
 
 ## Contents
 
