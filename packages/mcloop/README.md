@@ -44,6 +44,20 @@ Each session starts with a clean context, with no memory of previous sessions. T
 
 ## Where McLoop fits
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/triad.png" alt="McLoop architecture" width="85%">
+</p>
+
+The diagram is McLoop's runtime shape. Each labeled element corresponds to a real code path:
+
+- **Input** is the current `PLAN.md`. McLoop's loop pulls the next actionable task (`bob_tools.planfile.next_tasks`) and hands it to the Architect role.
+- **Architect** is the planning surface that decides what happens next. In McLoop today this is the combination of the canonical `PLAN.md` (the design), the threshold evaluator in `mcloop.ledger_pause.evaluate_and_maybe_pause` (which reads the Plan Ledger after every task settles), and — when a threshold rule fires — the recursive invocation of [Duplo's re-author path](https://github.com/mhcoen/bob/tree/main/packages/duplo) via `mcloop.ledger_pause.auto_reauthor` &rarr; `duplo.reauthor.reauthor_plan`. The plan changes when the evidence in the ledger says the current approach is not working. This is the dotted blue arrow at the bottom of the figure: McLoop &rarr; Duplo &rarr; new Input.
+- **Reviewers** are McLoop's pre- and post-commit review surfaces. The pre-commit reviewers are the orchestra-backed multi-model coding patterns described below (`draft_then_adjudicate`, `propose_critique_synthesize`, the council patterns) — a configurable number of reviewer roles read the Architect's framing and produce text-only critiques before any file is touched. The post-commit reviewer is the continuous code reviewer (`mcloop.reviewer`, enabled per project) that sends each commit's diff to a second model and writes findings to `.mcloop/reviews/` for the next loop iteration to absorb.
+- **Coders** are the per-task code-edit sessions (`mcloop.code_edit.invoke_code_edit`). Each task launches a fresh CLI session with a clean context. When orchestra is configured, the coder role is the edit-agent at the end of a multi-role workflow; otherwise it is a direct Claude Code or Codex invocation. Either way exactly one invocation per attempt mutates the workspace.
+- **Worktree** is the project tree the coder writes into. McLoop's investigation mode (`mcloop investigate`) creates a sibling git worktree per investigation (`mcloop.worktree.create`), isolating exploratory work from the main branch.
+- **Git** is the convergence point. Every Coder commits to Git; the canonical mutation through `bob_tools.planfile` updates `PLAN.md` in the same commit. Nothing crosses into committed state without passing the test/lint/build gate.
+- The **loop arc** wrapping McLoop is the iteration: tasks settle, evidence accumulates in the Plan Ledger, the threshold evaluator fires when warranted, Duplo re-authors, McLoop continues against the new plan. This is the recursive invocation that distinguishes McLoop from agent runners that treat the task file as a static input.
+
 McLoop is part of the [bob ecosystem](https://github.com/mhcoen/bob), a deterministic control plane for stochastic agents. The other components:
 
 - **[bob-tools](https://github.com/mhcoen/bob/tree/main/packages/bob-tools)** provides the `planfile` library that defines `PLAN.md`'s formal grammar, the canonical-form validator, the mutation API, and the everything log that captures every action the system takes. McLoop is built on this foundation.
