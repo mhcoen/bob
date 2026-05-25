@@ -17,7 +17,7 @@ was correct. I miss Bob.
 
 Vibe coding does not have Bob.
 
-This is the umbrella for four tools that put Bob back. Before the tools, the idea they all instantiate.
+Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here is how.
 
 ## What Bob actually believes
 
