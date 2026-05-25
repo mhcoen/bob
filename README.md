@@ -17,51 +17,7 @@ was correct. I miss Bob.
 
 Vibe coding does not have Bob.
 
-This is the umbrella for four tools that put Bob back.
-
-[Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
-product URL, drop in screenshots, PDFs, or a demo video, whatever you
-have. Duplo produces a phased build plan. The quality of the output is
-a direct function of the quality of the plan — and that is on purpose.
-The plan is not notes for the agent. The plan *is* the program; the
-agent is just the thing that runs it. Write a vague plan and you get
-vague code, plainly, with nowhere for the model to hide it. That is
-the incentive to design carefully, which the field has been busy
-losing.
-
-[McLoop](packages/mcloop/) is Bob running, testing, and debugging the build while you
-sleep or binge Netflix. Autonomous coding sessions for hours or days:
-fresh context per task, tests and lint after every change, only clean
-code committed, automatic audit when the queue is done. Fresh context
-per task is not a performance trick — it is the whole game. The state
-is the repository and its git history, nothing else. There is no
-private conversation only the model has seen, which is why a `kill -9`
-is a shrug instead of a catastrophe. McLoop builds what Duplo
-designed, and it never lets the model decide what happens next.
-
-[Orchestra](packages/orchestra/) is grumpy Bob fighting LLM slop. Any single LLM can fail
-spectacularly and sound delighted doing it. Bob doesn't like that.
-Orchestra hands different models different jobs and makes them argue,
-interact, and sing harmonies before anything touches the workspace.
-And the argument is not hardcoded: a council can be collapsed to a
-single responder, a pair promoted to a judge, a one-model edit swapped
-for a five-model brawl — by changing configuration, not by rewriting
-anything. Multi-model disagreement is a dial Bob can turn, not a
-feature someone soldered on.
-
-Vroom is Bob reading what shipped and asking what he should have done
-differently. Vroom runs parallel auditors over the work, coalesces
-what they find, and proposes a corrected or expanded plan — and it
-does it from the evidence, not from vibes. Every run leaves a typed,
-append-only ledger, so the plan can be re-derived from what actually
-happened instead of hand-patched into looking fine. Eventually Vroom
-is Bob running the whole loop himself: proposing changes on branches,
-gating them on verification, merging what survives. You sleep through
-that too. (How done that actually is: see Status, below. Bob does not
-lie about status.)
-
-Bring the kind of skepticism the field used to have before it fired
-Bob.
+This is the umbrella for four tools that put Bob back. Before the tools, the idea they all instantiate.
 
 ## What Bob actually believes
 
@@ -129,6 +85,54 @@ deterministic projector over an append-only log. A less disciplined
 design meets the same requirements with a database, a session manager,
 and an orchestration framework, and then cannot survive being killed
 mid-run. The restraint is the point.
+
+## The four tools
+
+Each of the four is the rule above applied at a different scale.
+
+[Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
+product URL, drop in screenshots, PDFs, or a demo video, whatever you
+have. Duplo produces a phased build plan. The quality of the output is
+a direct function of the quality of the plan — and that is on purpose.
+The plan is not notes for the agent. The plan *is* the program; the
+agent is just the thing that runs it. Write a vague plan and you get
+vague code, plainly, with nowhere for the model to hide it. That is
+the incentive to design carefully, which the field has been busy
+losing.
+
+[McLoop](packages/mcloop/) is Bob running, testing, and debugging the build while you
+sleep or binge Netflix. Autonomous coding sessions for hours or days:
+fresh context per task, tests and lint after every change, only clean
+code committed, automatic audit when the queue is done. Fresh context
+per task is not a performance trick — it is the whole game. The state
+is the repository and its git history, nothing else. There is no
+private conversation only the model has seen, which is why a `kill -9`
+is a shrug instead of a catastrophe. McLoop builds what Duplo
+designed, and it never lets the model decide what happens next.
+
+[Orchestra](packages/orchestra/) is grumpy Bob fighting LLM slop. Any single LLM can fail
+spectacularly and sound delighted doing it. Bob doesn't like that.
+Orchestra hands different models different jobs and makes them argue,
+interact, and sing harmonies before anything touches the workspace.
+And the argument is not hardcoded: a council can be collapsed to a
+single responder, a pair promoted to a judge, a one-model edit swapped
+for a five-model brawl — by changing configuration, not by rewriting
+anything. Multi-model disagreement is a dial Bob can turn, not a
+feature someone soldered on.
+
+Vroom is Bob reading what shipped and asking what he should have done
+differently. Vroom runs parallel auditors over the work, coalesces
+what they find, and proposes a corrected or expanded plan — and it
+does it from the evidence, not from vibes. Every run leaves a typed,
+append-only ledger, so the plan can be re-derived from what actually
+happened instead of hand-patched into looking fine. Eventually Vroom
+is Bob running the whole loop himself: proposing changes on branches,
+gating them on verification, merging what survives. You sleep through
+that too. (How done that actually is: see Status, below. Bob does not
+lie about status.)
+
+Bring the kind of skepticism the field used to have before it fired
+Bob.
 
 ## The Loop
 
