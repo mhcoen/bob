@@ -1,4 +1,4 @@
-# Duplo: https://github.com/mhcoen/duplo
+# Duplo
 
 Duplo builds software from reference material. Point it at a product
 URL, drop in screenshots or a demo video, write a sentence about
