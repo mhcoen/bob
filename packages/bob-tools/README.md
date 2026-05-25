@@ -72,7 +72,8 @@ What the planfile API guarantees:
 
 The full public surface is enumerated in
 `bob_tools/planfile/__init__.py`. The design reference is
-`/Users/mhcoen/proj/bob/design/planfile.md`.
+[`design/planfile.md`](../../design/planfile.md) at the workspace
+root.
 
 ### `bob-plan` — the planfile CLI
 
