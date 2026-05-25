@@ -34,10 +34,14 @@ matters for a solo project.
 cd /Users/mhcoen/proj/bob-tools/.scratch/consolidation
 git clone --no-local /Users/mhcoen/proj/mcloop mcloop-import
 cd mcloop-import
-git remote remove origin
 git filter-repo --to-subdirectory-filter packages/mcloop
+git remote remove origin
 cd ..
 ```
+
+Order matters: `filter-repo` runs first (it requires the clone to have
+exactly one remote, `origin`, as a safety check), then origin is removed
+after the rewrite completes.
 
 Repeat for `duplo`, `orchestra`, `bob-tools`. Use `--no-local`
 for each clone: filter-repo requires a fresh clone with its own object
