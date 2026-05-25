@@ -1,0 +1,171 @@
+<svg viewBox="0 0 1280 343" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+
+  <!-- White background -->
+  <rect width="1280" height="343" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+    <marker id="arr-sm" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="6" markerHeight="5" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+    <marker id="arr-red" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#bf616a"/>
+    </marker>
+  </defs>
+
+  <!-- ===== INPUT PILL ===== -->
+  <rect x="15" y="130" width="70" height="30" rx="15"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="1.5"/>
+  <text x="50" y="150" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <!-- Arrow: Input to Responder -->
+  <line x1="85" y1="145" x2="118" y2="145"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== RESPONDER CONTAINER (dashed slot) ===== -->
+  <rect x="120" y="25" width="690" height="225" rx="10"
+        fill="#f4f1ec" stroke="#5e81ac" stroke-width="2" stroke-dasharray="8 4"/>
+  <text x="465" y="50" text-anchor="middle"
+        font-size="20" font-weight="bold" fill="#2e3440">Responder</text>
+  <text x="465" y="67" text-anchor="middle"
+        font-size="14" font-style="italic" fill="#4c566a">writes or revises</text>
+
+  <!-- ── Thumbnail cards (white containers) ── -->
+  <rect x="143" y="80" width="68"  height="108" rx="6"
+        fill="#ffffff" stroke="#c8cdd5" stroke-width="1.2"/>
+  <rect x="223" y="80" width="148" height="108" rx="6"
+        fill="#ffffff" stroke="#c8cdd5" stroke-width="1.2"/>
+  <rect x="383" y="80" width="222" height="108" rx="6"
+        fill="#ffffff" stroke="#c8cdd5" stroke-width="1.2"/>
+  <rect x="617" y="80" width="178" height="108" rx="6"
+        fill="#ffffff" stroke="#c8cdd5" stroke-width="1.2"/>
+
+  <!-- ── Thumbnail 1: Single ── -->
+  <text x="177" y="100" text-anchor="middle"
+        font-size="11" font-weight="bold" fill="#2e3440">Single</text>
+  <rect x="157" y="120" width="40" height="24" rx="4"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="1"/>
+
+  <!-- ── Thumbnail 2: Draft &#x2192; Adjudicate ── -->
+  <text x="297" y="100" text-anchor="middle"
+        font-size="11" font-weight="bold" fill="#2e3440">Draft &#x2192; Adjudicate</text>
+  <rect x="248" y="120" width="38" height="24" rx="4"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="1"/>
+  <line x1="286" y1="132" x2="306" y2="132"
+        stroke="#2e3440" stroke-width="1" marker-end="url(#arr-sm)"/>
+  <rect x="308" y="120" width="38" height="24" rx="4"
+        fill="#d8a48f" stroke="#b07060" stroke-width="1"/>
+
+  <!-- ── Thumbnail 3: Propose &#x2192; Critique &#x2192; Synthesize ── -->
+  <text x="494" y="100" text-anchor="middle"
+        font-size="11" font-weight="bold" fill="#2e3440">Propose &#x2192; Critique &#x2192; Synthesize</text>
+  <rect x="418" y="120" width="38" height="24" rx="4"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="1"/>
+  <line x1="456" y1="132" x2="473" y2="132"
+        stroke="#2e3440" stroke-width="1" marker-end="url(#arr-sm)"/>
+  <rect x="475" y="120" width="38" height="24" rx="4"
+        fill="#ebcb8b" stroke="#c0a060" stroke-width="1"/>
+  <line x1="513" y1="132" x2="530" y2="132"
+        stroke="#2e3440" stroke-width="1" marker-end="url(#arr-sm)"/>
+  <rect x="532" y="120" width="38" height="24" rx="4"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1"/>
+
+  <!-- ── Thumbnail 4: Council (fan-out / fan-in) ── -->
+  <text x="706" y="100" text-anchor="middle"
+        font-size="11" font-weight="bold" fill="#2e3440">Council</text>
+
+  <!-- Council: input box -->
+  <rect x="646" y="127" width="22" height="16" rx="3"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="0.8"/>
+  <!-- Council: 5 parallel boxes -->
+  <rect x="690" y="104" width="18" height="11" rx="2"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="0.8"/>
+  <rect x="690" y="118" width="18" height="11" rx="2"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="0.8"/>
+  <rect x="690" y="132" width="18" height="11" rx="2"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="0.8"/>
+  <rect x="690" y="146" width="18" height="11" rx="2"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="0.8"/>
+  <rect x="690" y="160" width="18" height="11" rx="2"
+        fill="#b48ead" stroke="#8a6a88" stroke-width="0.8"/>
+  <!-- Council: merge box -->
+  <rect x="730" y="127" width="22" height="16" rx="3"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="0.8"/>
+
+  <!-- Fan-out lines -->
+  <line x1="668" y1="135" x2="690" y2="110" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="668" y1="135" x2="690" y2="124" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="668" y1="135" x2="690" y2="138" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="668" y1="135" x2="690" y2="152" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="668" y1="135" x2="690" y2="166" stroke="#2e3440" stroke-width="0.7"/>
+  <!-- Fan-in lines -->
+  <line x1="708" y1="110" x2="730" y2="135" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="708" y1="124" x2="730" y2="135" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="708" y1="138" x2="730" y2="135" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="708" y1="152" x2="730" y2="135" stroke="#2e3440" stroke-width="0.7"/>
+  <line x1="708" y1="166" x2="730" y2="135" stroke="#2e3440" stroke-width="0.7"/>
+
+  <!-- (or any other workflow) -->
+  <text x="465" y="230" text-anchor="middle"
+        font-size="13" font-style="italic" fill="#4c566a">(or any other workflow)</text>
+
+  <!-- ===== Arrow: Responder to Judge ===== -->
+  <line x1="810" y1="145" x2="848" y2="145"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- ===== JUDGE CONTAINER (dashed slot) ===== -->
+  <!-- Same y=25 and h=225 as Responder -->
+  <rect x="850" y="25" width="240" height="225" rx="10"
+        fill="#f4f1ec" stroke="#5e81ac" stroke-width="2" stroke-dasharray="8 4"/>
+  <text x="970" y="52" text-anchor="middle"
+        font-size="20" font-weight="bold" fill="#2e3440">Judge</text>
+  <text x="970" y="70" text-anchor="middle"
+        font-size="14" font-style="italic" fill="#4c566a">good enough yet?</text>
+
+  <!-- Judge interior note -->
+  <text font-size="11.5" fill="#4c566a" font-style="italic">
+    <tspan x="970" y="100" text-anchor="middle">any workflow can go here:</tspan>
+    <tspan x="970" dy="18" text-anchor="middle">a single model, a council,</tspan>
+    <tspan x="970" dy="18" text-anchor="middle">a draft-then-adjudicate, etc.</tspan>
+  </text>
+
+  <!-- ===== ACCEPT ARROW: Judge to Answer ===== -->
+  <!-- 75px gap between Judge right edge (1090) and Answer left edge (1165) -->
+  <line x1="1090" y1="145" x2="1163" y2="145"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <text x="1127" y="135" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">accept</text>
+
+  <!-- ===== ANSWER PILL ===== -->
+  <rect x="1165" y="130" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="1207" y="150" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+  <!-- ===== REVISE LOOP ===== -->
+  <path d="M970 250 L970 292 Q970 305 957 305 L263 305 Q250 305 250 292 L250 250"
+        fill="none" stroke="#bf616a" stroke-width="2" marker-end="url(#arr-red)"/>
+
+  <!-- Revise label -->
+  <text x="990" y="276" font-size="13" font-weight="bold" fill="#bf616a">revise</text>
+  <text x="990" y="290" font-size="11" font-style="italic" fill="#bf616a">(with feedback)</text>
+
+  <!-- "max N rounds" badge -->
+  <rect x="557" y="292" width="106" height="26" rx="13"
+        fill="#ffffff" stroke="#bf616a" stroke-width="1.2"/>
+  <text x="610" y="310" text-anchor="middle"
+        font-size="11" font-weight="bold" fill="#bf616a">max N rounds</text>
+
+  <!-- ===== BOTTOM NOTE ===== -->
+  <!-- Centered between Responder frame bottom (y=250) and badge top (y=292): midpoint y=271, baseline y=275 -->
+  <text x="610" y="275" text-anchor="middle"
+        font-size="12" font-style="italic" fill="#4c566a">at the cap, the most recent draft is returned</text>
+
+</svg>

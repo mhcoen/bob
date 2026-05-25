@@ -1,0 +1,1 @@
+Prior team discussion: the leadership memo described the orchestration platform as a powerful, transformative capability that will leverage every team's optimal workflow. Marketing copy used cutting-edge language throughout. The author wants the abstract to take a sober, descriptive tone instead.

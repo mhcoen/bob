@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.venv/
+.eggs/
+*.egg
+.ruff_cache/
+.pytest_cache/
+pytest-of-*/
+logs/
+*~
+\#*\#
+.#*
+.claude/settings.local.json
+.duplo/
+.mcloop/
+.mcloop-last-audit
+.orchestra/
+.DS_Store
+.scratch/
+*.lock
+
+# Generated presentation quicklooks
+outputs/

@@ -1,0 +1,17 @@
+{
+  "criteria": [
+    {"id": "exact_12_words",  "description": "Title is exactly 12 words.",                                     "required": true},
+    {"id": "char_60_to_80",   "description": "Title is between 60 and 80 characters inclusive.",               "required": true},
+    {"id": "contains_phrase", "description": "Title contains 'workflow orchestration'.",                       "required": true},
+    {"id": "ends_question",   "description": "Title ends with a question mark.",                               "required": true},
+    {"id": "no_colon_semi",   "description": "Title contains no colon or semicolon.",                          "required": true}
+  ],
+  "roles": {
+    "proposer":   { "adapter": "claude_code_text", "model": "haiku",   "parameters": {} },
+    "reviewer":   { "adapter": "codex_text",       "model": "gpt-5.5", "parameters": {} },
+    "judge_role": { "adapter": "codex_text",       "model": "gpt-5.5", "parameters": {} }
+  },
+  "workflows": {
+    "iterate_until_acceptable": { "pattern": "iterate_until_acceptable" }
+  }
+}

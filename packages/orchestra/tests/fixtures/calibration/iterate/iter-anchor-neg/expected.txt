@@ -1,0 +1,30 @@
+negative
+
+# Expected behavior under T1 + T2:
+#
+# Title-only task with one salient numeric constraint (exactly 12 words).
+# Cycle-1 reviewer cites the actual cycle-1 title word count (e.g.,
+# "title is 9 words, must be exactly 12"). Judge cycle 1 fires `iterate`
+# with feedback explicitly stating that count.
+#
+# Cycle 2: proposer redrafts. With one salient numeric constraint and
+# explicit "exactly 12" feedback, haiku can hit exactly 12 on a single
+# revision pass. The cycle-2 title is 12 words.
+#
+# THIS IS THE ANCHORING TEST: the cycle-2 reviewer's prompt contains
+# the cycle-1 numerical claim while the cycle-2 title is in fact 12
+# words. T1 instructs the reviewer to recount the current title rather
+# than restate the prior count. T2 instructs the cycle-2 judge to
+# verify the reviewer's claim against the title directly.
+#
+# Expected trajectory: [iterate, accept]. Classifier label: match.
+#
+# Anchoring test condition: cycle-1 reviewer cites a specific title
+# word count (whatever value the cycle-1 title produced).
+#
+# Post-run check: cycle-2 review_output should NOT restate the cycle-1
+# word count while looking at a 12-word title. If it does, T1 leaked
+# (either the reviewer ignored the recount instruction, or the
+# instruction is too weak). If T1 leaked but the cycle-2 judge fired
+# accept anyway, T2 caught the false claim. Inspect verdict_2 and
+# cycle-2 review_output to determine which template provided the save.

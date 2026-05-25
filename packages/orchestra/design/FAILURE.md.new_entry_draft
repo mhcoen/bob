@@ -1,0 +1,161 @@
+## Pattern: Calibration scenarios under-engineered relative to proposer capability produce inconclusive validation runs
+
+**How the bug got created.** Phase 2 calibration scenarios were
+designed to elicit specific judge failure modes (cycle-2 anchoring
+on prior numerical claims, stuck on persistent material defects,
+clean accept on fixable issues). The scenarios assumed haiku as
+proposer would fail cycle 1 reliably enough to produce cycle 2
+trajectories where the target failure modes could fire. The
+scenarios were authored from a mental model of haiku's capability
+on these task shapes that turned out to overestimate the difficulty
+of the constraints relative to haiku's actual competence. iter-
+stuck-neg post-fix, iter-anchor-neg, and iter-anchor-pos all
+terminated done on cycle 1 with first-attempt acceptance.
+
+**How the bug failed to be caught.** I treated each successive
+"task too easy" outcome as a per-scenario design issue rather than
+a class-level pattern. After the first inconclusive run, the
+response was to redesign the scenario; after the second, to
+redesign more aggressively; after the third, only then to consider
+that the calibration design lever itself might be wrong. Each
+scenario was reviewed by Codex at design time. Codex's reviews
+caught real failures of the prior drafts (rotating-defects design
+on iter-anchor-pos, multi-criterion dilution on iter-anchor-neg)
+but neither codex nor I framed the meta-question "is haiku reliably
+failing cycle 1 on any constraint shape we can author cheaply?"
+until after three runs of evidence had accumulated.
+
+**What the correct workflow looks like.** Calibration scenarios
+that depend on a specific cycle to fire should be validated at
+design time against the actual proposer model's behavior on the
+constraint, not against a mental model of what should be hard.
+Concretely: before staging a scenario whose validation hinges on
+cycle-N behavior, run the proposer on the cycle-1 prompt as a
+standalone smoke test and confirm the expected cycle-1 outcome
+(failure with specific defect, or first-attempt success) actually
+occurs. If the smoke test contradicts the design assumption, the
+scenario is mis-calibrated before any compute is spent on the
+multi-cycle run.
+
+The broader pattern: when validating a fix whose effect depends
+on a specific failure mode firing, the prerequisite is engineering
+that failure mode reliably, not assuming the original task already
+elicits it. A failure mode that fires once when conditions happen
+to align is not a failure mode you can validate a fix against;
+you need a scenario where the failure mode fires deterministically
+or near-deterministically. This is calibration design, not
+production code design, and the discipline differs.
+
+**What was lost.** Three calibration runs (iter-stuck-neg post-
+T1+T2 re-run, iter-anchor-neg, iter-anchor-pos) plus the design
+effort on iter-anchor-{neg,pos} that did not produce evidence on
+the cycle-2 anchoring failure mode the runs were authored to
+exercise. The runs were not waste; they produced the judge-under-
+verification finding that upgraded F2.5 from backlog-conditional to
+queued-principled-response. But that finding came from inspecting
+proposal_1 outputs after-the-fact rather than from the multi-cycle
+trajectories the scenarios were designed to produce. The intended
+validation of T1+T2 against cycle-2 anchoring did not happen.
+
+The cost was three runs of compute plus two scenario design
+rounds plus codex review cycles on each. The alternative path
+(smoke-test the proposer on cycle-1 prompts before staging multi-
+cycle runs) would have caught the calibration miscalibration after
+the first inconclusive iter-anchor-neg attempt and saved the
+iter-anchor-pos design effort plus the post-T1+T2 re-run.
+
+**External evidence.** Phase 2 REPORT.md Addendum 6 records T1+T2
+status as "deployed, partially validated for word-count self-
+verification, not validated for the original cycle-2 anchoring
+mode, and newly falsified as a sufficient general criterion-
+verification discipline." The "not validated for the original
+cycle-2 anchoring mode" clause is the explicit acknowledgment that
+the calibration scenarios designed to validate against that mode
+did not produce the validation. The phrasing is Codex's, adopted
+verbatim into the addendum, after Codex framed the iter-anchor
+results as evidence further hardening would chase variance rather
+than test the patch.
+
+---
+
+## Pattern: Layered correctness gaps surface serially, not in parallel
+
+**How the bug got created.** Phase 2 began as a single-question
+investigation (convergence detection: judge-driven stuck enum vs
+separate similarity detector) and produced six commits across the
+arc: F1 (tolerant JSON extraction), F2 (stuck enum + judge_decision
+plumbing), iterate re-propose path (4e59e84), T1+T2 (e983312), the
+PRJI architecture diagram (e49c618), and the calibration package
+promotion (ed006c9). F2.5a is queued. Each commit responded to a
+correctness gap that the prior commit's fix exposed. F1 unblocked
+judges that revealed F2's missing prior-context plumbing. F2's
+stuck enum revealed iterate's structurally meaningless "iterate"
+decision (workflow couldn't re-draft). T1+T2 responded to
+anchoring pressure F2's prior-context plumbing introduced. F2.5a
+responds to T1+T2's prose-side limits surfaced by iter-anchor's
+judge-under-verification finding.
+
+**How the bug failed to be caught.** None of these gaps were
+caught during the original orchestra design or earlier slice
+audits. Each surfaced only after the layer above was deployed and
+exercised. The arc cannot be characterized as Code or Codex
+missing things they should have caught at design time. F2's
+plumbing gap was not reachable until F1 cleared the parse barrier.
+The iterate workflow defect was not reachable until F2's stuck
+enum gave the judge a way to articulate "I can't make progress."
+The judge-under-verification finding was not reachable until
+T1+T2 deployed and produced runs whose proposals could be audited
+against judge claims. Each next-layer bug required the prior fix
+to surface.
+
+**What the correct workflow looks like.** For systems that compose
+LLM-emitted decisions with structured runtimes, expect layered
+correctness gaps and budget for serial discovery. Specifically:
+
+1. Do not treat "fix N landed and tests pass" as evidence the
+   composed system is correct. Tests cover what the implementer
+   wrote tests for; correctness at layer N often requires runs at
+   layer N+1 to falsify.
+2. Schedule validation runs after each layer that exercise the
+   downstream composition, not just the layer's unit tests. F1's
+   unit tests passed cleanly, but the F2 plumbing gap surfaced
+   only when F1-cleared judges produced verdicts that downstream
+   templates didn't read.
+3. Phase scope should be elastic. A phase scoped as a single-
+   question investigation (Phase 2's original convergence-
+   detection question) can become a multi-fix arc as discovered
+   gaps accumulate. Treating the original scope as fixed forces
+   the fixes to ship outside the phase, losing the documentation
+   continuity that makes the arc auditable.
+4. Layer naming matters for design clarity. Codex's two-layer
+   F2.5 split (schema for shape, runtime for semantics) was the
+   first time during Phase 2 that the schema/runtime/prompt
+   layering was named explicitly. That clarity made the F2.5
+   design tractable; before it was named, prior fixes (T1+T2)
+   were correct given the framing available but the framing did
+   not surface that prose-side discipline was the wrong layer.
+
+**What was lost.** Roughly six rounds of fix-then-discover-next-
+gap during Phase 2. Each round was correct given the information
+available; none were premature. The cumulative latency was the
+arc's primary cost. Latency was unavoidable once each layer had to
+be deployed to expose the next, but framing that named the layers
+explicitly earlier would have made the F2 -> T1+T2 -> F2.5
+sequence more legible during the arc rather than retrospectively.
+
+**External evidence.** REPORT.md Addendum 6's F2.5 status upgrade
+narrative records the sequence of layered findings explicitly:
+"the iter-anchor evidence has now made it [F2.5] the principled
+response to a documented finding, not just a wish-list item." The
+phrasing acknowledges that F2.5 was always the right structural
+fix; what was missing was the evidence that prose-side fixes
+(T1+T2) were the wrong layer. That evidence required deploying
+T1+T2 and observing what they could and could not catch. Codex's
+F2.5 split into F2.5a (universal accept invariant) and F2.5b
+(route-specific non-accept derivation) further encodes the
+recognition that not all of the remaining work generalizes
+uniformly across workflows; PRJI's decision route policy is its
+own design exercise that should not be bundled into F2.5a under
+time pressure.
+
+---

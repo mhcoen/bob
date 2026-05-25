@@ -1,0 +1,129 @@
+<svg viewBox="0 0 640 340" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+
+  <rect width="640" height="340" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+  </defs>
+
+  <!-- ============================================================ -->
+  <!-- ROW 1: N=2  (center y = 71)                                  -->
+  <!-- Analyst boxes: y=25..65 and y=77..117                        -->
+  <!-- ============================================================ -->
+
+  <!-- Input pill (centered on row 1 spine y=71) -->
+  <rect x="25" y="56" width="80" height="30" rx="15"
+        fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="65" y="75" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <!-- Fan-out: Input right edge (105, 71) to analyst left edges (170, y_center) -->
+  <line x1="105" y1="71" x2="168" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="105" y1="71" x2="168" y2="97"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Analyst 1 (top) -->
+  <rect x="170" y="25" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="235" y="49" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Analyst</text>
+
+  <!-- Analyst 2 (bottom) -->
+  <rect x="170" y="77" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="235" y="101" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Analyst</text>
+
+  <!-- Fan-in: analyst right edges (300, y_center) to Reconciler left edge, spread vertically -->
+  <line x1="300" y1="45" x2="363" y2="61"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="300" y1="97" x2="363" y2="81"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Reconciler (centered on row 1 spine y=71) -->
+  <rect x="365" y="51" width="130" height="40" rx="10"
+        fill="#d8a48f" stroke="#b07060" stroke-width="2"/>
+  <text x="430" y="75" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Reconciler</text>
+
+  <!-- Reconciler -> Answer -->
+  <line x1="495" y1="71" x2="528" y2="71"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="530" y="56" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="572" y="75" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+  <!-- ============================================================ -->
+  <!-- DIVIDER LABEL                                                -->
+  <!-- ============================================================ -->
+  <text x="320" y="160" text-anchor="middle"
+        font-size="12" font-style="italic" fill="#4c566a">N is configurable</text>
+
+  <!-- ============================================================ -->
+  <!-- ROW 2: N=3  (center y = 244)                                 -->
+  <!-- Analyst boxes: y=180..220, y=224..264, y=268..308            -->
+  <!-- ============================================================ -->
+
+  <!-- Input pill (centered on row 2 spine y=244) -->
+  <rect x="25" y="229" width="80" height="30" rx="15"
+        fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="65" y="248" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <!-- Fan-out: Input right edge (105, 244) to three analyst left edges -->
+  <line x1="105" y1="244" x2="168" y2="200"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="105" y1="244" x2="168" y2="244"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="105" y1="244" x2="168" y2="288"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Analyst 1 (top) -->
+  <rect x="170" y="180" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="235" y="204" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Analyst</text>
+
+  <!-- Analyst 2 (middle) -->
+  <rect x="170" y="224" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="235" y="248" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Analyst</text>
+
+  <!-- Analyst 3 (bottom) -->
+  <rect x="170" y="268" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="235" y="292" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Analyst</text>
+
+  <!-- Fan-in: analyst right edges (300, y_center) to Reconciler left edge, spread vertically -->
+  <line x1="300" y1="200" x2="363" y2="234"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="300" y1="244" x2="363" y2="244"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+  <line x1="300" y1="288" x2="363" y2="254"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Reconciler (centered on row 2 spine y=244) -->
+  <rect x="365" y="224" width="130" height="40" rx="10"
+        fill="#d8a48f" stroke="#b07060" stroke-width="2"/>
+  <text x="430" y="248" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Reconciler</text>
+
+  <!-- Reconciler -> Answer -->
+  <line x1="495" y1="244" x2="528" y2="244"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <rect x="530" y="229" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="572" y="248" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+</svg>

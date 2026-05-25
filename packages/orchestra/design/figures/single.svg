@@ -1,0 +1,37 @@
+<svg viewBox="0 0 415 90" xmlns="http://www.w3.org/2000/svg"
+     font-family="Inter, system-ui, -apple-system, Helvetica, sans-serif">
+
+  <rect width="415" height="90" fill="#ffffff"/>
+
+  <defs>
+    <marker id="arr" viewBox="0 0 10 7" refX="9" refY="3.5"
+            markerWidth="9" markerHeight="7" orient="auto">
+      <path d="M0 0L10 3.5L0 7z" fill="#2e3440"/>
+    </marker>
+  </defs>
+
+  <!-- Input pill -->
+  <rect x="25" y="30" width="80" height="30" rx="15"
+        fill="#e5e9f0" stroke="#7b8394" stroke-width="1.5"/>
+  <text x="65" y="49" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Input</text>
+
+  <line x1="105" y1="45" x2="138" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Responder box -->
+  <rect x="140" y="25" width="130" height="40" rx="10"
+        fill="#88c0d0" stroke="#5e81ac" stroke-width="2"/>
+  <text x="205" y="49" text-anchor="middle"
+        font-size="14" font-weight="bold" fill="#2e3440">Responder</text>
+
+  <line x1="270" y1="45" x2="303" y2="45"
+        stroke="#2e3440" stroke-width="1.5" marker-end="url(#arr)"/>
+
+  <!-- Answer pill -->
+  <rect x="305" y="30" width="85" height="30" rx="15"
+        fill="#a3be8c" stroke="#7a9a6a" stroke-width="1.5"/>
+  <text x="347" y="49" text-anchor="middle"
+        font-size="13" font-weight="bold" fill="#2e3440">Answer</text>
+
+</svg>
