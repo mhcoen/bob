@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcloop"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "orchestra",
+    "bob-tools",
+    "duplo",
+    "jsonschema>=4.21",
+]
+
+[tool.setuptools]
+packages = ["mcloop"]
+script-files = ["bin/appshot"]
+
+[project.scripts]
+mcloop = "mcloop.main:main"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 99
+exclude = ["telegram-permission-hook.py", "pytest-of-mhcoen"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[project.optional-dependencies]
+dev = [
+    "ruff",
+    "mypy>=1.10",
+    "pytest>=8.0",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-randomly>=3.15",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-n auto"
+timeout = 60
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m not integration')",
+]
+
+[tool.mypy]
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+# Editable installs of sibling packages (orchestra) use a PEP 660
+# import hook that mypy's analyzer does not follow. Pointing
+# mypy_path at sibling source directories (relative to mcloop's
+# repo root, assuming the repos are siblings) lets mypy see editable
+# installs that use PEP 660 import hooks without needing non-editable
+# installs.
+mypy_path = "../orchestra:../bob-tools:../duplo"

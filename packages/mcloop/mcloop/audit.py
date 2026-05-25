@@ -1,0 +1,344 @@
+"""Audit-related functions extracted from main.py."""
+
+from __future__ import annotations
+
+import enum
+import time
+from pathlib import Path
+
+from mcloop import formatting
+from mcloop.checks import run_autofix, run_checks
+from mcloop.formatting import format_elapsed as _format_elapsed
+from mcloop.git_ops import (
+    _commit,
+    _get_diff,
+    _get_git_hash,
+    _git,
+    _has_meaningful_changes,
+    _worktree_status,
+)
+from mcloop.notify import notify
+from mcloop.output import _print_error_tail, _tail
+from mcloop.prompts import (
+    bugs_md_has_bugs,
+    parse_bugs_md,
+    parse_verification_output,
+    review_found_problems,
+)
+from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
+
+AUDIT_HASH_FILE = ".mcloop-last-audit"
+AUDIT_REPORT_FILE = ".mcloop/audit-report.md"
+
+
+class AuditResult(enum.Enum):
+    """Structured result from an audit/fix cycle."""
+
+    no_bugs = "no_bugs"  # Audit ran, found nothing
+    fixed = "fixed"  # Audit ran, bugs found and fixed
+    failed = "failed"  # Audit session crashed, timed out, or BUGS.md not produced
+    skipped = "skipped"  # Audit skipped (no changes since last audit)
+
+
+def _should_skip_audit(project_dir: Path) -> bool:
+    """Skip audit if no source files changed since last audit."""
+    if not (project_dir / ".git").exists():
+        return False
+    hash_file = project_dir / AUDIT_HASH_FILE
+    if not hash_file.exists():
+        return False
+    last_hash = hash_file.read_text().strip()
+    if not last_hash:
+        return False
+    result = _git(
+        ["git", "diff", "--name-only", last_hash, "HEAD"],
+        cwd=project_dir,
+        label="audit diff check",
+    )
+    if result.returncode != 0:
+        return False
+    changed = [
+        f
+        for f in result.stdout.strip().splitlines()
+        if f and not f.startswith("logs/") and f != "PLAN.md" and f != AUDIT_HASH_FILE
+    ]
+    return len(changed) == 0
+
+
+def _save_audit_hash(project_dir: Path) -> None:
+    """Write current HEAD hash to .mcloop-last-audit."""
+    h = _get_git_hash(project_dir)
+    if h:
+        (project_dir / AUDIT_HASH_FILE).write_text(h + "\n")
+
+
+def _run_audit_fix_cycle(
+    project_dir: Path,
+    log_dir: Path,
+    model: str | None = None,
+) -> AuditResult:
+    """Run two rounds of audit/verify/fix to catch bugs introduced by fixes."""
+    if _should_skip_audit(project_dir):
+        print(
+            formatting.system_msg("Audit skipped (no changes since last audit)"),
+            flush=True,
+        )
+        return AuditResult.skipped
+
+    any_fixed = False
+    max_rounds = 2
+    for round_num in range(1, max_rounds + 1):
+        label = (
+            f"Audit round {round_num} of {max_rounds}"
+            if round_num > 1
+            else f"Audit round {round_num}"
+        )
+        print(formatting.system_msg(label), flush=True)
+        round_result = _run_single_audit_round(
+            project_dir,
+            log_dir,
+            model=model,
+        )
+        if round_result is None:
+            # Session crashed or BUGS.md not produced
+            notify("Audit failed: session crashed or timed out.")
+            return AuditResult.failed
+        if not round_result:
+            # No bugs found or fixed — no need for another round
+            if round_num == 1 and not any_fixed:
+                notify("Audit complete: no bugs found.")
+                result = AuditResult.no_bugs
+            else:
+                notify("Audit complete: fixes verified, no new bugs.")
+                result = AuditResult.fixed
+            _save_audit_hash(project_dir)
+            return result
+        any_fixed = True
+        if round_num == max_rounds:
+            notify("Audit complete: bugs fixed.")
+            _save_audit_hash(project_dir)
+            return AuditResult.fixed
+
+    # Should not reach here, but guard against it
+    return AuditResult.failed
+
+
+def _run_single_audit_round(
+    project_dir: Path,
+    log_dir: Path,
+    model: str | None = None,
+) -> bool | None:
+    """Run one audit/verify/fix cycle.
+
+    Returns True if bugs were fixed, False if no bugs found, or None if the
+    audit session failed (crashed, timed out, or BUGS.md not produced).
+    """
+    bugs_path = project_dir / AUDIT_REPORT_FILE
+    bugs_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Resume from existing audit report if present
+    if bugs_path.exists():
+        bugs_content = bugs_path.read_text()
+        if bugs_md_has_bugs(bugs_content):
+            print(
+                formatting.system_msg("Found existing audit report, resuming fix cycle..."),
+                flush=True,
+            )
+        else:
+            print(
+                formatting.system_msg("Existing audit report has no bugs"),
+                flush=True,
+            )
+            bugs_path.unlink()
+            return False
+    else:
+        print(formatting.system_msg("Running bug audit..."), flush=True)
+        _audit_start = time.monotonic()
+        audit_result = run_audit(
+            project_dir,
+            log_dir,
+            model=model,
+            existing_bugs="",
+        )
+        _audit_el = _format_elapsed(time.monotonic() - _audit_start)
+        if not audit_result.success:
+            print(
+                f"audit: session exited with code {audit_result.exit_code}, skipping fix",
+                flush=True,
+            )
+            return None
+
+        if not bugs_path.exists():
+            print(
+                f"audit: audit report not written, skipping fix [{_audit_el}]",
+                flush=True,
+            )
+            return None
+
+        bugs_content = bugs_path.read_text()
+        if not bugs_md_has_bugs(bugs_content):
+            print(f"audit: no bugs found [{_audit_el}]", flush=True)
+            bugs_path.unlink()
+            return False
+
+    # Pre-fix verification: check each bug against source code
+    bugs_content = bugs_path.read_text()
+    parsed_bugs = parse_bugs_md(bugs_content)
+    if parsed_bugs:
+        print(
+            formatting.system_msg(f"Verifying {len(parsed_bugs)} bugs..."),
+            flush=True,
+        )
+        _verify_start = time.monotonic()
+        verify_result = run_bug_verify(
+            project_dir,
+            log_dir,
+            bugs_content,
+            model=model,
+        )
+        _verify_el = _format_elapsed(time.monotonic() - _verify_start)
+        if verify_result.success:
+            verdicts = parse_verification_output(
+                verify_result.output,
+            )
+            for status, header, reason in verdicts:
+                if status == "CONFIRMED":
+                    print(
+                        f"  CONFIRMED: {header}",
+                        flush=True,
+                    )
+                else:
+                    suffix = f" ({reason})" if reason else ""
+                    print(
+                        f"  REMOVED: {header}{suffix}",
+                        flush=True,
+                    )
+
+            if verdicts:
+                removed_headers = {h for s, h, _ in verdicts if s == "REMOVED"}
+                # A bug is removed only when its title matches a REMOVED
+                # verdict header exactly. Substring matches drop unrelated
+                # bugs whose titles share a prefix (e.g. line 4 vs line 42).
+                confirmed_bugs = [b for b in parsed_bugs if b["title"] not in removed_headers]
+                if not confirmed_bugs:
+                    print(
+                        formatting.system_msg(
+                            f"All reported bugs were false positives [{_verify_el}]"
+                        ),
+                        flush=True,
+                    )
+                    bugs_path.unlink(missing_ok=True)
+                    return False
+                if len(confirmed_bugs) < len(parsed_bugs):
+                    new_content = "# Bugs\n\n"
+                    for bug in confirmed_bugs:
+                        new_content += bug["body"] + "\n\n"
+                    bugs_path.write_text(new_content)
+                    bugs_content = new_content
+
+    max_fix_attempts = 3
+    for attempt in range(1, max_fix_attempts + 1):
+        print(
+            formatting.system_msg(f"Fixing bugs (attempt {attempt}/{max_fix_attempts})..."),
+            flush=True,
+        )
+        _fix_start = time.monotonic()
+        fix_result = run_bug_fix(
+            project_dir,
+            log_dir,
+            model=model,
+        )
+        _fix_el = _format_elapsed(time.monotonic() - _fix_start)
+
+        if not fix_result.success:
+            print(
+                f"bug-fix: session exited with code {fix_result.exit_code} [{_fix_el}]",
+                flush=True,
+            )
+            break
+
+        if not _has_meaningful_changes(project_dir):
+            print(
+                f"bug-fix: no changes made [{_fix_el}]",
+                flush=True,
+            )
+            break
+
+        run_autofix(project_dir)
+        pre_check_status = _worktree_status(project_dir)
+        check_result = run_checks(project_dir)
+        if check_result.passed:
+            post = set(_worktree_status(project_dir).splitlines())
+            pre = set(pre_check_status.splitlines()) if pre_check_status else set()
+            if post != pre:
+                print(
+                    formatting.error_msg(
+                        f"Bug-fix: checker introduced uncommitted changes"
+                        f" (attempt {attempt}/{max_fix_attempts})"
+                    ),
+                    flush=True,
+                )
+                continue
+            # Post-fix review: verify changes don't introduce new bugs
+            diff = _get_diff(project_dir)
+            if diff:
+                print(
+                    formatting.system_msg("Post-fix review..."),
+                    flush=True,
+                )
+                _review_start = time.monotonic()
+                review_result = run_post_fix_review(
+                    project_dir,
+                    log_dir,
+                    bugs_content,
+                    diff,
+                    model=model,
+                )
+                _review_el = _format_elapsed(time.monotonic() - _review_start)
+                if review_result.success:
+                    found, desc = review_found_problems(
+                        review_result.output,
+                    )
+                    if found:
+                        print(
+                            formatting.error_msg("Post-fix review found problems"),
+                            flush=True,
+                        )
+                        for line in desc.splitlines()[:10]:
+                            print(f"    {line}", flush=True)
+                        bugs_content = bugs_content + "\n\n## Post-fix review problems\n" + desc
+                        bugs_path.write_text(bugs_content)
+                        continue
+                    print(
+                        formatting.system_msg(
+                            f"Post-fix review: no new bugs introduced [{_review_el}]"
+                        ),
+                        flush=True,
+                    )
+
+            try:
+                _commit(project_dir, "Fix bugs from audit")
+            except RuntimeError as exc:
+                print(
+                    formatting.error_msg(str(exc)),
+                    flush=True,
+                )
+                return None
+            bugs_path.unlink(missing_ok=True)
+            return True
+
+        error_ctx = f"Command: {check_result.command}\n" + _tail(check_result.output, 50)
+        print(
+            formatting.error_msg(
+                f"Bug fix checks failed (attempt {attempt}/{max_fix_attempts}) [{_fix_el}]"
+            ),
+            flush=True,
+        )
+        _print_error_tail(check_result.output)
+
+        # Append error to BUGS.md so next attempt sees it
+        bugs_path.write_text(
+            bugs_content + "\n\n## Post-fix check failure\n" + error_ctx,
+        )
+
+    return None

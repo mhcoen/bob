@@ -1,0 +1,245 @@
+"""Tests for mcloop.targeted — source-to-test file mapping."""
+
+import subprocess
+from unittest.mock import patch
+
+from mcloop.targeted import (
+    is_test_command,
+    map_to_tests,
+    targeted_pytest_command,
+)
+
+
+def test_map_basic(tmp_path):
+    """Source file maps to test file by naming convention."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+    result = map_to_tests(["mcloop/checks.py"], tmp_path)
+    assert result == ["tests/test_checks.py"]
+
+
+def test_map_multiple(tmp_path):
+    """Multiple source files map to their test files."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+    (tmp_path / "tests" / "test_runner.py").write_text("")
+    result = map_to_tests(
+        ["mcloop/checks.py", "mcloop/runner.py"],
+        tmp_path,
+    )
+    assert result == ["tests/test_checks.py", "tests/test_runner.py"]
+
+
+def test_map_no_matching_test(tmp_path):
+    """Source file with no corresponding test returns empty."""
+    (tmp_path / "tests").mkdir()
+    result = map_to_tests(["mcloop/main.py"], tmp_path)
+    assert result == []
+
+
+def test_map_skips_non_python(tmp_path):
+    """Non-Python files are ignored."""
+    (tmp_path / "tests").mkdir()
+    result = map_to_tests(["README.md", "mcloop.json"], tmp_path)
+    assert result == []
+
+
+def test_map_includes_changed_test_files(tmp_path):
+    """Changed test files are included directly in the targeted set."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_foo.py").write_text("")
+    result = map_to_tests(["tests/test_foo.py"], tmp_path)
+    assert result == ["tests/test_foo.py"]
+
+
+def test_map_skips_nonexistent_test_files(tmp_path):
+    """Changed test files that don't exist are not included."""
+    (tmp_path / "tests").mkdir()
+    result = map_to_tests(["tests/test_foo.py"], tmp_path)
+    assert result == []
+
+
+def test_map_skips_dunder_files(tmp_path):
+    """__init__.py and similar are skipped."""
+    (tmp_path / "tests").mkdir()
+    result = map_to_tests(["mcloop/__init__.py"], tmp_path)
+    assert result == []
+
+
+def test_map_deduplicates(tmp_path):
+    """Same test file from different source paths appears once."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+    result = map_to_tests(
+        ["mcloop/checks.py", "src/checks.py"],
+        tmp_path,
+    )
+    assert result == ["tests/test_checks.py"]
+
+
+def test_map_no_tests_dir(tmp_path):
+    """Missing tests/ directory returns empty."""
+    result = map_to_tests(["mcloop/checks.py"], tmp_path)
+    assert result == []
+
+
+def test_targeted_pytest_command():
+    cmd = targeted_pytest_command(["tests/test_checks.py"])
+    assert cmd == "pytest tests/test_checks.py"
+
+
+def test_targeted_pytest_command_multiple():
+    cmd = targeted_pytest_command(
+        ["tests/test_checks.py", "tests/test_runner.py"],
+    )
+    assert cmd == "pytest tests/test_checks.py tests/test_runner.py"
+
+
+def test_is_test_command():
+    assert is_test_command("pytest")
+    assert is_test_command("pytest tests/test_foo.py")
+    assert not is_test_command("ruff check .")
+    assert not is_test_command("npm test")
+    assert not is_test_command("make check")
+
+
+def test_run_checks_with_targeted(tmp_path):
+    """run_checks narrows pytest to targeted test files."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["mcloop/checks.py"],
+        )
+        # run_checks is side-effect-free: ruff is scoped to the changed
+        # .py files, pytest is scoped to their mapped tests. Parallel
+        # execution means order is non-deterministic.
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "mcloop/checks.py") in calls
+        assert ("ruff", "format", "--check", "mcloop/checks.py") in calls
+        assert ("pytest", "tests/test_checks.py") in calls
+
+
+def test_run_checks_targeted_only_test_files_changed(tmp_path):
+    """When only test files changed, pytest runs those test files."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_foo.py").write_text("")
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["tests/test_foo.py"],
+        )
+        # Test file included directly: ruff scoped to it, pytest scoped to it.
+        # Parallel execution means order is non-deterministic.
+        assert mock_run.call_count == 3
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "tests/test_foo.py") in calls
+        assert ("ruff", "format", "--check", "tests/test_foo.py") in calls
+        assert ("pytest", "tests/test_foo.py") in calls
+
+
+def test_run_checks_targeted_no_matching_tests(tmp_path):
+    """When Python source changes but no matching tests exist, fall back to full pytest.
+
+    This prevents untested code from committing when a new module has no
+    test file yet.  The fallback is to the full configured test command.
+    """
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["mcloop/main.py"],
+        )
+        # No test_main.py exists, but main.py is Python: fall back to full
+        # pytest while still scoping ruff to the changed file. Parallel
+        # execution means order is non-deterministic.
+        assert mock_run.call_count == 3
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", "mcloop/main.py") in calls
+        assert ("ruff", "format", "--check", "mcloop/main.py") in calls
+        assert ("pytest",) in calls
+
+
+def test_run_checks_targeted_no_python_changes(tmp_path):
+    """When only non-Python files change, pytest is correctly skipped."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["README.md", "docs/guide.md"],
+        )
+        # Only docs changed, no Python: ruff and pytest both skipped.
+        assert mock_run.call_count == 0
+
+
+def test_run_checks_no_changed_files_runs_full(tmp_path):
+    """Without changed_files, full test suite runs."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(tmp_path)
+        # Side-effect-free: ruff check + ruff format --check + pytest (full),
+        # no autofix. Parallel execution means order is non-deterministic.
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        assert ("ruff", "check", ".") in calls
+        assert ("ruff", "format", "--check", ".") in calls
+        assert ("pytest",) in calls

@@ -1,0 +1,527 @@
+#!/usr/bin/env python3
+"""PreToolUse hook: Telegram approval gate with session memory.
+
+Whitelisted commands (from settings.json permissions.allow) pass through.
+Everything else sends a Telegram message with Approve/Deny/Allow All buttons
+and blocks until the user responds. "Allow All" remembers the tool pattern
+for the rest of the session.
+"""
+
+import fnmatch
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+ENV_FILE = Path.home() / ".claude" / "telegram-hook.env"
+SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
+SESSION_FILE = Path.home() / ".claude" / "telegram-hook-session.json"
+
+POLL_INTERVAL = 2  # seconds between Telegram polling
+POLL_TIMEOUT = 600  # max seconds to wait for a response
+
+
+def _load_env_file():
+    """Load key=value pairs from ~/.claude/telegram-hook.env as fallback."""
+    vals = {}
+    try:
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if line and "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                vals[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return vals
+
+
+_env = _load_env_file()
+BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") or _env.get("TELEGRAM_BOT_TOKEN", "")
+CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or _env.get("TELEGRAM_CHAT_ID", "")
+
+RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
+
+
+# --- Session memory ---
+
+
+_SHELL_SUFFIX = ";&|"
+
+
+def _bash_prefix(cmd):
+    """Extract the command prefix (executable + subcommand) from a Bash command.
+
+    Returns the first two tokens unless the second token starts with '-',
+    in which case only the executable is returned. Trailing shell
+    metacharacters (;, &, |) glued to a token are stripped so a compound
+    command like 'pytest; echo done' yields 'pytest echo', not 'pytest;
+    echo'. If stripping leaves a token empty (e.g. standalone '&&'), the
+    prefix stops at the previous token.
+    Examples: 'git add a.py' -> 'git add', 'ls -la' -> 'ls',
+              'ruff check .' -> 'ruff check', 'pytest;' -> 'pytest'.
+    """
+    parts = [p.rstrip(_SHELL_SUFFIX) for p in cmd.split(None, 2)]
+    if not parts or not parts[0]:
+        return ""
+    if len(parts) >= 2 and parts[1] and not parts[1].startswith("-"):
+        return f"{parts[0]} {parts[1]}"
+    return parts[0]
+
+
+def _tool_pattern(tool_name, tool_input):
+    """Create a pattern key for session memory.
+
+    For Bash tools, stores the command prefix (executable + subcommand)
+    so that a single approval covers all invocations with different arguments.
+    For other tools, uses exact-string matching on the relevant identifier.
+    """
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "").strip()
+        prefix = _bash_prefix(cmd)
+        return f"Bash:{prefix}"
+    if tool_name in ("Edit", "Read", "Write"):
+        path = tool_input.get("file_path", "")
+        return f"{tool_name}:{path}"
+    return tool_name
+
+
+def _load_session():
+    """Load session-approved patterns from temp file."""
+    try:
+        data = json.loads(SESSION_FILE.read_text())
+        if data.get("created", 0) < time.time() - 86400:
+            SESSION_FILE.unlink(missing_ok=True)
+            return set()
+        return set(data.get("patterns", []))
+    except (OSError, json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _save_session(patterns):
+    """Save session-approved patterns to temp file."""
+    try:
+        # Preserve creation time if file exists
+        try:
+            existing = json.loads(SESSION_FILE.read_text())
+            created = existing.get("created", time.time())
+        except (OSError, json.JSONDecodeError):
+            created = time.time()
+        SESSION_FILE.write_text(
+            json.dumps(
+                {
+                    "created": created,
+                    "patterns": sorted(patterns),
+                }
+            )
+        )
+        _dbg(f"saved session: {sorted(patterns)}")
+    except Exception as e:
+        _dbg(f"session save FAILED: {e}")
+
+
+def is_session_allowed(tool_name, tool_input):
+    """Check if this tool pattern was approved for the session."""
+    pattern = _tool_pattern(tool_name, tool_input)
+    return pattern in _load_session()
+
+
+def remember_session(tool_name, tool_input):
+    """Add this tool pattern to the session allow list."""
+    patterns = _load_session()
+    patterns.add(_tool_pattern(tool_name, tool_input))
+    _save_session(patterns)
+
+
+# --- Permission rules ---
+
+
+def _rtk_rewrite(cmd):
+    """Call rtk rewrite and return the rewritten command, or None."""
+    try:
+        result = subprocess.run(
+            ["rtk", "rewrite", cmd],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def _respond(decision, reason="", tool_name="", tool_input=None):
+    """Write a properly formatted PreToolUse hook response to stdout."""
+    resp = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": decision,
+        }
+    }
+    if reason:
+        resp["hookSpecificOutput"]["permissionDecisionReason"] = reason
+    # RTK DISABLED 2026-04-15 for mcloop sessions: rtk's pytest_cmd.rs
+    # parser only matches summary lines starting with "===", but pytest
+    # in duplo emits "2474 passed in 340.94s" with no === framing, so
+    # rtk returns "Pytest: No tests collected" on a clean pass and the
+    # inner Claude chases a non-existent failure.
+    #
+    # We override any updatedInput from the upstream rtk hook by
+    # writing the ORIGINAL tool_input.command back. Claude Code merges
+    # hook responses; whichever hook last sets updatedInput wins.
+    if (
+        decision == "allow"
+        and tool_name == "Bash"
+        and tool_input is not None
+    ):
+        cmd = tool_input.get("command", "").strip()
+        if cmd:
+            resp["hookSpecificOutput"]["updatedInput"] = {
+                **tool_input,
+                "command": cmd,
+            }
+    json.dump(resp, sys.stdout)
+
+def load_allow_rules():
+    """Read permissions.allow from ~/.claude/settings.json."""
+    try:
+        with open(SETTINGS_PATH) as f:
+            settings = json.load(f)
+        return settings.get("permissions", {}).get("allow", [])
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def match_rule(rule, tool_name, tool_input):
+    """Check if a permission rule matches this tool call."""
+    m = RULE_RE.match(rule)
+    if not m:
+        return False
+
+    rule_tool, rule_arg = m.group(1), m.group(2)
+
+    if rule_tool != tool_name:
+        return False
+
+    if rule_arg is None:
+        return True
+
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "").strip()
+        if rule_arg.endswith(":*"):
+            prefix = rule_arg[:-2]
+            return cmd == prefix or cmd.startswith(prefix + " ")
+        else:
+            return cmd == rule_arg
+
+    if tool_name == "WebFetch":
+        if rule_arg.startswith("domain:"):
+            domain = rule_arg[7:]
+            url = tool_input.get("url", "")
+            try:
+                from urllib.parse import urlparse
+
+                url_domain = urlparse(url).hostname or ""
+                return url_domain == domain or url_domain.endswith("." + domain)
+            except Exception:
+                return False
+
+    if tool_name in ("Edit", "Read", "Write", "Glob"):
+        path_key = "file_path" if tool_name in ("Edit", "Read", "Write") else "path"
+        target = tool_input.get(path_key, "")
+        if not target:
+            return False
+        pattern = os.path.expanduser(rule_arg)
+        return fnmatch.fnmatch(target, pattern)
+
+    if tool_name == "Skill":
+        skill = tool_input.get("skill", "")
+        return skill == rule_arg
+
+    return False
+
+
+def _unwrap_rtk(tool_input):
+    """If command starts with 'rtk proxy', return input with the unwrapped command."""
+    if "command" not in tool_input:
+        return tool_input
+    cmd = tool_input["command"].strip()
+    if cmd.startswith("rtk proxy "):
+        unwrapped = cmd[len("rtk proxy ") :]
+        return {**tool_input, "command": unwrapped}
+    return tool_input
+
+
+def is_allowed(tool_name, tool_input):
+    """Check if this tool call is covered by any allow rule."""
+    rules = load_allow_rules()
+    if any(match_rule(rule, tool_name, tool_input) for rule in rules):
+        return True
+    # Check if the unwrapped command (without rtk proxy) is allowed
+    unwrapped = _unwrap_rtk(tool_input)
+    if unwrapped is not tool_input:
+        return any(match_rule(rule, tool_name, unwrapped) for rule in rules)
+    return False
+
+
+# --- Telegram ---
+
+
+def telegram_api(method, data=None):
+    """Call a Telegram Bot API method. Use data dict for POST body (supports nested JSON)."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    if data is not None:
+        body = json.dumps(data).encode()
+        req = urllib.request.Request(url, data=body)
+        req.add_header("Content-Type", "application/json")
+    else:
+        req = urllib.request.Request(url)
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        return json.loads(resp.read())
+
+
+def send_approval_request(text):
+    """Send a message with inline Approve/Deny/Allow All buttons. Returns message_id."""
+    data = {
+        "chat_id": CHAT_ID,
+        "text": text,
+        "parse_mode": "Markdown",
+        "reply_markup": {
+            "inline_keyboard": [
+                [
+                    {"text": "Approve", "callback_data": "approve"},
+                    {"text": "Deny", "callback_data": "deny"},
+                ],
+                [
+                    {"text": "Allow All Session", "callback_data": "allow_session"},
+                ],
+            ]
+        },
+    }
+    result = telegram_api("sendMessage", data=data)
+    return result["result"]["message_id"]
+
+
+def update_message(message_id, text):
+    """Edit the approval message to show the decision (removes buttons)."""
+    data = {
+        "chat_id": CHAT_ID,
+        "message_id": message_id,
+        "text": text,
+        "parse_mode": "Markdown",
+    }
+    try:
+        telegram_api("editMessageText", data=data)
+    except Exception:
+        pass
+
+
+def poll_for_response(message_id):
+    """Poll getUpdates for a callback_query on our message."""
+    # Get the latest update_id to only look at new updates
+    initial = telegram_api("getUpdates", data={"limit": 1, "offset": -1})
+    offset = 0
+    if initial.get("result"):
+        offset = initial["result"][-1]["update_id"] + 1
+
+    deadline = time.time() + POLL_TIMEOUT
+    while time.time() < deadline:
+        try:
+            updates = telegram_api(
+                "getUpdates",
+                data={
+                    "offset": offset,
+                    "timeout": POLL_INTERVAL,
+                    "allowed_updates": ["callback_query"],
+                },
+            )
+        except Exception:
+            time.sleep(POLL_INTERVAL)
+            continue
+
+        for update in updates.get("result", []):
+            offset = update["update_id"] + 1
+            cb = update.get("callback_query")
+            if not cb:
+                continue
+            if cb.get("message", {}).get("message_id") != message_id:
+                continue
+
+            # Answer the callback to dismiss the spinner
+            try:
+                telegram_api(
+                    "answerCallbackQuery",
+                    data={
+                        "callback_query_id": cb["id"],
+                    },
+                )
+            except Exception:
+                pass
+
+            return cb["data"]  # "approve", "deny", or "allow_session"
+
+    return None  # timed out
+
+
+def format_tool_description(tool_name, tool_input):
+    if tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        desc = tool_input.get("description", "")
+        lines = [f"`{cmd}`"]
+        if desc:
+            lines.append(f"({desc})")
+        return "\n".join(lines)
+    elif tool_name in ("Write", "Read"):
+        path = tool_input.get("file_path", "?")
+        return f"{tool_name}: `{path}`"
+    elif tool_name == "Edit":
+        path = tool_input.get("file_path", "?")
+        old = tool_input.get("old_string", "")[:80]
+        return f"Edit: `{path}`\n`{old}` → ..."
+    else:
+        return f"`{json.dumps(tool_input)[:200]}`"
+
+
+_DBG_PATH = Path.home() / ".claude" / "telegram-hook-debug.log"
+
+
+def _dbg(msg):
+    with open(_DBG_PATH, "a") as f:
+        f.write(f"{time.strftime('%H:%M:%S')} {msg}\n")
+
+
+def main():
+    # Interactive sessions (no MCLOOP_TASK_LABEL) skip Telegram.
+    # RTK rewrite for interactive sessions is handled by the
+    # standalone RTK hook in settings.json (no parallel conflict
+    # since this hook returns {} and does not participate).
+    if not os.environ.get("MCLOOP_TASK_LABEL"):
+        json.dump({}, sys.stdout)
+        return
+
+    _dbg(
+        f"invoked, BOT={bool(BOT_TOKEN)}, CHAT={bool(CHAT_ID)},"
+        f" TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}"
+    )
+
+    if not BOT_TOKEN or not CHAT_ID:
+        _dbg("EXIT: no credentials, no opinion")
+        json.dump({}, sys.stdout)
+        return
+
+    hook_input = json.load(sys.stdin)
+    tool_name = hook_input.get("tool_name", "unknown")
+    tool_input = hook_input.get("tool_input", {})
+    cwd = hook_input.get("cwd", "")
+    home = str(Path.home())
+    user = Path(home).name
+    project = Path(cwd).name if cwd else "?"
+    session_label = f"{user}/{project}"
+    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
+    _dbg(f"tool={tool_name} input={json.dumps(tool_input)[:100]}")
+
+    # Block MCP tools in McLoop sessions
+    if task_label and tool_name.startswith("mcp__"):
+        _dbg(f"EXIT: blocked MCP tool {tool_name} in mcloop session")
+        _respond("deny", "MCP tools blocked in mcloop")
+        return
+
+    # Whitelisted commands pass through instantly
+    if is_allowed(tool_name, tool_input):
+        _dbg("EXIT: allowed by rules")
+        _respond("allow", tool_name=tool_name, tool_input=tool_input)
+        return
+
+    # Session-approved patterns pass through
+    if is_session_allowed(tool_name, tool_input):
+        pattern = _tool_pattern(tool_name, tool_input)
+        _dbg(f"EXIT: allowed by session memory ({pattern})")
+        _respond("allow", f"Session-approved: {pattern}", tool_name=tool_name, tool_input=tool_input)
+        return
+
+    # Not whitelisted. Send Telegram with buttons and wait.
+    desc = format_tool_description(tool_name, tool_input)
+    pattern = _tool_pattern(tool_name, tool_input)
+    label_prefix = f"[{task_label}] " if task_label else ""
+    msg = (
+        f"*{label_prefix}Permission needed* [{session_label}]\n\n"
+        f"Tool: *{tool_name}*\n{desc}\n\n"
+        f"Pattern: `{pattern}`"
+    )
+
+    # Create pending file so McLoop can show waiting status
+    pending_dir = Path(cwd) / ".mcloop" / "pending"
+    pending_file = None
+    try:
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        pending_file = pending_dir / f"{os.getpid()}"
+        pending_file.write_text(f"{tool_name}: {desc[:200]}")
+    except OSError:
+        pass
+
+    try:
+        message_id = send_approval_request(msg)
+        _dbg(f"sent approval request, message_id={message_id}")
+    except Exception as e:
+        if pending_file:
+            pending_file.unlink(missing_ok=True)
+        _dbg(f"EXIT: telegram send failed ({e}), no opinion")
+        json.dump({}, sys.stdout)
+        return
+
+    # Block and poll for the button press
+    _dbg("polling for response...")
+    decision = poll_for_response(message_id)
+
+    # Remove pending file
+    if pending_file:
+        pending_file.unlink(missing_ok=True)
+
+    if decision == "approve":
+        update_message(message_id, f"{label_prefix}Approved: *{tool_name}*\n{desc}")
+        _dbg("EXIT: approved via Telegram")
+        _respond("allow", "Approved via Telegram", tool_name=tool_name, tool_input=tool_input)
+    elif decision == "allow_session":
+        remember_session(tool_name, tool_input)
+        msg = (
+            f"{label_prefix}Approved (session): *{tool_name}*\n"
+            f"{desc}\nPattern `{pattern}` remembered"
+        )
+        update_message(message_id, msg)
+        _dbg(f"EXIT: session-approved via Telegram ({pattern})")
+        _respond("allow", f"Session-approved via Telegram: {pattern}", tool_name=tool_name, tool_input=tool_input)
+    elif decision == "deny":
+        update_message(message_id, f"{label_prefix}Denied: *{tool_name}*\n{desc}")
+        _dbg("EXIT: denied via Telegram")
+        # Write denial marker so mcloop can kill the session
+        try:
+            denied_file = pending_dir / "denied"
+            denied_file.write_text(f"Denied: {tool_name} {desc[:200]}")
+        except OSError:
+            pass
+        _respond("deny", "Denied via Telegram")
+    else:
+        update_message(message_id, f"{label_prefix}Timed out: *{tool_name}*\n{desc}")
+        _dbg("EXIT: timed out, denying")
+        _respond("deny", "Timed out waiting for Telegram approval")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        _dbg(f"EXIT: exception {e}, no opinion")
+        err_path = str(Path.home() / ".claude" / "telegram-hook-error.log")
+        with open(err_path, "a") as f:
+            import traceback
+
+            f.write(f"--- {time.strftime('%H:%M:%S')} ---\n")
+            traceback.print_exc(file=f)
+        json.dump({}, sys.stdout)

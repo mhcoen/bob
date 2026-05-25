@@ -1,0 +1,70 @@
+{
+  "permissions": {
+    "defaultMode": "plan",
+    "allow": [
+      "WebSearch",
+      "Bash(grep:*)",
+      "Bash(echo:*)",
+      "Bash(find:*)",
+      "Bash(wc:*)",
+      "Bash(git commit:*)",
+      "Bash(git status:*)",
+      "Bash(git add:*)",
+      "Bash(git push)",
+      "Bash(git checkout:*)",
+      "Bash(git reset:*)",
+      "Bash(git rm:*)",
+      "Bash(git merge:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(pytest:*)",
+      "Bash(python3:*)",
+      "Bash(python -c:*)",
+      "Bash(pip index:*)",
+      "Bash(ruff:*)",
+      "Bash(npm:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:pypi.org)"
+    ]
+  },
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "allowUnsandboxedCommands": false,
+    "network": {
+      "allowedDomains": [
+        "github.com",
+        "*.github.com",
+        "api.github.com",
+        "raw.githubusercontent.com",
+        "objects.githubusercontent.com",
+        "api.anthropic.com",
+        "localhost",
+        "127.0.0.1",
+        "pypi.org",
+        "*.pypi.org",
+        "files.pythonhosted.org",
+        "registry.npmjs.org",
+        "*.npmjs.org",
+        "api.telegram.org"
+      ],
+      "allowLocalBinding": true
+    }
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/mcloop/telegram-permission-hook.py",
+            "timeout": 600000
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,877 @@
+"""Instrument project source files with error-catching hooks.
+
+Detects project language from PLAN.md description, file extensions,
+or build system files. Supports Swift and Python initially. Injected
+code is delimited with markers so it can be detected and re-injected.
+"""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+SWIFT_BEGIN = "// mcloop:wrap:begin"
+SWIFT_END = "// mcloop:wrap:end"
+PYTHON_BEGIN = "# mcloop:wrap:begin"
+PYTHON_END = "# mcloop:wrap:end"
+
+_PROJECT_DIR_PLACEHOLDER = "__MCLOOP_PROJECT_DIR__"
+
+SWIFT_WRAPPER = """\
+// mcloop:wrap:begin
+import Foundation
+
+/// Registry for app-state providers. Each closure returns a dict of
+/// property names to their string representations, captured at crash
+/// time.  ObservableObject subclasses register themselves so that
+/// @Published properties are included in error reports.
+enum _McloopState {
+    private static var _providers: [() -> [String: String]] = []
+    private static var _lastAction: String = ""
+    static let lock = NSLock()
+
+    static func register(_ provider: @escaping () -> [String: String]) {
+        lock.lock()
+        _providers.append(provider)
+        lock.unlock()
+    }
+
+    static func recordAction(_ action: String) {
+        lock.lock()
+        _lastAction = action
+        lock.unlock()
+    }
+
+    static func snapshot() -> [String: String] {
+        lock.lock()
+        let providers = _providers
+        lock.unlock()
+        var result: [String: String] = [:]
+        for provider in providers {
+            for (k, v) in provider() {
+                result[k] = v
+            }
+        }
+        return result
+    }
+
+    static func lastAction() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastAction
+    }
+
+    /// Lock-free accessors for signal handlers (async-signal-safe).
+    static func unsafeSnapshot() -> [String: String] {
+        var result: [String: String] = [:]
+        for provider in _providers {
+            for (k, v) in provider() {
+                result[k] = v
+            }
+        }
+        return result
+    }
+
+    static func unsafeLastAction() -> String {
+        return _lastAction
+    }
+}
+
+private var _mcloopErrorDir = ""
+
+private func _mcloopSetupCrashHandlers() {
+    let errorDir = FileManager.default.currentDirectoryPath + "/.mcloop"
+    try? FileManager.default.createDirectory(
+        atPath: errorDir, withIntermediateDirectories: true)
+    _mcloopErrorDir = errorDir
+
+    NSSetUncaughtExceptionHandler { exception in
+        let state = _McloopState.snapshot()
+        let action = _McloopState.lastAction()
+        let report: [String: Any] = [
+            "timestamp": ISO8601DateFormatter().string(from: Date()),
+            "exception_type": String(describing: type(of: exception)),
+            "description": exception.reason ?? exception.name.rawValue,
+            "stack_trace": exception.callStackSymbols.joined(
+                separator: "\\n"),
+            "source_file": "",
+            "line": 0,
+            "app_state": state,
+            "last_action": action,
+            "fix_attempts": 0,
+        ]
+        _mcloopWriteError(report, dir: _mcloopErrorDir)
+        let excType = String(describing: type(of: exception))
+        fputs(
+            "[McLoop] Crash captured: \\(excType)"
+            + " in \\(exception.name.rawValue)."
+            + " Run mcloop from __MCLOOP_PROJECT_DIR__"
+            + " to fix this bug.\\n",
+            stderr)
+    }
+
+    for sig: Int32 in [SIGSEGV, SIGABRT, SIGBUS] {
+        signal(sig) { signum in
+            _mcloopWriteSignalReport(signum, dir: _mcloopErrorDir)
+            fputs(
+                "[McLoop] Crash captured: Signal \\(signum)."
+                + " Run mcloop from __MCLOOP_PROJECT_DIR__"
+                + " to fix this bug.\\n",
+                stderr)
+            Darwin.signal(signum, SIG_DFL)
+            Darwin.raise(signum)
+        }
+    }
+}
+
+/// Write a signal crash report using only POSIX I/O and Swift stdlib.
+/// No Foundation calls — safe in a forked child inside a signal handler.
+private func _mcloopWriteSignalReport(_ signum: Int32, dir: String) {
+    let state = _McloopState.unsafeSnapshot()
+    let action = _McloopState.unsafeLastAction()
+    let trace = Thread.callStackSymbols.joined(separator: "\\n")
+    var hash: UInt32 = 5381
+    for c in (trace + "Signal").utf8 {
+        hash = hash &* 33 &+ UInt32(c)
+    }
+    let hex = "0123456789abcdef"
+    var hashStr = ""
+    for i in stride(from: 28, through: 0, by: -4) {
+        let nibble = Int((hash >> i) & 0xF)
+        hashStr.append(hex[hex.index(hex.startIndex, offsetBy: nibble)])
+    }
+    // Escape a string for JSON using only Swift stdlib
+    func esc(_ s: String) -> String {
+        var r = ""
+        for c in s {
+            switch c {
+            case "\\\\": r += "\\\\\\\\"
+            case "\\"": r += "\\\\\\""
+            case "\\n": r += "\\\\n"
+            case "\\t": r += "\\\\t"
+            default: r.append(c)
+            }
+        }
+        return r
+    }
+    var stateJson = "{"
+    var first = true
+    for (k, v) in state {
+        if !first { stateJson += "," }
+        stateJson += "\\"\\(esc(k))\\": \\"\\(esc(v))\\""
+        first = false
+    }
+    stateJson += "}"
+    let entry = "{"
+        + "\\"signal\\": \\(signum),"
+        + "\\"exception_type\\": \\"Signal\\","
+        + "\\"description\\": \\"Received signal \\(signum)\\","
+        + "\\"stack_trace\\": \\"\\(esc(trace))\\","
+        + "\\"source_file\\": \\"\\"," + "\\"line\\": 0,"
+        + "\\"app_state\\": \\(stateJson),"
+        + "\\"last_action\\": \\"\\(esc(action))\\","
+        + "\\"fix_attempts\\": 0,"
+        + "\\"id\\": \\"\\(hashStr)\\""
+        + "}"
+    // Read existing errors.json via POSIX, append new entry
+    let path = dir + "/errors.json"
+    var existing = ""
+    let rfd = open(path, O_RDONLY)
+    if rfd >= 0 {
+        var buf = [UInt8](repeating: 0, count: 65536)
+        let n = read(rfd, &buf, buf.count)
+        if n > 0 {
+            existing = String(
+                decoding: buf[0..<n], as: UTF8.self)
+        }
+        close(rfd)
+    }
+    // Find last ] to append into the array
+    var insertIdx = -1
+    for i in stride(from: existing.count - 1, through: 0, by: -1) {
+        let idx = existing.index(existing.startIndex, offsetBy: i)
+        let ch = existing[idx]
+        if ch == "]" { insertIdx = i; break }
+        if ch != " " && ch != "\\n" && ch != "\\r" && ch != "\\t" { break }
+    }
+    let output: String
+    if insertIdx > 0 {
+        // Find if there's a } before the ] (non-empty array)
+        var hasEntry = false
+        for i in stride(from: insertIdx - 1, through: 0, by: -1) {
+            let idx = existing.index(existing.startIndex, offsetBy: i)
+            let ch = existing[idx]
+            if ch == "}" { hasEntry = true; break }
+            if ch != " " && ch != "\\n" && ch != "\\r" && ch != "\\t" {
+                break
+            }
+        }
+        let before = String(
+            existing[existing.startIndex..<existing.index(
+                existing.startIndex, offsetBy: insertIdx)])
+        if hasEntry {
+            output = before + ",\\n" + entry + "\\n]"
+        } else {
+            output = "[\\n" + entry + "\\n]"
+        }
+    } else {
+        output = "[\\n" + entry + "\\n]"
+    }
+    let wfd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+    if wfd >= 0 {
+        output.withCString { ptr in
+            _ = write(wfd, ptr, strlen(ptr))
+        }
+        close(wfd)
+    }
+}
+
+private func _mcloopWriteError(_ report: [String: Any], dir: String) {
+    let path = dir + "/errors.json"
+    var entries: [[String: Any]] = []
+    if let data = FileManager.default.contents(atPath: path),
+       let existing = try? JSONSerialization.jsonObject(
+        with: data) as? [[String: Any]]
+    {
+        entries = existing
+    }
+    var entry = report
+    let trace = (report["stack_trace"] as? String) ?? ""
+    let sig = report["signal"].map { String(describing: $0) }
+        ?? (report["exception_type"] as? String) ?? ""
+    var hash: UInt32 = 5381
+    for c in (trace + sig).utf8 { hash = hash &* 33 &+ UInt32(c) }
+    entry["id"] = String(format: "%08x", hash)
+    entries.append(entry)
+    if let data = try? JSONSerialization.data(
+        withJSONObject: entries, options: [.prettyPrinted])
+    {
+        FileManager.default.createFile(atPath: path, contents: data)
+    }
+}
+// mcloop:wrap:end
+"""
+
+PYTHON_WRAPPER = """\
+# mcloop:wrap:begin
+import hashlib as _mcloop_hashlib
+import json as _mcloop_json
+import logging as _mcloop_logging
+import signal as _mcloop_signal
+import sys as _mcloop_sys
+import traceback as _mcloop_traceback
+from datetime import datetime as _mcloop_datetime, timezone as _mcloop_tz
+from pathlib import Path as _mcloop_Path
+
+
+class _McloopState:
+    _providers = []
+    _last_action = ""
+
+    @classmethod
+    def register(cls, provider):
+        cls._providers.append(provider)
+
+    @classmethod
+    def record_action(cls, action):
+        cls._last_action = str(action)
+
+    @classmethod
+    def snapshot(cls):
+        result = {}
+        for provider in cls._providers:
+            try:
+                result.update(provider())
+            except Exception:
+                pass
+        return result
+
+    @classmethod
+    def last_action(cls):
+        return cls._last_action
+
+
+def _mcloop_setup_crash_handlers():
+    error_dir = _mcloop_Path(".mcloop")
+    error_dir.mkdir(parents=True, exist_ok=True)
+    error_path = error_dir / "errors.json"
+
+    def _write_error(report):
+        entries = []
+        if error_path.exists():
+            try:
+                entries = _mcloop_json.loads(error_path.read_text())
+            except (ValueError, OSError):
+                pass
+        trace = report.get("stack_trace", "")
+        sig = report.get("signal", report.get("exception_type", ""))
+        raw = f"{trace}{sig}".encode()
+        report["id"] = _mcloop_hashlib.md5(raw).hexdigest()[:8]
+        entries.append(report)
+        try:
+            error_path.write_text(
+                _mcloop_json.dumps(entries, indent=2) + "\\n"
+            )
+        except OSError:
+            pass
+
+    def _excepthook(exc_type, exc_value, exc_tb):
+        frames = _mcloop_traceback.extract_tb(exc_tb)
+        last = frames[-1] if frames else None
+        local_vars = {}
+        if exc_tb is not None:
+            tb = exc_tb
+            while tb.tb_next:
+                tb = tb.tb_next
+            local_vars = {
+                k: repr(v)
+                for k, v in tb.tb_frame.f_locals.items()
+                if not k.startswith("_")
+            }
+        state = _McloopState.snapshot()
+        state.update(local_vars)
+        report = {
+            "timestamp": _mcloop_datetime.now(
+                _mcloop_tz.utc
+            ).isoformat(),
+            "exception_type": exc_type.__name__,
+            "description": str(exc_value),
+            "stack_trace": "".join(
+                _mcloop_traceback.format_exception(
+                    exc_type, exc_value, exc_tb
+                )
+            ),
+            "source_file": last.filename if last else "",
+            "line": last.lineno if last else 0,
+            "app_state": state,
+            "last_action": _McloopState.last_action(),
+            "fix_attempts": 0,
+        }
+        _write_error(report)
+        _loc = f"{last.filename}:{last.lineno}" if last else "unknown"
+        _mcloop_sys.stderr.write(
+            f"[McLoop] Crash captured: {exc_type.__name__} in {_loc}."
+            f" Run mcloop from __MCLOOP_PROJECT_DIR__"
+            f" to fix this bug.\\n"
+        )
+        _mcloop_sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+    _mcloop_sys.excepthook = _excepthook
+
+    def _signal_handler(signum, frame):
+        source = ""
+        lineno = 0
+        if frame is not None:
+            source = frame.f_code.co_filename
+            lineno = frame.f_lineno
+        # Avoid calling provider closures in signal context
+        # (they may hold locks or do I/O). Read raw state only.
+        try:
+            state = dict(_McloopState.snapshot())
+        except Exception:
+            state = {}
+        report = {
+            "timestamp": _mcloop_datetime.now(
+                _mcloop_tz.utc
+            ).isoformat(),
+            "signal": signum,
+            "exception_type": "Signal",
+            "description": f"Received signal {signum}",
+            "stack_trace": "".join(_mcloop_traceback.format_stack(frame)),
+            "source_file": source,
+            "line": lineno,
+            "app_state": state,
+            "last_action": _McloopState.last_action(),
+            "fix_attempts": 0,
+        }
+        try:
+            _write_error(report)
+        except Exception:
+            pass
+        _loc = f"{source}:{lineno}" if source else "unknown"
+        try:
+            _mcloop_sys.stderr.write(
+                f"[McLoop] Crash captured: Signal {signum} in {_loc}."
+                f" Run mcloop from __MCLOOP_PROJECT_DIR__"
+                f" to fix this bug.\\n"
+            )
+        except Exception:
+            pass
+        _mcloop_signal.signal(signum, _mcloop_signal.SIG_DFL)
+        import os
+        os.kill(os.getpid(), signum)
+
+    for _sig in (
+        _mcloop_signal.SIGSEGV,
+        _mcloop_signal.SIGABRT,
+    ):
+        try:
+            _mcloop_signal.signal(_sig, _signal_handler)
+        except OSError:
+            pass
+
+    class _McloopLogHandler(_mcloop_logging.Handler):
+        def emit(self, record):
+            if record.exc_info and record.exc_info[1] is not None:
+                exc_type, exc_value, exc_tb = record.exc_info
+                frames = _mcloop_traceback.extract_tb(exc_tb)
+                last = frames[-1] if frames else None
+                local_vars = {}
+                if exc_tb is not None:
+                    tb = exc_tb
+                    while tb.tb_next:
+                        tb = tb.tb_next
+                    local_vars = {
+                        k: repr(v)
+                        for k, v in tb.tb_frame.f_locals.items()
+                        if not k.startswith("_")
+                    }
+                state = _McloopState.snapshot()
+                state.update(local_vars)
+                report = {
+                    "timestamp": _mcloop_datetime.now(
+                        _mcloop_tz.utc
+                    ).isoformat(),
+                    "exception_type": exc_type.__name__,
+                    "description": str(exc_value),
+                    "stack_trace": "".join(
+                        _mcloop_traceback.format_exception(
+                            exc_type, exc_value, exc_tb
+                        )
+                    ),
+                    "source_file": last.filename if last else "",
+                    "line": last.lineno if last else 0,
+                    "app_state": state,
+                    "last_action": _McloopState.last_action(),
+                    "fix_attempts": 0,
+                }
+                _write_error(report)
+
+    handler = _McloopLogHandler()
+    handler.setLevel(_mcloop_logging.ERROR)
+    _mcloop_logging.getLogger().addHandler(handler)
+
+
+_mcloop_setup_crash_handlers()
+# mcloop:wrap:end
+"""
+
+
+def detect_language(project_dir: Path) -> str | None:
+    """Detect project language from PLAN.md, file extensions, or build system.
+
+    Returns 'swift', 'python', or None if unsupported/undetectable.
+    """
+    # 1. Check PLAN.md description for language keywords
+    plan = project_dir / "PLAN.md"
+    if plan.exists():
+        try:
+            text = plan.read_text().lower()
+            # Check description (before first checkbox)
+            desc = text.split("- [")[0] if "- [" in text else text
+            if _match_language(desc):
+                return _match_language(desc)
+        except OSError:
+            pass
+
+    # 2. Check file extensions
+    lang = _detect_from_extensions(project_dir)
+    if lang:
+        return lang
+
+    # 3. Check build system files
+    if (project_dir / "Package.swift").exists():
+        return "swift"
+    if (project_dir / "pyproject.toml").exists():
+        return "python"
+    if (project_dir / "setup.py").exists():
+        return "python"
+
+    return None
+
+
+def _match_language(text: str) -> str | None:
+    """Match language keywords in text."""
+    swift_patterns = [
+        r"\bswift\b",
+        r"\bswiftui\b",
+        r"\bspm\b",
+        r"\bxcode\b",
+        r"\buikit\b",
+        r"\bappkit\b",
+    ]
+    python_patterns = [
+        r"\bpython\b",
+        r"\bdjango\b",
+        r"\bflask\b",
+        r"\bfastapi\b",
+        r"\bpytest\b",
+    ]
+    for pat in swift_patterns:
+        if re.search(pat, text):
+            return "swift"
+    for pat in python_patterns:
+        if re.search(pat, text):
+            return "python"
+    return None
+
+
+def _detect_from_extensions(project_dir: Path) -> str | None:
+    """Detect language from file extensions in the project.
+
+    Uses ``os.walk`` with ``followlinks=False`` so circular directory
+    symlinks (e.g. ``current -> .``) cannot trigger infinite recursion.
+    """
+    import os
+
+    swift_count = 0
+    python_count = 0
+    for dirpath, dirnames, filenames in os.walk(project_dir, followlinks=False):
+        # Filter directories in place to skip hidden and common non-source dirs.
+        dirnames[:] = [
+            d
+            for d in dirnames
+            if not d.startswith(".")
+            and d not in ("node_modules", "__pycache__", ".build", "venv", ".venv")
+        ]
+        for name in filenames:
+            full = Path(dirpath) / name
+            # Skip individual symlinked files too.
+            if full.is_symlink():
+                continue
+            if name.endswith(".swift"):
+                swift_count += 1
+            elif name.endswith(".py"):
+                python_count += 1
+    if swift_count > python_count and swift_count > 0:
+        return "swift"
+    if python_count > swift_count and python_count > 0:
+        return "python"
+    return None
+
+
+def find_entry_point(project_dir: Path, language: str) -> Path | None:
+    """Find the main entry point file for the given language.
+
+    Swift: looks for @main struct or App.swift or main.swift
+    Python: looks for __main__.py or main.py
+    """
+    if language == "swift":
+        return _find_swift_entry(project_dir)
+    if language == "python":
+        return _find_python_entry(project_dir)
+    return None
+
+
+def _find_swift_entry(project_dir: Path) -> Path | None:
+    """Find Swift app entry point."""
+    swift_files = []
+    for p in project_dir.rglob("*.swift"):
+        parts = p.relative_to(project_dir).parts
+        if any(part.startswith(".") or part == ".build" for part in parts):
+            continue
+        swift_files.append(p)
+
+    # First: look for @main attribute
+    for f in swift_files:
+        try:
+            text = f.read_text()
+            if re.search(r"@main\b", text):
+                return f
+        except OSError:
+            continue
+
+    # Second: files named *App.swift (SwiftUI convention)
+    for f in swift_files:
+        if f.stem.endswith("App"):
+            return f
+
+    # Third: main.swift
+    for f in swift_files:
+        if f.name == "main.swift":
+            return f
+
+    return None
+
+
+def _find_python_entry(project_dir: Path) -> Path | None:
+    """Find Python app entry point."""
+    # Look for __main__.py in any package
+    for p in project_dir.rglob("__main__.py"):
+        parts = p.relative_to(project_dir).parts
+        if any(part.startswith(".") or part in ("node_modules", "__pycache__") for part in parts):
+            continue
+        return p
+
+    # Look for main.py at project root
+    main = project_dir / "main.py"
+    if main.exists():
+        return main
+
+    # Look for main.py anywhere
+    for p in project_dir.rglob("main.py"):
+        parts = p.relative_to(project_dir).parts
+        if any(part.startswith(".") or part in ("node_modules", "__pycache__") for part in parts):
+            continue
+        return p
+
+    return None
+
+
+def has_markers(content: str, language: str) -> bool:
+    """Check if file content already has mcloop wrap markers."""
+    if language == "swift":
+        return SWIFT_BEGIN in content and SWIFT_END in content
+    if language == "python":
+        return PYTHON_BEGIN in content and PYTHON_END in content
+    return False
+
+
+def strip_markers(content: str, language: str) -> str:
+    """Remove existing mcloop wrap block from file content.
+
+    A marker is recognised only when the line, after stripping leading
+    whitespace, *starts* with the literal marker string. This prevents
+    incidental matches inside string literals or comments (e.g. a
+    docstring that mentions ``// mcloop:wrap:begin``) from being silently
+    deleted.
+    """
+    if language == "swift":
+        begin, end = SWIFT_BEGIN, SWIFT_END
+    elif language == "python":
+        begin, end = PYTHON_BEGIN, PYTHON_END
+    else:
+        return content
+
+    lines = content.splitlines(keepends=True)
+    result = []
+    inside = False
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith(begin):
+            inside = True
+            continue
+        if stripped.startswith(end):
+            inside = False
+            continue
+        if not inside:
+            result.append(line)
+
+    return "".join(result)
+
+
+def _resolve_wrapper(template: str, project_dir: str | None) -> str:
+    """Substitute __MCLOOP_PROJECT_DIR__ placeholder in wrapper text."""
+    replacement = project_dir if project_dir else "."
+    return template.replace(_PROJECT_DIR_PLACEHOLDER, replacement)
+
+
+def inject(content: str, language: str, project_dir: str | None = None) -> str:
+    """Inject error-catching wrapper into file content.
+
+    If markers already exist, strips and re-injects. For Swift,
+    injects after imports and adds a call to the setup function.
+    For Python, prepends the wrapper at the top of the file.
+
+    project_dir is baked into the crash handler stderr message so
+    the user knows where to run mcloop from.
+    """
+    # Strip existing markers first
+    clean = strip_markers(content, language)
+
+    if language == "swift":
+        return _inject_swift(clean, project_dir)
+    if language == "python":
+        return _inject_python(clean, project_dir)
+    return content
+
+
+def _inject_swift(content: str, project_dir: str | None = None) -> str:
+    """Inject Swift crash handlers after imports."""
+    lines = content.splitlines(keepends=True)
+
+    # Find last import line
+    last_import = -1
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("import "):
+            last_import = i
+
+    # Insert wrapper after imports
+    insert_pos = last_import + 1 if last_import >= 0 else 0
+    resolved = _resolve_wrapper(SWIFT_WRAPPER, project_dir)
+    wrapper_lines = resolved.splitlines(keepends=True)
+    # Add blank line before wrapper if not at start
+    if insert_pos > 0:
+        wrapper_lines = ["\n"] + wrapper_lines
+    wrapper_lines.append("\n")
+
+    result = lines[:insert_pos] + wrapper_lines + lines[insert_pos:]
+
+    # Add setup call to init() if @main struct exists
+    text = "".join(result)
+    if re.search(r"@main\b", text):
+        text = _add_swift_init_call(text)
+
+    return text
+
+
+def _add_swift_init_call(content: str) -> str:
+    """Add _mcloopSetupCrashHandlers() call to the app's init().
+
+    Inserts the call into an existing init() inside the @main struct.
+    If the @main struct has no init(), a minimal init() is synthesized
+    right after the struct's opening brace so the crash handler is
+    actually installed at app launch.
+
+    Lines inside the mcloop wrapper block are skipped when looking for
+    the @main struct or for an existing call site, since the wrapper
+    itself contains the function definition.
+    """
+    call = "_mcloopSetupCrashHandlers()"
+
+    lines = content.splitlines(keepends=True)
+    in_wrapper = False
+    user_lines: list[tuple[int, str]] = []
+    for idx, line in enumerate(lines):
+        if SWIFT_BEGIN in line:
+            in_wrapper = True
+            continue
+        if SWIFT_END in line:
+            in_wrapper = False
+            continue
+        if in_wrapper:
+            continue
+        user_lines.append((idx, line))
+
+    # If the user code already invokes the call, leave it alone.
+    for _, line in user_lines:
+        stripped = line.strip()
+        if call in stripped and not stripped.startswith("func "):
+            return content
+
+    result = list(lines)
+    in_main_struct = False
+    found_init = False
+    pending_init = False
+    struct_open_idx = -1
+    struct_indent = 0
+    seen_main = False
+    awaiting_struct_brace = False
+    insertions: list[tuple[int, str]] = []
+
+    for idx, line in user_lines:
+        stripped = line.strip()
+
+        if "@main" in stripped:
+            in_main_struct = True
+            seen_main = True
+            awaiting_struct_brace = True
+            continue
+
+        if awaiting_struct_brace and struct_open_idx == -1:
+            if struct_indent == 0 and stripped:
+                struct_indent = len(line) - len(line.lstrip())
+            if "{" in line:
+                struct_open_idx = idx
+                awaiting_struct_brace = False
+            continue
+
+        if in_main_struct and not found_init:
+            if pending_init and stripped.startswith("{"):
+                found_init = True
+                indent = len(line) - len(line.lstrip()) + 4
+                insertions.append((idx + 1, " " * indent + call + "\n"))
+                continue
+            pending_init = False
+            if re.match(r"^\s*init\s*\(", stripped):
+                if "{" in stripped:
+                    found_init = True
+                    indent = len(line) - len(line.lstrip()) + 8
+                    insertions.append((idx + 1, " " * indent + call + "\n"))
+                    continue
+                pending_init = True
+                continue
+
+    if seen_main and not found_init and struct_open_idx != -1:
+        body_indent = " " * (struct_indent + 4)
+        call_indent = " " * (struct_indent + 8)
+        synthesized = f"{body_indent}init() {{\n{call_indent}{call}\n{body_indent}}}\n"
+        insertions.append((struct_open_idx + 1, synthesized))
+
+    for ins_idx, ins_text in sorted(insertions, key=lambda p: -p[0]):
+        result.insert(ins_idx, ins_text)
+
+    return "".join(result)
+
+
+def _inject_python(content: str, project_dir: str | None = None) -> str:
+    """Inject Python crash handlers at the top of the file."""
+    # Insert after shebang, encoding, and from __future__ lines
+    lines = content.splitlines(keepends=True)
+    insert_pos = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if i == 0 and stripped.startswith("#!"):
+            insert_pos = 1
+            continue
+        if i <= 1 and stripped.startswith("# -*- coding"):
+            insert_pos = i + 1
+            continue
+        if stripped.startswith("from __future__ "):
+            insert_pos = i + 1
+            continue
+        if stripped == "" or stripped.startswith("#"):
+            continue
+        break
+
+    resolved = _resolve_wrapper(PYTHON_WRAPPER, project_dir)
+    wrapper_lines = resolved.splitlines(keepends=True)
+    wrapper_lines.append("\n")
+
+    return "".join(lines[:insert_pos]) + "".join(wrapper_lines) + "".join(lines[insert_pos:])
+
+
+def save_canonical_wrappers(project_dir: Path, language: str) -> None:
+    """Save canonical wrapper source to .mcloop/wrap/ for re-injection."""
+    wrap_dir = project_dir / ".mcloop" / "wrap"
+    wrap_dir.mkdir(parents=True, exist_ok=True)
+
+    dir_str = str(project_dir)
+    if language == "swift":
+        resolved = _resolve_wrapper(SWIFT_WRAPPER, dir_str)
+        (wrap_dir / "swift_wrapper.swift").write_text(resolved)
+    elif language == "python":
+        resolved = _resolve_wrapper(PYTHON_WRAPPER, dir_str)
+        (wrap_dir / "python_wrapper.py").write_text(resolved)
+
+
+def wrap_project(project_dir: Path) -> tuple[str, Path]:
+    """Instrument the project's entry point with error-catching hooks.
+
+    Returns (language, entry_point) or raises ValueError if language
+    cannot be detected or entry point cannot be found. Both paths
+    that would otherwise return ``None`` raise instead, so the
+    return type is always a fully populated tuple.
+    """
+    language = detect_language(project_dir)
+    if language is None:
+        raise ValueError(
+            "Could not detect project language. "
+            "Supports Swift and Python. "
+            "Add a PLAN.md description or check file extensions."
+        )
+
+    entry = find_entry_point(project_dir, language)
+    if entry is None:
+        raise ValueError(
+            f"Could not find {language} entry point. "
+            f"Expected @main struct (Swift) or __main__.py/main.py (Python)."
+        )
+
+    content = entry.read_text()
+    instrumented = inject(content, language, str(project_dir))
+    entry.write_text(instrumented)
+    save_canonical_wrappers(project_dir, language)
+
+    return (language, entry)
