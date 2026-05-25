@@ -32,14 +32,17 @@ matters for a solo project.
 
 ```bash
 cd /Users/mhcoen/proj/bob-tools/.scratch/consolidation
-git clone /Users/mhcoen/proj/mcloop mcloop-import
+git clone --no-local /Users/mhcoen/proj/mcloop mcloop-import
 cd mcloop-import
 git remote remove origin
 git filter-repo --to-subdirectory-filter packages/mcloop
 cd ..
 ```
 
-Repeat for `duplo`, `orchestra`, `bob-tools`.
+Repeat for `duplo`, `orchestra`, `bob-tools`. Use `--no-local`
+for each clone: filter-repo requires a fresh clone with its own object
+store, not a local-optimized clone with hardlinks or alternates back
+to the source repository.
 
 filter-repo writes `.git/filter-repo/commit-map` in each rewritten
 clone. Save these — they map old SHA → new SHA, needed for citation
