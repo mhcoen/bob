@@ -1,0 +1,16 @@
+.DS_Store
+.env
+.venv/
+__pycache__/
+build/
+*.egg-info/
+logs/
+.scratch/
+*.lock
+
+# mcloop runtime state
+.mcloop/
+
+# claude CLI auto-installer staging (never commit)
+claude/
+/2.[0-9]*.[0-9]*
