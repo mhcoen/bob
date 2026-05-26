@@ -1398,3 +1398,139 @@ def test_executor_emits_fan_out_progress_without_child_actor_progress(
     watchdogs.tick_all()
 
     assert len([e for e in events if e[0] == "fan_out_progress"]) == count_after_run
+
+
+# --------------------------------------------------------------------
+# T-000001: live-activity surfacing under the actor_progress ticker
+# --------------------------------------------------------------------
+
+
+def _make_actor_progress_event(elapsed: float = 360.0) -> ProgressEvent:
+    return ProgressEvent(
+        kind="actor_progress",
+        state_name="implement",
+        role="editor",
+        adapter="claude_code_agent",
+        model="opus",
+        index=1,
+        total=1,
+        elapsed_seconds=elapsed,
+    )
+
+
+def test_actor_progress_surfaces_activity_line_when_getter_returns_summary() -> None:
+    """When the stateful reporter has an activity_getter that returns a
+    non-empty string, the ``actor_progress`` event renders two lines:
+    the existing elapsed-time ticker and an indented ``running: <tool>``
+    line beneath it. T-000001 fix.
+    """
+    buf = io.StringIO()
+    reporter = stderr_reporter(
+        stream=buf,
+        activity_getter=lambda: "Read /Users/mhcoen/proj/bob/PLAN.md",
+    )
+    reporter(_make_actor_progress_event(elapsed=360.0))
+    lines = buf.getvalue().splitlines()
+    assert lines == [
+        "[1/1] editor (claude_code_agent:opus) ... still running, 360.0s elapsed",
+        "    running: Read /Users/mhcoen/proj/bob/PLAN.md",
+    ]
+
+
+def test_actor_progress_no_activity_line_when_getter_returns_empty() -> None:
+    """An activity_getter that returns ``""`` (e.g. before any tool_use
+    has been observed, or when no session is active) must not add a
+    second line. Keeps the legacy one-line format for environments
+    that have not opted in."""
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf, activity_getter=lambda: "")
+    reporter(_make_actor_progress_event())
+    assert buf.getvalue().splitlines() == [
+        "[1/1] editor (claude_code_agent:opus) ... still running, 360.0s elapsed"
+    ]
+
+
+def test_actor_progress_no_activity_line_when_getter_is_none() -> None:
+    """The default ``stderr_reporter()`` constructor (no activity_getter
+    wired) preserves the legacy one-line ``actor_progress`` shape.
+    Unit tests across the rest of the suite rely on this default."""
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf)
+    reporter(_make_actor_progress_event())
+    assert buf.getvalue().splitlines() == [
+        "[1/1] editor (claude_code_agent:opus) ... still running, 360.0s elapsed"
+    ]
+
+
+def test_actor_progress_activity_line_truncates_to_terminal_width(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Long tool_use summaries are truncated with a trailing ellipsis
+    so the activity line never wraps. The bug specifies
+    ``shutil.get_terminal_size().columns`` as the budget; wrapping
+    would break the visual attachment to the elapsed-time line above.
+    """
+    import os
+    import shutil as _shutil
+
+    monkeypatch.setattr(
+        _shutil, "get_terminal_size", lambda fallback=(80, 24): os.terminal_size((40, 24))
+    )
+    long_path = "/Users/mhcoen/proj/bob/packages/orchestra/orchestra/some/very/deep/path/file.py"
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf, activity_getter=lambda: f"Read {long_path}")
+    reporter(_make_actor_progress_event())
+    lines = buf.getvalue().splitlines()
+    assert len(lines) == 2
+    activity_line = lines[1]
+    # Total terminal width is 40; the line must not exceed that and
+    # must end with the ellipsis sentinel since the content overflowed.
+    assert len(activity_line) <= 40
+    assert activity_line.endswith("…")
+    assert activity_line.startswith("    running: ")
+
+
+def test_actor_progress_activity_getter_exception_does_not_abort_reporter() -> None:
+    """A misbehaving activity_getter must never break the reporter.
+    The elapsed-time line still prints; the activity line is skipped.
+    Mirrors the pattern used everywhere else in the reporter where the
+    progress hook is for UX only."""
+
+    def _broken() -> str:
+        raise RuntimeError("boom")
+
+    buf = io.StringIO()
+    reporter = stderr_reporter(stream=buf, activity_getter=_broken)
+    reporter(_make_actor_progress_event())
+    assert buf.getvalue().splitlines() == [
+        "[1/1] editor (claude_code_agent:opus) ... still running, 360.0s elapsed"
+    ]
+
+
+def test_resolve_progress_callback_default_wires_live_activity_getter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The api's default progress callback must wire the subprocess
+    module's live-activity getter so orchestra-routed agent sessions
+    get the two-line ticker without the caller threading it in. T-000001
+    regression check.
+    """
+    import orchestra.api as api_module
+
+    captured: dict[str, Any] = {}
+
+    def _spy_stderr_reporter(*args: Any, **kwargs: Any) -> Any:
+        captured["activity_getter"] = kwargs.get("activity_getter")
+        # Return any non-None callable so _resolve_progress_callback's
+        # contract is satisfied. The body of the reporter is not under
+        # test here; the wiring is.
+        return lambda _event: None
+
+    monkeypatch.setattr(api_module, "stderr_reporter", _spy_stderr_reporter)
+
+    cb = api_module._resolve_progress_callback(None, quiet=False)
+    assert cb is not None
+    # The api wires its module-level get_current_activity reference as
+    # the default activity_getter. Identity check confirms the live
+    # subprocess tracker is the one that will fire under actor_progress.
+    assert captured["activity_getter"] is api_module.get_current_activity

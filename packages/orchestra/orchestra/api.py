@@ -61,6 +61,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from orchestra.adapters._subprocess import get_current_activity
 from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
 from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
@@ -402,7 +403,7 @@ def _resolve_progress_callback(
         return silent_reporter()
     if user_callback is not None:
         return user_callback
-    return stderr_reporter()
+    return stderr_reporter(activity_getter=get_current_activity)
 
 
 def _register_builtin_transforms(reg: ProfileRegistry) -> None:

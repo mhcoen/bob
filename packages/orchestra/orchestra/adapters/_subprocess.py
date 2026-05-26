@@ -112,6 +112,128 @@ _MCLOOP_CONFIG_PATH: Path = Path.home() / ".mcloop" / "config.json"
 
 
 # --------------------------------------------------------------------
+# Live-activity surfacing
+#
+# The orchestra ``actor_progress`` ticker only knows elapsed time. For
+# agent-routed sessions, the inner CLI emits ``tool_use`` blocks on the
+# stream-json channel that describe what the agent is currently doing
+# (Read /path/x, Edit /path/y, Bash some-cmd). The reader thread parses
+# each line it consumes and updates the module-global activity string so
+# the stateful progress reporter can surface it as a second line under
+# the elapsed-time ticker without coupling the reporter to the
+# subprocess module.
+# --------------------------------------------------------------------
+
+
+_activity_lock: threading.Lock = threading.Lock()
+_current_activity: str = ""
+
+
+def _clear_current_activity() -> None:
+    global _current_activity
+    with _activity_lock:
+        _current_activity = ""
+
+
+def get_current_activity() -> str:
+    """Return the most recent ``tool_use`` summary from the active
+    session, or ``""`` if no session is running or no tool_use has been
+    observed yet.
+
+    Safe to call from any thread. The stateful progress reporter calls
+    this from its watchdog-driven ``actor_progress`` handler to surface
+    "currently doing X" beneath the elapsed-time line.
+    """
+    with _activity_lock:
+        return _current_activity
+
+
+def _set_current_activity(summary: str) -> None:
+    global _current_activity
+    with _activity_lock:
+        _current_activity = summary
+
+
+def _format_tool_use_summary(block: dict[str, Any]) -> str:
+    """Render a stream-json ``tool_use`` block as a short activity
+    description.
+
+    Picks the most useful single-line representation per known tool
+    name (path for Read/Edit/Write/Glob, command for Bash, pattern for
+    Grep). Unknown tools fall back to the bare tool name. Returns ``""``
+    if the block has no usable name.
+    """
+    name = block.get("name")
+    if not isinstance(name, str) or not name:
+        return ""
+    raw_input = block.get("input")
+    inp: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
+
+    def _first(*keys: str) -> str:
+        for key in keys:
+            value = inp.get(key)
+            if isinstance(value, str) and value:
+                return value
+        return ""
+
+    if name in ("Read", "Edit", "Write", "NotebookEdit"):
+        detail = _first("file_path", "notebook_path", "path")
+    elif name == "Bash":
+        detail = _first("command")
+    elif name in ("Grep", "Glob"):
+        detail = _first("pattern", "path")
+    elif name == "WebFetch":
+        detail = _first("url")
+    elif name == "WebSearch":
+        detail = _first("query")
+    elif name == "TodoWrite":
+        detail = ""
+    else:
+        detail = _first("command", "file_path", "path", "query", "pattern", "url")
+    return f"{name} {detail}".strip() if detail else name
+
+
+def _record_activity_from_line(line: str) -> None:
+    """Parse one stream-json line and, if it announces a new tool_use,
+    update the module-global current activity.
+
+    Tolerant of non-JSON lines and unexpected shapes; never raises.
+    """
+    line = line.strip()
+    if not line or not line.startswith("{"):
+        return
+    try:
+        data = _json.loads(line)
+    except (_json.JSONDecodeError, ValueError):
+        return
+    if not isinstance(data, dict):
+        return
+    # Two shapes Claude Code emits for the same event:
+    # - top-level ``{"type": "assistant", "message": {"content": [...]}}``
+    # - ``{"type": "stream_event", "event": {"type": "content_block_start",
+    #   "content_block": {"type": "tool_use", ...}}}``
+    if data.get("type") == "assistant":
+        message = data.get("message")
+        if isinstance(message, dict):
+            content = message.get("content")
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("type") == "tool_use":
+                        summary = _format_tool_use_summary(block)
+                        if summary:
+                            _set_current_activity(summary)
+                            return
+    if data.get("type") == "stream_event":
+        event = data.get("event")
+        if isinstance(event, dict) and event.get("type") == "content_block_start":
+            block = event.get("content_block")
+            if isinstance(block, dict) and block.get("type") == "tool_use":
+                summary = _format_tool_use_summary(block)
+                if summary:
+                    _set_current_activity(summary)
+
+
+# --------------------------------------------------------------------
 # Environment construction (mirrors mcloop's _build_session_env and
 # _apply_provider_env)
 # --------------------------------------------------------------------
@@ -706,6 +828,7 @@ def run_session(
                 pass
     register_active_process(process, session=session)
     _last_output_lines.clear()
+    _clear_current_activity()
     try:
         pgid = os.getpgid(process.pid)
     except OSError:
@@ -862,6 +985,7 @@ def run_session(
                     dropped += 1
                 tail_lines.append(line)
             _last_output_lines.append(line.rstrip("\n"))
+            _record_activity_from_line(line)
             shown_waiting = False
             now = time.monotonic()
             if now - last_dot >= PROGRESS_DOT_INTERVAL:
@@ -877,3 +1001,4 @@ def run_session(
         _remove_pid_file(pid_file)
         clear_active_process(session=session)
         _set_current_session(previous)
+        _clear_current_activity()

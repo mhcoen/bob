@@ -23,6 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from orchestra.adapters._subprocess import get_current_activity
 from orchestra.api import run_verb
 from orchestra.config import (
     ConfigError,
@@ -747,7 +748,7 @@ def _dispatch_verb(
 def main(argv: list[str] | None = None) -> int:
     raw_args = list(sys.argv[1:] if argv is None else argv)
 
-    progress_cb: ProgressCallback = stderr_reporter()
+    progress_cb: ProgressCallback = stderr_reporter(activity_getter=get_current_activity)
 
     # No arguments at all: drop into the interactive REPL. The user
     # is asking to use the tool, not asking what argparse complains

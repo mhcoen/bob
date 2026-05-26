@@ -16,6 +16,7 @@ subprocess is enough to trigger a progress dot. No live LLM call.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -252,3 +253,112 @@ def test_run_session_no_stdin_bytes_falls_back_to_devnull(
     )
     assert exit_code == 0
     assert output == ""
+
+
+# --------------------------------------------------------------------
+# T-000001: live activity tracker for the actor_progress two-line
+# format. The reader thread parses each stream-json line and updates a
+# module-global activity string; the stateful progress reporter reads
+# the value while emitting the "still running" ticker.
+# --------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=False)
+def _isolate_activity() -> Any:
+    """Clear the module-global activity before and after the test so
+    one test's residue cannot leak into another."""
+    _subprocess._clear_current_activity()
+    yield
+    _subprocess._clear_current_activity()
+
+
+def test_record_activity_extracts_read_tool_use_path(_isolate_activity: Any) -> None:
+    """A top-level ``assistant`` record with a ``tool_use`` block
+    surfaces ``"<tool> <path>"`` as the current activity."""
+    line = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"name":"Read","input":{"file_path":"/tmp/x.py"}}]}}'
+    )
+    _subprocess._record_activity_from_line(line)
+    assert _subprocess.get_current_activity() == "Read /tmp/x.py"
+
+
+def test_record_activity_extracts_bash_command(_isolate_activity: Any) -> None:
+    """The Bash tool's activity is rendered as ``Bash <command>`` so
+    the user sees what shell command the agent kicked off."""
+    line = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"name":"Bash","input":{"command":"pytest tests/foo.py"}}]}}'
+    )
+    _subprocess._record_activity_from_line(line)
+    assert _subprocess.get_current_activity() == "Bash pytest tests/foo.py"
+
+
+def test_record_activity_handles_stream_event_shape(
+    _isolate_activity: Any,
+) -> None:
+    """Some Claude Code versions wrap the tool_use announcement in a
+    ``stream_event`` / ``content_block_start`` record instead of the
+    top-level ``assistant`` shape. Both shapes must be honoured."""
+    line = (
+        '{"type":"stream_event","event":{"type":"content_block_start",'
+        '"content_block":{"type":"tool_use","name":"Edit",'
+        '"input":{"file_path":"/tmp/y.py"}}}}'
+    )
+    _subprocess._record_activity_from_line(line)
+    assert _subprocess.get_current_activity() == "Edit /tmp/y.py"
+
+
+def test_record_activity_overwrites_with_most_recent_tool_use(
+    _isolate_activity: Any,
+) -> None:
+    """Each tool_use announcement overwrites the previous activity so
+    the reporter always shows what the agent is doing *now*."""
+    first = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"name":"Read","input":{"file_path":"/a"}}]}}'
+    )
+    second = (
+        '{"type":"assistant","message":{"content":[{"type":"tool_use",'
+        '"name":"Edit","input":{"file_path":"/b"}}]}}'
+    )
+    _subprocess._record_activity_from_line(first)
+    _subprocess._record_activity_from_line(second)
+    assert _subprocess.get_current_activity() == "Edit /b"
+
+
+def test_record_activity_ignores_non_tool_use_records(
+    _isolate_activity: Any,
+) -> None:
+    """Hook events, init records, partial text deltas, and result
+    summaries do not announce a new tool_use; the activity must not
+    change in response to them."""
+    _subprocess._set_current_activity("Read /baseline")
+    for noise in (
+        '{"type":"init"}',
+        '{"type":"hook"}',
+        '{"type":"result","subtype":"success","result":"done"}',
+        '{"type":"stream_event","event":{"type":"content_block_delta",'
+        '"delta":{"type":"text_delta","text":"hello"}}}',
+        # Malformed lines must not raise.
+        "not json at all",
+        "",
+        "{not json",
+    ):
+        _subprocess._record_activity_from_line(noise)
+    assert _subprocess.get_current_activity() == "Read /baseline"
+
+
+def test_run_session_clears_activity_on_completion(tmp_path: Path, fast_progress: None) -> None:
+    """The activity tracker is per-session. A finished session must
+    leave the global activity empty so a subsequent
+    ``actor_progress`` ticker does not surface stale state."""
+    _subprocess._set_current_activity("Read /from/previous/session")
+    _subprocess.run_session(
+        ["sh", "-c", "echo done"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=10,
+        silent=True,
+    )
+    assert _subprocess.get_current_activity() == ""

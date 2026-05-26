@@ -40,6 +40,7 @@ from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 
+from orchestra.adapters._subprocess import get_current_activity
 from orchestra.api import run_verb
 from orchestra.config import OrchestraConfig
 from orchestra.errors import OrchestraError
@@ -368,7 +369,7 @@ def run_repl(
         )
         return 1
     if progress_callback is None:
-        progress_callback = stderr_reporter()
+        progress_callback = stderr_reporter(activity_getter=get_current_activity)
     if project_dir is None:
         project_dir = Path.cwd()
     state = ReplState(

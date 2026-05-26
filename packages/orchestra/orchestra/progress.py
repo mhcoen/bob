@@ -45,11 +45,24 @@ Stdout is reserved for the workflow's final answer so piping
 
 from __future__ import annotations
 
+import shutil
 import sys
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import IO
+
+ActivityGetter = Callable[[], str]
+"""Signature for the optional live-activity fetcher. Returns the most
+recent agent-tool activity summary (e.g. ``"Read /path/to/file"``), or
+``""`` when no session is running or no activity has been observed
+yet."""
+
+_ACTIVITY_LINE_PREFIX: str = "    running: "
+"""The two-line ``actor_progress`` format indents the activity line by
+four spaces and prefixes it with ``running: `` so it visually attaches
+to the elapsed-time line above it without competing for the same
+visual slot. See T-000001 for the rationale on the two-line shape."""
 
 
 @dataclass(frozen=True)
@@ -153,7 +166,11 @@ class _StatefulStderrReporter:
     longest individual child duration (parallel wall-clock).
     """
 
-    def __init__(self, stream: IO[str]) -> None:
+    def __init__(
+        self,
+        stream: IO[str],
+        activity_getter: ActivityGetter | None = None,
+    ) -> None:
         self._stream = stream
         self._lock = threading.Lock()
         self._parallel_active = False
@@ -162,6 +179,7 @@ class _StatefulStderrReporter:
         self._parallel_total: int = 0
         self._parallel_count: int = 0
         self._parallel_max_elapsed: float = 0.0
+        self._activity_getter = activity_getter
 
     def __call__(self, event: ProgressEvent) -> None:
         with self._lock:
@@ -283,6 +301,33 @@ class _StatefulStderrReporter:
             f"[{event.index}/{event.total}] {label} ({backing}) "
             f"... still running, {elapsed:.1f}s elapsed"
         )
+        self._emit_activity_line()
+
+    def _emit_activity_line(self) -> None:
+        """Print an indented "running: <tool_use>" line beneath the
+        elapsed-time ticker when an activity getter is configured and
+        has something to report.
+
+        Truncates with a trailing ellipsis at terminal width so the
+        line never wraps; a wrapped second line would break the visual
+        attachment to the ticker above.
+        """
+        if self._activity_getter is None:
+            return
+        try:
+            activity = self._activity_getter()
+        except Exception:
+            return
+        if not activity:
+            return
+        try:
+            columns = shutil.get_terminal_size((80, 24)).columns
+        except (OSError, ValueError):
+            columns = 80
+        line = _ACTIVITY_LINE_PREFIX + activity
+        if columns > 1 and len(line) > columns:
+            line = line[: max(columns - 1, len(_ACTIVITY_LINE_PREFIX))] + "…"
+        self._print(line)
 
     # ----- io --------------------------------------------------------
 
@@ -290,16 +335,29 @@ class _StatefulStderrReporter:
         print(line, file=self._stream, flush=True)
 
 
-def stderr_reporter(stream: IO[str] | None = None) -> ProgressCallback:
+def stderr_reporter(
+    stream: IO[str] | None = None,
+    *,
+    activity_getter: ActivityGetter | None = None,
+) -> ProgressCallback:
     """Return a stateful reporter that prints each event to ``stream``.
 
     Defaults to ``sys.stderr``. The returned callable is safe to call
     from multiple threads (the underlying state is lock-guarded), so
     fan-out worker threads that surface state_exit events can share
     one reporter with the controller thread.
+
+    ``activity_getter``, when supplied, is invoked once per
+    ``actor_progress`` event after the elapsed-time line is printed.
+    A non-empty return value is rendered as an indented second line so
+    the user sees what the agent is currently doing (e.g.
+    ``Read /path/to/file``) underneath the ticker. Callers wiring this
+    in production should pass
+    ``orchestra.adapters._subprocess.get_current_activity`` so the live
+    inner-CLI tool_use stream surfaces in the ticker.
     """
     target = stream if stream is not None else sys.stderr
-    return _StatefulStderrReporter(target)
+    return _StatefulStderrReporter(target, activity_getter=activity_getter)
 
 
 def silent_reporter() -> ProgressCallback:
