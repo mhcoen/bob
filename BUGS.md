@@ -1,6 +1,8 @@
+<!-- bob-plan-format: 1 -->
+
 ## Bugs
 
-- [ ] Live-activity surfacing missing in orchestra-routed agent sessions.
+- [ ] T-000001: Live-activity surfacing missing in orchestra-routed agent sessions.
   T-000095 (Stage 1) implemented status-line surfacing for mcloop's
   direct `claude -p` subprocess wrapping, but the orchestra-routed
   `claude_code_agent` code path emits only the minimal ticker
@@ -26,7 +28,7 @@
   has the active log path. Cost is trivial: read last few KB of the
   log, find most recent tool_use block, format.
 
-- [ ] Workspace-root pytest has non-deterministic test-state pollution.
+- [ ] T-000002: Workspace-root pytest has non-deterministic test-state pollution.
   Running `.venv/bin/pytest` from the workspace root produces 0-270
   failures across runs (order-dependent), with the signature
   `AttributeError: module 'duplo' has no attribute 'X'` (or
@@ -45,4 +47,3 @@
   pytest for tighter coupling. Suggested approach: use `pytest
   --collect-only` to enumerate tests, then bisect by running pairs
   to find the smallest set that reproduces the pollution.
-
