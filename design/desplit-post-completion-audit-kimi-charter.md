@@ -9,9 +9,9 @@ the parallel-lineage parity re-derivation, executed by Kimi K2.6,
 modeled on the May 17 precedent at
 `bob/design/desplit-independent-validation-kimi.md`.
 
-**Dispatch:** Claude Code dispatches Kimi via the `kimi` shell
-function in this session. The Claude Code stream is complete; the
-two reports' convergence is the closure criterion.
+**Dispatch:** Claude Code dispatches Kimi via the `kimi_moonshot_fast`
+shell function in this session. The Claude Code stream is complete;
+the two reports' convergence is the closure criterion.
 
 Audience: CS PhD. Every claim re-derived from current source; no
 trust in upstream summaries. Citations are `file:line` style. Format
@@ -330,9 +330,9 @@ Specifically surface:
 
 ## 6. Stop conditions
 
-- The `kimi` shell function is unavailable or fails to dispatch →
-  stop, surface, do not fall back to running the re-derivation
-  yourself (the parallel-lineage property requires Kimi
+- The `kimi_moonshot_fast` shell function is unavailable or fails to
+  dispatch → stop, surface, do not fall back to running the
+  re-derivation yourself (the parallel-lineage property requires Kimi
   specifically).
 - Either tag (`mcloop:desplit-complete` or
   `bob-tools:desplit-complete`) does not resolve → stop, surface;
