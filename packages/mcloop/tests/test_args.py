@@ -78,7 +78,7 @@ from mcloop.review_integration import (
     _terminate_reviewers,
 )
 from mcloop.session_context import SessionContext
-from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _parse(*argv):

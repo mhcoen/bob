@@ -8,7 +8,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from tests.stubs.stub_cli import (
+from stubs.stub_cli import (
     _apply_files,
     _detect_mode,
     _find_scenario,

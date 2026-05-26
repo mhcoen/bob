@@ -9,7 +9,7 @@ import pytest
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from tests.plan_fixtures import assert_canonical_checkbox, canonical_plan_text
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:
