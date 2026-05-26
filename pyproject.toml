@@ -6,3 +6,13 @@ mcloop = { workspace = true }
 duplo = { workspace = true }
 orchestra = { workspace = true }
 bob-tools = { workspace = true }
+
+[tool.pytest.ini_options]
+addopts = "-n auto"
+timeout = 60
+
+[project.optional-dependencies]
+dev = [
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+]
