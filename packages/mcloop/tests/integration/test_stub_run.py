@@ -15,9 +15,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 from mcloop.main import run_loop
-from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 STUB_CLI = str(Path(__file__).resolve().parent.parent / "stubs" / "stub_cli.py")
 

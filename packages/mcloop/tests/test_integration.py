@@ -3,11 +3,12 @@
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
+
 from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
 from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
-from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _make_project(tmp_path, checklist_text):

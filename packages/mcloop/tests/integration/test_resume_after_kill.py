@@ -6,10 +6,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 from mcloop.main import run_loop
 from mcloop.runner import RunResult
-from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _git(args: list[str], cwd: Path) -> None:

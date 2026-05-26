@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 import mcloop.lifecycle as lifecycle_mod
 from mcloop.audit import AuditResult, _run_audit_fix_cycle, _run_single_audit_round
@@ -78,7 +79,6 @@ from mcloop.review_integration import (
     _terminate_reviewers,
 )
 from mcloop.session_context import SessionContext
-from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 
 def _parse(*argv):
