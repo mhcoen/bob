@@ -87,3 +87,5 @@
 ## Hypotheses
 
 ## Eliminated
+
+c38a500: Added live activity tracking for agent-routed sessions. The subprocess adapter now parses tool_use events from the CLI's JSON stream and surfaces them as a second line under the elapsed-time progress ticker. This shows users what the agent is currently doing (e.g., "Read /path/to/file") without coupling the reporter to the subprocess module. The feature is wired by default in the API, CLI, and REPL.

@@ -2,7 +2,7 @@
 
 ## Bugs
 
-- [ ] T-000001: Live-activity surfacing missing in orchestra-routed agent sessions.
+- [x] T-000001: Live-activity surfacing missing in orchestra-routed agent sessions.
   T-000095 (Stage 1) implemented status-line surfacing for mcloop's
   direct `claude -p` subprocess wrapping, but the orchestra-routed
   `claude_code_agent` code path emits only the minimal ticker
