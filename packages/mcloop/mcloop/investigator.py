@@ -9,10 +9,8 @@ from pathlib import Path
 
 from mcloop.checks import detect_app_type, detect_run
 from mcloop.prompts import (
-    DEBUGGING_INSTRUCTION,
     DEBUGGING_PLAYBOOK,
     PROBES_INSTRUCTION,
-    TESTING_INSTRUCTION,
     WEB_SEARCH_INSTRUCTION,
 )
 
