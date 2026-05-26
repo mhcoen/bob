@@ -128,6 +128,12 @@ def send_input(proc: LaunchedProcess, data: str | bytes, close: bool = False) ->
     proc.process.stdin.flush()
     if close:
         proc.process.stdin.close()
+        # Detach so a subsequent proc.communicate() does not try to
+        # flush the already-closed pipe. Python 3.13's
+        # ``Popen._communicate`` catches ``BrokenPipeError`` on the
+        # flush but not ``ValueError`` ("flush of closed file"), so
+        # leaving the closed pipe attached crashes communicate().
+        proc.process.stdin = None
 
 
 def read_output(proc: LaunchedProcess, timeout_seconds: float = 0.0) -> bytes:
