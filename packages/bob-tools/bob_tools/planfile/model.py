@@ -79,6 +79,11 @@ class Task:
     indent_level: int
     line_number: int
     trailing_lines: tuple[str, ...] = ()
+    # ISO 8601 UTC timestamp recording when the task was first added by
+    # ``add_task`` / ``add_phase_task``. Serialized on the task line as
+    # ``<!-- created_at: ... -->`` after annotations. ``None`` for tasks
+    # parsed from plans that do not carry the comment.
+    created_at: str | None = None
 
 
 @dataclass(frozen=True)

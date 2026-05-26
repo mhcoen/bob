@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -84,6 +85,19 @@ def _contains_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
 
 
+def _now_iso_utc() -> str:
+    """Return the current UTC instant as an ISO 8601 string.
+
+    Seconds precision and the trailing ``Z`` suffix keep the rendered
+    ``<!-- created_at: ... -->`` comment compact and easy to compare
+    lexicographically (which sorts chronologically for any same-zone
+    timestamps). Mutating operations call this once per added task
+    rather than threading a clock argument through every API; tests
+    that need a deterministic value monkey-patch this function.
+    """
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _task_path_label(path: tuple[int, ...]) -> str:
     if not path:
         return "task"
@@ -109,6 +123,8 @@ def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
         if node.task_id is not None and _TASK_REF_RE.fullmatch(node.task_id) is None:
             errors.append(f"{prefix}.task_id has invalid task id {node.task_id!r}")
         _validate_scalar(node.text, f"{prefix}.text", errors)
+        if node.created_at is not None:
+            _validate_scalar(node.created_at, f"{prefix}.created_at", errors)
         if not isinstance(node.status, TaskStatus):
             errors.append(f"{prefix}.status is not a TaskStatus")
         for flag_index, tag in enumerate(node.flag_tags):
@@ -290,6 +306,7 @@ def _compare_task_fields(
         "annotations",
         "deps",
         "ruled_out",
+        "created_at",
     ):
         intended_value = _field_value(intended, field)
         parsed_value = _field_value(parsed, field)
@@ -350,6 +367,7 @@ def make_task(
     children: tuple[Task, ...] = (),
     ruled_out: tuple[RuledOut, ...] = (),
     task_id: str | None = None,
+    created_at: str | None = None,
 ) -> Task:
     """Construct a semantically field-stable PLAN.md task.
 
@@ -373,6 +391,7 @@ def make_task(
         indent_level=0,
         line_number=0,
         trailing_lines=(),
+        created_at=created_at,
     )
     _assert_task_field_stability(task)
     return task
@@ -1110,6 +1129,7 @@ def _collect_task_semantic_diff(
         "action_tag",
         "annotations",
         "deps",
+        "created_at",
     ):
         intended_value = getattr(intended, field)
         parsed_value = getattr(parsed, field)
@@ -2155,10 +2175,12 @@ def add_task(
     """Append a new TODO task to ``phase_id`` and return the new plan.
 
     The new task gets the next sequential globally-unique ``T-NNNNNN``
-    id (:func:`_next_task_id`). When ``parent_id`` is supplied the task
-    is nested under that task's children, searching first the phase's
-    root tasks and then each subsection's tasks. When ``parent_id`` is
-    ``None`` the task is appended to the phase's root task list.
+    id (:func:`_next_task_id`) and a ``created_at`` timestamp set to
+    the current UTC instant in ISO 8601 form (:func:`_now_iso_utc`).
+    When ``parent_id`` is supplied the task is nested under that
+    task's children, searching first the phase's root tasks and then
+    each subsection's tasks. When ``parent_id`` is ``None`` the task
+    is appended to the phase's root task list.
 
     Raises :class:`ValueError` when ``phase_id`` does not match any
     phase, or when ``parent_id`` is supplied but does not match any
@@ -2177,6 +2199,7 @@ def add_task(
         ruled_out=(),
         indent_level=0,
         line_number=0,
+        created_at=_now_iso_utc(),
     )
 
     new_phases: list[Phase] = []
@@ -2235,7 +2258,10 @@ def add_phase_task(
     ``assigned_id`` is the ``T-NNNNNN`` carried by the appended task
     (the caller-supplied id when ``task.task_id`` is non-None, otherwise
     the next globally-unique sequential id assigned by
-    :func:`_next_task_id`).
+    :func:`_next_task_id`). A caller-supplied ``task.created_at`` is
+    honored verbatim; when the supplied task has ``created_at=None``
+    the appended task is stamped with the current UTC instant in
+    ISO 8601 form via :func:`_now_iso_utc`.
 
     Placement is selected by the keyword arguments:
 
@@ -2286,7 +2312,12 @@ def add_phase_task(
     target_phase = plan.phases[phase_index]
 
     assigned_id = task.task_id if task.task_id is not None else _next_task_id(plan)
-    appended = dataclasses.replace(task, task_id=assigned_id)
+    assigned_created_at = (
+        task.created_at if task.created_at is not None else _now_iso_utc()
+    )
+    appended = dataclasses.replace(
+        task, task_id=assigned_id, created_at=assigned_created_at
+    )
 
     if parent_id is not None:
         updated_root, root_added = _try_add_under_parent(

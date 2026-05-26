@@ -91,6 +91,17 @@ _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 # caller hands to the tag extractors next.
 _TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")
 
+# Trailing ``<!-- created_at: ... -->`` HTML-comment annotation on a
+# task line. Per the task contract: the field is serialized at the end
+# of the task body, after any ``[key: value]`` annotations, and must
+# round-trip through parse+render. The content captures one or more
+# non-angle-bracket characters so an embedded ``<`` or ``>`` in the
+# timestamp would fail extraction (and surface as a round-trip error
+# in the construction harness) rather than silently producing a
+# truncated value.
+_TRAILING_CREATED_AT_RE = re.compile(r"<!--\s*created_at\s*:\s*([^<>]+?)\s*-->\s*$")
+
+
 # Magic format-version line: anchored to a full line per design doc
 # section 4.1 grammar ``Magic ← "<!--" WS? "bob-plan-format:" WS? Int
 # WS? "-->" NL``. Captures the version integer. Only recognized when
@@ -677,12 +688,17 @@ def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
     Order matters. Task ID comes first: per task 3.3.1 it is applied
     directly to the checkbox-stripped text, before any tag extraction,
     so the ``^T-(\\d+):\\s+(.*)$`` regex can consume the whole rest of
-    the line as group 2. Annotations come next (they live at end of
-    line and would otherwise be swallowed by the action tag's args,
-    which span to end of line). Then flag tags, then action tag run
-    left-to-right. The remaining text is the task description.
+    the line as group 2. The ``<!-- created_at: ... -->`` HTML-comment
+    annotation is extracted next, from the trailing end, so that
+    annotations (which scan right-to-left for a closing ``]``) see the
+    comment-stripped tail and find their brackets unobstructed.
+    Annotations come next (they live at end of line and would otherwise
+    be swallowed by the action tag's args, which span to end of line).
+    Then flag tags, then action tag run left-to-right. The remaining
+    text is the task description.
     """
     task_id, remaining = _extract_task_id(raw.text)
+    created_at, remaining = _extract_trailing_created_at(remaining)
     annotations, remaining = _extract_annotations(remaining)
     flag_tags, remaining = _extract_flag_tags(remaining)
     action_tag, remaining = _extract_action_tag(remaining)
@@ -693,9 +709,34 @@ def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
         flag_tags=flag_tags,
         action_tag=action_tag,
         annotations=annotations,
+        created_at=created_at,
         indent_level=len(raw.indent),
         line_number=raw.line_number,
     )
+
+
+def _extract_trailing_created_at(text: str) -> tuple[str | None, str]:
+    """Strip a trailing ``<!-- created_at: ... -->`` HTML comment.
+
+    Returns ``(value, remainder)`` where ``value`` is the trimmed
+    timestamp string (typically ISO 8601 UTC) when the comment is
+    present at the end of ``text``, otherwise ``(None, text)``. The
+    comment must be separated from the preceding non-whitespace text
+    by at least one whitespace character (or be at column 0 of the
+    task body); a ``<!--`` abutting a non-whitespace character is
+    treated as task text. This matches the separation rule
+    :func:`_extract_annotations` enforces for bracketed annotations
+    and keeps embedded comment-like prose (``foo<!-- bar -->``) out
+    of the structured field.
+    """
+    rstripped = text.rstrip()
+    m = _TRAILING_CREATED_AT_RE.search(rstripped)
+    if m is None:
+        return None, text
+    start = m.start()
+    if start > 0 and not rstripped[start - 1].isspace():
+        return None, text
+    return m.group(1), rstripped[:start].rstrip()
 
 
 def _current_scope_tasks(
@@ -968,6 +1009,7 @@ class _TaskBuilder:
     annotations: tuple[tuple[str, str], ...]
     indent_level: int
     line_number: int
+    created_at: str | None = None
     deps: list[str] = field(default_factory=list)
     children: list[_TaskBuilder] = field(default_factory=list)
     ruled_out: list[RuledOut] = field(default_factory=list)
@@ -987,6 +1029,7 @@ class _TaskBuilder:
             indent_level=self.indent_level,
             line_number=self.line_number,
             trailing_lines=tuple(self.trailing_lines),
+            created_at=self.created_at,
         )
 
 

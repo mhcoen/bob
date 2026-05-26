@@ -177,6 +177,8 @@ def _render_task_lines(task: Task, *, depth: int) -> list[str]:
         body_parts.append(task.text)
     for key, value in task.annotations:
         body_parts.append(f"[{key}: {value}]")
+    if task.created_at is not None:
+        body_parts.append(f"<!-- created_at: {task.created_at} -->")
 
     body = " ".join(body_parts)
     line = f"{indent}- [{status_char}] {body}".rstrip()

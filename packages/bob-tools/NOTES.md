@@ -8,6 +8,42 @@
 
 ## Observations
 
+- 2026-05-26 [1.1] [T-000001] Workspace pytest exits with code 1 due
+  to pre-existing collection errors in `packages/mcloop/tests` and
+  `packages/orchestra/tests`, independent of this task. The mcloop
+  failure is `ImportPathMismatchError: ('tests.conftest',
+  '/duplo/tests/conftest.py', '/mcloop/tests/conftest.py')` —
+  duplo's `tests/conftest.py` and mcloop's `tests/conftest.py` both
+  register as the same `tests.conftest` module because each
+  `tests/` directory has an `__init__.py` and they share a top-level
+  package name. The orchestra failures are
+  `ModuleNotFoundError: No module named 'tests.test_workflows_*'`
+  for several `test_workflows_*.py` files in `packages/orchestra/tests`.
+  These are workspace-structure issues (the duplo merge at
+  `50d3dc80` on 2026-05-24 imported a `tests/` package with the same
+  name as mcloop's), not caused by this task's planfile changes —
+  every file I modified lives under `packages/bob-tools/`. The 3932
+  tests pytest did collect all passed (including the six new
+  `TestCreatedAt` tests added in `tests/test_operations.py`). The
+  user must address the conftest collision and orchestra
+  import paths before the workspace-wide check command can return
+  exit code 0.
+
+- 2026-05-26 [1.1] [T-000001] `created_at` is encoded as a trailing
+  HTML-comment annotation (`<!-- created_at: ISO -->`) at end of
+  task line, after any bracketed annotations. The parser extracts
+  it before annotations so the right-to-left annotation scanner
+  sees an unobstructed closing `]`; the renderer emits it after
+  annotations so the rendered ordering mirrors the parse order.
+  The parser rejects content containing `<` or `>` inside the
+  comment value (regex uses `[^<>]+?`), which means a user-supplied
+  `created_at` with embedded angle brackets would round-trip-fail
+  through the construction harness rather than silently producing
+  a truncated value. ISO 8601 strings do not contain those
+  characters, so the constraint is benign for the intended usage
+  but is worth knowing if future consumers want to overload the
+  field.
+
 - 2026-05-21 [23.2] [T-000197] Stage 23 gate verification. The gate's
   six conditions split into ones I can verify from bob-tools and ones
   I cannot. Verifiable from here: (a) no production imports of

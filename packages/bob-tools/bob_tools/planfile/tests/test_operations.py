@@ -2770,6 +2770,120 @@ class TestAddPhaseTask:
             add_phase_task(plan, "phase_001", bad)
 
 
+class TestCreatedAt:
+    """``Task.created_at`` round-trips and is populated by add operations.
+
+    The field is serialized on the task line as an HTML-comment
+    annotation (``<!-- created_at: ... -->``) after any bracketed
+    annotations. Round-trip equality through ``render_plan`` and
+    ``parse_plan`` is the parser/renderer contract; ``add_task`` and
+    ``add_phase_task`` stamp newly-added tasks with the current UTC
+    instant in ISO 8601 form so the timestamp is available to
+    downstream consumers without each caller threading its own clock.
+    """
+
+    _ISO_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+
+    def test_parser_extracts_created_at_html_comment(self) -> None:
+        source = (
+            "# Project\n\n"
+            "## Stage 1: Core\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [ ] T-000001: hello <!-- created_at: 2026-05-26T12:34:56Z -->\n"
+        )
+        from bob_tools.planfile.parser import parse_plan
+
+        plan = parse_plan(source)
+        task = plan.phases[0].tasks[0]
+        assert task.created_at == "2026-05-26T12:34:56Z"
+        assert task.text == "hello"
+
+    def test_round_trip_preserves_created_at(self) -> None:
+        task = make_task("hello", created_at="2026-05-26T12:34:56Z")
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(
+                _phase_with_tasks(tasks=(make_task("anchor", task_id="T-000001"),)),
+            ),
+            bugs=None,
+            source_path=None,
+        )
+        new_plan, _ = add_phase_task(plan, "phase_001", task)
+        rendered = render_plan(new_plan)
+        assert "<!-- created_at: 2026-05-26T12:34:56Z -->" in rendered
+        from bob_tools.planfile.parser import parse_plan
+
+        reparsed = parse_plan(rendered)
+        appended = reparsed.phases[0].tasks[1]
+        assert appended.created_at == "2026-05-26T12:34:56Z"
+        assert appended.text == "hello"
+
+    def test_round_trip_with_annotation_and_created_at(self) -> None:
+        task = make_task(
+            "build menu",
+            annotations=(("feat", "menu wired"),),
+            created_at="2026-05-26T12:34:56Z",
+        )
+        # field-stability oracle already ran inside make_task; this
+        # asserts the rendered ordering puts the annotation before the
+        # HTML comment so the parser's right-to-left annotation scan
+        # sees an unobstructed closing bracket.
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(_phase_with_tasks(tasks=(task,)),),
+            bugs=None,
+            source_path=None,
+        )
+        rendered = render_plan(plan)
+        line = [ln for ln in rendered.splitlines() if "build menu" in ln][0]
+        assert "[feat: menu wired]" in line
+        assert "<!-- created_at: 2026-05-26T12:34:56Z -->" in line
+        assert line.index("[feat: menu wired]") < line.index("<!-- created_at:")
+
+    def test_add_task_populates_created_at(self) -> None:
+        import re as _re
+
+        plan = _plan(phases=(_phase_with_tasks(tasks=()),))
+        new_plan = add_task(plan, "phase_001", text="fresh")
+        appended = new_plan.phases[0].tasks[-1]
+        assert appended.created_at is not None
+        assert _re.fullmatch(self._ISO_RE, appended.created_at) is not None
+
+    def test_add_phase_task_populates_created_at_when_unset(self) -> None:
+        import re as _re
+
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(_phase_with_tasks(tasks=()),),
+            bugs=None,
+            source_path=None,
+        )
+        new_plan, _ = add_phase_task(plan, "phase_001", make_task("fresh"))
+        appended = new_plan.phases[0].tasks[-1]
+        assert appended.created_at is not None
+        assert _re.fullmatch(self._ISO_RE, appended.created_at) is not None
+
+    def test_add_phase_task_preserves_caller_supplied_created_at(self) -> None:
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(_phase_with_tasks(tasks=()),),
+            bugs=None,
+            source_path=None,
+        )
+        task = make_task("imported", created_at="2024-01-01T00:00:00Z")
+        new_plan, _ = add_phase_task(plan, "phase_001", task)
+        appended = new_plan.phases[0].tasks[-1]
+        assert appended.created_at == "2024-01-01T00:00:00Z"
+
+
 class TestReplacePhase:
     """``replace_phase`` substitutes a whole Phase object by id."""
 
