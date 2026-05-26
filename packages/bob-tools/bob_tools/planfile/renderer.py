@@ -54,6 +54,10 @@ def render_plan(plan: Plan) -> str:
         lines.append(f"<!-- bob-plan-format: {plan.magic_version} -->")
         lines.append("")
 
+    if plan.task_namespace is not None:
+        lines.append(f"<!-- task_namespace: {plan.task_namespace} -->")
+        lines.append("")
+
     if plan.project_title:
         lines.append(f"# {plan.project_title}")
         lines.append("")

@@ -134,7 +134,15 @@ class BugsSection:
 
 @dataclass(frozen=True)
 class Plan:
-    """The top-level parsed PLAN.md document."""
+    """The top-level parsed PLAN.md document.
+
+    ``task_namespace`` is the optional 2-letter per-file namespace
+    declared via ``<!-- task_namespace: XX -->`` in the preamble. When
+    set, canonical task ids in this file take the ``T-XX-NNNNNN`` form;
+    legacy ``T-NNNNNN`` ids continue to parse but the canonical
+    validator warns once per file. ``None`` when no namespace is
+    declared (the format predates per-file namespaces).
+    """
 
     magic_version: int | None
     project_title: str
@@ -142,6 +150,7 @@ class Plan:
     phases: tuple[Phase, ...]
     bugs: BugsSection | None
     source_path: Path | None
+    task_namespace: str | None = None
 
 
 @dataclass(frozen=True)

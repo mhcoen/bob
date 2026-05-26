@@ -44,6 +44,46 @@
   four PLAN.md files plus this NOTES.md, so the flakiness is genuinely
   pre-existing and not introduced by the backfill.
 
+- 2026-05-26 [1.3] [T-000003]: The canonical-validator warning is gated
+  on `Plan.task_namespace is not None` — files that never opted in to
+  the namespace scheme stay silent so the existing corpus does not
+  acquire a deprecation drumbeat. The warning fires only when a
+  namespaced plan still carries an unprefixed id, which is the
+  migration-aid use case. Open question for the reviewer: should bare
+  `T-NNNNNN` in a non-namespaced plan also warn (i.e. signal that the
+  preamble should declare a namespace at all)? Left silent for now;
+  the task description reads "legacy unprefixed IDs continue to parse",
+  which I interpret as no-warning-without-declared-namespace.
+- 2026-05-26 [1.3] [T-000003]: `task_namespace` lives on `Plan` and is
+  recognized in the preamble before the first phase/bugs heading. The
+  parser does not enforce uniqueness across declarations — a repeated
+  `<!-- task_namespace: ... -->` comment last-write-wins, matching the
+  existing `_PHASE_ID_COMMENT_RE` policy. The structural-sanity check
+  was deliberately not extended to flag duplicates; if that ends up
+  mattering, the canonical validator is the better hook than parse
+  time.
+- 2026-05-26 [1.3] [T-000003]: Pre-existing test-isolation flakiness
+  in `packages/duplo/tests/` from notes [1.2] is unchanged. The bare
+  `pytest` invocation surfaces 20-30 failures/errors in the duplo
+  pipeline/status/phase5_integration files that all pass in isolation
+  and have no relationship to the planfile namespace work — most
+  surface as `AttributeError: module 'duplo' has no attribute 'main'`
+  from `_clean_argv` fixture's `monkeypatch.setattr("duplo.main.
+  _check_migration", ...)` when the duplo.main submodule hasn't been
+  imported yet in the xdist worker. Running `pytest packages/bob-tools`
+  alone is fully green: 707 passed, 5 skipped, including the new
+  `test_task_namespace.py`.
+- 2026-05-26 [1.3] [T-000003]: Re-confirmed the flakiness signature on
+  two back-to-back full-workspace runs of the check command. The prior
+  attempt's failure set (11 in `packages/duplo/tests/test_spec_writer.py`)
+  did not repeat; this session's runs surfaced 23 failures + 5 errors
+  spread across `test_reauthor.py`, `test_saver.py`,
+  `test_platform_integration.py`, and `test_main.py` instead. The
+  shifting failure set across runs with no intervening code change is
+  itself the diagnostic — every failure traces to xdist worker order
+  and `monkeypatch.setattr("duplo.main.…", …)` reaching for a submodule
+  the worker has not yet imported, not to any T-000003 change.
+
 ## Hypotheses
 
 ## Eliminated

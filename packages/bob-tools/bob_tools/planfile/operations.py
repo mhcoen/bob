@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import re
+import warnings
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -76,7 +77,13 @@ _KNOWN_LEADING_FLAGS = frozenset({"USER", "BATCH"})
 # legitimately mentions a reserved keyword" (prose by design).
 _RESERVED_SIBLING_MARKERS = frozenset({"RULEDOUT"})
 
-_TASK_REF_RE = re.compile(r"^T-\d{6}$")
+# Canonical task reference: either the legacy ``T-NNNNNN`` form or the
+# namespaced ``T-XX-NNNNNN`` form (T-000003). The namespace segment is
+# exactly two letters; the digit suffix stays six digits in canonical
+# form. ``_TASK_REF_RE`` is used both by deps validation and by the
+# field-stability harness, so a regex change here cascades to both.
+_TASK_REF_RE = re.compile(r"^T-(?:[A-Za-z]{2}-)?\d{6}$")
+_TASK_ID_NUMERIC_RE = re.compile(r"^T-(?:[A-Za-z]{2}-)?(\d+)$")
 _ACTION_NAME_RE = re.compile(r"^\w+$")
 _ANNOTATION_KEY_ONLY_RE = re.compile(r"^[A-Za-z_]\w*$")
 
@@ -1009,7 +1016,7 @@ def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
 def _collect_plan_semantic_diff(
     intended: Plan, parsed: Plan, errors: list[str]
 ) -> None:
-    for field in ("magic_version", "project_title", "preamble"):
+    for field in ("magic_version", "task_namespace", "project_title", "preamble"):
         intended_value = getattr(intended, field)
         parsed_value = getattr(parsed, field)
         if intended_value != parsed_value:
@@ -1236,6 +1243,27 @@ def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> s
             f"parsed plan has {len(idless_lines)} task(s) without "
             f"stable T-NNNNNN id(s) ({locs}{more})"
         )
+
+    # T-000003: legacy unprefixed ids in a namespaced plan continue to
+    # parse but the canonical validator warns once per file so callers
+    # see the migration nudge without blocking writes. The check fires
+    # only when ``task_namespace`` is declared — files predating the
+    # namespace scheme stay quiet.
+    if reparsed.task_namespace is not None:
+        prefix = f"T-{reparsed.task_namespace}-"
+        legacy = sum(
+            1
+            for task in _iter_plan_tasks(reparsed)
+            if task.task_id is not None and not task.task_id.startswith(prefix)
+        )
+        if legacy:
+            source_label = f" in {source_path}" if source_path is not None else ""
+            warnings.warn(
+                f"plan declares task_namespace {reparsed.task_namespace!r} "
+                f"but {legacy} task(s) use unprefixed ids{source_label}; "
+                f"canonical form is T-{reparsed.task_namespace}-NNNNNN",
+                stacklevel=2,
+            )
 
     if errors:
         raise PlanValidationError(errors)
@@ -2108,11 +2136,12 @@ def purge_done_bug_tasks(plan: Plan) -> Plan:
 
 
 def _next_task_id(plan: Plan) -> str:
-    """Return the next sequential ``T-NNNNNN`` id not yet used in ``plan``.
+    """Return the next sequential canonical task id not yet used in ``plan``.
 
     Scans every task in the plan, takes the maximum numeric suffix on
-    ids that match ``T-`` + digits, and returns ``T-`` formatted to six
-    digits at ``max + 1``. Tasks without an id, or with non-conforming
+    ids that match ``T-(XX-)?`` + digits, and formats the result with
+    the plan's declared ``task_namespace`` prefix when set or as bare
+    ``T-NNNNNN`` otherwise. Tasks without an id, or with non-conforming
     ids, are ignored. The scan covers phase tasks (with subsection
     descent) and bug tasks via :func:`_iter_plan_tasks`, so the
     returned id is globally unique within ``plan`` per design doc
@@ -2120,14 +2149,16 @@ def _next_task_id(plan: Plan) -> str:
     """
     max_num = 0
     for task in _iter_plan_tasks(plan):
-        if task.task_id is None or not task.task_id.startswith("T-"):
+        if task.task_id is None:
             continue
-        suffix = task.task_id[2:]
-        if not suffix.isdigit():
+        match = _TASK_ID_NUMERIC_RE.match(task.task_id)
+        if match is None:
             continue
-        num = int(suffix)
+        num = int(match.group(1))
         if num > max_num:
             max_num = num
+    if plan.task_namespace is not None:
+        return f"T-{plan.task_namespace}-{max_num + 1:06d}"
     return f"T-{max_num + 1:06d}"
 
 
@@ -2824,9 +2855,12 @@ def replace_phase_validated(
         phases_for_max[match_index] = candidate
         plan_for_max = dataclasses.replace(plan, phases=tuple(phases_for_max))
         counter = [_next_task_id_number(plan_for_max)]
-        new_root_tasks = _assign_task_ids(candidate.tasks, counter)
+        namespace = plan.task_namespace
+        new_root_tasks = _assign_task_ids(candidate.tasks, counter, namespace)
         new_subsections = tuple(
-            dataclasses.replace(sub, tasks=_assign_task_ids(sub.tasks, counter))
+            dataclasses.replace(
+                sub, tasks=_assign_task_ids(sub.tasks, counter, namespace)
+            )
             for sub in candidate.subsections
         )
         candidate = dataclasses.replace(
@@ -2870,20 +2904,29 @@ def _max_phase_id_number(plan: Plan) -> int:
     return max_num
 
 
-def _assign_task_ids(tasks: tuple[Task, ...], counter: list[int]) -> tuple[Task, ...]:
+def _assign_task_ids(
+    tasks: tuple[Task, ...],
+    counter: list[int],
+    namespace: str | None = None,
+) -> tuple[Task, ...]:
     """Return a copy of ``tasks`` with missing ``task_id`` fields assigned.
 
     ``counter`` is a single-element list holding the next id number to
     use; it is mutated in place so sibling subtrees share one running
-    counter. Tasks that already have a ``task_id`` are returned with
-    only their ``children`` re-walked (so a partially-migrated tree
-    fills only the gaps).
+    counter. ``namespace`` is the per-file ``task_namespace`` (or
+    ``None``) so assigned ids match the plan's canonical form. Tasks
+    that already have a ``task_id`` are returned with only their
+    ``children`` re-walked (so a partially-migrated tree fills only
+    the gaps); existing ids are not re-namespaced.
     """
     new_tasks: list[Task] = []
     for task in tasks:
-        new_children = _assign_task_ids(task.children, counter)
+        new_children = _assign_task_ids(task.children, counter, namespace)
         if task.task_id is None:
-            new_id = f"T-{counter[0]:06d}"
+            if namespace is not None:
+                new_id = f"T-{namespace}-{counter[0]:06d}"
+            else:
+                new_id = f"T-{counter[0]:06d}"
             counter[0] += 1
             new_tasks.append(
                 dataclasses.replace(task, task_id=new_id, children=new_children)
@@ -2918,12 +2961,15 @@ def migrate(plan: Plan) -> Plan:
     ``migrate(plan)``.
     """
     counter = [_next_task_id_number(plan)]
+    namespace = plan.task_namespace
     new_phases: list[Phase] = []
     next_phase_num = _max_phase_id_number(plan) + 1
     for phase in plan.phases:
-        new_root_tasks = _assign_task_ids(phase.tasks, counter)
+        new_root_tasks = _assign_task_ids(phase.tasks, counter, namespace)
         new_subsections = tuple(
-            dataclasses.replace(sub, tasks=_assign_task_ids(sub.tasks, counter))
+            dataclasses.replace(
+                sub, tasks=_assign_task_ids(sub.tasks, counter, namespace)
+            )
             for sub in phase.subsections
         )
         if phase.phase_id_source == "none":
@@ -2948,7 +2994,7 @@ def migrate(plan: Plan) -> Plan:
     new_bugs = plan.bugs
     if new_bugs is not None:
         new_bugs = dataclasses.replace(
-            new_bugs, tasks=_assign_task_ids(new_bugs.tasks, counter)
+            new_bugs, tasks=_assign_task_ids(new_bugs.tasks, counter, namespace)
         )
 
     return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
@@ -2958,18 +3004,20 @@ def _next_task_id_number(plan: Plan) -> int:
     """Return the integer suffix to use for the next assigned task id.
 
     Equivalent to :func:`_next_task_id` but returns the integer rather
-    than the formatted ``T-NNNNNN`` string; used by :func:`migrate`,
-    which mutates a counter as it walks the tree and needs to increment
-    the raw number.
+    than the formatted ``T-NNNNNN`` / ``T-XX-NNNNNN`` string; used by
+    :func:`migrate` and :func:`_assign_task_ids`, which mutate a
+    counter as they walk the tree and need the raw number. The regex
+    accepts both legacy and namespaced ids so the counter advances
+    past any existing canonical form.
     """
     max_num = 0
     for task in _iter_plan_tasks(plan):
-        if task.task_id is None or not task.task_id.startswith("T-"):
+        if task.task_id is None:
             continue
-        suffix = task.task_id[2:]
-        if not suffix.isdigit():
+        match = _TASK_ID_NUMERIC_RE.match(task.task_id)
+        if match is None:
             continue
-        num = int(suffix)
+        num = int(match.group(1))
         if num > max_num:
             max_num = num
     return max_num + 1

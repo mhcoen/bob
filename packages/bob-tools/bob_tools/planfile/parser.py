@@ -81,15 +81,16 @@ _SUBSECTION_RE = re.compile(r"^###\s+(.+?)\s*$")
 # mode) fall through to the active prose accumulator.
 _H1_RE = re.compile(r"^#\s+(.+?)\s*$")
 
-# Leading task ID: ``T-NNNNNN:`` followed by mandatory whitespace and
-# then the rest of the task body. Per design doc section 4.2 grammar
-# ``TaskId ← TaskRef ":" WS``. Recognized only at the start of the
-# checkbox-stripped task text, before any tag extraction. Group 1 is
-# the bare digits (the ``T-`` prefix is re-attached by the caller so
-# the stored ``task_id`` field keeps the canonical ``T-NNNNNN`` form);
-# group 2 is the remainder of the line through end-of-input, which the
-# caller hands to the tag extractors next.
-_TASK_ID_RE = re.compile(r"^T-(\d+):\s+(.*)$")
+# Leading task ID: ``T-NNNNNN:`` or ``T-XX-NNNNNN:`` followed by
+# mandatory whitespace and then the rest of the task body. Per design
+# doc section 4.2 grammar ``TaskId ← TaskRef ":" WS`` extended in
+# T-000003 to admit an optional 2-letter namespace prefix matching the
+# per-file ``<!-- task_namespace: XX -->`` declaration. Recognized only
+# at the start of the checkbox-stripped task text, before any tag
+# extraction. Group 1 is the full id text (including the namespace
+# segment when present); group 2 is the remainder of the line through
+# end-of-input, which the caller hands to the tag extractors next.
+_TASK_ID_RE = re.compile(r"^(T-(?:[A-Za-z]{2}-)?\d+):\s+(.*)$")
 
 # Trailing ``<!-- created_at: ... -->`` HTML-comment annotation on a
 # task line. Per the task contract: the field is serialized at the end
@@ -108,6 +109,13 @@ _TRAILING_CREATED_AT_RE = re.compile(r"<!--\s*created_at\s*:\s*([^<>]+?)\s*-->\s
 # this is the first non-blank line of the document; later occurrences
 # fall through to prose handling.
 _MAGIC_RE = re.compile(r"^<!--\s*bob-plan-format:\s*(\d+)\s*-->\s*$")
+
+# Task-namespace declaration: ``<!-- task_namespace: XX -->`` where XX
+# is exactly two letters. Per T-000003 the namespace is per-file and
+# scopes ``T-XX-NNNNNN`` ids in this plan; the comment is recognized
+# only in the preamble (before the first phase/bugs heading) and is
+# consumed there rather than retained as prose.
+_TASK_NAMESPACE_RE = re.compile(r"^<!--\s*task_namespace\s*:\s*([A-Za-z]{2})\s*-->\s*$")
 
 # Phase-id comment: ``<!-- phase_id: phase_NNN -->``. Captures the id.
 # Pattern must match ``mcloop/ledger_emit.py``'s ``_PHASE_ID_COMMENT_RE``
@@ -219,6 +227,7 @@ def parse_plan(
     project_title_seen = False
     preamble_lines: list[str] = []
     preamble_active = False
+    task_namespace: str | None = None
     phase_prose_lines: list[str] | None = None
     subsection_prose_lines: list[str] | None = None
     # The most recently parsed task in the current scope. Non-task,
@@ -300,6 +309,19 @@ def parse_plan(
             continue
 
         if current_phase is None and not in_bugs:
+            ns_m = _TASK_NAMESPACE_RE.match(line)
+            if ns_m is not None:
+                # T-000003: a single per-file ``<!-- task_namespace:
+                # XX -->`` declaration recognized anywhere in the
+                # preamble (before the first phase/bugs heading) and
+                # consumed rather than retained as prose. Last-write
+                # wins on a repeat declaration; the structural sanity
+                # check is intentionally not extended to flag duplicate
+                # declarations — the canonical validator surfaces them
+                # via the namespaced/legacy mismatch path instead.
+                task_namespace = ns_m.group(1)
+                continue
+
             h1_m = _H1_RE.match(line)
             if h1_m is not None:
                 if not project_title_seen:
@@ -438,6 +460,7 @@ def parse_plan(
         phases=tuple(p.freeze() for p in phases_b),
         bugs=bugs_b.freeze() if bugs_b is not None else None,
         source_path=source_path,
+        task_namespace=task_namespace,
     )
 
 
@@ -665,21 +688,21 @@ def _parse_ledger_phase_heading(line: str) -> tuple[str, str] | None:
 
 
 def _extract_task_id(text: str) -> tuple[str | None, str]:
-    """Strip a leading ``T-NNNNNN:`` task ID from ``text``.
+    """Strip a leading ``T-NNNNNN:`` or ``T-XX-NNNNNN:`` task ID from ``text``.
 
     Per design doc section 4.2 grammar, the task ID is the first token
     in the body after the checkbox. Returns ``(None, text)`` when no
     leading task ID is present; task IDs are optional in compat mode
     and mandatory in strict mode (enforced separately in Stage 3). The
-    returned id is the canonical ``T-NNNNNN`` form: the regex captures
-    only the digits as group 1, and the ``T-`` prefix is re-attached
-    here so the stored ``task_id`` matches what every other call site
-    (tests, ledger emitter, dep validator) compares against.
+    returned id preserves the form encountered: a plain ``T-NNNNNN``
+    stays as ``T-NNNNNN`` and a namespaced ``T-XX-NNNNNN`` stays as
+    ``T-XX-NNNNNN``, so renderer/validator paths see exactly what the
+    source carried.
     """
     m = _TASK_ID_RE.match(text)
     if m is None:
         return None, text
-    return f"T-{m.group(1)}", m.group(2)
+    return m.group(1), m.group(2)
 
 
 def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
