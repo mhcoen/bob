@@ -20,9 +20,7 @@ def _identity_text_parse_fn(envelope: Envelope, _store: object) -> list[tuple[st
     payload = envelope.payload or {}
     output = payload.get("output")
     if not isinstance(output, str):
-        raise AdapterError(
-            "identity_text_parser: model payload missing 'output' field"
-        )
+        raise AdapterError("identity_text_parser: model payload missing 'output' field")
     # The executor passes the list of declared writes via a side channel
     # on the envelope (envelope-internal field). We use the same channel
     # to know what writes to produce. See executor._dispatch_parsers.

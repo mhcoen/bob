@@ -100,9 +100,7 @@ def test_mock_model_adapter_summary_does_not_carry_prompt_body() -> None:
     summary = prepared.summary
     assert "SECRET_TOKEN_123" not in str(summary)
     assert "prompt_preview" not in summary
-    expected_digest = hashlib.sha256(
-        secret_prompt.encode("utf-8")
-    ).hexdigest()
+    expected_digest = hashlib.sha256(secret_prompt.encode("utf-8")).hexdigest()
     assert summary["prompt_sha256"] == expected_digest
     assert summary["prompt_chars"] == len(secret_prompt)
 
@@ -110,17 +108,11 @@ def test_mock_model_adapter_summary_does_not_carry_prompt_body() -> None:
 def test_mock_human_adapter_summary_does_not_carry_prompt_body() -> None:
     adapter = MockHumanAdapter()
     secret_prompt = "SECRET_TOKEN_123 in human gate prompt"
-    prepared = adapter.prepare(
-        _request_with_prompt(
-            secret_prompt, options=("accept", "reject")
-        )
-    )
+    prepared = adapter.prepare(_request_with_prompt(secret_prompt, options=("accept", "reject")))
     summary = prepared.summary
     assert "SECRET_TOKEN_123" not in str(summary)
     assert "prompt_preview" not in summary
-    expected_digest = hashlib.sha256(
-        secret_prompt.encode("utf-8")
-    ).hexdigest()
+    expected_digest = hashlib.sha256(secret_prompt.encode("utf-8")).hexdigest()
     assert summary["prompt_sha256"] == expected_digest
     assert summary["prompt_chars"] == len(secret_prompt)
 
@@ -180,9 +172,7 @@ def test_snapshot_directory_is_private_under_default_umask(
     snapshot_dir = run_dir / "prompt_sources"
     assert snapshot_dir.is_dir()
     mode = stat.S_IMODE(snapshot_dir.stat().st_mode)
-    assert mode == 0o700, (
-        f"snapshot directory mode is {oct(mode)}, expected 0o700"
-    )
+    assert mode == 0o700, f"snapshot directory mode is {oct(mode)}, expected 0o700"
 
 
 def test_snapshot_files_are_private_under_default_umask(
@@ -204,9 +194,7 @@ def test_snapshot_files_are_private_under_default_umask(
         "sensitive content the mode is protecting"
     )
     mode = stat.S_IMODE(snapshot_path.stat().st_mode)
-    assert mode == 0o600, (
-        f"snapshot file mode is {oct(mode)}, expected 0o600"
-    )
+    assert mode == 0o600, f"snapshot file mode is {oct(mode)}, expected 0o600"
 
 
 # --------------------------------------------------------------------
@@ -233,6 +221,7 @@ def test_repl_history_file_is_private_under_default_umask(
     # Re-import the repl module's _HISTORY_PATH after HOME swap; it's
     # a module-level constant, so patch it directly.
     from orchestra import repl as repl_mod
+
     history_path = fake_home / ".orchestra" / "history"
     monkeypatch.setattr(repl_mod, "_HISTORY_PATH", history_path)
 
@@ -241,12 +230,8 @@ def test_repl_history_file_is_private_under_default_umask(
 
     parent_mode = stat.S_IMODE(history_path.parent.stat().st_mode)
     file_mode = stat.S_IMODE(history_path.stat().st_mode)
-    assert parent_mode == 0o700, (
-        f"~/.orchestra mode is {oct(parent_mode)}, expected 0o700"
-    )
-    assert file_mode == 0o600, (
-        f"history file mode is {oct(file_mode)}, expected 0o600"
-    )
+    assert parent_mode == 0o700, f"~/.orchestra mode is {oct(parent_mode)}, expected 0o700"
+    assert file_mode == 0o600, f"history file mode is {oct(file_mode)}, expected 0o600"
 
 
 # --------------------------------------------------------------------
@@ -282,17 +267,11 @@ def test_write_log_transcript_is_private_under_default_umask(
         "sensitive content the mode is protecting"
     )
     file_mode = stat.S_IMODE(log_path.stat().st_mode)
-    assert file_mode == 0o600, (
-        f"transcript file mode is {oct(file_mode)}, expected 0o600"
-    )
+    assert file_mode == 0o600, f"transcript file mode is {oct(file_mode)}, expected 0o600"
     log_dir_mode = stat.S_IMODE(log_dir.stat().st_mode)
-    assert log_dir_mode == 0o700, (
-        f"log dir mode is {oct(log_dir_mode)}, expected 0o700"
-    )
+    assert log_dir_mode == 0o700, f"log dir mode is {oct(log_dir_mode)}, expected 0o700"
     mcloop_mode = stat.S_IMODE(log_dir.parent.stat().st_mode)
-    assert mcloop_mode == 0o700, (
-        f".mcloop mode is {oct(mcloop_mode)}, expected 0o700"
-    )
+    assert mcloop_mode == 0o700, f".mcloop mode is {oct(mcloop_mode)}, expected 0o700"
 
 
 def test_write_log_tightens_existing_loose_mcloop_directory(

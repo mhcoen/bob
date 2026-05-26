@@ -49,9 +49,7 @@ WorkspaceMutation = Literal["mutating", "text_only"]
 """The two valid values for an adapter's ``WORKSPACE_MUTATION``
 class-level metadata attribute."""
 
-WORKSPACE_MUTATION_VALUES: frozenset[str] = frozenset(
-    {"mutating", "text_only"}
-)
+WORKSPACE_MUTATION_VALUES: frozenset[str] = frozenset({"mutating", "text_only"})
 """Set form of ``WorkspaceMutation`` for runtime membership checks
 the api validator runs against arbitrary class attributes."""
 

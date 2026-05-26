@@ -78,9 +78,7 @@ def _ask_config_body() -> dict:
 
 
 @pytest.fixture
-def isolated_home(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Path:
+def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect ``~`` so the CLI's load_global_config reads from
     ``tmp_path/.orchestra/config.json`` instead of the developer's
     real home directory."""
@@ -105,9 +103,7 @@ def test_verb_dispatch_runs_configured_verb(
         captured["verb"] = verb_name
         captured["query"] = query
         captured["config_verbs"] = sorted(config.verbs)
-        captured["progress_callback_passed"] = (
-            kwargs.get("progress_callback") is not None
-        )
+        captured["progress_callback_passed"] = kwargs.get("progress_callback") is not None
         return "Paris.\n"
 
     monkeypatch.setattr(cli, "run_verb", _stub_run_verb)
@@ -483,9 +479,7 @@ def test_verb_dispatch_passes_project_dir_to_run_verb(
     rc = cli.main(["ask", "hello"])
     assert rc == 0
     project_dir = captured.get("project_dir")
-    assert project_dir is not None, (
-        "_dispatch_verb must thread project_dir through to run_verb"
-    )
+    assert project_dir is not None, "_dispatch_verb must thread project_dir through to run_verb"
     # The CLI uses Path.cwd() at dispatch time.
     assert Path(project_dir) == Path.cwd()
 

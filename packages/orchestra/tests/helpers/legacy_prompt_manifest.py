@@ -32,11 +32,7 @@ def _collect_prompt_files(workflow: Workflow) -> list[Path]:
         if state.prompt is not None:
             sources.append(state.prompt)
 
-    base = (
-        Path(workflow.source_dir)
-        if workflow.source_dir
-        else Path.cwd()
-    )
+    base = Path(workflow.source_dir) if workflow.source_dir else Path.cwd()
     out: list[Path] = []
     for src in sources:
         if src.kind not in ("file", "template"):

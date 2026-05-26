@@ -138,9 +138,7 @@ class _RecordingModelAdapter:
         state_id: str = prepared.inner["state_id"]
         text = self._responses.get(state_id)
         if text is None:
-            raise AssertionError(
-                f"recording adapter has no response for state {state_id!r}"
-            )
+            raise AssertionError(f"recording adapter has no response for state {state_id!r}")
         return {
             "output": text,
             "verdict": None,
@@ -291,9 +289,7 @@ def test_reviewer_prompts_carry_anon_keys_and_omit_panelist_identifiers(
     regression that would leak which panelist produced which response
     into the reviewer surface."""
     adapter, _run_dir, _rid = _run_workflow(tmp_path)
-    reviewer_calls = [
-        c for c in adapter.calls if c["state_id"].startswith("reviewer_")
-    ]
+    reviewer_calls = [c for c in adapter.calls if c["state_id"].startswith("reviewer_")]
     assert len(reviewer_calls) == 5
     for call in reviewer_calls:
         prompt: str = call["prompt"]
@@ -303,16 +299,14 @@ def test_reviewer_prompts_carry_anon_keys_and_omit_panelist_identifiers(
             )
         for panelist_text in PANELIST_RESPONSES.values():
             assert panelist_text in prompt, (
-                f"reviewer {call['state_id']!r} prompt missing "
-                f"panelist text {panelist_text!r}"
+                f"reviewer {call['state_id']!r} prompt missing panelist text {panelist_text!r}"
             )
         # The reviewer must not see the panelist state names or output
         # artifact names. Panelist identities are the thing
         # anonymization is supposed to hide.
         for state_name in PANELIST_STATES:
             assert state_name not in prompt, (
-                f"reviewer {call['state_id']!r} prompt leaked "
-                f"panelist state {state_name!r}"
+                f"reviewer {call['state_id']!r} prompt leaked panelist state {state_name!r}"
             )
         for n in range(1, 6):
             assert f"panelist_{n}_output" not in prompt, (
@@ -340,9 +334,7 @@ def test_synthesizer_prompt_carries_anonymized_panel_and_reviews(
     prompt: str = synth_calls[0]["prompt"]
     # Anonymized panel surfaces.
     for letter in ("A", "B", "C", "D", "E"):
-        assert f"'{letter}':" in prompt, (
-            f"synthesizer prompt missing anon_map key {letter!r}"
-        )
+        assert f"'{letter}':" in prompt, f"synthesizer prompt missing anon_map key {letter!r}"
     for panelist_text in PANELIST_RESPONSES.values():
         assert panelist_text in prompt
     # Every review text reaches the synthesizer.
@@ -365,13 +357,10 @@ def test_synthesizer_prompt_carries_anonymized_panel_and_reviews(
 
 def _config_with_roles(role_names: list[str]) -> OrchestraConfig:
     roles: dict[str, RoleBinding] = {
-        name: RoleBinding(adapter="claude_code_text", model="opus")
-        for name in role_names
+        name: RoleBinding(adapter="claude_code_text", model="opus") for name in role_names
     }
     workflows = {
-        "ask_anonymous_reviewers": WorkflowConfig(
-            pattern="ask_anonymous_reviewers"
-        ),
+        "ask_anonymous_reviewers": WorkflowConfig(pattern="ask_anonymous_reviewers"),
     }
     return OrchestraConfig(roles=roles, workflows=workflows, verbs={})
 

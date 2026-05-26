@@ -199,9 +199,7 @@ def test_state_invocation_visible_only_when_success(tmp_path):
     store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
     store.declare("a", "text")
     inv = "run-1::state-a::1"
-    h = store.tentative_write(
-        "a", "answer", written_by="state-a", invocation_id=inv
-    )
+    h = store.tentative_write("a", "answer", written_by="state-a", invocation_id=inv)
     store.commit_tentative([h])
     # Pending invocation: hidden.
     idx.set(inv, "pending")
@@ -433,9 +431,7 @@ def test_tentative_write_atomic_under_concurrent_pressure(tmp_path):
     assert len(handles) == 2
 
     cur = store._conn.cursor()
-    versions = cur.execute(
-        "SELECT seq FROM versions WHERE is_tentative = 1"
-    ).fetchall()
+    versions = cur.execute("SELECT seq FROM versions WHERE is_tentative = 1").fetchall()
     assert len(versions) == 2
     handle_rows = cur.execute("SELECT handle FROM tentative_handles").fetchall()
     assert len(handle_rows) == 2
@@ -493,9 +489,7 @@ def test_tentative_write_atomic_under_concurrent_pressure(tmp_path):
 
     # The rollback undid the versions insert: no half-written row.
     cur = fresh._conn.cursor()
-    versions = cur.execute(
-        "SELECT seq FROM versions WHERE is_tentative = 1"
-    ).fetchall()
+    versions = cur.execute("SELECT seq FROM versions WHERE is_tentative = 1").fetchall()
     assert versions == []
     handle_rows = cur.execute("SELECT handle FROM tentative_handles").fetchall()
     assert handle_rows == []
@@ -513,15 +507,21 @@ def test_list_committed_by_invocation_returns_only_matching_versions(
     store.declare("b", "text")
 
     h1 = store.tentative_write(
-        "a", "v-from-i1", written_by="edit#1",
+        "a",
+        "v-from-i1",
+        written_by="edit#1",
         invocation_id="run::edit::1",
     )
     h2 = store.tentative_write(
-        "b", "v-from-i1", written_by="edit#1",
+        "b",
+        "v-from-i1",
+        written_by="edit#1",
         invocation_id="run::edit::1",
     )
     h3 = store.tentative_write(
-        "a", "v-from-i2", written_by="other#1",
+        "a",
+        "v-from-i2",
+        written_by="other#1",
         invocation_id="run::other::1",
     )
     store.commit_tentative([h1, h2, h3])
@@ -546,7 +546,9 @@ def test_list_committed_by_invocation_excludes_tentative_versions(tmp_path):
     store = ArtifactStore(tmp_path / "store.sqlite")
     store.declare("a", "text")
     handle = store.tentative_write(
-        "a", "tentative-only", written_by="edit#1",
+        "a",
+        "tentative-only",
+        written_by="edit#1",
         invocation_id="run::edit::1",
     )
     # Do NOT commit. Tentative row exists; should not show up.

@@ -89,25 +89,19 @@ def load_payload(run_dir: Path, payload_ref: str) -> dict[str, Any]:
         payload_path.relative_to(run_root)
     except ValueError as exc:
         raise ResumeError(
-            f"payload_ref {payload_ref!r} resolves outside run "
-            f"directory {run_root}"
+            f"payload_ref {payload_ref!r} resolves outside run directory {run_root}"
         ) from exc
     try:
         with open(payload_path, encoding="utf-8") as fh:
             loaded = json.load(fh)
     except FileNotFoundError as exc:
         raise ResumeError(
-            f"payload file missing for payload_ref {payload_ref!r}: "
-            f"{payload_path}"
+            f"payload file missing for payload_ref {payload_ref!r}: {payload_path}"
         ) from exc
     except json.JSONDecodeError as exc:
-        raise ResumeError(
-            f"payload file for {payload_ref!r} is not valid JSON: "
-            f"{exc.msg}"
-        ) from exc
+        raise ResumeError(f"payload file for {payload_ref!r} is not valid JSON: {exc.msg}") from exc
     if not isinstance(loaded, dict):
         raise ResumeError(
-            f"payload file for {payload_ref!r} must be a JSON object, "
-            f"got {type(loaded).__name__}"
+            f"payload file for {payload_ref!r} must be a JSON object, got {type(loaded).__name__}"
         )
     return loaded

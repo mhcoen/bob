@@ -143,9 +143,7 @@ def test_old_nested_roles_shape_rejected_with_migration_hint() -> None:
         "workflows": {
             "code_edit": {
                 "pattern": "single",
-                "roles": {
-                    "editor": {"adapter": "claude_code_agent"}
-                },
+                "roles": {"editor": {"adapter": "claude_code_agent"}},
             }
         }
     }

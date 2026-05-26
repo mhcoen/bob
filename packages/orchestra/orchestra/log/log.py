@@ -195,30 +195,19 @@ class LogReader:
             if not line:
                 if is_final and unterminated_final:
                     break
-                raise ResumeError(
-                    f"empty log line at {self._path}:{line_no}"
-                )
+                raise ResumeError(f"empty log line at {self._path}:{line_no}")
             try:
                 data = json.loads(line)
             except json.JSONDecodeError as exc:
                 if is_final and unterminated_final:
                     break
-                raise ResumeError(
-                    f"corrupt log line at {self._path}:{line_no}: "
-                    f"{exc.msg}"
-                ) from exc
+                raise ResumeError(f"corrupt log line at {self._path}:{line_no}: {exc.msg}") from exc
             if not isinstance(data, dict):
-                raise ResumeError(
-                    f"log record at {self._path}:{line_no} is not a "
-                    f"JSON object"
-                )
+                raise ResumeError(f"log record at {self._path}:{line_no} is not a JSON object")
             try:
                 record = Record.from_dict(data)
             except (KeyError, ValueError, TypeError) as exc:
-                raise ResumeError(
-                    f"malformed log record at {self._path}:{line_no}: "
-                    f"{exc}"
-                ) from exc
+                raise ResumeError(f"malformed log record at {self._path}:{line_no}: {exc}") from exc
             if expected_seq is not None and record.seq != expected_seq:
                 raise ResumeError(
                     f"sequence gap at {self._path}:{line_no}: "

@@ -32,9 +32,7 @@ class WorkflowNotFound(OrchestraError):
 
     def __init__(self, name: str, searched: list[Path]) -> None:
         searched_str = ", ".join(str(p) for p in searched)
-        super().__init__(
-            f"workflow {name!r} not found. searched: {searched_str}"
-        )
+        super().__init__(f"workflow {name!r} not found. searched: {searched_str}")
         self.name = name
         self.searched = searched
 
@@ -62,9 +60,7 @@ def resolve_workflow_path(
     surface narrow.
     """
     if "/" in name or "\\" in name or name.endswith(".orc") or ".." in name:
-        raise ValueError(
-            f"workflow name must be a bare identifier, got {name!r}"
-        )
+        raise ValueError(f"workflow name must be a bare identifier, got {name!r}")
 
     searched: list[Path] = []
     if project_dir is not None:

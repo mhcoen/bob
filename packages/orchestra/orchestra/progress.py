@@ -197,10 +197,7 @@ class _StatefulStderrReporter:
         # number of children. Listing every child binding up front
         # gives the user the full picture before any child finishes.
         header_label = f"{count} {label} children"
-        self._print(
-            f"[{start}-{end}/{event.total}] "
-            f"{header_label} starting in parallel:"
-        )
+        self._print(f"[{start}-{end}/{event.total}] {header_label} starting in parallel:")
         for child in children:
             backing = _format_backing(child.adapter, child.model)
             child_label = child.role or child.state_name
@@ -212,8 +209,7 @@ class _StatefulStderrReporter:
             # means the executor surfaced an unexpected event. Print a
             # single diagnostic line and reset state.
             self._print(
-                f"[?/{event.total}] fan_out_end without open block "
-                f"for {event.state_name!r}"
+                f"[?/{event.total}] fan_out_end without open block for {event.state_name!r}"
             )
             return
         start = self._parallel_start
@@ -221,10 +217,7 @@ class _StatefulStderrReporter:
         total = self._parallel_total
         n = self._parallel_count
         wall = self._parallel_max_elapsed
-        self._print(
-            f"[{start}-{end}/{total}] all {n} done, "
-            f"parallel wall-clock {wall:.1f}s"
-        )
+        self._print(f"[{start}-{end}/{total}] all {n} done, parallel wall-clock {wall:.1f}s")
         self._parallel_active = False
         self._parallel_start = 0
         self._parallel_end = 0
@@ -253,10 +246,7 @@ class _StatefulStderrReporter:
             return
         backing = _format_backing(event.adapter, event.model)
         label = event.role or event.state_name
-        self._print(
-            f"[{event.index}/{event.total}] {label} ({backing}) "
-            "... starting"
-        )
+        self._print(f"[{event.index}/{event.total}] {label} ({backing}) ... starting")
 
     def _handle_state_exit(self, event: ProgressEvent) -> None:
         elapsed = event.elapsed_seconds or 0.0
@@ -273,10 +263,7 @@ class _StatefulStderrReporter:
         backing = _format_backing(event.adapter, event.model)
         label = event.role or event.state_name
         if event.elapsed_seconds is None:
-            self._print(
-                f"[{event.index}/{event.total}] {label} ({backing}) "
-                "... done"
-            )
+            self._print(f"[{event.index}/{event.total}] {label} ({backing}) ... done")
             return
         self._print(
             f"[{event.index}/{event.total}] {label} ({backing}) "

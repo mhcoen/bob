@@ -146,9 +146,7 @@ def test_mock_human_no_options_raises_at_prepare():
 
 
 def test_mock_shell_runs_block_executes_each_command():
-    adapter = MockShellAdapter(
-        response_table={"echo a": (0, "a\n", ""), "echo b": (0, "b\n", "")}
-    )
+    adapter = MockShellAdapter(response_table={"echo a": (0, "a\n", ""), "echo b": (0, "b\n", "")})
     req = _request(
         actor_binding={"kind": "shell"},
         backing_options={"runs": ["echo a", "echo b"]},
@@ -584,11 +582,9 @@ def test_workspace_mutation_classification_for_shipped_adapters():
     for cls, expected_value in expected.items():
         # Canonical source: class-level WORKSPACE_MUTATION attribute.
         assert hasattr(cls, "WORKSPACE_MUTATION"), (
-            f"{cls.__name__}: missing class-level "
-            "'WORKSPACE_MUTATION' attribute"
+            f"{cls.__name__}: missing class-level 'WORKSPACE_MUTATION' attribute"
         )
         cls_value = cls.WORKSPACE_MUTATION
         assert cls_value == expected_value, (
-            f"{cls.__name__}.WORKSPACE_MUTATION = {cls_value!r}, "
-            f"expected {expected_value!r}"
+            f"{cls.__name__}.WORKSPACE_MUTATION = {cls_value!r}, expected {expected_value!r}"
         )

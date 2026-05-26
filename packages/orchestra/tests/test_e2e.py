@@ -171,9 +171,7 @@ def test_b_parser_failure_rollback(tmp_path: Path) -> None:
     aw = [r for r in records if r.event == "artifact_write"]
     assert aw == []
 
-    respond_exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "respond"
-    ]
+    respond_exits = [r for r in records if r.event == "state_exit" and r.state_id == "respond"]
     assert len(respond_exits) == 1
     exit_fields = respond_exits[0].fields
     assert exit_fields["status"] == "error"
@@ -189,9 +187,7 @@ def test_b_parser_failure_rollback(tmp_path: Path) -> None:
     assert len(pr) == 1
     assert pr[0].fields["parser"] == "faulty_text"
 
-    confirm_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "confirm"
-    ]
+    confirm_enters = [r for r in records if r.event == "state_enter" and r.state_id == "confirm"]
     assert confirm_enters == []
 
     store.close()
@@ -301,25 +297,17 @@ def test_c_resume_from_interrupted_state(tmp_path: Path) -> None:
     rh = [r for r in records if r.event == "resume_hook"]
     assert rh == []
 
-    confirm_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "confirm"
-    ]
+    confirm_enters = [r for r in records if r.event == "state_enter" and r.state_id == "confirm"]
     assert len(confirm_enters) == 2
     assert confirm_enters[0].attempt == 1
     assert confirm_enters[1].attempt == 2
 
-    confirm_exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "confirm"
-    ]
+    confirm_exits = [r for r in records if r.event == "state_exit" and r.state_id == "confirm"]
     assert len(confirm_exits) == 1
     assert confirm_exits[0].fields["outcome"] == "accept"
 
-    respond_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "respond"
-    ]
-    respond_exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "respond"
-    ]
+    respond_enters = [r for r in records if r.event == "state_enter" and r.state_id == "respond"]
+    respond_exits = [r for r in records if r.event == "state_exit" and r.state_id == "respond"]
     assert len(respond_enters) == 1
     assert len(respond_exits) == 1
     assert respond_enters[0].attempt == 1
@@ -375,10 +363,7 @@ def test_resume_after_state_exit_without_transition_does_not_reexecute(
     truncate_at: int | None = None
     seen_state_exit = False
     for r in records_before_truncate:
-        if (
-            r.event == "state_exit"
-            and r.state_id == "respond"
-        ):
+        if r.event == "state_exit" and r.state_id == "respond":
             seen_state_exit = True
             continue
         if seen_state_exit and r.event == "transition":
@@ -388,9 +373,7 @@ def test_resume_after_state_exit_without_transition_does_not_reexecute(
         "fixture must produce a transition record after respond's "
         "state_exit for this test to simulate the crash window"
     )
-    keep_records = [
-        r for r in records_before_truncate if r.seq < truncate_at
-    ]
+    keep_records = [r for r in records_before_truncate if r.seq < truncate_at]
     with open(log_path, "w", encoding="utf-8") as fh:
         for r in keep_records:
             fh.write(r.to_json() + "\n")
@@ -421,9 +404,7 @@ def test_resume_after_state_exit_without_transition_does_not_reexecute(
 
         def invoke(self, prepared: Any) -> Any:
             self.calls += 1
-            raise AssertionError(
-                "respond's actor must not be re-invoked during resume"
-            )
+            raise AssertionError("respond's actor must not be re-invoked during resume")
 
         def cancel(self, prepared: Any) -> None:
             pass
@@ -490,20 +471,10 @@ def test_resume_after_state_exit_without_transition_does_not_reexecute(
     )
 
     records = LogReader(log_path).read_all()
-    respond_enters = [
-        r
-        for r in records
-        if r.event == "state_enter" and r.state_id == "respond"
-    ]
-    respond_exits = [
-        r
-        for r in records
-        if r.event == "state_exit" and r.state_id == "respond"
-    ]
+    respond_enters = [r for r in records if r.event == "state_enter" and r.state_id == "respond"]
+    respond_exits = [r for r in records if r.event == "state_exit" and r.state_id == "respond"]
     respond_transitions = [
-        r
-        for r in records
-        if r.event == "transition" and r.state_id == "respond"
+        r for r in records if r.event == "transition" and r.state_id == "respond"
     ]
     # The actor body ran exactly once (one state_enter and one
     # state_exit, both attempt 1). The missing transition was filled
@@ -556,9 +527,7 @@ class _DenylistAdapter:
     def invoke(self, prepared: Any) -> Any:
         sid = prepared.request.state_id
         if sid in self.denied:
-            raise AssertionError(
-                f"state {sid!r} must not be re-invoked on resume"
-            )
+            raise AssertionError(f"state {sid!r} must not be re-invoked on resume")
         self.invocations.append(f"invoke:{sid}")
         return self._inner.invoke(prepared)
 
@@ -590,9 +559,7 @@ def _registry_with_model_adapter(
     return reg
 
 
-def _truncate_log_after_state_exit(
-    log_path: Path, state_id: str
-) -> None:
+def _truncate_log_after_state_exit(log_path: Path, state_id: str) -> None:
     """Truncate ``log_path`` to drop everything from the named
     state's ``state_exit`` record onward EXCEPT the ``state_exit``
     itself. The result mimics a crash in the small window between
@@ -607,9 +574,7 @@ def _truncate_log_after_state_exit(
         if seen_state_exit and r.event == "transition":
             truncate_at = r.seq
             break
-    assert truncate_at is not None, (
-        f"expected a transition record after {state_id!r}'s state_exit"
-    )
+    assert truncate_at is not None, f"expected a transition record after {state_id!r}'s state_exit"
     keep = [r for r in records if r.seq < truncate_at]
     with open(log_path, "w", encoding="utf-8") as fh:
         for r in keep:
@@ -632,9 +597,7 @@ def _resume_run(
     replay = replay_log(str(log_path))
     workflow = load_workflow(workflow_path, registry)
     store = ArtifactStore(run_dir / "store.sqlite")
-    log = LogWriter(
-        log_path, replay.last_run_id, start_seq=replay.next_seq
-    )
+    log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
     run_resume_hooks(workflow, registry, replay, log)
     vi = VisibilityIndex(persist_path=run_dir / "visibility.json")
     vi.replace_from(replay.visibility_statuses)
@@ -671,10 +634,7 @@ def _resume_run(
             completed = {
                 name: env
                 for name, env in replay.envelopes.items()
-                if (
-                    name in children_list
-                    and env.attempt == replay.attempts.get(name)
-                )
+                if (name in children_list and env.attempt == replay.attempts.get(name))
             }
             executor.resume_fan_out(
                 parent_state_name=str(of.get("parent_state", "")),
@@ -775,20 +735,13 @@ def test_resume_two_state_crash_window_does_not_reexecute_second_state(
     )
     assert terminal == "done"
     assert deny.invocations == [], (
-        "no model state should run on resume; both s_a and s_b "
-        "completed before the crash"
+        "no model state should run on resume; both s_a and s_b completed before the crash"
     )
 
     records = LogReader(run_dir / "log.jsonl").read_all()
-    s_b_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "s_b"
-    ]
-    s_b_exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "s_b"
-    ]
-    s_b_transitions = [
-        r for r in records if r.event == "transition" and r.state_id == "s_b"
-    ]
+    s_b_enters = [r for r in records if r.event == "state_enter" and r.state_id == "s_b"]
+    s_b_exits = [r for r in records if r.event == "state_exit" and r.state_id == "s_b"]
+    s_b_transitions = [r for r in records if r.event == "transition" and r.state_id == "s_b"]
     assert len(s_b_enters) == 1
     assert len(s_b_exits) == 1
     assert len(s_b_transitions) == 1
@@ -888,21 +841,11 @@ def test_resume_three_state_crash_window_does_not_reexecute_last_state(
 
     records = LogReader(run_dir / "log.jsonl").read_all()
     for sid in ("s_a", "s_b", "s_c"):
-        enters = [
-            r
-            for r in records
-            if r.event == "state_enter" and r.state_id == sid
-        ]
-        exits = [
-            r
-            for r in records
-            if r.event == "state_exit" and r.state_id == sid
-        ]
+        enters = [r for r in records if r.event == "state_enter" and r.state_id == sid]
+        exits = [r for r in records if r.event == "state_exit" and r.state_id == sid]
         assert len(enters) == 1, sid
         assert len(exits) == 1, sid
-    s_c_transitions = [
-        r for r in records if r.event == "transition" and r.state_id == "s_c"
-    ]
+    s_c_transitions = [r for r in records if r.event == "transition" and r.state_id == "s_c"]
     assert len(s_c_transitions) == 1
     assert s_c_transitions[0].fields["target"] == "done"
 
@@ -1044,12 +987,8 @@ def test_resume_fan_out_parent_crash_window_does_not_reexecute_parent(
     assert terminal == "done"
 
     records2 = LogReader(log_path).read_all()
-    launch_enters = [
-        r for r in records2 if r.event == "state_enter" and r.state_id == "launch"
-    ]
-    launch_exits = [
-        r for r in records2 if r.event == "state_exit" and r.state_id == "launch"
-    ]
+    launch_enters = [r for r in records2 if r.event == "state_enter" and r.state_id == "launch"]
+    launch_exits = [r for r in records2 if r.event == "state_exit" and r.state_id == "launch"]
     assert len(launch_enters) == 1, "launch must not be re-entered"
     assert len(launch_exits) == 1, "only the original state_exit"
     fan_starts = [r for r in records2 if r.event == "fan_out_start"]
@@ -1154,9 +1093,7 @@ def test_resume_with_payload_guard_picks_correct_branch(
     assert terminal == "done"
 
     records = LogReader(run_dir / "log.jsonl").read_all()
-    s_a_transitions = [
-        r for r in records if r.event == "transition" and r.state_id == "s_a"
-    ]
+    s_a_transitions = [r for r in records if r.event == "transition" and r.state_id == "s_a"]
     assert len(s_a_transitions) == 1
     assert s_a_transitions[0].fields["target"] == "s_high", (
         "the guard reads s_a.payload.tokens_out; the live path picks "
@@ -1164,13 +1101,9 @@ def test_resume_with_payload_guard_picks_correct_branch(
         "branch, which requires hydrating the envelope's payload from "
         "its durable file."
     )
-    s_high_exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "s_high"
-    ]
+    s_high_exits = [r for r in records if r.event == "state_exit" and r.state_id == "s_high"]
     assert len(s_high_exits) == 1
-    s_low_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "s_low"
-    ]
+    s_low_enters = [r for r in records if r.event == "state_enter" and r.state_id == "s_low"]
     assert len(s_low_enters) == 0, "s_low must not have been entered"
 
 
@@ -1223,26 +1156,68 @@ workflow ag
     log_path = run_dir / "log.jsonl"
     with open(log_path, "w", encoding="utf-8") as fh:
         records = [
-            {"ts": "2026-05-03T00:00:00.000Z", "run_id": run_id, "seq": 0,
-             "event": "run_start", "state_id": None, "attempt": None,
-             "workflow_path": str(src), "external_inputs": {"topic": "x"}},
-            {"ts": "2026-05-03T00:00:01.000Z", "run_id": run_id, "seq": 1,
-             "event": "state_enter", "state_id": "edit", "attempt": 1,
-             "attempts": {"edit": 1}, "retries": {"edit": 0},
-             "invocation_id": f"{run_id}::edit::1"},
-            {"ts": "2026-05-03T00:00:02.000Z", "run_id": run_id, "seq": 2,
-             "event": "actor_prepare", "state_id": "edit", "attempt": 1},
-            {"ts": "2026-05-03T00:00:03.000Z", "run_id": run_id, "seq": 3,
-             "event": "actor_invoke_start", "state_id": "edit", "attempt": 1},
-            {"ts": "2026-05-03T00:00:04.000Z", "run_id": run_id, "seq": 4,
-             "event": "actor_invoke_end", "state_id": "edit", "attempt": 1,
-             "payload_ref": None, "duration_ms": 0, "summary": {}},
-            {"ts": "2026-05-03T00:00:05.000Z", "run_id": run_id, "seq": 5,
-             "event": "artifact_write", "state_id": "edit", "attempt": 1,
-             "artifact": "reply", "version_id": "v1",
-             "invocation_id": f"{run_id}::edit::1"},
+            {
+                "ts": "2026-05-03T00:00:00.000Z",
+                "run_id": run_id,
+                "seq": 0,
+                "event": "run_start",
+                "state_id": None,
+                "attempt": None,
+                "workflow_path": str(src),
+                "external_inputs": {"topic": "x"},
+            },
+            {
+                "ts": "2026-05-03T00:00:01.000Z",
+                "run_id": run_id,
+                "seq": 1,
+                "event": "state_enter",
+                "state_id": "edit",
+                "attempt": 1,
+                "attempts": {"edit": 1},
+                "retries": {"edit": 0},
+                "invocation_id": f"{run_id}::edit::1",
+            },
+            {
+                "ts": "2026-05-03T00:00:02.000Z",
+                "run_id": run_id,
+                "seq": 2,
+                "event": "actor_prepare",
+                "state_id": "edit",
+                "attempt": 1,
+            },
+            {
+                "ts": "2026-05-03T00:00:03.000Z",
+                "run_id": run_id,
+                "seq": 3,
+                "event": "actor_invoke_start",
+                "state_id": "edit",
+                "attempt": 1,
+            },
+            {
+                "ts": "2026-05-03T00:00:04.000Z",
+                "run_id": run_id,
+                "seq": 4,
+                "event": "actor_invoke_end",
+                "state_id": "edit",
+                "attempt": 1,
+                "payload_ref": None,
+                "duration_ms": 0,
+                "summary": {},
+            },
+            {
+                "ts": "2026-05-03T00:00:05.000Z",
+                "run_id": run_id,
+                "seq": 5,
+                "event": "artifact_write",
+                "state_id": "edit",
+                "attempt": 1,
+                "artifact": "reply",
+                "version_id": "v1",
+                "invocation_id": f"{run_id}::edit::1",
+            },
         ]
         import json as _json
+
         for r in records:
             fh.write(_json.dumps(r, sort_keys=True) + "\n")
 
@@ -1251,6 +1226,7 @@ workflow ag
         data_root=str(data_root),
     )
     from orchestra import cli
+
     rc = cli.cmd_resume(args)
     assert rc == 2
 
@@ -1303,22 +1279,57 @@ workflow ag
     log_path = run_dir / "log.jsonl"
     with open(log_path, "w", encoding="utf-8") as fh:
         records = [
-            {"ts": "2026-05-03T00:00:00.000Z", "run_id": run_id, "seq": 0,
-             "event": "run_start", "state_id": None, "attempt": None,
-             "workflow_path": str(src), "external_inputs": {"topic": "x"}},
-            {"ts": "2026-05-03T00:00:01.000Z", "run_id": run_id, "seq": 1,
-             "event": "state_enter", "state_id": "edit", "attempt": 1,
-             "attempts": {"edit": 1}, "retries": {"edit": 0},
-             "invocation_id": f"{run_id}::edit::1"},
-            {"ts": "2026-05-03T00:00:02.000Z", "run_id": run_id, "seq": 2,
-             "event": "actor_prepare", "state_id": "edit", "attempt": 1},
-            {"ts": "2026-05-03T00:00:03.000Z", "run_id": run_id, "seq": 3,
-             "event": "actor_invoke_start", "state_id": "edit", "attempt": 1},
-            {"ts": "2026-05-03T00:00:04.000Z", "run_id": run_id, "seq": 4,
-             "event": "actor_invoke_end", "state_id": "edit", "attempt": 1,
-             "payload_ref": None, "duration_ms": 0, "summary": {}},
+            {
+                "ts": "2026-05-03T00:00:00.000Z",
+                "run_id": run_id,
+                "seq": 0,
+                "event": "run_start",
+                "state_id": None,
+                "attempt": None,
+                "workflow_path": str(src),
+                "external_inputs": {"topic": "x"},
+            },
+            {
+                "ts": "2026-05-03T00:00:01.000Z",
+                "run_id": run_id,
+                "seq": 1,
+                "event": "state_enter",
+                "state_id": "edit",
+                "attempt": 1,
+                "attempts": {"edit": 1},
+                "retries": {"edit": 0},
+                "invocation_id": f"{run_id}::edit::1",
+            },
+            {
+                "ts": "2026-05-03T00:00:02.000Z",
+                "run_id": run_id,
+                "seq": 2,
+                "event": "actor_prepare",
+                "state_id": "edit",
+                "attempt": 1,
+            },
+            {
+                "ts": "2026-05-03T00:00:03.000Z",
+                "run_id": run_id,
+                "seq": 3,
+                "event": "actor_invoke_start",
+                "state_id": "edit",
+                "attempt": 1,
+            },
+            {
+                "ts": "2026-05-03T00:00:04.000Z",
+                "run_id": run_id,
+                "seq": 4,
+                "event": "actor_invoke_end",
+                "state_id": "edit",
+                "attempt": 1,
+                "payload_ref": None,
+                "duration_ms": 0,
+                "summary": {},
+            },
         ]
         import json as _json
+
         for r in records:
             fh.write(_json.dumps(r, sort_keys=True) + "\n")
 
@@ -1330,7 +1341,9 @@ workflow ag
     store = ArtifactStore(run_dir / "store.sqlite")
     store.declare("reply", "text")
     handle = store.tentative_write(
-        "reply", "draft body", written_by="edit#1",
+        "reply",
+        "draft body",
+        written_by="edit#1",
         invocation_id=invocation_id,
     )
     store.commit_tentative([handle])
@@ -1353,6 +1366,7 @@ workflow ag
         data_root=str(data_root),
     )
     from orchestra import cli
+
     rc = cli.cmd_resume(args)
     assert rc == 2
 
@@ -1381,6 +1395,7 @@ def test_cmd_resume_uses_snapshot_when_template_edited_after_run_start(
     workflow = load_workflow(src, reg)
 
     from orchestra.prompt_snapshot import snapshot_prompt_sources
+
     workflow, snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
 
     store = _initialize_store(workflow, run_dir / "store.sqlite")
@@ -1421,6 +1436,7 @@ def test_cmd_resume_uses_snapshot_when_template_edited_after_run_start(
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     # Resume completes successfully because it reads the snapshot,
     # not the edited live file. The pass-4 gate would have returned 2.
@@ -1444,6 +1460,7 @@ def test_cmd_resume_refuses_when_snapshot_file_mutated(tmp_path: Path) -> None:
     workflow = load_workflow(src, reg)
 
     from orchestra.prompt_snapshot import snapshot_prompt_sources
+
     workflow, snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
 
     store = _initialize_store(workflow, run_dir / "store.sqlite")
@@ -1487,6 +1504,7 @@ def test_cmd_resume_refuses_when_snapshot_file_mutated(tmp_path: Path) -> None:
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     assert rc == 2
 
@@ -1546,6 +1564,7 @@ def test_cmd_resume_refuses_when_workflow_file_changed(tmp_path: Path) -> None:
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     assert rc == 2
 
@@ -1571,6 +1590,7 @@ def test_cmd_resume_refuses_when_prompt_template_changed(tmp_path: Path) -> None
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
     from helpers.legacy_prompt_manifest import compute_prompt_manifest
+
     log.write(
         "run_start",
         fields={
@@ -1609,6 +1629,7 @@ def test_cmd_resume_refuses_when_prompt_template_changed(tmp_path: Path) -> None
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     assert rc == 2
 
@@ -1631,6 +1652,7 @@ def test_cmd_resume_refuses_when_prompt_template_removed(tmp_path: Path) -> None
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
     from helpers.legacy_prompt_manifest import compute_prompt_manifest
+
     log.write(
         "run_start",
         fields={
@@ -1665,6 +1687,7 @@ def test_cmd_resume_refuses_when_prompt_template_removed(tmp_path: Path) -> None
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     assert rc == 2
 
@@ -1719,6 +1742,7 @@ def test_cmd_resume_accepts_unchanged_workflow_after_run_start_digest(
         data_root=str(data_root),
     )
     from orchestra import cli as cli_mod
+
     rc = cli_mod.cmd_resume(args)
     # Resume should reach terminal "done" via the resume path; rc 0
     # means successful end. (A non-zero rc here would indicate digest
@@ -1832,16 +1856,10 @@ def test_resume_after_retry_transition_does_not_reset_retries(
     records = LogReader(run_dir / "log.jsonl").read_all()
     keep_until: int | None = None
     for r in records:
-        if (
-            r.event == "transition"
-            and r.state_id == "edit"
-            and r.fields.get("target") == "edit"
-        ):
+        if r.event == "transition" and r.state_id == "edit" and r.fields.get("target") == "edit":
             keep_until = r.seq
             break
-    assert keep_until is not None, (
-        "expected a durable retry transition that targets 'edit'"
-    )
+    assert keep_until is not None, "expected a durable retry transition that targets 'edit'"
     truncated = [r for r in records if r.seq <= keep_until]
     with open(run_dir / "log.jsonl", "w", encoding="utf-8") as fh:
         for r in truncated:
@@ -1863,9 +1881,7 @@ def test_resume_after_retry_transition_does_not_reset_retries(
     # must have attempts[edit]=2 and retries[edit]=1. Pre-fix
     # retries[edit] would be 0 here.
     records = LogReader(run_dir / "log.jsonl").read_all()
-    edit_enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "edit"
-    ]
+    edit_enters = [r for r in records if r.event == "state_enter" and r.state_id == "edit"]
     assert len(edit_enters) >= 2
     second_enter = edit_enters[1]
     assert second_enter.attempt == 2

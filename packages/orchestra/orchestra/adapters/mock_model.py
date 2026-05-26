@@ -38,9 +38,7 @@ class MockModelAdapter:
         # writes prompt bodies into the JSONL log every time it runs.
         prompt = request.prompt_artifact or ""
         prompt_bytes = prompt.encode("utf-8") if prompt else b""
-        prompt_sha256 = (
-            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
-        )
+        prompt_sha256 = hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
         prepared = PreparedInvocation(
             request=request,
             summary={

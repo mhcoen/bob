@@ -55,10 +55,7 @@ def test_format_event_state_enter() -> None:
         total=7,
         elapsed_seconds=None,
     )
-    assert (
-        format_event(event)
-        == "[2/7] contrarian (claude_code_text:kimi-k2.6) ... starting"
-    )
+    assert format_event(event) == "[2/7] contrarian (claude_code_text:kimi-k2.6) ... starting"
 
 
 def test_format_event_state_exit_includes_elapsed() -> None:
@@ -72,10 +69,7 @@ def test_format_event_state_exit_includes_elapsed() -> None:
         total=7,
         elapsed_seconds=4.825,
     )
-    assert (
-        format_event(event)
-        == "[2/7] contrarian (claude_code_text:kimi-k2.6) ... done in 4.8s"
-    )
+    assert format_event(event) == "[2/7] contrarian (claude_code_text:kimi-k2.6) ... done in 4.8s"
 
 
 def test_format_event_falls_back_to_state_name_when_role_missing() -> None:
@@ -121,10 +115,7 @@ def test_format_event_actor_progress_includes_elapsed() -> None:
         total=1,
         elapsed_seconds=15.25,
     )
-    assert (
-        format_event(event)
-        == "[1/1] editor (code_agent:opus) ... still running, 15.2s elapsed"
-    )
+    assert format_event(event) == "[1/1] editor (code_agent:opus) ... still running, 15.2s elapsed"
 
 
 # --------------------------------------------------------------------
@@ -591,9 +582,7 @@ def test_executor_fires_callback_once_per_state_enter_and_exit(
         if kind == "state_exit":
             assert isinstance(events[0][5], type(None))  # enters carry no elapsed
             # exits carry float elapsed
-            elapsed = next(
-                e[5] for e in events if e[0] == "state_exit" and e[3] == index
-            )
+            elapsed = next(e[5] for e in events if e[0] == "state_exit" and e[3] == index)
             assert isinstance(elapsed, float) and elapsed >= 0.0
 
 
@@ -706,7 +695,11 @@ def test_cli_default_installs_stderr_reporter(
     received_callback: list[Any] = []
 
     def _stub_run_verb(
-        verb: str, query: str, config: Any, *, progress_callback: Any = None,
+        verb: str,
+        query: str,
+        config: Any,
+        *,
+        progress_callback: Any = None,
         **_kwargs: Any,
     ) -> str:
         received_callback.append(progress_callback)
@@ -750,9 +743,7 @@ def test_wrap_progress_callback_enriches_fan_out_children() -> None:
     bindings = {
         "framer": RoleBinding(adapter="claude_code_text", model="opus"),
         "contrarian": RoleBinding(adapter="claude_code_text", model="kimi-k2.6"),
-        "first_principles": RoleBinding(
-            adapter="claude_code_text", model="opus"
-        ),
+        "first_principles": RoleBinding(adapter="claude_code_text", model="opus"),
     }
     received: list[ProgressEvent] = []
     inner = _wrap_progress_callback(lambda e: received.append(e), bindings)
@@ -901,8 +892,26 @@ def test_stateful_reporter_suppresses_per_child_starting_lines() -> None:
     )
     # Per-child state_enter events that arrive while the block is
     # open must NOT add lines.
-    _emit(reporter, "state_enter", state_name="c1", role="r1", adapter="a", model="m", index=1, total=4)
-    _emit(reporter, "state_enter", state_name="c2", role="r2", adapter="a", model="m", index=2, total=4)
+    _emit(
+        reporter,
+        "state_enter",
+        state_name="c1",
+        role="r1",
+        adapter="a",
+        model="m",
+        index=1,
+        total=4,
+    )
+    _emit(
+        reporter,
+        "state_enter",
+        state_name="c2",
+        role="r2",
+        adapter="a",
+        model="m",
+        index=2,
+        total=4,
+    )
     _emit(
         reporter,
         "state_exit",
@@ -1011,7 +1020,15 @@ def test_stateful_reporter_resumes_sequential_after_parallel_block() -> None:
         CB(state_name="c1", role="r1", adapter="a", model="m"),
         CB(state_name="c2", role="r2", adapter="a", model="m"),
     )
-    _emit(reporter, "fan_out_start", state_name="frame", role="framer", index=2, total=7, children=children)
+    _emit(
+        reporter,
+        "fan_out_start",
+        state_name="frame",
+        role="framer",
+        index=2,
+        total=7,
+        children=children,
+    )
     _emit(
         reporter,
         "state_exit",
@@ -1081,21 +1098,11 @@ def _make_minimal_config() -> OrchestraConfig:
     return OrchestraConfig(
         roles={
             "framer": RoleBinding(adapter="claude_code_text", model="opus"),
-            "contrarian": RoleBinding(
-                adapter="claude_code_text", model="kimi-k2.6"
-            ),
-            "first_principles": RoleBinding(
-                adapter="claude_code_text", model="opus"
-            ),
-            "expansionist": RoleBinding(
-                adapter="claude_code_text", model="sonnet"
-            ),
-            "outsider": RoleBinding(
-                adapter="claude_code_text", model="kimi-k2.6"
-            ),
-            "executor_lens": RoleBinding(
-                adapter="claude_code_text", model="opus"
-            ),
+            "contrarian": RoleBinding(adapter="claude_code_text", model="kimi-k2.6"),
+            "first_principles": RoleBinding(adapter="claude_code_text", model="opus"),
+            "expansionist": RoleBinding(adapter="claude_code_text", model="sonnet"),
+            "outsider": RoleBinding(adapter="claude_code_text", model="kimi-k2.6"),
+            "executor_lens": RoleBinding(adapter="claude_code_text", model="opus"),
             "chairman": RoleBinding(adapter="claude_code_text", model="opus"),
         },
         workflows={"council": WorkflowConfig(pattern="ask_council")},
@@ -1276,9 +1283,7 @@ def test_executor_emits_fan_out_start_and_fan_out_end(
     registry.actor_backings["model"] = lambda: adapter
     registry._adapter_cache.pop("model", None)
 
-    events: list[
-        tuple[str, str, str | None, int, int, float | None, Any]
-    ] = []
+    events: list[tuple[str, str, str | None, int, int, float | None, Any]] = []
 
     def _cb(
         kind: str,
@@ -1343,9 +1348,7 @@ def test_executor_emits_fan_out_progress_without_child_actor_progress(
     registry.actor_backings["model"] = lambda: adapter
     registry._adapter_cache.pop("model", None)
 
-    events: list[
-        tuple[str, str, str | None, int, int, float | None, Any]
-    ] = []
+    events: list[tuple[str, str, str | None, int, int, float | None, Any]] = []
 
     def _cb(
         kind: str,
@@ -1389,9 +1392,7 @@ def test_executor_emits_fan_out_progress_without_child_actor_progress(
         "executor_lens_advise",
     }
     assert any(e[0] == "fan_out_progress" for e in events)
-    assert not any(
-        e[0] == "actor_progress" and e[1] in child_states for e in events
-    )
+    assert not any(e[0] == "actor_progress" and e[1] in child_states for e in events)
     count_after_run = len([e for e in events if e[0] == "fan_out_progress"])
 
     watchdogs.tick_all()

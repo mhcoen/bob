@@ -283,9 +283,13 @@ workflow x
 
 
 def test_fan_out_unknown_join_target_rejected(tmp_path):
-    src = _fan_out_workflow(tmp_path).read_text().replace(
-        "join join_state on error abort_state",
-        "join missing_join on error abort_state",
+    src = (
+        _fan_out_workflow(tmp_path)
+        .read_text()
+        .replace(
+            "join join_state on error abort_state",
+            "join missing_join on error abort_state",
+        )
     )
     p = tmp_path / "bad.orc"
     p.write_text(src)
@@ -295,9 +299,13 @@ def test_fan_out_unknown_join_target_rejected(tmp_path):
 
 
 def test_fan_out_unknown_error_target_rejected(tmp_path):
-    src = _fan_out_workflow(tmp_path).read_text().replace(
-        "join join_state on error abort_state",
-        "join join_state on error missing_abort",
+    src = (
+        _fan_out_workflow(tmp_path)
+        .read_text()
+        .replace(
+            "join join_state on error abort_state",
+            "join join_state on error missing_abort",
+        )
     )
     p = tmp_path / "bad.orc"
     p.write_text(src)
@@ -1047,12 +1055,7 @@ def test_dominator_check_accepts_real_council_workflow():
     catch any divergence between the synthetic council shape above
     and the real one. If this regresses, a real verb workflow has
     started failing the loader."""
-    council = (
-        Path(__file__).parent.parent
-        / "orchestra"
-        / "workflows"
-        / "ask_council.orc"
-    )
+    council = Path(__file__).parent.parent / "orchestra" / "workflows" / "ask_council.orc"
     assert council.exists(), council
     wf = load_workflow(council, with_core())
     assert wf.name == "ask_council"
@@ -1575,10 +1578,7 @@ def test_dominator_check_accepts_anonymous_reviewers_workflow():
     children-of-fan-out and join contributions still flow through
     the must-reach analysis correctly."""
     wf_path = (
-        Path(__file__).parent.parent
-        / "orchestra"
-        / "workflows"
-        / "ask_anonymous_reviewers.orc"
+        Path(__file__).parent.parent / "orchestra" / "workflows" / "ask_anonymous_reviewers.orc"
     )
     assert wf_path.exists(), wf_path
     # ask_anonymous_reviewers uses the anonymize_outputs transform,
@@ -1588,6 +1588,7 @@ def test_dominator_check_accepts_anonymous_reviewers_workflow():
     # role-binding-driven per-role dispatchers (we only need the
     # workflow to validate, not to run).
     from orchestra.api import _register_builtin_transforms
+
     reg = with_core()
     _register_builtin_transforms(reg)
     wf = load_workflow(wf_path, reg)

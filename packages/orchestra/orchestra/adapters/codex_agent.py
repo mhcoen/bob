@@ -88,27 +88,13 @@ class CodexAgentAdapter:
         ext = request.external_inputs or {}
         backing = request.backing_options or {}
 
-        model = (
-            backing.get("model_override")
-            or self._default_model
-            or binding.get("model")
-        )
-        sandbox = str(
-            backing.get("sandbox") or self._default_sandbox
-        )
-        project_dir = Path(
-            backing.get("project_dir")
-            or ext.get("project_dir")
-            or os.getcwd()
-        )
+        model = backing.get("model_override") or self._default_model or binding.get("model")
+        sandbox = str(backing.get("sandbox") or self._default_sandbox)
+        project_dir = Path(backing.get("project_dir") or ext.get("project_dir") or os.getcwd())
         log_dir = Path(
-            backing.get("log_dir")
-            or ext.get("log_dir")
-            or project_dir / ".mcloop" / "logs"
+            backing.get("log_dir") or ext.get("log_dir") or project_dir / ".mcloop" / "logs"
         )
-        task_label = str(
-            backing.get("task_label") or ext.get("task_label") or ""
-        )
+        task_label = str(backing.get("task_label") or ext.get("task_label") or "")
         timeout_s = (
             int(request.timeout_ms / 1000)
             if request.timeout_ms is not None
@@ -116,14 +102,10 @@ class CodexAgentAdapter:
         )
 
         cmd = self._build_command(model, sandbox)
-        env = build_session_env(
-            task_label=task_label, cli=self._cli, model=model
-        )
+        env = build_session_env(task_label=task_label, cli=self._cli, model=model)
 
         prompt_bytes = prompt.encode("utf-8") if prompt else b""
-        prompt_sha256 = (
-            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
-        )
+        prompt_sha256 = hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
         return PreparedInvocation(
             request=request,
             summary={
@@ -212,9 +194,7 @@ class CodexAgentAdapter:
 
     # ----- internals --------------------------------------------------
 
-    def _build_command(
-        self, model: str | None, sandbox: str
-    ) -> list[str]:
+    def _build_command(self, model: str | None, sandbox: str) -> list[str]:
         # The Codex CLI accepts ``--ask-for-approval`` and ``--sandbox``
         # at the top level only. Both flags must appear before the
         # ``exec`` subcommand or argument parsing rejects them.

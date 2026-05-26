@@ -77,9 +77,7 @@ def _load_schemas(workflow: Workflow) -> dict[str, SchemaSpec]:
         try:
             spec = load_schema(full)
         except SchemaError as exc:
-            raise ValidationError(
-                f"artifact {art.name!r}: {exc}"
-            ) from exc
+            raise ValidationError(f"artifact {art.name!r}: {exc}") from exc
         out[art.name] = spec
     return out
 
@@ -89,20 +87,14 @@ def _load_schemas(workflow: Workflow) -> dict[str, SchemaSpec]:
 # --------------------------------------------------------------------
 
 
-def _phase3_declaration_resolution(
-    workflow: Workflow, registry: ProfileRegistry
-) -> None:
+def _phase3_declaration_resolution(workflow: Workflow, registry: ProfileRegistry) -> None:
     if not workflow.states:
         raise ValidationError("workflow has no states")
     if workflow.max_total_steps <= 0:
-        raise ValidationError(
-            "workflow must declare max_total_steps (or max_state_visits)"
-        )
+        raise ValidationError("workflow must declare max_total_steps (or max_state_visits)")
     for art in workflow.artifacts:
         if art.type not in registry.artifact_types:
-            raise ValidationError(
-                f"artifact {art.name!r}: unknown type {art.type!r}"
-            )
+            raise ValidationError(f"artifact {art.name!r}: unknown type {art.type!r}")
         if art.source_kind is not None:
             # ``source file`` and ``source path`` qualifiers parse and
             # are exposed on ArtifactDecl, but the store's declare()
@@ -128,37 +120,27 @@ def _phase3_declaration_resolution(
             assert state.prompt.path is not None
             full = source_dir / state.prompt.path
             if not full.exists():
-                raise ValidationError(
-                    f"state {state.name!r}: prompt file not found: {full}"
-                )
+                raise ValidationError(f"state {state.name!r}: prompt file not found: {full}")
     for role in workflow.roles:
         if role.default_prompt.kind in ("file", "template"):
             assert role.default_prompt.path is not None
             full = source_dir / role.default_prompt.path
             if not full.exists():
-                raise ValidationError(
-                    f"role {role.name!r}: prompt file not found: {full}"
-                )
+                raise ValidationError(f"role {role.name!r}: prompt file not found: {full}")
     # Agents reference declared models.
     model_names = {m.name for m in workflow.models}
     for agent in workflow.agents:
         if agent.model not in model_names:
-            raise ValidationError(
-                f"agent {agent.name!r}: undeclared model {agent.model!r}"
-            )
+            raise ValidationError(f"agent {agent.name!r}: undeclared model {agent.model!r}")
     # Group members resolve to declared roles or agents per group kind.
     role_names = {r.name for r in workflow.roles}
     agent_names = {a.name for a in workflow.agents}
     for group in workflow.groups:
         for member in group.members:
             if group.kind == "roles" and member not in role_names:
-                raise ValidationError(
-                    f"group {group.name!r}: undeclared role member {member!r}"
-                )
+                raise ValidationError(f"group {group.name!r}: undeclared role member {member!r}")
             if group.kind == "agents" and member not in agent_names:
-                raise ValidationError(
-                    f"group {group.name!r}: undeclared agent member {member!r}"
-                )
+                raise ValidationError(f"group {group.name!r}: undeclared agent member {member!r}")
 
 
 # --------------------------------------------------------------------
@@ -180,9 +162,7 @@ def _phase4_name_uniqueness(workflow: Workflow) -> None:
     for category, names in categories:
         for n in names:
             if n in seen:
-                raise ValidationError(
-                    f"name {n!r} is declared as both {seen[n]} and {category}"
-                )
+                raise ValidationError(f"name {n!r} is declared as both {seen[n]} and {category}")
             seen[n] = category
     for reserved in ("done", "stop", "attempts", "retries"):
         if reserved in seen:
@@ -225,31 +205,20 @@ def _phase5_state_validation(
             schema_handled_artifacts.add(ext.target)
 
     for state in workflow.states:
-        if (
-            state.actor.kind != "transform"
-            and state.actor.kind not in registry.actor_backings
-        ):
+        if state.actor.kind != "transform" and state.actor.kind not in registry.actor_backings:
             raise ValidationError(
                 f"state {state.name!r}: unknown actor backing {state.actor.kind!r}"
             )
         if state.actor.kind == "model":
             if state.actor.ref not in model_names:
-                raise ValidationError(
-                    f"state {state.name!r}: undeclared model {state.actor.ref!r}"
-                )
+                raise ValidationError(f"state {state.name!r}: undeclared model {state.actor.ref!r}")
         if state.actor.kind == "agent":
             if state.actor.ref not in agent_names:
-                raise ValidationError(
-                    f"state {state.name!r}: undeclared agent {state.actor.ref!r}"
-                )
+                raise ValidationError(f"state {state.name!r}: undeclared agent {state.actor.ref!r}")
         if state.actor.kind == "transform":
-            _validate_transform_state(
-                state, workflow, registry, artifact_types
-            )
+            _validate_transform_state(state, workflow, registry, artifact_types)
         if state.role is not None and state.role not in role_names:
-            raise ValidationError(
-                f"state {state.name!r}: undeclared role {state.role!r}"
-            )
+            raise ValidationError(f"state {state.name!r}: undeclared role {state.role!r}")
         for r in state.reads:
             if r not in artifact_names and r not in external_names:
                 raise ValidationError(
@@ -297,18 +266,14 @@ def _phase5_state_validation(
                 for child in t.fan_out:
                     if child not in state_names:
                         raise ValidationError(
-                            f"state {state.name!r}: fan_out child {child!r} "
-                            "is not a declared state"
+                            f"state {state.name!r}: fan_out child {child!r} is not a declared state"
                         )
                 if t.error_target is None:
                     raise ValidationError(
                         f"state {state.name!r}: fan_out transition is missing "
                         "the 'on error <target>' clause"
                     )
-                if (
-                    t.error_target not in state_names
-                    and t.error_target not in {"done", "stop"}
-                ):
+                if t.error_target not in state_names and t.error_target not in {"done", "stop"}:
                     raise ValidationError(
                         f"state {state.name!r}: fan_out error target "
                         f"{t.error_target!r} is not a declared state"
@@ -422,11 +387,7 @@ def _phase5_state_validation(
         # because the runtime never emits ``complete`` for such
         # states; every enum value must have a transition; every
         # non-failure transition outcome must be in the enum.
-        schema_backed_writes = [
-            w
-            for w in state.writes
-            if w.name in schema_specs
-        ]
+        schema_backed_writes = [w for w in state.writes if w.name in schema_specs]
         if schema_backed_writes:
             if len(schema_backed_writes) > 1:
                 raise ValidationError(
@@ -500,9 +461,7 @@ def _phase5_state_validation(
             required_outcomes = ("error", "timeout")
         for required in required_outcomes:
             if required not in seen_outcomes:
-                raise ValidationError(
-                    f"state {state.name!r}: missing 'on {required}' transition"
-                )
+                raise ValidationError(f"state {state.name!r}: missing 'on {required}' transition")
 
         # Model and agent states must also handle the success path.
         # The executor's _derive_outcome returns the payload's verdict
@@ -527,18 +486,14 @@ def _phase5_state_validation(
 
         if state.actor.kind == "human":
             if not state.options:
-                raise ValidationError(
-                    f"state {state.name!r}: human state must declare options"
-                )
+                raise ValidationError(f"state {state.name!r}: human state must declare options")
             for opt in state.options:
                 if opt not in seen_outcomes:
                     raise ValidationError(
                         f"state {state.name!r}: missing 'on {opt}' transition for option"
                     )
             if "cancelled" not in seen_outcomes:
-                raise ValidationError(
-                    f"state {state.name!r}: missing 'on cancelled' transition"
-                )
+                raise ValidationError(f"state {state.name!r}: missing 'on cancelled' transition")
 
         # Parser coverage: every declared write's type must be served
         # by at least one applicable parser. The "any matches any"
@@ -565,9 +520,7 @@ def _phase5_state_validation(
 
         for t in state.transitions:
             if t.guard is not None:
-                _validate_guard_refs(
-                    state, t.guard, state_names, artifact_names, external_names
-                )
+                _validate_guard_refs(state, t.guard, state_names, artifact_names, external_names)
 
 
 def _validate_extractions(
@@ -638,10 +591,7 @@ def _validate_extractions(
                     f"{ext.target!r} is declared as type "
                     f"{target_decl.type!r}, but v0 requires 'text'"
                 )
-            if (
-                ext.target in read_by_some_state
-                and ext.source_field not in spec.required_fields
-            ):
+            if ext.target in read_by_some_state and ext.source_field not in spec.required_fields:
                 raise ValidationError(
                     f"artifact {art.name!r}: extract source field "
                     f"{ext.source_field!r} is not in the schema's "
@@ -672,25 +622,17 @@ def _validate_transform_state(
     """
     if state.actor.ref is None:
         raise ValidationError(
-            f"state {state.name!r}: transform actor must name a "
-            "registered transform"
+            f"state {state.name!r}: transform actor must name a registered transform"
         )
     transform = registry.transforms.get(state.actor.ref)
     if transform is None:
         raise ValidationError(
-            f"state {state.name!r}: transform {state.actor.ref!r} is not "
-            "registered"
+            f"state {state.name!r}: transform {state.actor.ref!r} is not registered"
         )
     if state.role is not None:
-        raise ValidationError(
-            f"state {state.name!r}: transform states do not take a "
-            "role binding"
-        )
+        raise ValidationError(f"state {state.name!r}: transform states do not take a role binding")
     if state.prompt is not None:
-        raise ValidationError(
-            f"state {state.name!r}: transform states do not take a "
-            "prompt clause"
-        )
+        raise ValidationError(f"state {state.name!r}: transform states do not take a prompt clause")
     for t in state.transitions:
         if t.retry_max is not None:
             raise ValidationError(
@@ -785,9 +727,7 @@ def _validate_guard_refs(
             continue
         if head in external_names:
             continue
-        raise ValidationError(
-            f"state {state.name!r}: guard reference {ref!s} does not resolve"
-        )
+        raise ValidationError(f"state {state.name!r}: guard reference {ref!s} does not resolve")
 
 
 def _collect_refs(expr: GuardExpr) -> list[Reference]:
@@ -850,13 +790,9 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                 continue
             decl = artifact_decls[r]
             has_initial = decl.initial is not NO_INITIAL
-            if (
-                not has_initial
-                and r not in written_by_some_state
-            ):
+            if not has_initial and r not in written_by_some_state:
                 raise ValidationError(
-                    f"state {s.name!r}: reads artifact {r!r} that is "
-                    "never initialized or written"
+                    f"state {s.name!r}: reads artifact {r!r} that is never initialized or written"
                 )
 
     if not workflow.states:
@@ -872,9 +808,7 @@ def _phase6_dataflow(workflow: Workflow) -> None:
     # child has completed, so children's writes are guaranteed at the
     # join site (sibling collisions are rejected upstream, so each
     # written artifact has exactly one producer in the group).
-    entry_paths: dict[str, list[tuple[str, tuple[str, ...]]]] = {
-        n: [] for n in state_names
-    }
+    entry_paths: dict[str, list[tuple[str, tuple[str, ...]]]] = {n: [] for n in state_names}
     for s in workflow.states:
         for t in s.transitions:
             if t.is_fan_out():
@@ -883,23 +817,14 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                         entry_paths[child].append((s.name, ()))
                 if t.target in entry_paths:
                     entry_paths[t.target].append((s.name, t.fan_out))
-                if (
-                    t.error_target is not None
-                    and t.error_target in entry_paths
-                ):
+                if t.error_target is not None and t.error_target in entry_paths:
                     entry_paths[t.error_target].append((s.name, ()))
             else:
                 if t.target in entry_paths:
                     entry_paths[t.target].append((s.name, ()))
 
-    initial_artifacts = {
-        a.name for a in workflow.artifacts if a.initial is not NO_INITIAL
-    }
-    universe = (
-        set(written_by_some_state)
-        | initial_artifacts
-        | external_names
-    )
+    initial_artifacts = {a.name for a in workflow.artifacts if a.initial is not NO_INITIAL}
+    universe = set(written_by_some_state) | initial_artifacts | external_names
     base_set = set(initial_artifacts) | set(external_names)
 
     reaching: dict[str, set[str]] = {start: set(base_set)}
@@ -921,8 +846,7 @@ def _phase6_dataflow(workflow: Workflow) -> None:
         iterations += 1
         if iterations > max_iterations:
             raise ValidationError(
-                "dataflow analysis did not converge; workflow graph "
-                "may have an unexpected shape"
+                "dataflow analysis did not converge; workflow graph may have an unexpected shape"
             )
         for n in state_names:
             if n == start:
@@ -992,9 +916,7 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                 prompt = role.default_prompt
         if prompt is not None and prompt.kind == "template":
             for var in prompt.template_vars:
-                _check_artifact_dominated(
-                    s.name, var, "prompt template variable", pre_reads
-                )
+                _check_artifact_dominated(s.name, var, "prompt template variable", pre_reads)
 
         # Guards run AFTER the state's actor body and AFTER its writes
         # commit, so guard references see reaching[s] plus the state's
@@ -1014,9 +936,7 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                 if head in ("attempts", "retries"):
                     continue
                 if head in artifact_decls or head in external_names:
-                    _check_artifact_dominated(
-                        s.name, head, "guard data", guard_available
-                    )
+                    _check_artifact_dominated(s.name, head, "guard data", guard_available)
                     continue
                 if head in state_decls:
                     if head == s.name:
@@ -1024,9 +944,7 @@ def _phase6_dataflow(workflow: Workflow) -> None:
                         # is always available to the state's own
                         # guards.
                         continue
-                    if not _state_dominates(
-                        head, s.name, entry_paths, state_decls
-                    ):
+                    if not _state_dominates(head, s.name, entry_paths, state_decls):
                         raise ValidationError(
                             f"state {s.name!r}: guard references "
                             f"envelope {ref!s} but state {head!r} is "

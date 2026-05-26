@@ -80,11 +80,7 @@ def evaluate(expr: GuardExpr, ctx: GuardContext) -> bool:
         return bool(ctx.resolve(expr.ref))
     if isinstance(expr, Comparison):
         left = ctx.resolve(expr.left)
-        right = (
-            expr.right.value
-            if isinstance(expr.right, Literal_)
-            else ctx.resolve(expr.right)
-        )
+        right = expr.right.value if isinstance(expr.right, Literal_) else ctx.resolve(expr.right)
         return _cmp(expr.op, left, right)
     if isinstance(expr, NotExpr):
         return not evaluate(expr.inner, ctx)

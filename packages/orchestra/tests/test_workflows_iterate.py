@@ -80,9 +80,7 @@ class _ScriptedModelAdapter:
         state_id: str = prepared.inner["state_id"]
         queue = self._responses.get(state_id) or []
         if not queue:
-            raise AssertionError(
-                f"scripted adapter has no response for {state_id!r}"
-            )
+            raise AssertionError(f"scripted adapter has no response for {state_id!r}")
         text = queue.pop(0)
         return {
             "output": text,
@@ -186,9 +184,7 @@ def test_iterate_accept_on_first_try(tmp_path: Path) -> None:
         "review": ["REVIEW-1"],
         "judge": [json.dumps({"decision": "accept", "feedback": "fine"})],
     }
-    adapter, _, terminal, store = _run_iterate(
-        tmp_path, responses=responses
-    )
+    adapter, _, terminal, store = _run_iterate(tmp_path, responses=responses)
     try:
         assert terminal == "done"
         # One invocation each.
@@ -221,9 +217,7 @@ def test_iterate_accept_after_two_iterations(tmp_path: Path) -> None:
             json.dumps({"decision": "accept", "feedback": "ok now"}),
         ],
     }
-    adapter, _, terminal, store = _run_iterate(
-        tmp_path, responses=responses
-    )
+    adapter, _, terminal, store = _run_iterate(tmp_path, responses=responses)
     try:
         assert terminal == "done"
         states = [c["state_id"] for c in adapter.calls]
@@ -272,17 +266,13 @@ def test_iterate_accept_after_two_iterations(tmp_path: Path) -> None:
 
 
 def test_iterate_accept_on_cap(tmp_path: Path) -> None:
-    iterate_response = json.dumps(
-        {"decision": "iterate", "feedback": "still iterate"}
-    )
+    iterate_response = json.dumps({"decision": "iterate", "feedback": "still iterate"})
     responses = {
         "propose": ["DRAFT"] * 6,
         "review": ["REVIEW"] * 6,
         "judge": [iterate_response] * 6,
     }
-    adapter, run_dir, terminal, store = _run_iterate(
-        tmp_path, responses=responses
-    )
+    adapter, run_dir, terminal, store = _run_iterate(tmp_path, responses=responses)
     try:
         # accept-on-cap: workflow terminates done with the proposal.
         assert terminal == "done"
@@ -298,14 +288,10 @@ def test_iterate_accept_on_cap(tmp_path: Path) -> None:
         # The final transition's outcome on the judge state is iterate
         # (not accept) but the unguarded fallback routes to done.
         state_exits = [r for r in records if r.event == "state_exit"]
-        last_judge_exit = next(
-            r for r in reversed(state_exits) if r.state_id == "judge"
-        )
+        last_judge_exit = next(r for r in reversed(state_exits) if r.state_id == "judge")
         assert last_judge_exit.fields["outcome"] == "iterate"
         transitions = [r for r in records if r.event == "transition"]
-        last_judge_transition = next(
-            r for r in reversed(transitions) if r.state_id == "judge"
-        )
+        last_judge_transition = next(r for r in reversed(transitions) if r.state_id == "judge")
         assert last_judge_transition.fields["target"] == "done"
     finally:
         store.close()
@@ -323,9 +309,7 @@ def test_iterate_schema_violation_routes_to_error(tmp_path: Path) -> None:
         # decision is required and must be in enum; "punt" violates the enum.
         "judge": [json.dumps({"decision": "punt", "feedback": "x"})],
     }
-    adapter, _, terminal, store = _run_iterate(
-        tmp_path, responses=responses
-    )
+    adapter, _, terminal, store = _run_iterate(tmp_path, responses=responses)
     try:
         assert terminal == "stop"
     finally:
@@ -347,20 +331,12 @@ def _make_iterate_config(
 ) -> OrchestraConfig:
     return OrchestraConfig(
         roles={
-            "proposer": RoleBinding(
-                adapter=proposer_adapter, model=proposer_model
-            ),
-            "reviewer": RoleBinding(
-                adapter=reviewer_adapter, model=reviewer_model
-            ),
-            "judge_role": RoleBinding(
-                adapter=judge_adapter, model=judge_model
-            ),
+            "proposer": RoleBinding(adapter=proposer_adapter, model=proposer_model),
+            "reviewer": RoleBinding(adapter=reviewer_adapter, model=reviewer_model),
+            "judge_role": RoleBinding(adapter=judge_adapter, model=judge_model),
         },
         workflows={
-            "iterate_until_acceptable": WorkflowConfig(
-                pattern="iterate_until_acceptable"
-            ),
+            "iterate_until_acceptable": WorkflowConfig(pattern="iterate_until_acceptable"),
         },
     )
 
@@ -431,20 +407,12 @@ def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
         "propose": ["DRAFT-1", "DRAFT-2", "DRAFT-3"],
         "review": ["REVIEW-1", "REVIEW-2", "REVIEW-3"],
         "judge": [
-            json.dumps(
-                {"decision": "iterate", "feedback": "first iteration"}
-            ),
-            json.dumps(
-                {"decision": "iterate", "feedback": "second iteration"}
-            ),
-            json.dumps(
-                {"decision": "accept", "feedback": "final accept"}
-            ),
+            json.dumps({"decision": "iterate", "feedback": "first iteration"}),
+            json.dumps({"decision": "iterate", "feedback": "second iteration"}),
+            json.dumps({"decision": "accept", "feedback": "final accept"}),
         ],
     }
-    adapter, run_dir, terminal, store = _run_iterate(
-        tmp_path, responses=responses
-    )
+    adapter, run_dir, terminal, store = _run_iterate(tmp_path, responses=responses)
     try:
         assert terminal == "done"
         # Three judge calls: two iterates, one accept.
@@ -453,9 +421,7 @@ def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
         # Proposer fires once per cycle under on iterate => propose:
         # three calls total for two iterate verdicts plus the final
         # accept cycle.
-        propose_calls = [
-            c for c in adapter.calls if c["state_id"] == "propose"
-        ]
+        propose_calls = [c for c in adapter.calls if c["state_id"] == "propose"]
         assert len(propose_calls) == 3
         proposal = store.read_latest("proposal")
         assert proposal is not None
@@ -463,16 +429,13 @@ def test_iterate_three_iterations_then_accept(tmp_path: Path) -> None:
         # Final state envelope: the judge state's last invocation has
         # outcome "accept" and routed to done.
         from orchestra.log import LogReader
+
         records = LogReader(run_dir / "log.jsonl").read_all()
         state_exits = [r for r in records if r.event == "state_exit"]
-        last_judge_exit = next(
-            r for r in reversed(state_exits) if r.state_id == "judge"
-        )
+        last_judge_exit = next(r for r in reversed(state_exits) if r.state_id == "judge")
         assert last_judge_exit.fields["outcome"] == "accept"
         transitions = [r for r in records if r.event == "transition"]
-        last_judge_transition = next(
-            r for r in reversed(transitions) if r.state_id == "judge"
-        )
+        last_judge_transition = next(r for r in reversed(transitions) if r.state_id == "judge")
         assert last_judge_transition.fields["target"] == "done"
         # judge_feedback carries the last feedback string.
         feedback = store.read_latest("judge_feedback")
@@ -542,20 +505,17 @@ def test_iterate_stuck_routes_to_stop(tmp_path: Path) -> None:
         assert decision_art is not None
         assert decision_art.value == "stuck"
         from orchestra.log import LogReader
+
         records = LogReader(run_dir / "log.jsonl").read_all()
         last_judge_exit = next(
-            r
-            for r in reversed(records)
-            if r.event == "state_exit" and r.state_id == "judge"
+            r for r in reversed(records) if r.event == "state_exit" and r.state_id == "judge"
         )
         # Status is ok (the state ran cleanly); outcome is the
         # schema-derived `stuck`. Distinct from outcome=error.
         assert last_judge_exit.fields["status"] == "ok"
         assert last_judge_exit.fields["outcome"] == "stuck"
         last_judge_transition = next(
-            r
-            for r in reversed(records)
-            if r.event == "transition" and r.state_id == "judge"
+            r for r in reversed(records) if r.event == "transition" and r.state_id == "judge"
         )
         assert last_judge_transition.fields["target"] == "stop"
         assert last_judge_transition.fields["outcome"] == "stuck"

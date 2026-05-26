@@ -46,9 +46,7 @@ class MockShellAdapter:
             },
             inner={
                 "commands": commands,
-                "continue_on_fail": bool(
-                    request.backing_options.get("continue_on_fail", False)
-                ),
+                "continue_on_fail": bool(request.backing_options.get("continue_on_fail", False)),
             },
         )
         return prepared
@@ -141,9 +139,7 @@ class MockShellAdapter:
             if not isinstance(runs, list) or not all(isinstance(c, str) for c in runs):
                 raise AdapterError("'runs' must be a list of strings")
             return list(runs)
-        raise AdapterError(
-            f"shell state {request.state_id!r} has neither 'command' nor 'runs'"
-        )
+        raise AdapterError(f"shell state {request.state_id!r} has neither 'command' nor 'runs'")
 
     def _lookup(self, command: str) -> tuple[int, str, str]:
         if command in self._table:

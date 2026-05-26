@@ -68,9 +68,7 @@ def test_build_command_default_sandbox_no_model() -> None:
 
 def test_build_command_with_model() -> None:
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(
-        model="gpt-5-codex", sandbox="workspace-write"
-    )
+    cmd = adapter._build_command(model="gpt-5-codex", sandbox="workspace-write")
     assert cmd == [
         "codex",
         "--ask-for-approval",
@@ -90,9 +88,7 @@ def test_build_command_does_not_include_prompt_in_argv() -> None:
     the .mcloop/active-pid file, transcript logs, and the prepare()
     summary's command field is impossible by construction."""
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(
-        model="gpt-5-codex", sandbox="workspace-write"
-    )
+    cmd = adapter._build_command(model="gpt-5-codex", sandbox="workspace-write")
     assert "SECRET_TOKEN_123" not in " ".join(cmd)
     assert cmd[-1] == "gpt-5-codex"
 
@@ -122,15 +118,11 @@ def test_build_command_skip_git_repo_check_follows_exec() -> None:
     codex refuses to run in untrusted directories and exits with
     status 1 before contacting the model."""
     adapter = CodexAgentAdapter()
-    cmd = adapter._build_command(
-        model="gpt-5-codex", sandbox="workspace-write"
-    )
+    cmd = adapter._build_command(model="gpt-5-codex", sandbox="workspace-write")
     assert "--skip-git-repo-check" in cmd
     exec_idx = cmd.index("exec")
     skip_idx = cmd.index("--skip-git-repo-check")
-    assert skip_idx > exec_idx, (
-        "--skip-git-repo-check must follow the exec subcommand"
-    )
+    assert skip_idx > exec_idx, "--skip-git-repo-check must follow the exec subcommand"
 
 
 # --------------------------------------------------------------------
@@ -169,6 +161,7 @@ def test_prepare_summary_kind_agent_and_full_command(tmp_path: Path) -> None:
     assert prepared.summary["log_dir"] == str(tmp_path / "logs")
     # Pass-7 fix: prompt content not in summary; sha256 only.
     import hashlib as _hashlib
+
     expected_digest = _hashlib.sha256(b"edit").hexdigest()
     assert prepared.summary["prompt_sha256"] == expected_digest
     assert "prompt_preview" not in prepared.summary
@@ -218,9 +211,7 @@ def test_prepare_default_sandbox_constructor_argument(tmp_path: Path) -> None:
 def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_stdout = (
-        '{"type": "result", "subtype": "success", "result": "would-be-extracted"}'
-    )
+    fake_stdout = '{"type": "result", "subtype": "success", "result": "would-be-extracted"}'
     monkeypatch.setattr(
         codex_agent_mod,
         "run_session",
@@ -231,13 +222,9 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
         "write_log",
         lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
-    monkeypatch.setattr(
-        codex_agent_mod, "_detect_changed_files", lambda project_dir: []
-    )
+    monkeypatch.setattr(codex_agent_mod, "_detect_changed_files", lambda project_dir: [])
     adapter = CodexAgentAdapter()
-    prepared = adapter.prepare(
-        _request(prompt="x", external_inputs={"project_dir": str(tmp_path)})
-    )
+    prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
     assert payload["output"] == fake_stdout
 
@@ -261,28 +248,20 @@ def test_invoke_surfaces_changed_files_in_fields(
         lambda project_dir: ["src/a.py", "src/b.py"],
     )
     adapter = CodexAgentAdapter()
-    prepared = adapter.prepare(
-        _request(prompt="x", external_inputs={"project_dir": str(tmp_path)})
-    )
+    prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
     assert payload["fields"]["changed_files"] == ["src/a.py", "src/b.py"]
 
 
-def test_invoke_verdict_mapping(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_invoke_verdict_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         codex_agent_mod,
         "write_log",
         lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
-    monkeypatch.setattr(
-        codex_agent_mod, "_detect_changed_files", lambda project_dir: []
-    )
+    monkeypatch.setattr(codex_agent_mod, "_detect_changed_files", lambda project_dir: [])
     adapter = CodexAgentAdapter()
-    prepared = adapter.prepare(
-        _request(prompt="x", external_inputs={"project_dir": str(tmp_path)})
-    )
+    prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     for exit_code, expected in [(0, "complete"), (-2, "timeout"), (3, "error")]:
         monkeypatch.setattr(
             codex_agent_mod,

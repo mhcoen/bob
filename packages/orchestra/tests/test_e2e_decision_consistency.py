@@ -172,9 +172,7 @@ def _iterate_verdict_noncompliant() -> str:
 
 
 def _criteria_one_required() -> tuple[CriterionDecl, ...]:
-    return (
-        CriterionDecl(id="len", description="length", required=True),
-    )
+    return (CriterionDecl(id="len", description="length", required=True),)
 
 
 def test_e2e_accept_with_compliance_passes(tmp_path: Path) -> None:

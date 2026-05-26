@@ -106,8 +106,6 @@ def test_byte_identical_log_modulo_nondeterministic_fields(tmp_path: Path) -> No
     """
     first = _run_once(tmp_path / "run1")
     second = _run_once(tmp_path / "run2")
-    assert len(first) == len(second), (
-        f"record count differs: {len(first)} vs {len(second)}"
-    )
+    assert len(first) == len(second), f"record count differs: {len(first)} vs {len(second)}"
     for i, (a, b) in enumerate(zip(first, second, strict=True)):
         assert a == b, f"record {i} differs:\n  run1: {a}\n  run2: {b}"

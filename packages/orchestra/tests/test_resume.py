@@ -70,9 +70,7 @@ def test_replay_case_1_after_transition(tmp_path: Path) -> None:
                 status="ok",
                 outcome="complete",
             ),
-            _common(
-                6, "transition", state_id="A", attempt=1, outcome="complete", target="B"
-            ),
+            _common(6, "transition", state_id="A", attempt=1, outcome="complete", target="B"),
         ],
     )
     state = replay_log(str(log))
@@ -186,9 +184,7 @@ def test_replay_case_2_after_transition_to_unstarted_state(tmp_path: Path) -> No
                 status="ok",
                 outcome="complete",
             ),
-            _common(
-                6, "transition", state_id="A", attempt=1, outcome="complete", target="B"
-            ),
+            _common(6, "transition", state_id="A", attempt=1, outcome="complete", target="B"),
         ],
     )
     state = replay_log(str(log))
@@ -202,17 +198,20 @@ def test_replay_truncated_last_line_dropped(tmp_path: Path) -> None:
     log = tmp_path / "log.jsonl"
     with open(log, "w", encoding="utf-8") as fh:
         fh.write(json.dumps(_common(0, "run_start"), sort_keys=True) + "\n")
-        fh.write(json.dumps(
-            _common(
-                1,
-                "state_enter",
-                state_id="A",
-                attempt=1,
-                attempts={"A": 1},
-                retries={"A": 0},
-            ),
-            sort_keys=True,
-        ) + "\n")
+        fh.write(
+            json.dumps(
+                _common(
+                    1,
+                    "state_enter",
+                    state_id="A",
+                    attempt=1,
+                    attempts={"A": 1},
+                    retries={"A": 0},
+                ),
+                sort_keys=True,
+            )
+            + "\n"
+        )
         # Truncated record (no closing brace, no newline)
         fh.write('{"ts": "2026-01-01", "run_id": "test-run", "seq": 2, "ev')
     state = replay_log(str(log))
@@ -280,8 +279,7 @@ def test_replay_records_committed_without_exit(tmp_path: Path) -> None:
             ),
             _common(2, "actor_prepare", state_id="A", attempt=1),
             _common(3, "actor_invoke_start", state_id="A", attempt=1),
-            _common(4, "actor_invoke_end", state_id="A", attempt=1,
-                    payload_ref=None),
+            _common(4, "actor_invoke_end", state_id="A", attempt=1, payload_ref=None),
             _common(
                 5,
                 "artifact_write",
@@ -401,15 +399,27 @@ def test_replay_last_transition_takes_latest_record(tmp_path: Path) -> None:
         [
             _common(0, "run_start"),
             _common(1, "state_enter", state_id="A", attempt=1),
-            _common(2, "state_exit", state_id="A", attempt=1,
-                    status="ok", outcome="complete"),
-            _common(3, "transition", state_id="A", attempt=1,
-                    outcome="complete", target="B", step_count=1),
+            _common(2, "state_exit", state_id="A", attempt=1, status="ok", outcome="complete"),
+            _common(
+                3,
+                "transition",
+                state_id="A",
+                attempt=1,
+                outcome="complete",
+                target="B",
+                step_count=1,
+            ),
             _common(4, "state_enter", state_id="B", attempt=1),
-            _common(5, "state_exit", state_id="B", attempt=1,
-                    status="error", outcome="timeout"),
-            _common(6, "transition", state_id="B", attempt=1,
-                    outcome="timeout", target="B", step_count=2),
+            _common(5, "state_exit", state_id="B", attempt=1, status="error", outcome="timeout"),
+            _common(
+                6,
+                "transition",
+                state_id="B",
+                attempt=1,
+                outcome="timeout",
+                target="B",
+                step_count=2,
+            ),
         ],
     )
     state = replay_log(str(log))

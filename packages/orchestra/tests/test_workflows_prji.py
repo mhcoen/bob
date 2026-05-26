@@ -80,9 +80,7 @@ class _ScriptedAdapter:
         state_id: str = prepared.inner["state_id"]
         queue = self._responses.get(state_id) or []
         if not queue:
-            raise AssertionError(
-                f"scripted adapter has no response for {state_id!r}"
-            )
+            raise AssertionError(f"scripted adapter has no response for {state_id!r}")
         text = queue.pop(0)
         return {
             "output": text,
@@ -123,16 +121,12 @@ def _run_prji(
     *,
     model_responses: dict[str, list[str]],
     agent_responses: dict[str, list[str]],
-) -> tuple[
-    _ScriptedAdapter, _ScriptedAdapter, Path, str, ArtifactStore
-]:
+) -> tuple[_ScriptedAdapter, _ScriptedAdapter, Path, str, ArtifactStore]:
     """Run the PRJI workflow with separate scripted adapters for the
     model and agent backings. Returns the model adapter, the agent
     adapter, the run directory, the terminal status, and the open
     store (caller closes)."""
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     registry = _pre_load_registry()
     workflow = load_workflow(path, registry)
     model_adapter = _ScriptedAdapter(
@@ -178,18 +172,14 @@ def _run_prji(
 
 
 def test_prji_workflow_loads_and_validates() -> None:
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     assert workflow.name == "propose_review_judge_implement"
     state_names = {s.name for s in workflow.states}
     assert state_names == {"propose", "review", "judge", "implement"}
     verdict = next(a for a in workflow.artifacts if a.name == "judge_verdict")
     assert verdict.schema_path is not None
-    extracts = {
-        (e.source_field, e.target) for e in verdict.extractions
-    }
+    extracts = {(e.source_field, e.target) for e in verdict.extractions}
     assert extracts == {
         ("decision", "judge_decision"),
         ("feedback", "judge_feedback"),
@@ -388,15 +378,11 @@ def test_prji_implement_cap_routes_to_stop(tmp_path: Path) -> None:
     try:
         assert terminal == "stop"
         # Implementer was called exactly 20 times before the cap.
-        impl_calls = [
-            c for c in agent_adapter.calls if c["state_id"] == "implement"
-        ]
+        impl_calls = [c for c in agent_adapter.calls if c["state_id"] == "implement"]
         assert len(impl_calls) == 20
         # Judge fired 21 times: 20 led to implement, the 21st hit the
         # cap and routed to stop.
-        judge_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "judge"
-        ]
+        judge_calls = [c for c in model_adapter.calls if c["state_id"] == "judge"]
         assert len(judge_calls) == 21
     finally:
         store.close()
@@ -432,9 +418,7 @@ def test_prji_propose_cap_routes_to_stop(tmp_path: Path) -> None:
     try:
         assert terminal == "stop"
         # Propose was called exactly 6 times (initial + 5 reframes).
-        propose_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "propose"
-        ]
+        propose_calls = [c for c in model_adapter.calls if c["state_id"] == "propose"]
         assert len(propose_calls) == 6
     finally:
         store.close()
@@ -470,9 +454,7 @@ def test_prji_judge_cap_routes_to_stop_on_rereview(tmp_path: Path) -> None:
     )
     try:
         assert terminal == "stop"
-        judge_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "judge"
-        ]
+        judge_calls = [c for c in model_adapter.calls if c["state_id"] == "judge"]
         # The judge fires up to 30 times. The 30th call's outcome is
         # rereview, but with attempts.judge < 30 false, the unguarded
         # "on rereview => stop" branch fires.
@@ -499,18 +481,10 @@ def _make_prji_config(
 ) -> OrchestraConfig:
     return OrchestraConfig(
         roles={
-            "proposer": RoleBinding(
-                adapter=proposer_adapter, model=proposer_model
-            ),
-            "reviewer": RoleBinding(
-                adapter=reviewer_adapter, model=reviewer_model
-            ),
-            "judge_role": RoleBinding(
-                adapter=judge_adapter, model=judge_model
-            ),
-            "implementer": RoleBinding(
-                adapter=implementer_adapter, model=implementer_model
-            ),
+            "proposer": RoleBinding(adapter=proposer_adapter, model=proposer_model),
+            "reviewer": RoleBinding(adapter=reviewer_adapter, model=reviewer_model),
+            "judge_role": RoleBinding(adapter=judge_adapter, model=judge_model),
+            "implementer": RoleBinding(adapter=implementer_adapter, model=implementer_model),
         },
         workflows={
             "propose_review_judge_implement": WorkflowConfig(
@@ -522,16 +496,10 @@ def _make_prji_config(
 
 def test_prji_distinct_actor_rule_accepts_distinct_actors() -> None:
     cfg = _make_prji_config()
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
-    bindings = _validate_role_bindings(
-        workflow, "propose_review_judge_implement", cfg
-    )
-    assert bindings.keys() == {
-        "proposer", "reviewer", "judge_role", "implementer"
-    }
+    bindings = _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
+    assert bindings.keys() == {"proposer", "reviewer", "judge_role", "implementer"}
 
 
 def test_prji_distinct_actor_rule_rejects_proposer_reviewer_collision() -> None:
@@ -541,14 +509,10 @@ def test_prji_distinct_actor_rule_rejects_proposer_reviewer_collision() -> None:
         reviewer_adapter="claude_code_text",
         reviewer_model="m1",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     with pytest.raises(ConfigError) as exc:
-        _validate_role_bindings(
-            workflow, "propose_review_judge_implement", cfg
-        )
+        _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     msg = str(exc.value)
     assert "proposer" in msg
     assert "reviewer" in msg
@@ -564,14 +528,10 @@ def test_prji_distinct_actor_rule_rejects_reviewer_implementer_collision() -> No
         implementer_adapter="claude_code_agent",
         implementer_model="m1",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     with pytest.raises(ConfigError) as exc:
-        _validate_role_bindings(
-            workflow, "propose_review_judge_implement", cfg
-        )
+        _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     # Either "reviewer/implementer collision" or the workspace_mutation
     # rule fires first; both are valid rejections.
     msg = str(exc.value)
@@ -591,13 +551,9 @@ def test_prji_distinct_actor_rule_judge_can_match_proposer() -> None:
         implementer_adapter="codex_agent",
         implementer_model="m3",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
-    bindings = _validate_role_bindings(
-        workflow, "propose_review_judge_implement", cfg
-    )
+    bindings = _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     assert bindings["proposer"].adapter == bindings["judge_role"].adapter
 
 
@@ -614,14 +570,10 @@ def test_prji_workspace_mutation_rejects_text_implementer() -> None:
         implementer_adapter="codex_text",
         implementer_model="m3",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     with pytest.raises(ConfigError) as exc:
-        _validate_role_bindings(
-            workflow, "propose_review_judge_implement", cfg
-        )
+        _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     msg = str(exc.value)
     assert "implementer" in msg
     # Either kind-mismatch or workspace_mutation rule fires; both
@@ -635,14 +587,10 @@ def test_prji_workspace_mutation_rejects_mutating_proposer() -> None:
         proposer_adapter="codex_agent",
         proposer_model="m1",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     with pytest.raises(ConfigError) as exc:
-        _validate_role_bindings(
-            workflow, "propose_review_judge_implement", cfg
-        )
+        _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     msg = str(exc.value)
     assert "proposer" in msg
 
@@ -652,14 +600,10 @@ def test_prji_workspace_mutation_rejects_mutating_reviewer() -> None:
         reviewer_adapter="claude_code_agent",
         reviewer_model="m2",
     )
-    path = resolve_workflow_path(
-        "propose_review_judge_implement", project_dir=None
-    )
+    path = resolve_workflow_path("propose_review_judge_implement", project_dir=None)
     workflow = load_workflow(path, _pre_load_registry())
     with pytest.raises(ConfigError) as exc:
-        _validate_role_bindings(
-            workflow, "propose_review_judge_implement", cfg
-        )
+        _validate_role_bindings(workflow, "propose_review_judge_implement", cfg)
     msg = str(exc.value)
     assert "reviewer" in msg
 
@@ -677,6 +621,7 @@ def test_prji_workspace_mutation_rejects_mutating_reviewer() -> None:
 def test_adapter_workspace_mutation_rejects_unknown_adapter() -> None:
     """An unknown adapter name fails closed."""
     from orchestra.api import _adapter_workspace_mutation
+
     binding = RoleBinding(adapter="not_a_real_adapter", model="m")
     with pytest.raises(ConfigError) as exc:
         _adapter_workspace_mutation(binding)
@@ -696,9 +641,7 @@ def test_adapter_workspace_mutation_rejects_class_missing_attribute(
     class _BrokenAdapter:
         pass
 
-    monkeypatch.setitem(
-        api_mod._ADAPTER_CLASSES, "broken_adapter", _BrokenAdapter
-    )
+    monkeypatch.setitem(api_mod._ADAPTER_CLASSES, "broken_adapter", _BrokenAdapter)
     binding = RoleBinding(adapter="broken_adapter", model="m")
     with pytest.raises(ConfigError) as exc:
         api_mod._adapter_workspace_mutation(binding)
@@ -747,14 +690,10 @@ def test_adapter_workspace_mutation_accepts_valid_classification(
         def __init__(self, required_arg: str) -> None:
             self.required_arg = required_arg
 
-    monkeypatch.setitem(
-        api_mod._ADAPTER_CLASSES, "strict_adapter", _StrictAdapter
-    )
+    monkeypatch.setitem(api_mod._ADAPTER_CLASSES, "strict_adapter", _StrictAdapter)
     binding = RoleBinding(adapter="strict_adapter", model="m")
     # No exception: the validator reads the class attribute directly.
-    assert (
-        api_mod._adapter_workspace_mutation(binding) == "mutating"
-    )
+    assert api_mod._adapter_workspace_mutation(binding) == "mutating"
 
 
 # --------------------------------------------------------------------
@@ -823,18 +762,10 @@ def test_prji_each_branch_traversed(tmp_path: Path) -> None:
     try:
         assert terminal == "done"
         # Per-state call counts pin the trajectory shape.
-        propose_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "propose"
-        ]
-        review_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "review"
-        ]
-        judge_calls = [
-            c for c in model_adapter.calls if c["state_id"] == "judge"
-        ]
-        impl_calls = [
-            c for c in agent_adapter.calls if c["state_id"] == "implement"
-        ]
+        propose_calls = [c for c in model_adapter.calls if c["state_id"] == "propose"]
+        review_calls = [c for c in model_adapter.calls if c["state_id"] == "review"]
+        judge_calls = [c for c in model_adapter.calls if c["state_id"] == "judge"]
+        impl_calls = [c for c in agent_adapter.calls if c["state_id"] == "implement"]
         # Two propose calls (initial + reframe), four reviews
         # (one per judge call), four judges (one per verdict), one
         # implement (from the implement verdict).
@@ -845,18 +776,13 @@ def test_prji_each_branch_traversed(tmp_path: Path) -> None:
         # Per-judge outcome sequence: every nonterminal branch fired
         # before the terminal accept.
         from orchestra.log import LogReader
+
         records = LogReader(run_dir / "log.jsonl").read_all()
-        state_exits = [
-            r for r in records
-            if r.event == "state_exit" and r.state_id == "judge"
-        ]
+        state_exits = [r for r in records if r.event == "state_exit" and r.state_id == "judge"]
         outcomes = [r.fields["outcome"] for r in state_exits]
         assert outcomes == ["reframe", "implement", "rereview", "accept"]
         # State-transition log shows the four branches taken.
-        transitions = [
-            r for r in records
-            if r.event == "transition" and r.state_id == "judge"
-        ]
+        transitions = [r for r in records if r.event == "transition" and r.state_id == "judge"]
         targets = [r.fields["target"] for r in transitions]
         assert targets == ["propose", "implement", "review", "done"]
         # Final verdict artifact reflects the accept payload.
@@ -940,18 +866,15 @@ def test_prji_stuck_routes_to_stop(tmp_path: Path) -> None:
         assert decision_art is not None
         assert decision_art.value == "stuck"
         from orchestra.log import LogReader
+
         records = LogReader(run_dir / "log.jsonl").read_all()
         last_judge_exit = next(
-            r
-            for r in reversed(records)
-            if r.event == "state_exit" and r.state_id == "judge"
+            r for r in reversed(records) if r.event == "state_exit" and r.state_id == "judge"
         )
         assert last_judge_exit.fields["status"] == "ok"
         assert last_judge_exit.fields["outcome"] == "stuck"
         last_judge_transition = next(
-            r
-            for r in reversed(records)
-            if r.event == "transition" and r.state_id == "judge"
+            r for r in reversed(records) if r.event == "transition" and r.state_id == "judge"
         )
         assert last_judge_transition.fields["target"] == "stop"
         assert last_judge_transition.fields["outcome"] == "stuck"

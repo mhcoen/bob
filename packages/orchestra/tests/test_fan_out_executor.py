@@ -195,14 +195,8 @@ def test_fan_out_happy_path_runs_all_children_and_joins(
     assert fan_start.fields["error_target"] == "abort_state"
     # Each child writes a state_enter and state_exit.
     for child in ("advise_a", "advise_b", "advise_c"):
-        enter = [
-            r for r in records
-            if r.event == "state_enter" and r.state_id == child
-        ]
-        exit_ = [
-            r for r in records
-            if r.event == "state_exit" and r.state_id == child
-        ]
+        enter = [r for r in records if r.event == "state_enter" and r.state_id == child]
+        exit_ = [r for r in records if r.event == "state_exit" and r.state_id == child]
         assert len(enter) == 1, child
         assert len(exit_) == 1, child
         assert exit_[0].fields["status"] == "ok"
@@ -221,10 +215,7 @@ def test_fan_out_happy_path_runs_all_children_and_joins(
     # state's reads (a_out, b_out, c_out) were visible (the
     # visibility rule does not hide successful state_invocation
     # rows).
-    join_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "join_state"
-    ]
+    join_exits = [r for r in records if r.event == "state_exit" and r.state_id == "join_state"]
     assert len(join_exits) == 1
     assert join_exits[0].fields["status"] == "ok"
 
@@ -238,9 +229,7 @@ def test_fan_out_log_records_carry_invocation_ids(tmp_path: Path) -> None:
     for child in ("advise_a", "advise_b", "advise_c"):
         records_for = [r for r in records if r.state_id == child]
         invocation_ids = {
-            r.fields.get("invocation_id")
-            for r in records_for
-            if "invocation_id" in r.fields
+            r.fields.get("invocation_id") for r in records_for if "invocation_id" in r.fields
         }
         assert len(invocation_ids) == 1, child
         inv = invocation_ids.pop()
@@ -410,6 +399,7 @@ def test_fan_out_replay_skips_completed_group(tmp_path: Path) -> None:
     captures the next state."""
     run_dir = _run(tmp_path)
     from orchestra.resume import replay_log
+
     rep = replay_log(str(run_dir / "log.jsonl"))
     assert rep.last_fan_out_target == "join_state"
     # The visibility-status rebuild includes every successful child.
@@ -419,11 +409,7 @@ def test_fan_out_replay_skips_completed_group(tmp_path: Path) -> None:
     assert any(inv_a in k for k in rep.visibility_statuses)
     assert any(inv_b in k for k in rep.visibility_statuses)
     assert any(inv_c in k for k in rep.visibility_statuses)
-    successes = {
-        k: v
-        for k, v in rep.visibility_statuses.items()
-        if v == "success"
-    }
+    successes = {k: v for k, v in rep.visibility_statuses.items() if v == "success"}
     # The three advisors plus parent plus join_state all completed
     # successfully.
     assert sum(1 for k in successes if "::advise_" in k) == 3
@@ -438,14 +424,11 @@ def test_fan_out_replay_open_group_on_partial(tmp_path: Path) -> None:
     # Truncate the log to the fan_out_start record (drop everything
     # after it).
     records = LogReader(log_path).read_all()
-    cutoff = next(
-        i for i, r in enumerate(records) if r.event == "fan_out_start"
-    )
+    cutoff = next(i for i, r in enumerate(records) if r.event == "fan_out_start")
     truncated = records[: cutoff + 1]
-    log_path.write_text(
-        "\n".join(r.to_json() for r in truncated) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in truncated) + "\n", encoding="utf-8")
     from orchestra.resume import replay_log
+
     rep = replay_log(str(log_path))
     assert rep.open_fan_out is not None
     assert rep.open_fan_out["parent_state"] == "launch"
@@ -477,17 +460,25 @@ def test_visibility_not_success_until_state_exit_durable(tmp_path: Path) -> None
     real_writer = _LogWriter(tmp_path / "log.jsonl", "test-run")
 
     class _PausingWriter:
-        def __init__(self, inner): self._inner = inner
+        def __init__(self, inner):
+            self._inner = inner
+
         @property
-        def lock(self): return self._inner.lock
-        def critical_section(self): return self._inner.critical_section()
+        def lock(self):
+            return self._inner.lock
+
+        def critical_section(self):
+            return self._inner.critical_section()
+
         @property
-        def next_seq(self): return self._inner.next_seq
-        def close(self): self._inner.close()
+        def next_seq(self):
+            return self._inner.next_seq
+
+        def close(self):
+            self._inner.close()
+
         def write(self, event, *, state_id=None, attempt=None, fields=None):
-            rec = self._inner.write(
-                event, state_id=state_id, attempt=attempt, fields=fields
-            )
+            rec = self._inner.write(event, state_id=state_id, attempt=attempt, fields=fields)
             if event == "state_exit" and not saw_state_exit.is_set():
                 saw_state_exit.set()
                 paused.set()
@@ -693,9 +684,7 @@ workflow sib
     def _wrapped_read_latest(name: str) -> Any:
         if threading.current_thread().name.startswith("orchestra-fan-out"):
             with rl_lock:
-                worker_read_latest_calls[name] = (
-                    worker_read_latest_calls.get(name, 0) + 1
-                )
+                worker_read_latest_calls[name] = worker_read_latest_calls.get(name, 0) + 1
         return real_read_latest(name)
 
     store.read_latest = _wrapped_read_latest  # type: ignore[method-assign]
@@ -726,10 +715,7 @@ workflow sib
                     records = LogReader(log_path).read_all()
                 except Exception:
                     records = []
-                if any(
-                    r.event == "state_exit" and r.state_id == "fast"
-                    for r in records
-                ):
+                if any(r.event == "state_exit" and r.state_id == "fast" for r in records):
                     fast_done.set()
                     return
             time.sleep(0.02)
@@ -748,9 +734,7 @@ workflow sib
     # (parent state's commit landed before fan-out, and lives in the
     # snapshot). fast_out should be None (its commit landed during
     # fan-out, which the snapshot does not see).
-    slow_reads = next(
-        reads for model_id, reads in invocations if model_id == "m_slow"
-    )
+    slow_reads = next(reads for model_id, reads in invocations if model_id == "m_slow")
     assert slow_reads["frame_out"]["value"] is not None
     assert slow_reads["frame_out"]["__version_id"] == "snapshot"
     assert slow_reads["fast_out"]["value"] is None
@@ -889,10 +873,7 @@ workflow retry
     # Three distinct invocation_ids on the flaky child's state_enter
     # records (one per attempt).
     records = LogReader(run_dir / "log.jsonl").read_all()
-    enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "flaky"
-    ]
+    enters = [r for r in records if r.event == "state_enter" and r.state_id == "flaky"]
     assert len(enters) == 3
     inv_ids = [r.fields.get("invocation_id") for r in enters]
     assert len(set(inv_ids)) == 3
@@ -1053,6 +1034,7 @@ workflow stress_cancel
                     # the test exercises: cancel arrives while
                     # multiple children are simultaneously in invoke.
                     import time as _time
+
                     _time.sleep(0.05)
                     raise RuntimeError("synthetic failure on a")
                 if model_id in release_events:
@@ -1107,8 +1089,7 @@ workflow stress_cancel
     # No exception escaped through the registry's concurrent
     # cancellation paths.
     assert captured_exceptions == [], (
-        f"unexpected exceptions during stress cancellation: "
-        f"{captured_exceptions!r}"
+        f"unexpected exceptions during stress cancellation: {captured_exceptions!r}"
     )
 
     # Each of B/C/D/E received exactly one cancel(handle) call with
@@ -1134,9 +1115,7 @@ workflow stress_cancel
 
     # All four cancelled children's prepared handles are pairwise
     # distinct objects (each adapter.prepare returns a new instance).
-    cancelled_handles = [
-        by_model[m][0] for m in ("m_b", "m_c", "m_d", "m_e")
-    ]
+    cancelled_handles = [by_model[m][0] for m in ("m_b", "m_c", "m_d", "m_e")]
     assert len(set(id(h) for h in cancelled_handles)) == 4, (
         "expected four distinct prepared-invocation handles "
         "across the cancelled children; got duplicates"
@@ -1147,13 +1126,8 @@ workflow stress_cancel
     # released them and they returned MockModelAdapter's payload).
     records = LogReader(run_dir / "log.jsonl").read_all()
     for child in ("b", "c", "d", "e"):
-        exits = [
-            r for r in records
-            if r.event == "state_exit" and r.state_id == child
-        ]
-        assert len(exits) == 1, (
-            f"child {child} missing durable state_exit"
-        )
+        exits = [r for r in records if r.event == "state_exit" and r.state_id == child]
+        assert len(exits) == 1, f"child {child} missing durable state_exit"
 
     # Group aggregate is error (a errored), routed to abort_state.
     # per_child_outcome contains all five children.
@@ -1305,11 +1279,7 @@ workflow crash_retry
         if r.event == "run_end":
             continue
         truncated.append(r)
-        if (
-            r.event == "state_enter"
-            and r.state_id == "flaky"
-            and r.attempt == 2
-        ):
+        if r.event == "state_enter" and r.state_id == "flaky" and r.attempt == 2:
             seen_attempt2_enter = True
             break
     assert seen_attempt2_enter
@@ -1320,14 +1290,8 @@ workflow crash_retry
 
     # Sanity-check the truncated log:
     pre_records = LogReader(log_path).read_all()
-    flaky_enters = [
-        r for r in pre_records
-        if r.event == "state_enter" and r.state_id == "flaky"
-    ]
-    flaky_exits = [
-        r for r in pre_records
-        if r.event == "state_exit" and r.state_id == "flaky"
-    ]
+    flaky_enters = [r for r in pre_records if r.event == "state_enter" and r.state_id == "flaky"]
+    flaky_exits = [r for r in pre_records if r.event == "state_exit" and r.state_id == "flaky"]
     assert [r.attempt for r in flaky_enters] == [1, 2]
     assert [r.attempt for r in flaky_exits] == [1]
     assert flaky_exits[0].fields["status"] == "error"
@@ -1352,12 +1316,8 @@ workflow crash_retry
         registry._adapter_cache.pop("model", None)
         workflow_resume = load_workflow(src, registry)
         store_resume = ArtifactStore(run_dir / "store.sqlite")
-        log_resume = LogWriter(
-            log_path, replay.last_run_id, start_seq=replay.next_seq
-        )
-        visibility_index = VisibilityIndex(
-            persist_path=run_dir / "visibility.json"
-        )
+        log_resume = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
+        visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
         visibility_index.replace_from(replay.visibility_statuses)
 
         executor_resume = Executor(
@@ -1385,8 +1345,7 @@ workflow crash_retry
         completed = {
             n: env
             for n, env in replay.envelopes.items()
-            if n in children_list
-            and env.attempt == replay.attempts.get(n)
+            if n in children_list and env.attempt == replay.attempts.get(n)
         }
         executor_resume.resume_fan_out(
             parent_state_name=str(of["parent_state"]),
@@ -1408,23 +1367,20 @@ workflow crash_retry
     # The resumed entry has retries[flaky] = 0 in its state_enter
     # snapshot (fresh budget rule).
     flaky_enters_after = [
-        r for r in resumed_records
-        if r.event == "state_enter" and r.state_id == "flaky"
+        r for r in resumed_records if r.event == "state_enter" and r.state_id == "flaky"
     ]
     # Attempts 1 and 2 from pre-crash + 1 fresh resumed attempt.
     assert len(flaky_enters_after) == 3
     resumed_enter = flaky_enters_after[-1]
     retries_snapshot = resumed_enter.fields.get("retries", {})
     assert retries_snapshot.get("flaky") == 0, (
-        f"resumed entry's retries snapshot should show fresh "
-        f"budget (0); got {retries_snapshot}"
+        f"resumed entry's retries snapshot should show fresh budget (0); got {retries_snapshot}"
     )
 
     # The resumed attempt's adapter call succeeded; flaky has a
     # durable success state_exit. fan_out_end records success.
     resumed_exits = [
-        r for r in resumed_records
-        if r.event == "state_exit" and r.state_id == "flaky"
+        r for r in resumed_records if r.event == "state_exit" and r.state_id == "flaky"
     ]
     # Pre-crash exit (attempt 1, error) + new exit (resumed
     # attempt, success).
@@ -1559,6 +1515,7 @@ workflow race_test
                 # Small additional delay so a's drain reaches the
                 # controller and request_cancel_all has fired.
                 import time as _time
+
                 _time.sleep(0.05)
                 b_proceed.set()
             return super().invoke(prepared)
@@ -1593,9 +1550,7 @@ workflow race_test
     records = LogReader(run_dir / "log.jsonl").read_all()
     fan_end = next(r for r in records if r.event == "fan_out_end")
     per_child = fan_end.fields["per_child_outcome"]
-    assert per_child["a"] == "error", (
-        f"a errored; got {per_child!r}"
-    )
+    assert per_child["a"] == "error", f"a errored; got {per_child!r}"
     assert per_child["b"] == "success", (
         f"b's success after a's error must still be recorded "
         f"(cancellation race rule); got {per_child!r}"
@@ -1607,6 +1562,7 @@ workflow race_test
     # whose log already contains ``fan_out_end`` does not re-run any
     # child on resume; the durable target is reused.
     from orchestra.resume import replay_log
+
     rep = replay_log(str(run_dir / "log.jsonl"))
     assert rep.last_fan_out_target == "abort_state"
     assert rep.open_fan_out is None
@@ -1625,15 +1581,23 @@ workflow race_test
     # envelopes from durable payload files referenced by state_exit
     # records, so the truncated run directory must carry them.
     import shutil
+
     shutil.copy(run_dir / "store.sqlite", truncated_dir / "store.sqlite")
     shutil.copytree(run_dir / "payloads", truncated_dir / "payloads")
     # Copy log without fan_out_end and everything after.
     keep = []
     for r in records:
-        if r.event in ("fan_out_end", "transition", "state_enter",
-                       "actor_prepare", "actor_invoke_start",
-                       "actor_invoke_end", "artifact_write",
-                       "state_exit", "run_end"):
+        if r.event in (
+            "fan_out_end",
+            "transition",
+            "state_enter",
+            "actor_prepare",
+            "actor_invoke_start",
+            "actor_invoke_end",
+            "artifact_write",
+            "state_exit",
+            "run_end",
+        ):
             # Keep state_enter / state_exit / artifact_write etc.
             # only if they belong to launch / a / b (drop
             # post-fan-out abort_state records and fan_out_end).
@@ -1652,9 +1616,7 @@ workflow race_test
         if r.event == "fan_out_end":
             break
         keep.append(r)
-    log_path.write_text(
-        "\n".join(r.to_json() for r in keep) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in keep) + "\n", encoding="utf-8")
 
     # Replay: open_fan_out should be set, with completed_children
     # carrying both a (error) and b (success) envelopes.
@@ -1668,9 +1630,7 @@ workflow race_test
     # children (none in this case, since a and b both completed)
     # are not launched. fan_out_end is written with the per-child
     # outcomes reconstructed from completed_children.
-    terminal2, _ = _resume_open_fan_out(
-        truncated_dir, src, {"topic": "hello"}
-    )
+    terminal2, _ = _resume_open_fan_out(truncated_dir, src, {"topic": "hello"})
 
     # The resumed log has a fresh fan_out_end with both outcomes.
     resumed_records = LogReader(log_path).read_all()
@@ -1752,9 +1712,7 @@ def test_lock_order_deadlock_prevention(tmp_path: Path) -> None:
                 events.append((tname, "release", self._name))
             return self._real.__exit__(*args)
 
-        def acquire(
-            self, blocking: bool = True, timeout: float = -1
-        ) -> bool:
+        def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
             ok = self._real.acquire(blocking, timeout)
             if ok:
                 tname = threading.current_thread().name
@@ -2024,20 +1982,15 @@ workflow retry_inv_id
     parts = flaky_inv.split("::")
     assert parts[1] == "flaky"
     assert parts[2] == "3", (
-        f"expected final attempt_seq=3 in fan_out_end's "
-        f"child_invocation_ids; got {flaky_inv!r}"
+        f"expected final attempt_seq=3 in fan_out_end's child_invocation_ids; got {flaky_inv!r}"
     )
 
     # And the durable state_exit at attempt 3 carries the same
     # invocation_id (the records agree).
-    flaky_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "flaky"
-    ]
+    flaky_exits = [r for r in records if r.event == "state_exit" and r.state_id == "flaky"]
     # The final state_exit (the one that succeeded) is at attempt 3.
     final_exit = next(
-        r for r in flaky_exits
-        if str(r.fields.get("invocation_id")).endswith("::flaky::3")
+        r for r in flaky_exits if str(r.fields.get("invocation_id")).endswith("::flaky::3")
     )
     assert final_exit.fields["status"] == "ok"
     assert final_exit.fields["invocation_id"] == flaky_inv
@@ -2193,18 +2146,14 @@ workflow cancel_test
     # children receive cancel.)
     b_cancels = [c for c in cancel_calls if c[0] == "m_b"]
     assert len(b_cancels) == 1, (
-        f"expected exactly one cancel(prepared) call for b, got "
-        f"{cancel_calls}"
+        f"expected exactly one cancel(prepared) call for b, got {cancel_calls}"
     )
     _, prepared = b_cancels[0]
     assert prepared.summary.get("model") == "m_b"
 
     # b's worker drained to a durable state_exit despite the cancel.
     records = LogReader(run_dir / "log.jsonl").read_all()
-    b_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "b"
-    ]
+    b_exits = [r for r in records if r.event == "state_exit" and r.state_id == "b"]
     assert len(b_exits) == 1
 
     # fan_out_end records the per-child outcome map and routes to
@@ -2380,6 +2329,7 @@ workflow cancel_pre_invoke
         # for the test's purposes; the assertion below catches a
         # genuinely-broken implementation regardless.
         import time as _time
+
         _time.sleep(0.2)
         a_prepare_release.set()
 
@@ -2407,18 +2357,12 @@ workflow cancel_pre_invoke
 
     # a has a state_exit with outcome=cancelled (the
     # cancelled-post-register path).
-    a_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "a"
-    ]
+    a_exits = [r for r in records if r.event == "state_exit" and r.state_id == "a"]
     assert len(a_exits) == 1
     assert a_exits[0].fields["outcome"] == "cancelled"
 
     # a wrote no actor_invoke_start (skipped invoke entirely).
-    a_invoke_starts = [
-        r for r in records
-        if r.event == "actor_invoke_start" and r.state_id == "a"
-    ]
+    a_invoke_starts = [r for r in records if r.event == "actor_invoke_start" and r.state_id == "a"]
     assert a_invoke_starts == []
 
     # The group routes to the error target because b errored.
@@ -2478,9 +2422,7 @@ def _filter_log_to_open_fan_out(
     # we collapse the seqs to keep the resulting log valid.
     for new_seq, rec in enumerate(out):
         rec.seq = new_seq
-    log_path.write_text(
-        "\n".join(r.to_json() for r in out) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in out) + "\n", encoding="utf-8")
 
 
 def _resume_open_fan_out(
@@ -2515,6 +2457,7 @@ def _resume_open_fan_out(
         # state. The log is the source of truth; replace_from must
         # win regardless of what was on disk.
         import json as _json
+
         (run_dir / "visibility.json").write_text(
             _json.dumps(visibility_overrides), encoding="utf-8"
         )
@@ -2548,8 +2491,7 @@ def _resume_open_fan_out(
     completed = {
         n: env
         for n, env in replay.envelopes.items()
-        if n in children_list
-        and env.attempt == replay.attempts.get(n)
+        if n in children_list and env.attempt == replay.attempts.get(n)
     }
     executor.resume_fan_out(
         parent_state_name=str(of["parent_state"]),
@@ -2595,18 +2537,14 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     # does not bypass the resume path; then truncate to mid-fan-out.
     records = LogReader(log_path).read_all()
     records = [r for r in records if r.event != "run_end"]
-    log_path.write_text(
-        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in records) + "\n", encoding="utf-8")
     _filter_log_to_open_fan_out(
         log_path,
         keep_completed=["advise_a"],
         keep_started_only=["advise_b"],
     )
 
-    terminal, _ = _resume_open_fan_out(
-        run_dir, workflow_path, {"topic": "hello world"}
-    )
+    terminal, _ = _resume_open_fan_out(run_dir, workflow_path, {"topic": "hello world"})
     assert terminal == "done"
 
     records = LogReader(log_path).read_all()
@@ -2614,14 +2552,8 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     # advise_a was NOT re-run: it has exactly one state_enter (the
     # original) and one state_exit (the original), both with
     # attempt_seq 1.
-    a_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_a"
-    ]
-    a_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "advise_a"
-    ]
+    a_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_a"]
+    a_exits = [r for r in records if r.event == "state_exit" and r.state_id == "advise_a"]
     assert len(a_enters) == 1
     assert len(a_exits) == 1
     a_inv = a_enters[0].fields.get("invocation_id")
@@ -2631,43 +2563,28 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     # advise_b was re-run: the original state_enter (attempt 1) is
     # still in the log, and a fresh state_enter+state_exit pair was
     # appended with attempt 2 carrying a different invocation_id.
-    b_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_b"
-    ]
-    b_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "advise_b"
-    ]
+    b_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_b"]
+    b_exits = [r for r in records if r.event == "state_exit" and r.state_id == "advise_b"]
     assert len(b_enters) == 2
     assert len(b_exits) == 1
     b_inv_ids = {r.fields.get("invocation_id") for r in b_enters}
     assert any(str(inv).endswith("::advise_b::1") for inv in b_inv_ids)
     assert any(str(inv).endswith("::advise_b::2") for inv in b_inv_ids)
     # The state_exit's invocation_id is the new one (attempt 2).
-    assert str(b_exits[0].fields.get("invocation_id")).endswith(
-        "::advise_b::2"
-    )
+    assert str(b_exits[0].fields.get("invocation_id")).endswith("::advise_b::2")
 
     # advise_c was run for the first time on resume: one state_enter
     # and one state_exit. After Cleanup 1, attempt_seq is minted at
     # state_enter time (not pre-seeded by the controller), so a
     # never-entered pending child gets attempt_seq=1 on its first
     # entry rather than an inflated counter.
-    c_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_c"
-    ]
-    c_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "advise_c"
-    ]
+    c_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_c"]
+    c_exits = [r for r in records if r.event == "state_exit" and r.state_id == "advise_c"]
     assert len(c_enters) == 1
     assert len(c_exits) == 1
     c_inv = str(c_enters[0].fields.get("invocation_id"))
     assert c_inv.endswith("::advise_c::1"), (
-        f"after Cleanup 1 advise_c should mint attempt 1 on first "
-        f"entry; got {c_inv}"
+        f"after Cleanup 1 advise_c should mint attempt 1 on first entry; got {c_inv}"
     )
     assert c_inv == str(c_exits[0].fields.get("invocation_id"))
 
@@ -2679,10 +2596,7 @@ def test_resume_open_fan_out_relaunches_only_incomplete_children(
     assert fan_ends[0].fields["target"] == "join_state"
 
     # The linear loop continued past the join target to terminal.
-    join_exits = [
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "join_state"
-    ]
+    join_exits = [r for r in records if r.event == "state_exit" and r.state_id == "join_state"]
     assert len(join_exits) == 1
 
 
@@ -2702,9 +2616,7 @@ def test_resume_visibility_log_wins_over_persisted_json(
     log_path = run_dir / "log.jsonl"
     records = LogReader(log_path).read_all()
     records = [r for r in records if r.event != "run_end"]
-    log_path.write_text(
-        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in records) + "\n", encoding="utf-8")
     # Truncate to mid-fan-out so resume actually runs (terminal logs
     # bypass the resume path entirely).
     _filter_log_to_open_fan_out(
@@ -2715,10 +2627,7 @@ def test_resume_visibility_log_wins_over_persisted_json(
 
     # advise_a's invocation_id is in the truncated log as success.
     records = LogReader(log_path).read_all()
-    a_exit = next(
-        r for r in records
-        if r.event == "state_exit" and r.state_id == "advise_a"
-    )
+    a_exit = next(r for r in records if r.event == "state_exit" and r.state_id == "advise_a")
     a_inv = str(a_exit.fields["invocation_id"])
 
     # Stale cache: claim advise_a errored AND introduce a phantom
@@ -2918,12 +2827,8 @@ workflow sib_resume
 
     resume_store.read_latest = _wrapped_read_latest  # type: ignore[method-assign]
 
-    resume_log = LogWriter(
-        log_path, replay.last_run_id, start_seq=replay.next_seq
-    )
-    visibility_index = VisibilityIndex(
-        persist_path=run_dir / "visibility.json"
-    )
+    resume_log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
+    visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
     visibility_index.replace_from(replay.visibility_statuses)
 
     # Sanity: the visibility index marks fast's invocation as
@@ -2931,7 +2836,8 @@ workflow sib_resume
     # the committed value (we are exercising the path the bug
     # makes vulnerable).
     fast_inv_id = next(
-        inv for inv, status in replay.visibility_statuses.items()
+        inv
+        for inv, status in replay.visibility_statuses.items()
         if "::fast::" in inv and status == "success"
     )
     assert visibility_index.status(fast_inv_id) == "success"
@@ -2957,11 +2863,7 @@ workflow sib_resume
     assert replay.open_fan_out is not None
     of = replay.open_fan_out
     children_list = [str(c) for c in of["children"]]
-    completed = {
-        n: env
-        for n, env in replay.envelopes.items()
-        if n in children_list
-    }
+    completed = {n: env for n, env in replay.envelopes.items() if n in children_list}
     resume_executor.resume_fan_out(
         parent_state_name=str(of["parent_state"]),
         children=children_list,
@@ -2991,8 +2893,7 @@ workflow sib_resume
     # No worker thread hit the live store: snapshot threading still
     # holds across the resume path.
     assert worker_reads == {}, (
-        f"no fan-out worker should hit the live store on resume; "
-        f"got {worker_reads!r}"
+        f"no fan-out worker should hit the live store on resume; got {worker_reads!r}"
     )
 
 
@@ -3026,27 +2927,20 @@ def test_attempt_seq_minted_at_state_enter(tmp_path: Path) -> None:
     log_path = run_dir / "log.jsonl"
     records = LogReader(log_path).read_all()
     records = [r for r in records if r.event != "run_end"]
-    log_path.write_text(
-        "\n".join(r.to_json() for r in records) + "\n", encoding="utf-8"
-    )
+    log_path.write_text("\n".join(r.to_json() for r in records) + "\n", encoding="utf-8")
     _filter_log_to_open_fan_out(
         log_path,
         keep_completed=["advise_a"],
         keep_started_only=[],
     )
 
-    terminal, _ = _resume_open_fan_out(
-        run_dir, workflow_path, {"topic": "hello world"}
-    )
+    terminal, _ = _resume_open_fan_out(run_dir, workflow_path, {"topic": "hello world"})
     assert terminal == "done"
 
     records = LogReader(log_path).read_all()
 
     # advise_a entered exactly once (first run); attempt_seq=1.
-    a_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_a"
-    ]
+    a_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_a"]
     assert len(a_enters) == 1
     a_inv = str(a_enters[0].fields["invocation_id"])
     assert a_inv.endswith("::advise_a::1"), (
@@ -3056,10 +2950,7 @@ def test_attempt_seq_minted_at_state_enter(tmp_path: Path) -> None:
     # advise_b never entered in the truncated log. After resume, its
     # first (and only) entry is attempt 1, NOT attempt 2 (which is
     # what controller pre-seeding would have produced).
-    b_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_b"
-    ]
+    b_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_b"]
     assert len(b_enters) == 1
     b_inv = str(b_enters[0].fields["invocation_id"])
     assert b_inv.endswith("::advise_b::1"), (
@@ -3068,10 +2959,7 @@ def test_attempt_seq_minted_at_state_enter(tmp_path: Path) -> None:
 
     # advise_c same as advise_b: never entered before crash, attempt
     # 1 on resume.
-    c_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_c"
-    ]
+    c_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_c"]
     assert len(c_enters) == 1
     c_inv = str(c_enters[0].fields["invocation_id"])
     assert c_inv.endswith("::advise_c::1"), (
@@ -3158,9 +3046,7 @@ def test_resume_open_fan_out_with_errored_completed_child_does_not_launch_pendin
     # Resume: the fix should observe advise_b's error in
     # completed_children and short-circuit BEFORE submitting any
     # future for advise_c.
-    terminal, _ = _resume_open_fan_out(
-        run_dir, workflow_path, {"topic": "hello world"}
-    )
+    terminal, _ = _resume_open_fan_out(run_dir, workflow_path, {"topic": "hello world"})
 
     # The run reaches a terminal state via the abort_state branch.
     assert terminal in ("done", "stop")
@@ -3170,26 +3056,16 @@ def test_resume_open_fan_out_with_errored_completed_child_does_not_launch_pendin
     # advise_c was NOT launched: there is no fresh state_enter for
     # advise_c added by the resume path. (The truncated log had no
     # advise_c records to begin with.)
-    c_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "advise_c"
-    ]
+    c_enters = [r for r in records if r.event == "state_enter" and r.state_id == "advise_c"]
     assert c_enters == [], (
-        f"advise_c should not have been launched on resume; "
-        f"got state_enters {c_enters}"
+        f"advise_c should not have been launched on resume; got state_enters {c_enters}"
     )
 
     # advise_a and advise_b retain exactly their original
     # state_enter / state_exit pair (no resume re-entry of either).
     for completed in ("advise_a", "advise_b"):
-        enters = [
-            r for r in records
-            if r.event == "state_enter" and r.state_id == completed
-        ]
-        exits = [
-            r for r in records
-            if r.event == "state_exit" and r.state_id == completed
-        ]
+        enters = [r for r in records if r.event == "state_enter" and r.state_id == completed]
+        exits = [r for r in records if r.event == "state_exit" and r.state_id == completed]
         assert len(enters) == 1
         assert len(exits) == 1
 
@@ -3251,13 +3127,10 @@ def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
     # Sanity: the tentative row is staged.
     cur = store._conn.cursor()
     pre_versions = cur.execute(
-        "SELECT seq FROM versions WHERE is_tentative = 1 "
-        "AND written_by LIKE 'advise_a#%'"
+        "SELECT seq FROM versions WHERE is_tentative = 1 AND written_by LIKE 'advise_a#%'"
     ).fetchall()
     assert len(pre_versions) == 1
-    pre_handles = cur.execute(
-        "SELECT seq FROM tentative_handles"
-    ).fetchall()
+    pre_handles = cur.execute("SELECT seq FROM tentative_handles").fetchall()
     assert len(pre_handles) == 1
 
     # The discard must not raise: under FK=ON, the wrong delete
@@ -3267,13 +3140,10 @@ def test_discard_stale_tentatives_respects_fk(tmp_path: Path) -> None:
 
     # Both rows are gone.
     post_versions = cur.execute(
-        "SELECT seq FROM versions WHERE is_tentative = 1 "
-        "AND written_by LIKE 'advise_a#%'"
+        "SELECT seq FROM versions WHERE is_tentative = 1 AND written_by LIKE 'advise_a#%'"
     ).fetchall()
     assert len(post_versions) == 0
-    post_handles = cur.execute(
-        "SELECT seq FROM tentative_handles"
-    ).fetchall()
+    post_handles = cur.execute("SELECT seq FROM tentative_handles").fetchall()
     assert len(post_handles) == 0
 
     log.close()
@@ -3301,19 +3171,14 @@ class _DenyChildrenAdapter:
 
     def prepare(self, request: Any) -> Any:
         if request.state_id in self.denied:
-            raise AssertionError(
-                f"state {request.state_id!r} must not be re-invoked "
-                "on resume"
-            )
+            raise AssertionError(f"state {request.state_id!r} must not be re-invoked on resume")
         self.invocations.append(f"prepare:{request.state_id}")
         return self._inner.prepare(request)
 
     def invoke(self, prepared: Any) -> Any:
         sid = prepared.request.state_id
         if sid in self.denied:
-            raise AssertionError(
-                f"state {sid!r} must not be re-invoked on resume"
-            )
+            raise AssertionError(f"state {sid!r} must not be re-invoked on resume")
         self.invocations.append(f"invoke:{sid}")
         return self._inner.invoke(prepared)
 
@@ -3331,9 +3196,7 @@ def _registry_with_deny(deny: _DenyChildrenAdapter) -> Any:
     from orchestra.registry.registry import ProfileRegistry
 
     reg = ProfileRegistry()
-    for type_name in (
-        "text", "json", "messages", "prompt", "schema", "document"
-    ):
+    for type_name in ("text", "json", "messages", "prompt", "schema", "document"):
         reg.register_artifact_type(type_name)
     reg.register_actor_backing("model", lambda: deny)
     reg.register_actor_backing("human", _Human)
@@ -3358,9 +3221,7 @@ def _resume_with_registry(
     replay = replay_log(str(log_path))
     workflow = load_workflow(workflow_path, registry)
     store = ArtifactStore(run_dir / "store.sqlite")
-    log = LogWriter(
-        log_path, replay.last_run_id, start_seq=replay.next_seq
-    )
+    log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
     run_resume_hooks(workflow, registry, replay, log)
     vi = VisibilityIndex(persist_path=run_dir / "visibility.json")
     vi.replace_from(replay.visibility_statuses)
@@ -3386,10 +3247,7 @@ def _resume_with_registry(
             and replay.current_state not in {"done", "stop"}
         ):
             executor.resume_pending_transition(replay.current_state)
-        if (
-            replay.pending_fan_out_transition is not None
-            and replay.open_fan_out is None
-        ):
+        if replay.pending_fan_out_transition is not None and replay.open_fan_out is None:
             pft = replay.pending_fan_out_transition
             executor.close_fan_out_pending_transition(
                 parent_state_name=str(pft["parent_state"]),
@@ -3405,10 +3263,7 @@ def _resume_with_registry(
             completed = {
                 name: env
                 for name, env in replay.envelopes.items()
-                if (
-                    name in children_list
-                    and env.attempt == replay.attempts.get(name)
-                )
+                if (name in children_list and env.attempt == replay.attempts.get(name))
             }
             executor.resume_fan_out(
                 parent_state_name=str(of.get("parent_state", "")),
@@ -3449,9 +3304,7 @@ def test_resume_after_fan_out_end_writes_missing_parent_transition(
         if seen_fan_out_end and r.event == "transition" and r.state_id == "launch":
             cutoff = i
             break
-    assert cutoff is not None, (
-        "the fixture must emit a parent transition after fan_out_end"
-    )
+    assert cutoff is not None, "the fixture must emit a parent transition after fan_out_end"
     truncated = records[:cutoff]
     log_path.write_text(
         "\n".join(r.to_json() for r in truncated) + "\n",
@@ -3467,9 +3320,7 @@ def test_resume_after_fan_out_end_writes_missing_parent_transition(
     assert pft["target"] == "join_state"
     assert isinstance(pft["attempt"], int) and pft["attempt"] >= 1
 
-    deny = _DenyChildrenAdapter(
-        denied={"launch", "advise_a", "advise_b", "advise_c"}
-    )
+    deny = _DenyChildrenAdapter(denied={"launch", "advise_a", "advise_b", "advise_c"})
     reg2 = _registry_with_deny(deny)
     workflow_path = run_dir.parent / "fan.orc"
     terminal = _resume_with_registry(
@@ -3480,23 +3331,13 @@ def test_resume_after_fan_out_end_writes_missing_parent_transition(
     )
     assert terminal == "done"
     # No fan-out child or parent invocation should have run.
-    assert all(
-        not s.startswith("prepare:advise_") for s in deny.invocations
-    )
-    assert all(
-        not s.startswith("invoke:advise_") for s in deny.invocations
-    )
+    assert all(not s.startswith("prepare:advise_") for s in deny.invocations)
+    assert all(not s.startswith("invoke:advise_") for s in deny.invocations)
     assert "prepare:launch" not in deny.invocations
 
     records2 = _read_records(run_dir)
-    launch_transitions = [
-        r
-        for r in records2
-        if r.event == "transition" and r.state_id == "launch"
-    ]
-    assert len(launch_transitions) == 1, (
-        "resume must write exactly one parent transition record"
-    )
+    launch_transitions = [r for r in records2 if r.event == "transition" and r.state_id == "launch"]
+    assert len(launch_transitions) == 1, "resume must write exactly one parent transition record"
     assert launch_transitions[0].fields["target"] == "join_state"
     # The closure transition's attempt matches fan_out_end's attempt.
     fan_out_end = next(r for r in records2 if r.event == "fan_out_end")
@@ -3520,9 +3361,7 @@ def test_resume_open_fan_out_writes_parent_transition_with_correct_attempt(
     # Truncate the log so fan_out_start is durable but no children
     # have completed (drop everything after fan_out_start).
     records = _read_records(run_dir)
-    cutoff = next(
-        i for i, r in enumerate(records) if r.event == "fan_out_start"
-    )
+    cutoff = next(i for i, r in enumerate(records) if r.event == "fan_out_start")
     truncated = records[: cutoff + 1]
     fan_out_start_attempt = records[cutoff].attempt
     assert isinstance(fan_out_start_attempt, int)
@@ -3549,11 +3388,7 @@ def test_resume_open_fan_out_writes_parent_transition_with_correct_attempt(
     fan_starts = [r for r in records2 if r.event == "fan_out_start"]
     fan_resumes = [r for r in records2 if r.event == "fan_out_resume"]
     fan_ends = [r for r in records2 if r.event == "fan_out_end"]
-    parent_transitions = [
-        r
-        for r in records2
-        if r.event == "transition" and r.state_id == "launch"
-    ]
+    parent_transitions = [r for r in records2 if r.event == "transition" and r.state_id == "launch"]
     assert len(fan_starts) == 1
     assert len(fan_resumes) == 1
     assert len(fan_ends) == 1
@@ -3585,12 +3420,8 @@ def test_resume_after_fan_out_end_does_not_double_count_parent_step(
 
     # First record the live-path step counts as the contract.
     live_records = _read_records(run_dir)
-    live_transitions = [
-        r for r in live_records if r.event == "transition"
-    ]
-    live_step_counts = [
-        int(r.fields["step_count"]) for r in live_transitions
-    ]
+    live_transitions = [r for r in live_records if r.event == "transition"]
+    live_step_counts = [int(r.fields["step_count"]) for r in live_transitions]
     assert live_step_counts == sorted(live_step_counts), (
         "the live path's step_counts must be monotonically increasing"
     )
@@ -3624,12 +3455,8 @@ def test_resume_after_fan_out_end_does_not_double_count_parent_step(
     assert terminal == "done"
 
     resumed_records = _read_records(run_dir)
-    resumed_transitions = [
-        r for r in resumed_records if r.event == "transition"
-    ]
-    resumed_step_counts = [
-        int(r.fields["step_count"]) for r in resumed_transitions
-    ]
+    resumed_transitions = [r for r in resumed_records if r.event == "transition"]
+    resumed_step_counts = [int(r.fields["step_count"]) for r in resumed_transitions]
     # The launch transition that resume wrote must close the same
     # step the live launch transition closed: step_counts identical.
     assert resumed_step_counts == live_step_counts, (
@@ -3723,9 +3550,9 @@ def test_fan_out_payload_files_do_not_collide_under_barrier(
 
     records = LogReader(run_dir / "log.jsonl").read_all()
     child_exits = [
-        r for r in records
-        if r.event == "state_exit"
-        and r.state_id in {"advise_a", "advise_b", "advise_c"}
+        r
+        for r in records
+        if r.event == "state_exit" and r.state_id in {"advise_a", "advise_b", "advise_c"}
     ]
     assert len(child_exits) == 3, (
         f"expected one state_exit per child, got "
@@ -3899,9 +3726,7 @@ workflow guard_check
         retries={"fast": 0, "slow": 0},
     )
 
-    selected = executor._select_transition_decl(
-        fast_state, fast_envelope, snapshot=snapshot
-    )
+    selected = executor._select_transition_decl(fast_state, fast_envelope, snapshot=snapshot)
     # Pre-fix: live attempts.slow == 5 satisfies ``> 0``, so the
     # first transition (=> stop) wins and selected.target == "stop"
     # with retry_max == None. The fast child does NOT retry.
@@ -4045,20 +3870,13 @@ workflow retry_order
     # invokes exactly once. Pre-fix the scan-for-retry would have
     # tripped the retry-shaped transition and called invoke twice.
     assert flaky_calls["n"] == 1, (
-        f"first-match selection should not retry; got "
-        f"flaky_calls={flaky_calls['n']}"
+        f"first-match selection should not retry; got flaky_calls={flaky_calls['n']}"
     )
 
     # Aggregate result of the fan_out group: error (the child errored
     # on its only invocation). Routing goes through abort_state.
     records = LogReader(run_dir / "log.jsonl").read_all()
-    abort_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "abort_state"
-    ]
-    join_enters = [
-        r for r in records
-        if r.event == "state_enter" and r.state_id == "join_state"
-    ]
+    abort_enters = [r for r in records if r.event == "state_enter" and r.state_id == "abort_state"]
+    join_enters = [r for r in records if r.event == "state_enter" and r.state_id == "join_state"]
     assert len(abort_enters) == 1, "abort_state must run on child error"
     assert join_enters == [], "join_state must not run on child error"

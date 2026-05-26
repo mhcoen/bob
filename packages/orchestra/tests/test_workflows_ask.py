@@ -41,9 +41,7 @@ def test_ask_workflow_loads(
     workflow = load_workflow(path, _pre_load_registry())
     assert workflow.name == name
     assert [s.name for s in workflow.states] == expected_states
-    assert sorted(s.role for s in workflow.states if s.role is not None) == (
-        expected_roles
-    )
+    assert sorted(s.role for s in workflow.states if s.role is not None) == (expected_roles)
 
 
 @pytest.mark.parametrize(
@@ -83,8 +81,7 @@ def test_ask_workflow_states_are_all_model_kind(name: str) -> None:
     workflow = load_workflow(path, _pre_load_registry())
     for state in workflow.states:
         assert state.actor.kind == "model", (
-            f"{name}: state {state.name} has actor kind "
-            f"{state.actor.kind}, expected 'model'"
+            f"{name}: state {state.name} has actor kind {state.actor.kind}, expected 'model'"
         )
 
 
@@ -100,6 +97,4 @@ def test_ask_workflow_terminates_in_done() -> None:
         workflow = load_workflow(path, _pre_load_registry())
         answer_state = next(s for s in workflow.states if s.name == "answer")
         targets = {t.target for t in answer_state.transitions}
-        assert "done" in targets, (
-            f"{name}: 'answer' state must transition to 'done'"
-        )
+        assert "done" in targets, f"{name}: 'answer' state must transition to 'done'"

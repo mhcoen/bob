@@ -41,9 +41,7 @@ SUPPORTED_FIELD_TYPES: frozenset[str] = frozenset(
 )
 """Top-level field types the v0 schema validator supports."""
 
-EXTRACTABLE_FIELD_TYPES: frozenset[str] = frozenset(
-    {"string", "integer", "number", "boolean"}
-)
+EXTRACTABLE_FIELD_TYPES: frozenset[str] = frozenset({"string", "integer", "number", "boolean"})
 """Source-field types admissible in an ``extract`` clause. Object and
 array source fields are a load error in v0."""
 
@@ -107,48 +105,30 @@ def load_schema(path: Path) -> SchemaSpec:
     except json.JSONDecodeError as exc:
         raise SchemaError(f"schema file is not valid JSON {path}: {exc}") from exc
     if not isinstance(data, dict):
-        raise SchemaError(
-            f"schema {path}: root must be a JSON object, "
-            f"got {type(data).__name__}"
-        )
+        raise SchemaError(f"schema {path}: root must be a JSON object, got {type(data).__name__}")
     return _build_spec(data, str(path))
 
 
 def _build_spec(data: dict[str, Any], where: str) -> SchemaSpec:
     if data.get("type") != "object":
-        raise SchemaError(
-            f"schema {where}: root 'type' must be 'object', "
-            f"got {data.get('type')!r}"
-        )
+        raise SchemaError(f"schema {where}: root 'type' must be 'object', got {data.get('type')!r}")
     _reject_unsupported_keywords(data, where, top_level=True)
 
     properties_raw = data.get("properties")
     if not isinstance(properties_raw, dict):
-        raise SchemaError(
-            f"schema {where}: 'properties' must be an object"
-        )
+        raise SchemaError(f"schema {where}: 'properties' must be an object")
     required_raw = data.get("required") or []
-    if not isinstance(required_raw, list) or not all(
-        isinstance(r, str) for r in required_raw
-    ):
-        raise SchemaError(
-            f"schema {where}: 'required' must be a list of strings"
-        )
+    if not isinstance(required_raw, list) or not all(isinstance(r, str) for r in required_raw):
+        raise SchemaError(f"schema {where}: 'required' must be a list of strings")
     required: set[str] = set(required_raw)
 
     if "decision" not in required:
-        raise SchemaError(
-            f"schema {where}: 'decision' must be listed in 'required'"
-        )
+        raise SchemaError(f"schema {where}: 'decision' must be listed in 'required'")
     decision_schema = properties_raw.get("decision")
     if not isinstance(decision_schema, dict):
-        raise SchemaError(
-            f"schema {where}: 'decision' property is missing"
-        )
+        raise SchemaError(f"schema {where}: 'decision' property is missing")
     if decision_schema.get("type") != "string":
-        raise SchemaError(
-            f"schema {where}: 'decision' type must be 'string'"
-        )
+        raise SchemaError(f"schema {where}: 'decision' type must be 'string'")
     enum_raw = decision_schema.get("enum")
     if (
         not isinstance(enum_raw, list)
@@ -156,26 +136,17 @@ def _build_spec(data: dict[str, Any], where: str) -> SchemaSpec:
         or not all(isinstance(v, str) and v for v in enum_raw)
     ):
         raise SchemaError(
-            f"schema {where}: 'decision' must declare a non-empty 'enum' "
-            "of string values"
+            f"schema {where}: 'decision' must declare a non-empty 'enum' of string values"
         )
     if len(set(enum_raw)) != len(enum_raw):
-        raise SchemaError(
-            f"schema {where}: 'decision' enum values must be unique"
-        )
+        raise SchemaError(f"schema {where}: 'decision' enum values must be unique")
 
     field_types: dict[str, str] = {}
     for prop_name, prop_schema in properties_raw.items():
         if not isinstance(prop_name, str):
-            raise SchemaError(
-                f"schema {where}: property name must be a string, "
-                f"got {prop_name!r}"
-            )
+            raise SchemaError(f"schema {where}: property name must be a string, got {prop_name!r}")
         if not isinstance(prop_schema, dict):
-            raise SchemaError(
-                f"schema {where}: property {prop_name!r} schema must "
-                "be an object"
-            )
+            raise SchemaError(f"schema {where}: property {prop_name!r} schema must be an object")
         prop_type = prop_schema.get("type")
         if prop_type not in SUPPORTED_FIELD_TYPES:
             raise SchemaError(
@@ -188,16 +159,11 @@ def _build_spec(data: dict[str, Any], where: str) -> SchemaSpec:
 
     add_props = data.get("additionalProperties", True)
     if not isinstance(add_props, bool):
-        raise SchemaError(
-            f"schema {where}: 'additionalProperties' must be a bool"
-        )
+        raise SchemaError(f"schema {where}: 'additionalProperties' must be a bool")
 
     for r in required:
         if r not in properties_raw:
-            raise SchemaError(
-                f"schema {where}: required field {r!r} is not listed in "
-                "'properties'"
-            )
+            raise SchemaError(f"schema {where}: required field {r!r} is not listed in 'properties'")
 
     return SchemaSpec(
         path=where,
@@ -235,30 +201,18 @@ _REJECTED_KEYWORDS: frozenset[str] = frozenset(
 )
 
 
-def _reject_unsupported_keywords(
-    obj: dict[str, Any], where: str, *, top_level: bool
-) -> None:
-    allowed = (
-        _SUPPORTED_TOPLEVEL_KEYWORDS if top_level else _SUPPORTED_PROPERTY_KEYWORDS
-    )
+def _reject_unsupported_keywords(obj: dict[str, Any], where: str, *, top_level: bool) -> None:
+    allowed = _SUPPORTED_TOPLEVEL_KEYWORDS if top_level else _SUPPORTED_PROPERTY_KEYWORDS
     for key in obj.keys():
         if key in _REJECTED_KEYWORDS:
-            raise SchemaError(
-                f"schema {where}: keyword {key!r} is not supported in v0"
-            )
+            raise SchemaError(f"schema {where}: keyword {key!r} is not supported in v0")
         if key not in allowed:
-            raise SchemaError(
-                f"schema {where}: keyword {key!r} is not recognized"
-            )
+            raise SchemaError(f"schema {where}: keyword {key!r} is not recognized")
 
 
-def _validate_property_subschema(
-    prop_name: str, prop_schema: dict[str, Any], where: str
-) -> None:
+def _validate_property_subschema(prop_name: str, prop_schema: dict[str, Any], where: str) -> None:
     """Recursively check a property's schema for v0 compliance."""
-    _reject_unsupported_keywords(
-        prop_schema, f"{where} (property {prop_name!r})", top_level=False
-    )
+    _reject_unsupported_keywords(prop_schema, f"{where} (property {prop_name!r})", top_level=False)
     prop_type = prop_schema.get("type")
     if prop_type == "array":
         items = prop_schema.get("items")
@@ -273,16 +227,13 @@ def _validate_property_subschema(
                 f"schema {where}: array property {prop_name!r} 'items' "
                 f"type {item_type!r} is unsupported"
             )
-        _validate_property_subschema(
-            f"{prop_name}.items", items, where
-        )
+        _validate_property_subschema(f"{prop_name}.items", items, where)
     elif prop_type == "object":
         # Nested object: recurse with same shape rules but no decision check.
         nested_props = prop_schema.get("properties") or {}
         if not isinstance(nested_props, dict):
             raise SchemaError(
-                f"schema {where}: object property {prop_name!r} "
-                "'properties' must be an object"
+                f"schema {where}: object property {prop_name!r} 'properties' must be an object"
             )
         for sub_name, sub_schema in nested_props.items():
             if not isinstance(sub_schema, dict):
@@ -297,9 +248,7 @@ def _validate_property_subschema(
                     f"{prop_name}.{sub_name} type {sub_type!r} is "
                     "unsupported"
                 )
-            _validate_property_subschema(
-                f"{prop_name}.{sub_name}", sub_schema, where
-            )
+            _validate_property_subschema(f"{prop_name}.{sub_name}", sub_schema, where)
 
 
 # --------------------------------------------------------------------
@@ -323,34 +272,23 @@ def _type_matches(value: Any, expected: str) -> bool:
     return False
 
 
-def _validate_value_against_schema(
-    value: Any, schema: dict[str, Any], path: str
-) -> list[str]:
+def _validate_value_against_schema(value: Any, schema: dict[str, Any], path: str) -> list[str]:
     errors: list[str] = []
     expected_type = schema.get("type")
     if expected_type is None:
         return errors
     if not _type_matches(value, expected_type):
-        errors.append(
-            f"{path}: expected {expected_type}, got "
-            f"{type(value).__name__}"
-        )
+        errors.append(f"{path}: expected {expected_type}, got {type(value).__name__}")
         return errors
     if expected_type == "string":
         enum = schema.get("enum")
         if isinstance(enum, list) and value not in enum:
-            errors.append(
-                f"{path}: value {value!r} is not in enum {enum!r}"
-            )
+            errors.append(f"{path}: value {value!r} is not in enum {enum!r}")
     elif expected_type == "array":
         items_schema = schema.get("items")
         if isinstance(items_schema, dict):
             for i, item in enumerate(value):
-                errors.extend(
-                    _validate_value_against_schema(
-                        item, items_schema, f"{path}[{i}]"
-                    )
-                )
+                errors.extend(_validate_value_against_schema(item, items_schema, f"{path}[{i}]"))
     elif expected_type == "object":
         nested_props = schema.get("properties") or {}
         nested_required = schema.get("required") or []
@@ -358,61 +296,41 @@ def _validate_value_against_schema(
         if isinstance(nested_required, list):
             for r in nested_required:
                 if r not in value:
-                    errors.append(
-                        f"{path}.{r}: required field missing"
-                    )
+                    errors.append(f"{path}.{r}: required field missing")
         if isinstance(nested_props, dict):
             for k, sub_schema in nested_props.items():
                 if k in value and isinstance(sub_schema, dict):
                     errors.extend(
-                        _validate_value_against_schema(
-                            value[k], sub_schema, f"{path}.{k}"
-                        )
+                        _validate_value_against_schema(value[k], sub_schema, f"{path}.{k}")
                     )
             if isinstance(nested_add, bool) and not nested_add:
                 extras = sorted(set(value.keys()) - set(nested_props.keys()))
                 for extra in extras:
-                    errors.append(
-                        f"{path}.{extra}: additional property not "
-                        "permitted"
-                    )
+                    errors.append(f"{path}.{extra}: additional property not permitted")
     return errors
 
 
 def _validate_object(spec: SchemaSpec, value: Any) -> ValidationResult:
     if not isinstance(value, dict):
-        return Invalid(
-            errors=(
-                f"root: expected object, got {type(value).__name__}",
-            )
-        )
+        return Invalid(errors=(f"root: expected object, got {type(value).__name__}",))
     errors: list[str] = []
     for r in spec.required_fields:
         if r not in value:
             errors.append(f"{r}: required field missing")
     for prop_name, prop_schema in spec.properties.items():
         if prop_name in value:
-            errors.extend(
-                _validate_value_against_schema(
-                    value[prop_name], prop_schema, prop_name
-                )
-            )
+            errors.extend(_validate_value_against_schema(value[prop_name], prop_schema, prop_name))
     if not spec.additional_properties:
         extras = sorted(set(value.keys()) - set(spec.properties.keys()))
         for extra in extras:
-            errors.append(
-                f"{extra}: additional property not permitted"
-            )
+            errors.append(f"{extra}: additional property not permitted")
     if errors:
         return Invalid(errors=tuple(errors))
     decision = value.get("decision")
     assert isinstance(decision, str)
     if decision not in spec.decision_enum:
         return Invalid(
-            errors=(
-                f"decision: value {decision!r} is not in enum "
-                f"{list(spec.decision_enum)!r}",
-            )
+            errors=(f"decision: value {decision!r} is not in enum {list(spec.decision_enum)!r}",)
         )
     return Valid(decision=decision)
 

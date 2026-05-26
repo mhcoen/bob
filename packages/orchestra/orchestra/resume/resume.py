@@ -137,14 +137,10 @@ def replay_log(log_path: str | Path) -> ReplayState:
             state.attempts[rec.state_id] = rec.attempt
             attempts_field = rec.fields.get("attempts")
             if isinstance(attempts_field, dict):
-                state.attempts.update(
-                    {k: int(v) for k, v in attempts_field.items()}
-                )
+                state.attempts.update({k: int(v) for k, v in attempts_field.items()})
             retries_field = rec.fields.get("retries")
             if isinstance(retries_field, dict):
-                state.retries.update(
-                    {k: int(v) for k, v in retries_field.items()}
-                )
+                state.retries.update({k: int(v) for k, v in retries_field.items()})
             state.current_state = rec.state_id
             state.last_state_completed = False
             # Round-2 fix: ``last_target`` is a per-state question
@@ -190,16 +186,12 @@ def replay_log(log_path: str | Path) -> ReplayState:
             # the pair gets cleared below; otherwise it stays in the
             # set and cmd_resume refuses to re-enter the state.
             if rec.state_id is not None and rec.attempt is not None:
-                state.committed_without_exit.add(
-                    (rec.state_id, rec.attempt)
-                )
+                state.committed_without_exit.add((rec.state_id, rec.attempt))
         elif rec.event == "state_exit":
             assert rec.state_id is not None
             assert rec.attempt is not None
             state.last_state_completed = True
-            state.committed_without_exit.discard(
-                (rec.state_id, rec.attempt)
-            )
+            state.committed_without_exit.discard((rec.state_id, rec.attempt))
             outcome = rec.fields.get("outcome")
             state.last_outcome = str(outcome) if outcome is not None else None
             # Slice A: invocation_id -> success/error in the
@@ -207,9 +199,7 @@ def replay_log(log_path: str | Path) -> ReplayState:
             inv_id = rec.fields.get("invocation_id")
             if isinstance(inv_id, str):
                 status_field = rec.fields.get("status")
-                state.visibility_statuses[inv_id] = (
-                    "success" if status_field == "ok" else "error"
-                )
+                state.visibility_statuses[inv_id] = "success" if status_field == "ok" else "error"
             # Rebuild the envelope so guards on resumed transitions
             # can reference this state's results.
             err_field = rec.fields.get("error")

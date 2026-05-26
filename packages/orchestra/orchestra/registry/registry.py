@@ -118,9 +118,7 @@ class ProfileRegistry:
             raise RegistryConflict(f"result parser already registered: {parser.name!r}")
         self.result_parsers[parser.name] = parser
 
-    def register_validation_rule(
-        self, name: str, fn: Callable[..., None]
-    ) -> None:
+    def register_validation_rule(self, name: str, fn: Callable[..., None]) -> None:
         if name in self.validation_rules:
             raise RegistryConflict(f"validation rule already registered: {name!r}")
         self.validation_rules[name] = fn
@@ -139,9 +137,7 @@ class ProfileRegistry:
         and runtime checks see the same shape.
         """
         if name in self.transforms:
-            raise RegistryConflict(
-                f"transform already registered: {name!r}"
-            )
+            raise RegistryConflict(f"transform already registered: {name!r}")
         validate_schema(input_schema, where=f"{name!r} input_schema")
         validate_schema(output_schema, where=f"{name!r} output_schema")
         self.transforms[name] = Transform(
@@ -166,9 +162,7 @@ class ProfileRegistry:
         self._adapter_cache[backing] = instance
         return instance
 
-    def parsers_for(
-        self, *, backing: str, artifact_types: tuple[str, ...]
-    ) -> list[ResultParser]:
+    def parsers_for(self, *, backing: str, artifact_types: tuple[str, ...]) -> list[ResultParser]:
         applicable: list[ResultParser] = []
         for parser in self.result_parsers.values():
             if backing not in parser.backing_filter:

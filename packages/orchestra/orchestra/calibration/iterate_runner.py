@@ -72,8 +72,7 @@ def _make_callback(fh: IO[str]) -> Any:
         fh.write(json.dumps(record) + "\n")
         fh.flush()
         line = (
-            f"[{event.kind}] {event.state_name} role={event.role} "
-            f"index={event.index}/{event.total}"
+            f"[{event.kind}] {event.state_name} role={event.role} index={event.index}/{event.total}"
         )
         if event.elapsed_seconds is not None:
             line += f" elapsed={event.elapsed_seconds:.2f}s"
@@ -118,17 +117,13 @@ def main(argv: list[str] | None = None) -> int:
     logs.mkdir(parents=True, exist_ok=True)
     removed = clean_stale_versioned_artifacts(logs)
     if removed:
-        sys.stderr.write(
-            f"cleaned {removed} stale versioned artifact(s) from {logs}\n"
-        )
+        sys.stderr.write(f"cleaned {removed} stale versioned artifact(s) from {logs}\n")
 
     progress_path = logs / "progress.jsonl"
     fh = progress_path.open("w", encoding="utf-8")
     callback = _make_callback(fh)
 
-    cfg_raw = cast(
-        Mapping[str, Any], json.loads(cfg_path.read_text())
-    )
+    cfg_raw = cast(Mapping[str, Any], json.loads(cfg_path.read_text()))
     cfg = OrchestraConfig.from_dict(dict(cfg_raw))
 
     try:
@@ -144,9 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         fh.close()
 
-    sys.stderr.write(
-        f"\nrun_id={result.run_id}\nterminal={result.terminal}\n"
-    )
+    sys.stderr.write(f"\nrun_id={result.run_id}\nterminal={result.terminal}\n")
 
     run_dir = result.log_path.parent
     shutil.copy(result.log_path, logs / "log.jsonl")
@@ -162,6 +155,7 @@ def main(argv: list[str] | None = None) -> int:
     verdicts = dump_versions(cur, "judge_verdict", ".json", logs)
     for i, (_, value, _) in enumerate(verdicts, start=1):
         from orchestra.calibration._runner_common import to_text
+
         (logs / f"verdict_{i}.json").write_text(to_text(value))
     dump_versions(cur, "proposal", ".txt", logs)
     dump_versions(cur, "review_output", ".txt", logs)
@@ -204,9 +198,7 @@ def main(argv: list[str] | None = None) -> int:
         "decision_trajectory": decisions,
         "judge_feedback_strings": feedbacks,
     }
-    (run_dir / "run_meta.json").write_text(
-        json.dumps(meta, indent=2) + "\n"
-    )
+    (run_dir / "run_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     shutil.copy(run_dir / "run_meta.json", logs / "run_meta.json")
 
     summary_lines = [

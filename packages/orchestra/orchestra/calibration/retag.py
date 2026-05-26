@@ -49,9 +49,7 @@ def retag_polluted_meta(meta_path: Path, classifier: str) -> RetagResult:
     the supplied classifier or when meta_path is missing.
     """
     if classifier not in VALID_EXPECTED:
-        raise ValueError(
-            f"classifier must be one of {VALID_EXPECTED}, got {classifier!r}"
-        )
+        raise ValueError(f"classifier must be one of {VALID_EXPECTED}, got {classifier!r}")
     if not meta_path.is_file():
         return RetagResult(False, 0, 0)
     data: dict[str, Any] = json.loads(meta_path.read_text())
@@ -61,9 +59,7 @@ def retag_polluted_meta(meta_path: Path, classifier: str) -> RetagResult:
     if prior == classifier:
         return RetagResult(False, prior_len, len(classifier))
     tags["expected_stuck"] = classifier
-    tags["expected_stuck_corrected_at"] = (
-        datetime.now(UTC).isoformat()
-    )
+    tags["expected_stuck_corrected_at"] = datetime.now(UTC).isoformat()
     tags["expected_stuck_pollution_len"] = prior_len
     meta_path.write_text(json.dumps(data, indent=2) + "\n")
     return RetagResult(True, prior_len, len(classifier))

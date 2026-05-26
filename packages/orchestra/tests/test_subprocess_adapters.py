@@ -167,12 +167,8 @@ def test_write_log_filename_unique_without_state_id(tmp_path: Path) -> None:
     that hand-call write_log), two calls in the same wall-clock
     second must still produce distinct paths via the monotonic
     nanosecond suffix."""
-    p1 = _subprocess.write_log(
-        tmp_path, "task", ["echo"], "body 1", 0
-    )
-    p2 = _subprocess.write_log(
-        tmp_path, "task", ["echo"], "body 2", 0
-    )
+    p1 = _subprocess.write_log(tmp_path, "task", ["echo"], "body 1", 0)
+    p2 = _subprocess.write_log(tmp_path, "task", ["echo"], "body 2", 0)
     assert p1 != p2
     assert p1.read_text().endswith("body 1\n")
     assert p2.read_text().endswith("body 2\n")
@@ -215,9 +211,7 @@ def test_write_log_does_not_persist_prompt_argv(tmp_path: Path) -> None:
     # logged separately; that surface is documented as caller-
     # provided and is the user's choice (a label should not include
     # secrets, but redacting the label is out of scope).
-    cmd_line = next(
-        line for line in body.splitlines() if line.startswith("Command:")
-    )
+    cmd_line = next(line for line in body.splitlines() if line.startswith("Command:"))
     for arg in cmd:
         assert "SECRET_TOKEN_123" not in arg
     assert "SECRET_TOKEN_123" not in cmd_line

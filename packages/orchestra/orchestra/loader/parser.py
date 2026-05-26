@@ -194,9 +194,7 @@ class Parser:
             elif kw == "context_policy":
                 context_policy = self._expect("IDENT").value
             else:
-                raise ParseError(
-                    f"unknown agent field: {kw!r}", line=tok.line
-                )
+                raise ParseError(f"unknown agent field: {kw!r}", line=tok.line)
             self._expect("NEWLINE")
         self._expect("DEDENT")
         if model is None:
@@ -204,9 +202,7 @@ class Parser:
         if adapter is None:
             raise ParseError(f"agent {name!r}: missing 'adapter'", line=0)
         if context_policy is None:
-            raise ParseError(
-                f"agent {name!r}: missing 'context_policy'", line=0
-            )
+            raise ParseError(f"agent {name!r}: missing 'context_policy'", line=0)
         return AgentDecl(
             name=name,
             model=model,
@@ -257,9 +253,7 @@ class Parser:
                         self._expect("NEWLINE")
                     self._expect("DEDENT")
             else:
-                raise ParseError(
-                    f"unknown group field: {kw!r}", line=tok.line
-                )
+                raise ParseError(f"unknown group field: {kw!r}", line=tok.line)
         self._expect("DEDENT")
         if kind is None:
             raise ParseError(f"group {name!r}: missing 'kind'", line=0)
@@ -306,8 +300,7 @@ class Parser:
                 elif kw == "schema":
                     if schema_path is not None:
                         raise ParseError(
-                            f"artifact {name!r}: 'schema' declared more "
-                            "than once",
+                            f"artifact {name!r}: 'schema' declared more than once",
                             line=kw_tok.line,
                         )
                     schema_path = self._expect("STRING").value
@@ -380,9 +373,7 @@ class Parser:
                 elif kind in ("shell", "human"):
                     ref = None
                 else:
-                    raise ParseError(
-                        f"unknown actor backing: {kind!r}", line=tok.line
-                    )
+                    raise ParseError(f"unknown actor backing: {kind!r}", line=tok.line)
                 self._expect("NEWLINE")
                 actor = ActorBinding(kind=kind, ref=ref)  # type: ignore[arg-type]
             elif kw == "role":
@@ -479,15 +470,11 @@ class Parser:
                 backing_options["require_diff"] = bv == "true"
                 self._expect("NEWLINE")
             else:
-                raise ParseError(
-                    f"unknown state clause: {kw!r}", line=tok.line
-                )
+                raise ParseError(f"unknown state clause: {kw!r}", line=tok.line)
 
         self._expect("DEDENT")
         if actor is None:
-            raise ParseError(
-                f"state {name!r} has no 'actor' clause", line=start_tok.line
-            )
+            raise ParseError(f"state {name!r} has no 'actor' clause", line=start_tok.line)
         if actor.kind == "human" and options:
             backing_options["options"] = list(options)
         return StateDecl(
@@ -520,9 +507,7 @@ class Parser:
                     self._advance()
                     template_vars.append(self._expect("IDENT").value)
             self._expect("NEWLINE")
-            return PromptSource(
-                kind="template", path=path, template_vars=tuple(template_vars)
-            )
+            return PromptSource(kind="template", path=path, template_vars=tuple(template_vars))
         if kind == "from":
             head = self._expect("IDENT").value
             parts = [head]
@@ -564,9 +549,7 @@ class Parser:
                     f"retry clause is legal only on 'error' or 'timeout', got {outcome!r}",
                     line=on_tok.line,
                 )
-            return Transition(
-                outcome=outcome, target=target, guard=None, retry_max=n
-            )
+            return Transition(outcome=outcome, target=target, guard=None, retry_max=n)
         if self._peek().kind == "IDENT" and self._peek().value == "fan_out":
             if guard is not None:
                 raise ParseError(
@@ -575,8 +558,7 @@ class Parser:
                 )
             if outcome != "complete":
                 raise ParseError(
-                    "fan_out is legal only on 'complete', got "
-                    f"{outcome!r}",
+                    f"fan_out is legal only on 'complete', got {outcome!r}",
                     line=on_tok.line,
                 )
             return self._parse_fan_out_tail(outcome=outcome, line=on_tok.line)
@@ -639,9 +621,7 @@ class Parser:
 
     def _parse_or(self) -> GuardExpr:
         first = self._parse_and()
-        if not (
-            self._peek().kind == "IDENT" and self._peek().value == "or"
-        ):
+        if not (self._peek().kind == "IDENT" and self._peek().value == "or"):
             return first
         parts: list[GuardExpr] = [first]
         while self._peek().kind == "IDENT" and self._peek().value == "or":
@@ -651,9 +631,7 @@ class Parser:
 
     def _parse_and(self) -> GuardExpr:
         first = self._parse_unary()
-        if not (
-            self._peek().kind == "IDENT" and self._peek().value == "and"
-        ):
+        if not (self._peek().kind == "IDENT" and self._peek().value == "and"):
             return first
         parts: list[GuardExpr] = [first]
         while self._peek().kind == "IDENT" and self._peek().value == "and":
@@ -706,9 +684,7 @@ class Parser:
                 self._advance()
                 return Literal_(value=None)
             return self._parse_reference()
-        raise ParseError(
-            f"expected operand, got {tok.kind}", line=tok.line
-        )
+        raise ParseError(f"expected operand, got {tok.kind}", line=tok.line)
 
     def _parse_literal(self) -> Any:
         tok = self._peek()
@@ -725,9 +701,7 @@ class Parser:
             if tok.value == "null":
                 self._advance()
                 return None
-        raise ParseError(
-            f"expected literal, got {tok.kind} {tok.value!r}", line=tok.line
-        )
+        raise ParseError(f"expected literal, got {tok.kind} {tok.value!r}", line=tok.line)
 
     # ----- token helpers -----------------------------------------
 

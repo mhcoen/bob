@@ -159,9 +159,7 @@ def test_snapshot_handles_state_prompt(tmp_path: Path) -> None:
         rewritten.states[0].prompt is not None
         and rewritten.states[0].prompt.path == state_entry["snapshot_path"]
     )
-    assert (
-        rewritten.roles[0].default_prompt.path == role_entry["snapshot_path"]
-    )
+    assert rewritten.roles[0].default_prompt.path == role_entry["snapshot_path"]
 
 
 def test_snapshot_skips_non_file_kinds(tmp_path: Path) -> None:
@@ -173,9 +171,7 @@ def test_snapshot_skips_non_file_kinds(tmp_path: Path) -> None:
         roles=(
             RoleDecl(
                 name="r",
-                default_prompt=PromptSource(
-                    kind="from", from_ref="some.field"
-                ),
+                default_prompt=PromptSource(kind="from", from_ref="some.field"),
             ),
         ),
         states=(
@@ -211,9 +207,7 @@ def test_snapshot_skips_missing_files(tmp_path: Path) -> None:
         roles=(
             RoleDecl(
                 name="r",
-                default_prompt=PromptSource(
-                    kind="file", path="not-here.md"
-                ),
+                default_prompt=PromptSource(kind="file", path="not-here.md"),
             ),
         ),
         states=(
@@ -312,9 +306,7 @@ def test_restore_with_symlink_retargeting_does_not_bypass(
         roles=(
             RoleDecl(
                 name="r",
-                default_prompt=PromptSource(
-                    kind="file", path="templates/active.md"
-                ),
+                default_prompt=PromptSource(kind="file", path="templates/active.md"),
             ),
         ),
         states=(
@@ -349,9 +341,7 @@ def test_restore_with_symlink_retargeting_does_not_bypass(
         roles=(
             RoleDecl(
                 name="r",
-                default_prompt=PromptSource(
-                    kind="file", path="templates/active.md"
-                ),
+                default_prompt=PromptSource(kind="file", path="templates/active.md"),
             ),
         ),
         states=(
@@ -441,6 +431,7 @@ def test_snapshot_copies_schema_into_run_dir(tmp_path: Path) -> None:
 
 def test_snapshot_schema_file_mode_is_private(tmp_path: Path) -> None:
     import os
+
     workflow = _build_schema_workflow(tmp_path)
     run_dir = tmp_path / "run"
     run_dir.mkdir()

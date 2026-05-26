@@ -204,9 +204,7 @@ class _PerRoleDispatcher:
 
     def __init__(self, role_to_adapter: dict[str, Any]) -> None:
         if not role_to_adapter:
-            raise WorkflowApiError(
-                "_PerRoleDispatcher requires at least one role-adapter binding"
-            )
+            raise WorkflowApiError("_PerRoleDispatcher requires at least one role-adapter binding")
         self._adapters: dict[str, Any] = dict(role_to_adapter)
         # Note: the dispatcher does not expose a static
         # ``manages_own_timeout`` attribute. The executor consults the
@@ -229,8 +227,7 @@ class _PerRoleDispatcher:
             # a different role's adapter.
             return next(iter(self._adapters.values()))
         raise WorkflowApiError(
-            f"no adapter configured for role {role!r}. "
-            f"Configured roles: {sorted(self._adapters)}"
+            f"no adapter configured for role {role!r}. Configured roles: {sorted(self._adapters)}"
         )
 
     def prepare(self, request: InvocationRequest) -> PreparedInvocation:
@@ -301,18 +298,21 @@ identities in clear."""
 def _wrap_progress_callback(
     user_callback: ProgressCallback | None,
     role_bindings: dict[str, RoleBinding],
-) -> Callable[
-    [
-        str,
-        str,
-        str | None,
-        int,
-        int,
-        float | None,
-        tuple[tuple[str, str | None], ...] | None,
-    ],
-    None,
-] | None:
+) -> (
+    Callable[
+        [
+            str,
+            str,
+            str | None,
+            int,
+            int,
+            float | None,
+            tuple[tuple[str, str | None], ...] | None,
+        ],
+        None,
+    ]
+    | None
+):
     """Adapt the user-facing ``ProgressCallback`` to the executor's
     callback signature, enriching each event with the resolved adapter
     and model from the role binding.
@@ -422,9 +422,7 @@ def _register_builtin_transforms(reg: ProfileRegistry) -> None:
         reg.register_transform(
             "anonymize_outputs",
             anonymize_outputs,
-            input_schema=dict(
-                _ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA
-            ),
+            input_schema=dict(_ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA),
             output_schema={"anon_map": dict[str, str]},
         )
     if "finish_panel" not in reg.transforms:
@@ -477,8 +475,7 @@ def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
     adapter_name = binding.adapter
     if adapter_name not in _ADAPTER_CLASSES:
         raise WorkflowApiError(
-            f"unknown adapter {adapter_name!r}. Known: "
-            f"{sorted(_ADAPTER_CLASSES)}"
+            f"unknown adapter {adapter_name!r}. Known: {sorted(_ADAPTER_CLASSES)}"
         )
     cls = _ADAPTER_CLASSES[adapter_name]
     kind = _ADAPTER_TO_KIND[adapter_name]
@@ -488,8 +485,11 @@ def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
     if binding.tools and binding.tools != "default":
         if adapter_name == "claude_code_agent":
             params.setdefault("default_allowed_tools", binding.tools)
-        elif adapter_name in ("claude_code_text", "claude_code_text_kimi",
-                              "claude_code_text_deepseek"):
+        elif adapter_name in (
+            "claude_code_text",
+            "claude_code_text_kimi",
+            "claude_code_text_deepseek",
+        ):
             params.setdefault("allowed_tools", binding.tools)
         elif adapter_name == "codex_agent":
             params.setdefault("default_sandbox", binding.tools)
@@ -588,9 +588,7 @@ def _apply_instruction_templates(
         resolved = _resolve_template(
             override,
             project_dir=project_dir,
-            workflow_source_dir=Path(workflow.source_dir)
-            if workflow.source_dir
-            else None,
+            workflow_source_dir=Path(workflow.source_dir) if workflow.source_dir else None,
             run_dir=run_dir,
             role_name=role.name,
         )
@@ -723,9 +721,7 @@ def _resolve_workflow_role_bindings(
     resolved: dict[str, RoleBinding] = {}
     for role_name in needed:
         try:
-            resolved[role_name] = _resolve_role_binding(
-                workflow_name, role_name, config
-            )
+            resolved[role_name] = _resolve_role_binding(workflow_name, role_name, config)
         except ConfigError as exc:
             resolution_errors.append(str(exc))
     if resolution_errors:
@@ -791,8 +787,7 @@ def _validate_role_bindings(
             )
     if mismatches:
         raise ConfigError(
-            f"workflow {workflow_name!r}: role-adapter kind mismatch:\n  "
-            + "\n  ".join(mismatches)
+            f"workflow {workflow_name!r}: role-adapter kind mismatch:\n  " + "\n  ".join(mismatches)
         )
     _apply_workflow_specific_rules(workflow, resolved, workflow_name)
     return resolved
@@ -889,8 +884,7 @@ def _validate_iterate_until_acceptable(
     missing = [r for r in ("proposer", "reviewer") if r not in role_bindings]
     if missing:
         raise ConfigError(
-            f"workflow {workflow_name!r}: missing required role "
-            f"bindings: {missing!r}"
+            f"workflow {workflow_name!r}: missing required role bindings: {missing!r}"
         )
     proposer_identity = _actor_identity(role_bindings["proposer"])
     reviewer_identity = _actor_identity(role_bindings["reviewer"])
@@ -923,8 +917,7 @@ def _validate_prji(
     missing = [r for r in required if r not in role_bindings]
     if missing:
         raise ConfigError(
-            f"workflow {workflow_name!r}: missing required role "
-            f"bindings: {missing!r}"
+            f"workflow {workflow_name!r}: missing required role bindings: {missing!r}"
         )
     distinct_roles = ("proposer", "reviewer", "implementer")
     seen: dict[tuple[str, str | None], str] = {}
@@ -997,8 +990,7 @@ def _validate_council_four(
     missing = [r for r in required if r not in role_bindings]
     if missing:
         raise ConfigError(
-            f"workflow {workflow_name!r}: missing required role "
-            f"bindings: {missing!r}"
+            f"workflow {workflow_name!r}: missing required role bindings: {missing!r}"
         )
     proposer_roles = (
         "proposer_code",
@@ -1042,20 +1034,13 @@ def _validate_inputs(workflow: Workflow, inputs: dict[str, Any]) -> None:
     declared = {ext.name for ext in workflow.external_inputs}
     extras = set(inputs) - declared
     if extras:
-        raise WorkflowApiError(
-            f"unknown inputs: {sorted(extras)}. "
-            f"Declared: {sorted(declared)}"
-        )
+        raise WorkflowApiError(f"unknown inputs: {sorted(extras)}. Declared: {sorted(declared)}")
     missing = declared - set(inputs)
     if missing:
-        raise WorkflowApiError(
-            f"missing required inputs: {sorted(missing)}"
-        )
+        raise WorkflowApiError(f"missing required inputs: {sorted(missing)}")
 
 
-def _gather_artifacts(
-    workflow: Workflow, store: ArtifactStore
-) -> dict[str, ArtifactView]:
+def _gather_artifacts(workflow: Workflow, store: ArtifactStore) -> dict[str, ArtifactView]:
     out: dict[str, ArtifactView] = {}
     for art in workflow.artifacts:
         latest = store.read_latest(art.name)
@@ -1179,9 +1164,7 @@ def run_workflow(
         cfg = config
     workflow_cfg = cfg.workflow(name)
 
-    workflow_path = resolve_workflow_path(
-        workflow_cfg.pattern, project_dir=project_dir
-    )
+    workflow_path = resolve_workflow_path(workflow_cfg.pattern, project_dir=project_dir)
 
     # Two-pass load: a pre-registry with placeholder backings for any
     # kind the workflow might reference (the loader validates that
@@ -1234,16 +1217,13 @@ def run_workflow(
     log_path = run_dir / "log.jsonl"
     log = LogWriter(log_path, run_id)
     from orchestra.prompt_snapshot import snapshot_prompt_sources
-    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(
-        workflow, run_dir
-    )
+
+    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
     log.write(
         "run_start",
         fields={
             "workflow_path": str(Path(workflow_path).resolve()),
-            "workflow_digest": hashlib.sha256(
-                Path(workflow_path).read_bytes()
-            ).hexdigest(),
+            "workflow_digest": hashlib.sha256(Path(workflow_path).read_bytes()).hexdigest(),
             "prompt_snapshot_manifest": prompt_snapshot_manifest,
             "workflow_name": workflow.name,
             "config_name": name,
@@ -1256,9 +1236,7 @@ def run_workflow(
     )
 
     resolved_progress = _resolve_progress_callback(progress_callback, quiet)
-    executor_progress = _wrap_progress_callback(
-        resolved_progress, role_bindings
-    )
+    executor_progress = _wrap_progress_callback(resolved_progress, role_bindings)
     executor = Executor(
         workflow=workflow,
         registry=registry,
@@ -1295,14 +1273,10 @@ def run_workflow(
         envelope = next(iter(reversed(list(envelopes.values()))))
     else:
         store.close()
-        raise WorkflowApiError(
-            f"workflow {name!r} produced no envelopes"
-        )
+        raise WorkflowApiError(f"workflow {name!r} produced no envelopes")
 
     artifacts = _gather_artifacts(workflow, store)
-    summary = _build_summary(
-        terminal=terminal, envelope=envelope, artifacts=artifacts
-    )
+    summary = _build_summary(terminal=terminal, envelope=envelope, artifacts=artifacts)
     store.close()
 
     return WorkflowRunResult(
@@ -1361,18 +1335,13 @@ def run_verb(
     carries no text response.
     """
     if verb_name not in config.verbs:
-        raise WorkflowApiError(
-            f"unknown verb {verb_name!r}. Configured: "
-            f"{sorted(config.verbs)}"
-        )
+        raise WorkflowApiError(f"unknown verb {verb_name!r}. Configured: {sorted(config.verbs)}")
     workflow_name = config.verbs[verb_name].workflow
     inputs: dict[str, Any] = {"query": query}
     # history threads through only when the workflow asks for it.
     # The pre-load registry is enough to introspect declared inputs;
     # run_workflow does the real load again with the runtime registry.
-    workflow_path = resolve_workflow_path(
-        workflow_name, project_dir=project_dir
-    )
+    workflow_path = resolve_workflow_path(workflow_name, project_dir=project_dir)
     workflow = load_workflow(workflow_path, _pre_load_registry())
     declared = {ext.name for ext in workflow.external_inputs}
     if "history" in declared:

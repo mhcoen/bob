@@ -135,24 +135,12 @@ class ClaudeCodeTextAdapter:
         ext = request.external_inputs or {}
         backing = request.backing_options or {}
 
-        model = (
-            backing.get("model_override")
-            or self._default_model
-            or binding.get("model")
-        )
-        project_dir = Path(
-            backing.get("project_dir")
-            or ext.get("project_dir")
-            or os.getcwd()
-        )
+        model = backing.get("model_override") or self._default_model or binding.get("model")
+        project_dir = Path(backing.get("project_dir") or ext.get("project_dir") or os.getcwd())
         log_dir = Path(
-            backing.get("log_dir")
-            or ext.get("log_dir")
-            or project_dir / ".mcloop" / "logs"
+            backing.get("log_dir") or ext.get("log_dir") or project_dir / ".mcloop" / "logs"
         )
-        task_label = str(
-            backing.get("task_label") or ext.get("task_label") or ""
-        )
+        task_label = str(backing.get("task_label") or ext.get("task_label") or "")
         timeout_s = (
             int(request.timeout_ms / 1000)
             if request.timeout_ms is not None
@@ -168,9 +156,7 @@ class ClaudeCodeTextAdapter:
         )
 
         prompt_bytes = prompt.encode("utf-8") if prompt else b""
-        prompt_sha256 = (
-            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
-        )
+        prompt_sha256 = hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
         return PreparedInvocation(
             request=request,
             summary={
@@ -276,7 +262,11 @@ class ClaudeCodeTextAdapter:
         attempt.
         """
         output, exit_code = run_session(
-            cmd, cwd, env=env, timeout=timeout, silent=True,
+            cmd,
+            cwd,
+            env=env,
+            timeout=timeout,
+            silent=True,
             stdin_bytes=stdin_bytes,
         )
         if not self._retry_on_throttle:
@@ -288,7 +278,11 @@ class ClaudeCodeTextAdapter:
             time.sleep(backoff)
             backoff *= 2
             output, exit_code = run_session(
-                cmd, cwd, env=env, timeout=timeout, silent=True,
+                cmd,
+                cwd,
+                env=env,
+                timeout=timeout,
+                silent=True,
                 stdin_bytes=stdin_bytes,
             )
         return output, exit_code

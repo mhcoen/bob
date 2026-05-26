@@ -144,14 +144,10 @@ def test_build_command_skip_git_repo_check_follows_exec() -> None:
     contacting the model."""
     adapter = CodexTextAdapter()
     cmd = adapter._build_command(model="gpt-5-codex")
-    assert "--skip-git-repo-check" in cmd, (
-        "codex_text command must include --skip-git-repo-check"
-    )
+    assert "--skip-git-repo-check" in cmd, "codex_text command must include --skip-git-repo-check"
     exec_idx = cmd.index("exec")
     skip_idx = cmd.index("--skip-git-repo-check")
-    assert skip_idx > exec_idx, (
-        "--skip-git-repo-check must follow the exec subcommand"
-    )
+    assert skip_idx > exec_idx, "--skip-git-repo-check must follow the exec subcommand"
 
 
 # --------------------------------------------------------------------
@@ -188,6 +184,7 @@ def test_prepare_summary_carries_kind_adapter_cli_command(
     # snapshot integrity, confirming two runs got the same input)
     # without retaining content.
     import hashlib as _hashlib
+
     expected_digest = _hashlib.sha256(b"say hi").hexdigest()
     assert prepared.summary["prompt_sha256"] == expected_digest
     assert "prompt_preview" not in prepared.summary
@@ -249,9 +246,7 @@ def test_prepare_model_resolution_order() -> None:
     assert p.summary["model"] == "default-m"
     # binding when no defaults
     plain = CodexTextAdapter()
-    p = plain.prepare(
-        _request(actor_binding={"kind": "model", "model": "binding-m"})
-    )
+    p = plain.prepare(_request(actor_binding={"kind": "model", "model": "binding-m"}))
     assert p.summary["model"] == "binding-m"
 
 
@@ -279,9 +274,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     """Codex emits final text on stdout. The adapter must NOT call
     ``extract_final_text`` on it. A stream-json-shaped string fed
     through invoke() should reach the caller unchanged."""
-    fake_stdout = (
-        '{"type": "result", "subtype": "success", "result": "would-be-extracted"}'
-    )
+    fake_stdout = '{"type": "result", "subtype": "success", "result": "would-be-extracted"}'
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
@@ -293,9 +286,7 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
         lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
     )
     adapter = CodexTextAdapter()
-    prepared = adapter.prepare(
-        _request(prompt="x", external_inputs={"project_dir": str(tmp_path)})
-    )
+    prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
     # Output is the raw fake_stdout, not "would-be-extracted".
     assert payload["output"] == fake_stdout

@@ -74,9 +74,7 @@ def parse_invocation_id(invocation_id: str) -> InvocationParts:
     """Inverse of ``make_invocation_id``."""
     parts = invocation_id.split("::")
     if len(parts) != 3:
-        raise ValueError(
-            f"invocation_id {invocation_id!r} is not in run_id::state::seq form"
-        )
+        raise ValueError(f"invocation_id {invocation_id!r} is not in run_id::state::seq form")
     run_id, state_name, attempt_seq = parts
     return InvocationParts(
         run_id=run_id,
@@ -159,9 +157,7 @@ class VisibilityIndex:
         self._persist_path.parent.mkdir(parents=True, exist_ok=True)
         # Atomic-ish write: write to a sibling and rename. The index
         # is a small JSON object so this is cheap.
-        tmp = self._persist_path.with_suffix(
-            self._persist_path.suffix + ".tmp"
-        )
+        tmp = self._persist_path.with_suffix(self._persist_path.suffix + ".tmp")
         tmp.write_text(json.dumps(self._statuses, sort_keys=True), encoding="utf-8")
         tmp.replace(self._persist_path)
 

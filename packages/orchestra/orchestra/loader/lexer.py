@@ -28,16 +28,16 @@ TokenKind = Literal[
     "IDENT",
     "INT",
     "STRING",
-    "ARROW",     # =>
+    "ARROW",  # =>
     "COMMA",
     "DOT",
-    "LT",        # <
-    "LE",        # <=
-    "GT",        # >
-    "GE",        # >=
-    "EQ",        # ==
-    "NEQ",       # !=
-    "BANG",      # !
+    "LT",  # <
+    "LE",  # <=
+    "GT",  # >
+    "GE",  # >=
+    "EQ",  # ==
+    "NEQ",  # !=
+    "BANG",  # !
     "LPAREN",
     "RPAREN",
     "LBRACKET",  # [
@@ -205,9 +205,7 @@ class Lexer:
                 yield self._lex_ident()
                 continue
             if ch.isdigit() or (
-                ch == "-"
-                and self._pos + 1 < len(self._src)
-                and self._src[self._pos + 1].isdigit()
+                ch == "-" and self._pos + 1 < len(self._src) and self._src[self._pos + 1].isdigit()
             ):
                 yield self._lex_number()
                 continue
@@ -302,11 +300,7 @@ class Lexer:
             self._col += 3
             buf: list[str] = []
             while self._pos < len(self._src):
-                if (
-                    self._src[self._pos] == '"'
-                    and self._peek(1) == '"'
-                    and self._peek(2) == '"'
-                ):
+                if self._src[self._pos] == '"' and self._peek(1) == '"' and self._peek(2) == '"':
                     self._pos += 3
                     self._col += 3
                     return Token("STRING", "".join(buf), self._line, start_col)
@@ -333,9 +327,7 @@ class Lexer:
                 self._col += 1
                 return Token("STRING", "".join(buf2), self._line, start_col)
             if ch == "\n":
-                raise ParseError(
-                    "newline inside short string", line=self._line
-                )
+                raise ParseError("newline inside short string", line=self._line)
             if ch == "\\":
                 buf2.append(self._lex_escape())
                 continue
@@ -371,9 +363,7 @@ class Lexer:
         while self._pos < len(self._src) and _is_ident_cont(self._src[self._pos]):
             self._pos += 1
             self._col += 1
-        return Token(
-            "IDENT", self._src[start : self._pos], self._line, start_col
-        )
+        return Token("IDENT", self._src[start : self._pos], self._line, start_col)
 
     def _lex_number(self) -> Token:
         start = self._pos
@@ -384,6 +374,4 @@ class Lexer:
         while self._pos < len(self._src) and self._src[self._pos].isdigit():
             self._pos += 1
             self._col += 1
-        return Token(
-            "INT", self._src[start : self._pos], self._line, start_col
-        )
+        return Token("INT", self._src[start : self._pos], self._line, start_col)

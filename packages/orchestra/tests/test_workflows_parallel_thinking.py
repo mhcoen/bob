@@ -74,9 +74,7 @@ class _RecordingModelAdapter:
             raise RuntimeError(f"injected failure on state {state_id}")
         text = self._responses.get(state_id)
         if text is None:
-            raise AssertionError(
-                f"recording adapter has no response for {state_id!r}"
-            )
+            raise AssertionError(f"recording adapter has no response for {state_id!r}")
         return {
             "output": text,
             "verdict": None,
@@ -209,9 +207,7 @@ def test_parallel_thinking_happy_path(tmp_path: Path) -> None:
 def test_parallel_thinking_panelist_failure_routes_to_stop(
     tmp_path: Path,
 ) -> None:
-    adapter, run_dir, terminal, store = _run_parallel_thinking(
-        tmp_path, fail_states={"p3"}
-    )
+    adapter, run_dir, terminal, store = _run_parallel_thinking(tmp_path, fail_states={"p3"})
     try:
         assert terminal == "stop", (
             "a failed panelist must route the workflow to stop "
@@ -291,31 +287,25 @@ def test_parallel_thinking_five_panelists_succeed(tmp_path: Path) -> None:
         for i, state_name in enumerate(PANELIST_STATES, start=1):
             art = store.read_latest(f"panelist_{i}_output")
             assert art is not None, (
-                f"panelist_{i}_output must be committed when all five "
-                "panelists succeed"
+                f"panelist_{i}_output must be committed when all five panelists succeed"
             )
             assert art.value == PANELIST_RESPONSES[state_name]
         # finish_panel ran at the join site and wrote finish_marker.
         finish_art = store.read_latest("finish_marker")
         assert finish_art is not None, (
-            "finish_panel transform must run at the join site and "
-            "write finish_marker"
+            "finish_panel transform must run at the join site and write finish_marker"
         )
         assert finish_art.value == "ok"
         records = LogReader(run_dir / "log.jsonl").read_all()
         # The finish state's state_exit confirms the transform's
         # success path closed the workflow.
-        finish_exits = [
-            r for r in records
-            if r.event == "state_exit" and r.state_id == "finish"
-        ]
+        finish_exits = [r for r in records if r.event == "state_exit" and r.state_id == "finish"]
         assert len(finish_exits) == 1
         assert finish_exits[0].fields["status"] == "ok"
         assert finish_exits[0].fields["outcome"] == "complete"
         # The finish state's transition routed to the done terminal.
         finish_transitions = [
-            r for r in records
-            if r.event == "transition" and r.state_id == "finish"
+            r for r in records if r.event == "transition" and r.state_id == "finish"
         ]
         assert len(finish_transitions) == 1
         assert finish_transitions[0].fields["target"] == "done"

@@ -112,10 +112,7 @@ def test_extract_with_string_containing_braces():
     """Brace characters inside a JSON string value do not affect the
     scanner's depth tracking. The whole top-level object is captured
     correctly even when its string values contain JSON-like fragments."""
-    text = (
-        '{"decision": "iterate", '
-        '"feedback": "the prior verdict was {decision: iterate} again"}'
-    )
+    text = '{"decision": "iterate", "feedback": "the prior verdict was {decision: iterate} again"}'
     out = _extract_last_json_object(text)
     assert out["decision"] == "iterate"
     assert "{decision: iterate}" in out["feedback"]

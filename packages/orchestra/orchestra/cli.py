@@ -103,31 +103,23 @@ def _parse_external_input(decl: ExternalInputDecl, raw: str) -> Any:
         try:
             return json.loads(raw)
         except json.JSONDecodeError as exc:
-            raise SystemExit(
-                f"--input {decl.name}={raw!r}: invalid JSON ({exc})"
-            ) from exc
+            raise SystemExit(f"--input {decl.name}={raw!r}: invalid JSON ({exc})") from exc
     if t == "integer":
         try:
             return int(raw)
         except ValueError as exc:
-            raise SystemExit(
-                f"--input {decl.name}={raw!r}: not an integer ({exc})"
-            ) from exc
+            raise SystemExit(f"--input {decl.name}={raw!r}: not an integer ({exc})") from exc
     if t == "decimal":
         try:
             return float(raw)
         except ValueError as exc:
-            raise SystemExit(
-                f"--input {decl.name}={raw!r}: not a decimal ({exc})"
-            ) from exc
+            raise SystemExit(f"--input {decl.name}={raw!r}: not a decimal ({exc})") from exc
     if t == "boolean":
         if raw.lower() in ("true", "1", "yes"):
             return True
         if raw.lower() in ("false", "0", "no"):
             return False
-        raise SystemExit(
-            f"--input {decl.name}={raw!r}: not a boolean (expected true/false)"
-        )
+        raise SystemExit(f"--input {decl.name}={raw!r}: not a boolean (expected true/false)")
     # Pass-through for unknown types; slice 2+ may add structured
     # artifact-type inputs.
     return raw
@@ -209,8 +201,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 2
 
     external: dict[str, Any] = {
-        name: _parse_external_input(declared[name], raw)
-        for name, raw in raw_inputs.items()
+        name: _parse_external_input(declared[name], raw) for name, raw in raw_inputs.items()
     }
 
     run_id = new_run_id()
@@ -234,9 +225,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log = LogWriter(run_dir / "log.jsonl", run_id)
     from orchestra.prompt_snapshot import snapshot_prompt_sources
-    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(
-        workflow, run_dir
-    )
+
+    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
     log.write(
         "run_start",
         fields={
@@ -311,15 +301,13 @@ def cmd_resume(args: argparse.Namespace) -> int:
             current_digest = _workflow_digest(Path(workflow_path))
         except OSError as exc:
             print(
-                f"refusing to resume: cannot read workflow file "
-                f"{workflow_path}: {exc}",
+                f"refusing to resume: cannot read workflow file {workflow_path}: {exc}",
                 file=sys.stderr,
             )
             return 2
         if current_digest != recorded_digest:
             print(
-                "refusing to resume: workflow file has changed since "
-                "the original run.",
+                "refusing to resume: workflow file has changed since the original run.",
                 file=sys.stderr,
             )
             print(
@@ -367,26 +355,17 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # were created with prompt_manifest but no
     # prompt_snapshot_manifest. New runs skip this gate entirely
     # because the snapshot path is the source of truth.
-    recorded_snapshot_manifest = run_start.fields.get(
-        "prompt_snapshot_manifest"
-    )
+    recorded_snapshot_manifest = run_start.fields.get("prompt_snapshot_manifest")
     recorded_manifest = run_start.fields.get("prompt_manifest")
-    if (
-        recorded_snapshot_manifest is None
-        and isinstance(recorded_manifest, dict)
-    ):
+    if recorded_snapshot_manifest is None and isinstance(recorded_manifest, dict):
         diffs: list[str] = []
-        recorded_clean: dict[str, str] = {
-            str(k): str(v) for k, v in recorded_manifest.items()
-        }
+        recorded_clean: dict[str, str] = {str(k): str(v) for k, v in recorded_manifest.items()}
         for path_str, recorded_digest_v in sorted(recorded_clean.items()):
             path_obj = Path(path_str)
             if not path_obj.is_file():
                 diffs.append(f"  removed: {path_str}")
                 continue
-            current_digest_v = hashlib.sha256(
-                path_obj.read_bytes()
-            ).hexdigest()
+            current_digest_v = hashlib.sha256(path_obj.read_bytes()).hexdigest()
             if current_digest_v != recorded_digest_v:
                 diffs.append(
                     f"  changed: {path_str} "
@@ -425,14 +404,12 @@ def cmd_resume(args: argparse.Namespace) -> int:
             SnapshotIntegrityError,
             restore_prompt_snapshots,
         )
+
         try:
-            workflow = restore_prompt_snapshots(
-                workflow, recorded_snapshot_manifest
-            )
+            workflow = restore_prompt_snapshots(workflow, recorded_snapshot_manifest)
         except SnapshotIntegrityError as exc:
             print(
-                "refusing to resume: prompt snapshot integrity "
-                "check failed.",
+                "refusing to resume: prompt snapshot integrity check failed.",
                 file=sys.stderr,
             )
             print(f"  {exc}", file=sys.stderr)
@@ -463,10 +440,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # where the committed row is durable but no log record names it.
     # Querying the store keyed by invocation_id is authoritative for
     # that earlier window.
-    if (
-        replay.current_state is not None
-        and not replay.last_state_completed
-    ):
+    if replay.current_state is not None and not replay.last_state_completed:
         target_state = replay.current_state
         state_decl = next(
             (s for s in workflow.states if s.name == target_state),
@@ -477,13 +451,11 @@ def cmd_resume(args: argparse.Namespace) -> int:
             store_orphans: list[Any] = []
             if target_attempt is not None and replay.last_run_id:
                 from orchestra.visibility import make_invocation_id
-                target_inv = make_invocation_id(
-                    replay.last_run_id, target_state, target_attempt
-                )
+
+                target_inv = make_invocation_id(replay.last_run_id, target_state, target_attempt)
                 store_orphans = store.list_committed_by_invocation(target_inv)
             log_orphan_attempts = sorted(
-                a for s, a in replay.committed_without_exit
-                if s == target_state
+                a for s, a in replay.committed_without_exit if s == target_state
             )
             if store_orphans or log_orphan_attempts:
                 refusal_reason: str
@@ -526,7 +498,6 @@ def cmd_resume(args: argparse.Namespace) -> int:
                 store.close()
                 return 2
 
-
     log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
 
     run_resume_hooks(workflow, registry, replay, log)
@@ -536,6 +507,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     # statuses to the index BEFORE constructing the Executor so the
     # store consults the log-derived view from the first read.
     from orchestra.visibility import VisibilityIndex
+
     visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
     visibility_index.replace_from(replay.visibility_statuses)
 
@@ -575,10 +547,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
         # durable in ``fan_out_end`` but the transition record
         # unwritten. Close the missing transition without
         # re-dispatching the fan-out children.
-        if (
-            replay.pending_fan_out_transition is not None
-            and replay.open_fan_out is None
-        ):
+        if replay.pending_fan_out_transition is not None and replay.open_fan_out is None:
             pft = replay.pending_fan_out_transition
             executor.close_fan_out_pending_transition(
                 parent_state_name=str(pft["parent_state"]),
@@ -608,10 +577,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             completed = {
                 name: env
                 for name, env in replay.envelopes.items()
-                if (
-                    name in children_list
-                    and env.attempt == replay.attempts.get(name)
-                )
+                if (name in children_list and env.attempt == replay.attempts.get(name))
             }
             executor.resume_fan_out(
                 parent_state_name=str(of.get("parent_state", "")),
@@ -663,8 +629,7 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
     err = sys.stderr
     if verb_name not in config.verbs:
         print(
-            f"unknown verb {verb_name!r}. Configured: "
-            f"{sorted(config.verbs)}",
+            f"unknown verb {verb_name!r}. Configured: {sorted(config.verbs)}",
             file=err,
         )
         return 2
@@ -677,13 +642,12 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
         return 1
     try:
         from orchestra.api import _pre_load_registry
+
         workflow = load_workflow(workflow_path, _pre_load_registry())
     except OrchestraError as exc:
         print(f"  workflow failed to load: {exc}", file=err)
         return 1
-    role_names = sorted(
-        {state.role for state in workflow.states if state.role is not None}
-    )
+    role_names = sorted({state.role for state in workflow.states if state.role is not None})
     print(
         "Required roles: " + (", ".join(role_names) if role_names else "(none)"),
         file=out,
@@ -760,8 +724,7 @@ def _dispatch_verb(
         return 2
     if not query_words:
         print(
-            f"verb {verb_name!r}: no query supplied. "
-            f"Usage: orchestra {verb_name} <words...>",
+            f"verb {verb_name!r}: no query supplied. Usage: orchestra {verb_name} <words...>",
             file=sys.stderr,
         )
         return 2
@@ -798,14 +761,13 @@ def main(argv: list[str] | None = None) -> int:
             print(err or "config unavailable", file=sys.stderr)
             return 1
         from orchestra.repl import run_repl
+
         return run_repl(config, progress_callback=progress_cb)
 
     # Handle the verb-style surface before argparse so positional
     # words can flow through unmangled.
     if raw_args and raw_args[0] not in _RESERVED_COMMANDS and not raw_args[0].startswith("-"):
-        return _dispatch_verb(
-            raw_args[0], raw_args[1:], progress_callback=progress_cb
-        )
+        return _dispatch_verb(raw_args[0], raw_args[1:], progress_callback=progress_cb)
 
     if raw_args and raw_args[0] == "help":
         config, _err = _try_load_merged_config(project_dir=Path.cwd())
@@ -813,8 +775,7 @@ def main(argv: list[str] | None = None) -> int:
             return _print_help_overview(config)
         if config is None:
             print(
-                "no config; cannot describe verb. Create "
-                f"{global_config_path()} first.",
+                f"no config; cannot describe verb. Create {global_config_path()} first.",
                 file=sys.stderr,
             )
             return 1
@@ -829,9 +790,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_p = sub.add_parser("run", help="Execute a workflow")
     run_p.add_argument("workflow")
-    run_p.add_argument(
-        "--input", action="append", help="External input as key=value", default=[]
-    )
+    run_p.add_argument("--input", action="append", help="External input as key=value", default=[])
     run_p.set_defaults(func=cmd_run)
 
     resume_p = sub.add_parser("resume", help="Resume a previously interrupted run")

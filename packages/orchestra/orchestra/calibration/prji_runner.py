@@ -89,8 +89,7 @@ def _make_callback(
         fh.write(json.dumps(record) + "\n")
         fh.flush()
         line = (
-            f"[{event.kind}] {event.state_name} role={event.role} "
-            f"index={event.index}/{event.total}"
+            f"[{event.kind}] {event.state_name} role={event.role} index={event.index}/{event.total}"
         )
         if event.elapsed_seconds is not None:
             line += f" elapsed={event.elapsed_seconds:.2f}s"
@@ -155,9 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     logs.mkdir(parents=True, exist_ok=True)
     removed = clean_stale_versioned_artifacts(logs)
     if removed:
-        sys.stderr.write(
-            f"cleaned {removed} stale versioned artifact(s) from {logs}\n"
-        )
+        sys.stderr.write(f"cleaned {removed} stale versioned artifact(s) from {logs}\n")
 
     progress_path = logs / "progress.jsonl"
     fh = progress_path.open("w", encoding="utf-8")
@@ -165,9 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     implement_attempt: dict[str, int] = {"counter": 0}
     callback = _make_callback(fh, sandbox, logs, scenario_id, implement_attempt)
 
-    cfg_raw = cast(
-        Mapping[str, Any], json.loads(cfg_path.read_text())
-    )
+    cfg_raw = cast(Mapping[str, Any], json.loads(cfg_path.read_text()))
     cfg = OrchestraConfig.from_dict(dict(cfg_raw))
 
     try:
@@ -187,9 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         fh.close()
 
-    sys.stderr.write(
-        f"\nrun_id={result.run_id}\nterminal={result.terminal}\n"
-    )
+    sys.stderr.write(f"\nrun_id={result.run_id}\nterminal={result.terminal}\n")
 
     run_dir = result.log_path.parent
     shutil.copy(result.log_path, logs / "log.jsonl")
@@ -247,9 +240,7 @@ def main(argv: list[str] | None = None) -> int:
         "judge_feedback_strings": feedbacks,
         "implement_step_count": implement_attempt["counter"],
     }
-    (run_dir / "run_meta.json").write_text(
-        json.dumps(meta, indent=2) + "\n"
-    )
+    (run_dir / "run_meta.json").write_text(json.dumps(meta, indent=2) + "\n")
     shutil.copy(run_dir / "run_meta.json", logs / "run_meta.json")
 
     summary_lines = [

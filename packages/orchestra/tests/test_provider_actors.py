@@ -231,10 +231,9 @@ def test_retry_on_throttle_succeeds_on_second_attempt(
             return "API error: status 403 Forbidden\n", 1
         return '{"type":"text","text":"ok"}\n', 0
 
-    with mock.patch(
-        "orchestra.adapters.claude_code_text.run_session", fake_run_session
-    ):
+    with mock.patch("orchestra.adapters.claude_code_text.run_session", fake_run_session):
         from pathlib import Path
+
         out, exit_code = adapter._run_with_optional_retry(
             ["claude", "-p"],
             Path("/tmp"),
@@ -271,10 +270,9 @@ def test_retry_on_throttle_gives_up_after_max_retries(
         calls.append(1)
         return "Error: 429 too many requests\n", 1
 
-    with mock.patch(
-        "orchestra.adapters.claude_code_text.run_session", fake_run_session
-    ):
+    with mock.patch("orchestra.adapters.claude_code_text.run_session", fake_run_session):
         from pathlib import Path
+
         out, exit_code = adapter._run_with_optional_retry(
             ["claude", "-p"],
             Path("/tmp"),
@@ -299,10 +297,9 @@ def test_retry_disabled_passes_through_failure(
         calls.append(1)
         return "API error: status 403 Forbidden\n", 1
 
-    with mock.patch(
-        "orchestra.adapters.claude_code_text.run_session", fake_run_session
-    ):
+    with mock.patch("orchestra.adapters.claude_code_text.run_session", fake_run_session):
         from pathlib import Path
+
         out, exit_code = adapter._run_with_optional_retry(
             ["claude", "-p"],
             Path("/tmp"),
@@ -337,10 +334,9 @@ def test_retry_returns_immediately_on_success(
         calls.append(1)
         return '{"type":"text","text":"first try"}\n', 0
 
-    with mock.patch(
-        "orchestra.adapters.claude_code_text.run_session", fake_run_session
-    ):
+    with mock.patch("orchestra.adapters.claude_code_text.run_session", fake_run_session):
         from pathlib import Path
+
         out, exit_code = adapter._run_with_optional_retry(
             ["claude", "-p"],
             Path("/tmp"),

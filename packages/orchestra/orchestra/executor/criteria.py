@@ -94,9 +94,7 @@ def _coverage(
             continue
         seen_counts[cid_raw] = seen_counts.get(cid_raw, 0) + 1
     seen_ids = set(seen_counts)
-    duplicates = tuple(
-        sorted(cid for cid, count in seen_counts.items() if count > 1)
-    )
+    duplicates = tuple(sorted(cid for cid, count in seen_counts.items() if count > 1))
     configured_ids = {c.id for c in configured}
     missing = tuple(sorted(configured_ids - seen_ids))
     extras = tuple(sorted(seen_ids - configured_ids))

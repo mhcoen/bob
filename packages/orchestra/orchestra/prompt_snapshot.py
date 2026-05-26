@@ -142,11 +142,7 @@ def snapshot_prompt_sources(
         # threat model is multi-user POSIX systems.
         pass
 
-    base = (
-        Path(workflow.source_dir)
-        if workflow.source_dir
-        else Path.cwd()
-    )
+    base = Path(workflow.source_dir) if workflow.source_dir else Path.cwd()
 
     manifest: list[dict[str, Any]] = []
 
@@ -156,9 +152,7 @@ def snapshot_prompt_sources(
         if resolved is None:
             new_roles.append(role)
             continue
-        snapshot_name = _snapshot_filename(
-            "role", role.name, str(resolved)
-        )
+        snapshot_name = _snapshot_filename("role", role.name, str(resolved))
         snapshot_path = snapshot_dir / snapshot_name
         _copy_private(resolved, snapshot_path)
         digest = _digest_file(snapshot_path)
@@ -172,9 +166,7 @@ def snapshot_prompt_sources(
                 "sha256": digest,
             }
         )
-        new_default = replace(
-            role.default_prompt, path=str(snapshot_path)
-        )
+        new_default = replace(role.default_prompt, path=str(snapshot_path))
         new_roles.append(replace(role, default_prompt=new_default))
 
     new_states: list[StateDecl] = []
@@ -186,9 +178,7 @@ def snapshot_prompt_sources(
         if resolved is None:
             new_states.append(state)
             continue
-        snapshot_name = _snapshot_filename(
-            "state", state.name, str(resolved)
-        )
+        snapshot_name = _snapshot_filename("state", state.name, str(resolved))
         snapshot_path = snapshot_dir / snapshot_name
         _copy_private(resolved, snapshot_path)
         digest = _digest_file(snapshot_path)
@@ -264,9 +254,7 @@ class SnapshotIntegrityError(Exception):
     """
 
 
-def restore_prompt_snapshots(
-    workflow: Workflow, manifest: list[dict[str, Any]]
-) -> Workflow:
+def restore_prompt_snapshots(workflow: Workflow, manifest: list[dict[str, Any]]) -> Workflow:
     """Rewrite ``workflow`` so file-backed prompts point at the
     recorded snapshot files. Verify each snapshot's current digest
     matches the recorded one; raise ``SnapshotIntegrityError`` on
@@ -295,14 +283,11 @@ def restore_prompt_snapshots(
             or not isinstance(snapshot_path_str, str)
             or not isinstance(recorded_digest, str)
         ):
-            raise SnapshotIntegrityError(
-                f"malformed snapshot manifest entry: {entry!r}"
-            )
+            raise SnapshotIntegrityError(f"malformed snapshot manifest entry: {entry!r}")
         snapshot_path = Path(snapshot_path_str)
         if not snapshot_path.is_file():
             raise SnapshotIntegrityError(
-                f"snapshot file missing for {kind} {name!r}: "
-                f"{snapshot_path}"
+                f"snapshot file missing for {kind} {name!r}: {snapshot_path}"
             )
         current_digest = _digest_file(snapshot_path)
         if current_digest != recorded_digest:
@@ -320,9 +305,7 @@ def restore_prompt_snapshots(
         elif kind == "schema":
             by_schema[name] = snapshot_path_str
         else:
-            raise SnapshotIntegrityError(
-                f"unknown snapshot kind {kind!r} for {name!r}"
-            )
+            raise SnapshotIntegrityError(f"unknown snapshot kind {kind!r} for {name!r}")
 
     new_roles: list[RoleDecl] = []
     for role in workflow.roles:
@@ -336,11 +319,7 @@ def restore_prompt_snapshots(
     new_states: list[StateDecl] = []
     for state in workflow.states:
         snap = by_state.get(state.name)
-        if (
-            snap is None
-            or state.prompt is None
-            or state.prompt.kind not in ("file", "template")
-        ):
+        if snap is None or state.prompt is None or state.prompt.kind not in ("file", "template"):
             new_states.append(state)
             continue
         new_prompt = replace(state.prompt, path=snap)

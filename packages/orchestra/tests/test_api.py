@@ -76,9 +76,7 @@ def test_resolve_applies_override_replacing_keys() -> None:
             ),
         },
     )
-    binding = _resolve_role_binding(
-        "code_edit_aggressive", "drafter", cfg
-    )
+    binding = _resolve_role_binding("code_edit_aggressive", "drafter", cfg)
     assert binding.adapter == "claude_code_text"
     assert binding.model == "deepseek-v4-pro"
     assert binding.parameters == {"temperature": 0.0}

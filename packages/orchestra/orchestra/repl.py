@@ -126,13 +126,13 @@ def _format_markdown_transcript(turns: list[Turn]) -> str:
 
 
 def _format_json_transcript(turns: list[Turn]) -> str:
-    return json.dumps(
-        [
-            {"verb": t.verb, "query": t.query, "answer": t.answer}
-            for t in turns
-        ],
-        indent=2,
-    ) + "\n"
+    return (
+        json.dumps(
+            [{"verb": t.verb, "query": t.query, "answer": t.answer} for t in turns],
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 # --------------------------------------------------------------------
@@ -174,8 +174,7 @@ def _cmd_use(state: ReplState, args: list[str]) -> SlashOutcome:
     target = args[0]
     if target not in state.config.verbs:
         print(
-            f"unknown workflow {target!r}. Configured: "
-            f"{sorted(state.config.verbs)}",
+            f"unknown workflow {target!r}. Configured: {sorted(state.config.verbs)}",
             file=sys.stderr,
         )
         return SlashOutcome()

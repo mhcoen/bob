@@ -175,9 +175,7 @@ def test_retag_overwrites_polluted_classifier(tmp_path: Path) -> None:
     """Polluted (whole-file) classifier overwritten with the correct token."""
     polluted = "negative\n\n# 1400-char prose ...\n" * 20
     meta = tmp_path / "run_meta.json"
-    meta.write_text(
-        json.dumps({"tags": {"expected_stuck": polluted}}) + "\n"
-    )
+    meta.write_text(json.dumps({"tags": {"expected_stuck": polluted}}) + "\n")
 
     result = retag_polluted_meta(meta, "negative")
     assert result.changed is True
@@ -193,9 +191,7 @@ def test_retag_overwrites_polluted_classifier(tmp_path: Path) -> None:
 
 def test_retag_noop_when_already_correct(tmp_path: Path) -> None:
     meta = tmp_path / "run_meta.json"
-    meta.write_text(
-        json.dumps({"tags": {"expected_stuck": "positive"}}) + "\n"
-    )
+    meta.write_text(json.dumps({"tags": {"expected_stuck": "positive"}}) + "\n")
     result = retag_polluted_meta(meta, "positive")
     assert result.changed is False
     refreshed = json.loads(meta.read_text())
@@ -229,9 +225,7 @@ def test_parse_verdict_clean_json(tmp_path: Path) -> None:
 def test_parse_verdict_wrapped_object(tmp_path: Path) -> None:
     """Tolerant fallback: wrapped JSON like F1 unwraps."""
     p = tmp_path / "verdict_2.json"
-    p.write_text(
-        'leading prose\n{"decision": "iterate", "feedback": "more"}\ntrailing\n'
-    )
+    p.write_text('leading prose\n{"decision": "iterate", "feedback": "more"}\ntrailing\n')
     parsed = parse_verdict(p)
     assert parsed == {"decision": "iterate", "feedback": "more"}
 
@@ -259,9 +253,7 @@ def test_scenario_rows_two_cycle_iterate(tmp_path: Path) -> None:
     (scenario / "expected.txt").write_text("negative\n")
     logs = scenario / "logs"
     logs.mkdir()
-    (logs / "verdict_1.json").write_text(
-        json.dumps({"decision": "iterate", "feedback": "first"})
-    )
+    (logs / "verdict_1.json").write_text(json.dumps({"decision": "iterate", "feedback": "first"}))
     (logs / "verdict_2.json").write_text(
         json.dumps({"decision": "stuck", "feedback": "still first"})
     )
@@ -300,12 +292,8 @@ def test_scenario_rows_skips_stale_higher_numbered_only_when_logs_pristine(
     logs = scenario / "logs"
     logs.mkdir()
     # Pre-populate as a 2-cycle prior-run shape.
-    (logs / "verdict_1.json").write_text(
-        json.dumps({"decision": "iterate", "feedback": "f1"})
-    )
-    (logs / "verdict_2.json").write_text(
-        json.dumps({"decision": "stuck", "feedback": "f2"})
-    )
+    (logs / "verdict_1.json").write_text(json.dumps({"decision": "iterate", "feedback": "f1"}))
+    (logs / "verdict_2.json").write_text(json.dumps({"decision": "stuck", "feedback": "f2"}))
     spec = ScenarioSpec(
         scenario_id="scn", scenario_dir=scenario, workflow="iterate_until_acceptable"
     )
@@ -316,9 +304,7 @@ def test_scenario_rows_skips_stale_higher_numbered_only_when_logs_pristine(
     # only verdict_1.json. Without the cleanup the prior verdict_2.json
     # would survive and pollute the count.
     clean_stale_versioned_artifacts(logs)
-    (logs / "verdict_1.json").write_text(
-        json.dumps({"decision": "accept", "feedback": "done"})
-    )
+    (logs / "verdict_1.json").write_text(json.dumps({"decision": "accept", "feedback": "done"}))
     _, summary_after = scenario_rows(spec)
     assert summary_after["judge_calls"] == 1
     assert summary_after["decision_trajectory"] == ["accept"]
@@ -346,15 +332,11 @@ def _seed_scenario(
 def test_lint_passes_when_all_ids_present(tmp_path: Path) -> None:
     _seed_scenario(
         tmp_path / "ok",
-        task_text=(
-            "Task with criteria.\n"
-            "  1. exact_12_words: ...\n"
-            "  2. ends_question: ...\n"
-        ),
+        task_text=("Task with criteria.\n  1. exact_12_words: ...\n  2. ends_question: ...\n"),
         config={
             "criteria": [
                 {"id": "exact_12_words", "description": "d", "required": True},
-                {"id": "ends_question",  "description": "d", "required": True},
+                {"id": "ends_question", "description": "d", "required": True},
             ]
         },
     )
@@ -371,7 +353,7 @@ def test_lint_fails_when_id_missing_from_task_md(tmp_path: Path) -> None:
         config={
             "criteria": [
                 {"id": "exact_12_words", "description": "d", "required": True},
-                {"id": "ends_question",  "description": "d", "required": True},
+                {"id": "ends_question", "description": "d", "required": True},
             ]
         },
     )
@@ -454,6 +436,4 @@ def test_fixture_scenarios_lint_clean(scenario_dir: Path) -> None:
     that DO declare criteria must have all ids present in task.md.
     """
     result = lint_scenario(scenario_dir)
-    assert result.ok, (
-        f"lint failed for {scenario_dir}: missing ids {result.missing_in_task_md}"
-    )
+    assert result.ok, f"lint failed for {scenario_dir}: missing ids {result.missing_in_task_md}"

@@ -103,14 +103,10 @@ def validate_schema(schema: dict[str, Any], *, where: str) -> None:
     which schema (input or output) failed.
     """
     if not isinstance(schema, dict):
-        raise RegistryConflict(
-            f"transform {where}: schema must be a dict[str, type]"
-        )
+        raise RegistryConflict(f"transform {where}: schema must be a dict[str, type]")
     for key, t in schema.items():
         if not isinstance(key, str):
-            raise RegistryConflict(
-                f"transform {where}: schema keys must be str, got {key!r}"
-            )
+            raise RegistryConflict(f"transform {where}: schema keys must be str, got {key!r}")
         if not is_supported_type(t):
             raise RegistryConflict(
                 f"transform {where}: type for {key!r} is {type_label(t)}, "
@@ -161,9 +157,7 @@ class TransformContext:
     sorted_input_keys: list[str]
 
 
-TransformCallable = Callable[
-    [dict[str, Any], TransformContext], dict[str, Any]
-]
+TransformCallable = Callable[[dict[str, Any], TransformContext], dict[str, Any]]
 
 
 @dataclass(frozen=True)
@@ -186,9 +180,7 @@ class Transform:
 # --------------------------------------------------------------------
 
 
-def anonymize_outputs(
-    inputs: dict[str, Any], ctx: TransformContext
-) -> dict[str, Any]:
+def anonymize_outputs(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
     """Map named string inputs to anonymous keys ``A``, ``B``, ``C``...
 
     Determinism contract: the seed is derived from
@@ -206,9 +198,7 @@ def anonymize_outputs(
     # non-ASCII characters (``ensure_ascii=False`` emits raw UTF-8;
     # the default escapes to ``\uXXXX``). Determinism across
     # platforms and Python versions requires the literal default.
-    seed_material = json.dumps(
-        [ctx.run_id, ctx.state_name, sorted_keys]
-    )
+    seed_material = json.dumps([ctx.run_id, ctx.state_name, sorted_keys])
     seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
     seed_int = int(seed_hash, 16)
     rng = random.Random(seed_int)
@@ -219,16 +209,12 @@ def anonymize_outputs(
     for letter, original_key in zip(anon_keys, shuffled, strict=True):
         value = inputs[original_key]
         if not isinstance(value, str):
-            raise TypeError(
-                f"anonymize_outputs: input {original_key!r} is not a str"
-            )
+            raise TypeError(f"anonymize_outputs: input {original_key!r} is not a str")
         anon_map[letter] = value
     return {"anon_map": anon_map}
 
 
-def finish_panel(
-    inputs: dict[str, Any], ctx: TransformContext
-) -> dict[str, Any]:
+def finish_panel(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
     """Pure-function join for the Parallel Thinking workflow.
 
     Reads the five panelist outputs (pinning them in the must-reach

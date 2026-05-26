@@ -78,9 +78,7 @@ class _ScriptedModelAdapter:
         sid: str = prepared.inner["state_id"]
         queue = self._responses.get(sid) or []
         if not queue:
-            raise AssertionError(
-                f"scripted adapter has no response for {sid!r}"
-            )
+            raise AssertionError(f"scripted adapter has no response for {sid!r}")
         text = queue.pop(0)
         return {
             "output": text,
@@ -251,9 +249,7 @@ def test_council_four_canonical_workflow_loads() -> None:
     assert workflow.name == "council_four_canonical"
     verdict = next(a for a in workflow.artifacts if a.name == "judge_verdict")
     assert verdict.schema_path is not None
-    assert verdict.schema_path.endswith(
-        "council_synthesis_verdict_canonical.json"
-    )
+    assert verdict.schema_path.endswith("council_synthesis_verdict_canonical.json")
 
 
 def test_canonical_workflow_takes_required_phase_id_input() -> None:
@@ -403,9 +399,7 @@ def test_canonical_synthesizer_template_forbids_h1_phase_heading() -> None:
     assert "h1 phase heading" in body_lower
     assert "stripped and replaced" in body_lower
     # The forbidden envelope shape is named explicitly.
-    assert "# <project_name> — Phase N:" in body or (
-        "<project_name>" in body and "Phase N" in body
-    )
+    assert "# <project_name> — Phase N:" in body or ("<project_name>" in body and "Phase N" in body)
 
 
 def test_reauthor_synthesizer_template_phase_ids_runtime_supplied() -> None:
@@ -489,9 +483,7 @@ def test_council_four_reauthor_workflow_loads() -> None:
     assert workflow.name == "council_four_reauthor"
     verdict = next(a for a in workflow.artifacts if a.name == "judge_verdict")
     assert verdict.schema_path is not None
-    assert verdict.schema_path.endswith(
-        "council_synthesis_verdict_reauthor.json"
-    )
+    assert verdict.schema_path.endswith("council_synthesis_verdict_reauthor.json")
 
 
 def test_canonical_schema_omits_lineage() -> None:
@@ -572,9 +564,7 @@ def _base_reauthor_verdict() -> dict[str, Any]:
         "agreements": ["a"],
         "disagreements": [],
         "rejected_options": [],
-        "criteria_compliance": [
-            {"criterion_id": "c1", "observed_value": "ok", "compliant": True}
-        ],
+        "criteria_compliance": [{"criterion_id": "c1", "observed_value": "ok", "compliant": True}],
         "lineage": {
             "phases": [
                 {"id": "phase_001", "action": "preserve"},
@@ -641,9 +631,7 @@ def test_commit_attributions_items_reject_missing_required_fields() -> None:
     schema = _reauthor_schema()
     verdict = _base_reauthor_verdict()
     # Missing rationale.
-    verdict["commit_attributions"] = [
-        {"commit_sha": "abcdef1234567", "phase_id": "phase_002"}
-    ]
+    verdict["commit_attributions"] = [{"commit_sha": "abcdef1234567", "phase_id": "phase_002"}]
     with pytest.raises(jsonschema.ValidationError) as exc_info:
         jsonschema.validate(instance=verdict, schema=schema)
     assert "rationale" in str(exc_info.value.message).lower()
@@ -688,9 +676,7 @@ def test_canonical_schema_accepts_commit_attributions_populated() -> None:
         "agreements": ["a"],
         "disagreements": [],
         "rejected_options": [],
-        "criteria_compliance": [
-            {"criterion_id": "c1", "observed_value": "ok", "compliant": True}
-        ],
+        "criteria_compliance": [{"criterion_id": "c1", "observed_value": "ok", "compliant": True}],
         "commit_attributions": [
             {
                 "commit_sha": "abcdef1234567",
@@ -805,9 +791,9 @@ def _make_council_config(
     framer: RoleBinding | None = None,
 ) -> OrchestraConfig:
     default_proposers = {
-        "proposer_code":     _binding("claude_code_text",          "sonnet"),
-        "proposer_codex":    _binding("codex_text",                "gpt-5.5"),
-        "proposer_kimi":     _binding("claude_code_text_kimi",     "kimi-k2.6"),
+        "proposer_code": _binding("claude_code_text", "sonnet"),
+        "proposer_codex": _binding("codex_text", "gpt-5.5"),
+        "proposer_kimi": _binding("claude_code_text_kimi", "kimi-k2.6"),
         "proposer_deepseek": _binding("claude_code_text_deepseek", "deepseek-v4-pro"),
     }
     if proposers:
@@ -816,9 +802,7 @@ def _make_council_config(
         roles={
             "framer": framer or _binding("claude_code_text", "haiku"),
             **default_proposers,
-            "synthesizer": (
-                synthesizer or _binding("claude_code_text", "opus")
-            ),
+            "synthesizer": (synthesizer or _binding("claude_code_text", "opus")),
         },
         workflows={
             "council_four": WorkflowConfig(pattern="council_four"),
@@ -886,10 +870,10 @@ def test_distinct_actor_rule_rejects_proposer_overlap() -> None:
 def test_distinct_actor_rule_missing_synthesizer_fails() -> None:
     cfg = OrchestraConfig(
         roles={
-            "framer":            _binding("claude_code_text", "haiku"),
-            "proposer_code":     _binding("claude_code_text", "sonnet"),
-            "proposer_codex":    _binding("codex_text", "gpt-5.5"),
-            "proposer_kimi":     _binding("claude_code_text_kimi", "kimi-k2.6"),
+            "framer": _binding("claude_code_text", "haiku"),
+            "proposer_code": _binding("claude_code_text", "sonnet"),
+            "proposer_codex": _binding("codex_text", "gpt-5.5"),
+            "proposer_kimi": _binding("claude_code_text_kimi", "kimi-k2.6"),
             "proposer_deepseek": _binding("claude_code_text_deepseek", "deepseek-v4-pro"),
         },
         workflows={
@@ -945,15 +929,13 @@ def test_council_e2e_fan_out_and_synthesize_to_done(tmp_path: Path) -> None:
     """Frame, four proposers in parallel, synthesizer accept => done."""
     responses = {
         "frame": ["COUNCIL BRIEF: the question, restated."],
-        "propose_code":     ["proposal from code: phased rollout."],
-        "propose_codex":    ["proposal from codex: phased rollout."],
-        "propose_kimi":     ["proposal from kimi: single-pass authoring."],
+        "propose_code": ["proposal from code: phased rollout."],
+        "propose_codex": ["proposal from codex: phased rollout."],
+        "propose_kimi": ["proposal from kimi: single-pass authoring."],
         "propose_deepseek": ["proposal from deepseek: phased rollout."],
         "synthesize": [_accept_verdict()],
     }
-    adapter, run_dir, terminal, store = _run_council(
-        tmp_path, responses=responses
-    )
+    adapter, run_dir, terminal, store = _run_council(tmp_path, responses=responses)
     try:
         assert terminal == "done"
         states_called = [c["state_id"] for c in adapter.calls]
@@ -997,15 +979,13 @@ def test_council_synthesizer_reads_all_four_proposals(tmp_path: Path) -> None:
     """Synthesizer's prompt must contain content from each proposer."""
     responses = {
         "frame": ["COUNCIL BRIEF"],
-        "propose_code":     ["UNIQUE-MARK-CODE"],
-        "propose_codex":    ["UNIQUE-MARK-CODEX"],
-        "propose_kimi":     ["UNIQUE-MARK-KIMI"],
+        "propose_code": ["UNIQUE-MARK-CODE"],
+        "propose_codex": ["UNIQUE-MARK-CODEX"],
+        "propose_kimi": ["UNIQUE-MARK-KIMI"],
         "propose_deepseek": ["UNIQUE-MARK-DEEPSEEK"],
         "synthesize": [_accept_verdict()],
     }
-    adapter, _, terminal, store = _run_council(
-        tmp_path, responses=responses
-    )
+    adapter, _, terminal, store = _run_council(tmp_path, responses=responses)
     try:
         assert terminal == "done"
         synth_call = next(c for c in adapter.calls if c["state_id"] == "synthesize")
@@ -1016,9 +996,7 @@ def test_council_synthesizer_reads_all_four_proposals(tmp_path: Path) -> None:
             "UNIQUE-MARK-KIMI",
             "UNIQUE-MARK-DEEPSEEK",
         ):
-            assert marker in prompt, (
-                f"synthesizer prompt missing {marker!r}"
-            )
+            assert marker in prompt, f"synthesizer prompt missing {marker!r}"
     finally:
         store.close()
 
@@ -1034,9 +1012,9 @@ def test_council_accept_with_noncompliant_violates(tmp_path: Path) -> None:
     it; state exits via error outcome; terminal=stop."""
     responses = {
         "frame": ["COUNCIL BRIEF"],
-        "propose_code":     ["proposal A"],
-        "propose_codex":    ["proposal B"],
-        "propose_kimi":     ["proposal C"],
+        "propose_code": ["proposal A"],
+        "propose_codex": ["proposal B"],
+        "propose_kimi": ["proposal C"],
         "propose_deepseek": ["proposal D"],
         "synthesize": [
             json.dumps(
@@ -1064,15 +1042,11 @@ def test_council_accept_with_noncompliant_violates(tmp_path: Path) -> None:
             required=True,
         ),
     )
-    _, run_dir, terminal, store = _run_council(
-        tmp_path, responses=responses, criteria=criteria
-    )
+    _, run_dir, terminal, store = _run_council(tmp_path, responses=responses, criteria=criteria)
     try:
         assert terminal == "stop"
         records = LogReader(run_dir / "log.jsonl").read_all()
-        consistency_events = [
-            r for r in records if r.event == "decision_consistency"
-        ]
+        consistency_events = [r for r in records if r.event == "decision_consistency"]
         assert len(consistency_events) == 1
         fields = consistency_events[0].fields
         assert fields["outcome"] == "violation"

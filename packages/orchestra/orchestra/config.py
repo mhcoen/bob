@@ -75,25 +75,19 @@ class CriterionDecl:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> CriterionDecl:
         if not isinstance(raw, dict):
-            raise ConfigError(
-                f"criterion: expected an object, got {type(raw).__name__}"
-            )
+            raise ConfigError(f"criterion: expected an object, got {type(raw).__name__}")
         cid = raw.get("id")
         if not isinstance(cid, str) or not cid.strip():
-            raise ConfigError(
-                f"criterion: 'id' must be a non-empty string, got {cid!r}"
-            )
+            raise ConfigError(f"criterion: 'id' must be a non-empty string, got {cid!r}")
         description = raw.get("description")
         if not isinstance(description, str) or not description.strip():
             raise ConfigError(
-                f"criterion {cid!r}: 'description' must be a non-empty string, "
-                f"got {description!r}"
+                f"criterion {cid!r}: 'description' must be a non-empty string, got {description!r}"
             )
         required = raw.get("required", True)
         if not isinstance(required, bool):
             raise ConfigError(
-                f"criterion {cid!r}: 'required' must be a bool, got "
-                f"{type(required).__name__}"
+                f"criterion {cid!r}: 'required' must be a bool, got {type(required).__name__}"
             )
         return cls(id=cid, description=description, required=required)
 
@@ -111,22 +105,16 @@ class RoleBinding:
     @classmethod
     def from_dict(cls, role_name: str, raw: dict[str, Any]) -> RoleBinding:
         if not isinstance(raw, dict):
-            raise ConfigError(
-                f"role {role_name!r}: expected an object, got {type(raw).__name__}"
-            )
+            raise ConfigError(f"role {role_name!r}: expected an object, got {type(raw).__name__}")
         adapter = raw.get("adapter")
         if not isinstance(adapter, str) or not adapter:
-            raise ConfigError(
-                f"role {role_name!r}: missing or empty 'adapter' key"
-            )
+            raise ConfigError(f"role {role_name!r}: missing or empty 'adapter' key")
         return cls(
             adapter=adapter,
             **_role_optional_fields(role_name, raw),
         )
 
-    def with_overrides(
-        self, role_name: str, overrides: dict[str, Any]
-    ) -> RoleBinding:
+    def with_overrides(self, role_name: str, overrides: dict[str, Any]) -> RoleBinding:
         """Return a new binding with ``overrides`` applied on top.
 
         Override values replace top-level values entirely. Validates
@@ -143,34 +131,27 @@ class RoleBinding:
             if key == "adapter":
                 if not isinstance(value, str) or not value:
                     raise ConfigError(
-                        f"role {role_name!r}: override 'adapter' must be a "
-                        "non-empty string"
+                        f"role {role_name!r}: override 'adapter' must be a non-empty string"
                     )
                 replacements["adapter"] = value
             elif key == "model":
                 if value is not None and not isinstance(value, str):
-                    raise ConfigError(
-                        f"role {role_name!r}: override 'model' must be a string"
-                    )
+                    raise ConfigError(f"role {role_name!r}: override 'model' must be a string")
                 replacements["model"] = value
             elif key == "instruction_template":
                 if value is not None and not isinstance(value, str):
                     raise ConfigError(
-                        f"role {role_name!r}: override 'instruction_template' "
-                        "must be a string"
+                        f"role {role_name!r}: override 'instruction_template' must be a string"
                     )
                 replacements["instruction_template"] = value
             elif key == "tools":
                 if value is not None and not isinstance(value, str):
-                    raise ConfigError(
-                        f"role {role_name!r}: override 'tools' must be a string"
-                    )
+                    raise ConfigError(f"role {role_name!r}: override 'tools' must be a string")
                 replacements["tools"] = value
             elif key == "parameters":
                 if not isinstance(value, dict):
                     raise ConfigError(
-                        f"role {role_name!r}: override 'parameters' must be "
-                        "an object"
+                        f"role {role_name!r}: override 'parameters' must be an object"
                     )
                 replacements["parameters"] = dict(value)
             else:
@@ -182,32 +163,20 @@ class RoleBinding:
         return replace(self, **replacements)
 
 
-def _role_optional_fields(
-    role_name: str, raw: dict[str, Any]
-) -> dict[str, Any]:
+def _role_optional_fields(role_name: str, raw: dict[str, Any]) -> dict[str, Any]:
     """Validate and extract the optional keys shared by RoleBinding init."""
     model = raw.get("model")
     if model is not None and not isinstance(model, str):
-        raise ConfigError(
-            f"role {role_name!r}: 'model' must be a string"
-        )
+        raise ConfigError(f"role {role_name!r}: 'model' must be a string")
     instruction_template = raw.get("instruction_template")
-    if instruction_template is not None and not isinstance(
-        instruction_template, str
-    ):
-        raise ConfigError(
-            f"role {role_name!r}: 'instruction_template' must be a string"
-        )
+    if instruction_template is not None and not isinstance(instruction_template, str):
+        raise ConfigError(f"role {role_name!r}: 'instruction_template' must be a string")
     tools = raw.get("tools")
     if tools is not None and not isinstance(tools, str):
-        raise ConfigError(
-            f"role {role_name!r}: 'tools' must be a string"
-        )
+        raise ConfigError(f"role {role_name!r}: 'tools' must be a string")
     parameters = raw.get("parameters") or {}
     if not isinstance(parameters, dict):
-        raise ConfigError(
-            f"role {role_name!r}: 'parameters' must be an object"
-        )
+        raise ConfigError(f"role {role_name!r}: 'parameters' must be an object")
     return {
         "model": model,
         "instruction_template": instruction_template,
@@ -234,15 +203,10 @@ class VerbBinding:
     @classmethod
     def from_dict(cls, verb_name: str, raw: dict[str, Any]) -> VerbBinding:
         if not isinstance(raw, dict):
-            raise ConfigError(
-                f"verb {verb_name!r}: expected an object, got "
-                f"{type(raw).__name__}"
-            )
+            raise ConfigError(f"verb {verb_name!r}: expected an object, got {type(raw).__name__}")
         workflow = raw.get("workflow")
         if not isinstance(workflow, str) or not workflow:
-            raise ConfigError(
-                f"verb {verb_name!r}: missing or empty 'workflow' key"
-            )
+            raise ConfigError(f"verb {verb_name!r}: missing or empty 'workflow' key")
         return cls(workflow=workflow)
 
 
@@ -263,8 +227,7 @@ class WorkflowConfig:
     def from_dict(cls, workflow_name: str, raw: dict[str, Any]) -> WorkflowConfig:
         if not isinstance(raw, dict):
             raise ConfigError(
-                f"workflow {workflow_name!r}: expected an object, got "
-                f"{type(raw).__name__}"
+                f"workflow {workflow_name!r}: expected an object, got {type(raw).__name__}"
             )
         if "roles" in raw:
             raise ConfigError(
@@ -274,14 +237,10 @@ class WorkflowConfig:
             )
         pattern = raw.get("pattern")
         if not isinstance(pattern, str) or not pattern:
-            raise ConfigError(
-                f"workflow {workflow_name!r}: missing or empty 'pattern' key"
-            )
+            raise ConfigError(f"workflow {workflow_name!r}: missing or empty 'pattern' key")
         overrides_raw = raw.get("role_overrides") or {}
         if not isinstance(overrides_raw, dict):
-            raise ConfigError(
-                f"workflow {workflow_name!r}: 'role_overrides' must be an object"
-            )
+            raise ConfigError(f"workflow {workflow_name!r}: 'role_overrides' must be an object")
         role_overrides: dict[str, dict[str, Any]] = {}
         for role_name, override in overrides_raw.items():
             if not isinstance(override, dict):
@@ -324,9 +283,7 @@ class OrchestraConfig:
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> OrchestraConfig:
         if not isinstance(raw, dict):
-            raise ConfigError(
-                f"config root must be an object, got {type(raw).__name__}"
-            )
+            raise ConfigError(f"config root must be an object, got {type(raw).__name__}")
         # Each top-level section is optional in a single config file.
         # The merge step combines a global file plus an optional
         # project-local file, and either may carry only a subset of
@@ -336,24 +293,17 @@ class OrchestraConfig:
         roles_raw = raw.get("roles") or {}
         if not isinstance(roles_raw, dict):
             raise ConfigError("'roles' must be an object")
-        roles = {
-            name: RoleBinding.from_dict(name, body)
-            for name, body in roles_raw.items()
-        }
+        roles = {name: RoleBinding.from_dict(name, body) for name, body in roles_raw.items()}
         workflows_raw = raw.get("workflows") or {}
         if not isinstance(workflows_raw, dict):
             raise ConfigError("'workflows' must be an object")
         workflows = {
-            name: WorkflowConfig.from_dict(name, body)
-            for name, body in workflows_raw.items()
+            name: WorkflowConfig.from_dict(name, body) for name, body in workflows_raw.items()
         }
         verbs_raw = raw.get("verbs") or {}
         if not isinstance(verbs_raw, dict):
             raise ConfigError("'verbs' must be an object")
-        verbs = {
-            name: VerbBinding.from_dict(name, body)
-            for name, body in verbs_raw.items()
-        }
+        verbs = {name: VerbBinding.from_dict(name, body) for name, body in verbs_raw.items()}
         criteria_raw = raw.get("criteria") or []
         if not isinstance(criteria_raw, list):
             raise ConfigError("'criteria' must be an array")
@@ -361,9 +311,7 @@ class OrchestraConfig:
         seen_ids: set[str] = set()
         for crit in criteria_list:
             if crit.id in seen_ids:
-                raise ConfigError(
-                    f"criteria: duplicate id {crit.id!r}; ids must be unique"
-                )
+                raise ConfigError(f"criteria: duplicate id {crit.id!r}; ids must be unique")
             seen_ids.add(crit.id)
         return cls(
             roles=roles,
@@ -423,9 +371,7 @@ def _read_config_file(path: Path) -> OrchestraConfig | None:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ConfigError(
-            f"{path}: invalid JSON ({exc})"
-        ) from exc
+        raise ConfigError(f"{path}: invalid JSON ({exc})") from exc
     return OrchestraConfig.from_dict(raw)
 
 

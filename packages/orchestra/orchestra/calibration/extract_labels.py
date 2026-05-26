@@ -259,9 +259,7 @@ def scenario_rows(
     return rows, summary
 
 
-def render_matrix(
-    rows: list[dict[str, Any]], summaries: list[dict[str, Any]]
-) -> str:
+def render_matrix(rows: list[dict[str, Any]], summaries: list[dict[str, Any]]) -> str:
     """Render the calibration matrix as Markdown."""
     lines = [
         "# Calibration matrix",
@@ -278,9 +276,7 @@ def render_matrix(
     for s in summaries:
         traj_list = s["decision_trajectory"]
         traj = ",".join(traj_list) if traj_list else "(none)"
-        wf_short = (
-            "iterate" if str(s["workflow"]).startswith("iterate") else "prji"
-        )
+        wf_short = "iterate" if str(s["workflow"]).startswith("iterate") else "prji"
         lines.append(
             f"| {s['scenario_id']} "
             f"| {wf_short} "
@@ -327,8 +323,7 @@ def render_matrix(
     lines.append("- under-trigger: expected positive, but stuck did not fire.")
     lines.append("- over-trigger: expected negative, but stuck fired.")
     lines.append(
-        "- ambiguous-stuck / ambiguous-non-stuck: expected ambiguous; "
-        "both ends are valid signal."
+        "- ambiguous-stuck / ambiguous-non-stuck: expected ambiguous; both ends are valid signal."
     )
     return "\n".join(lines) + "\n"
 
@@ -336,9 +331,7 @@ def render_matrix(
 def _parse_scenario_arg(s: str) -> tuple[Path, str]:
     """Parse a ``<dir>:<workflow_name>`` argument. Returns (dir, workflow)."""
     if ":" not in s:
-        raise argparse.ArgumentTypeError(
-            f"expected <dir>:<workflow_name>, got {s!r}"
-        )
+        raise argparse.ArgumentTypeError(f"expected <dir>:<workflow_name>, got {s!r}")
     dir_str, workflow = s.rsplit(":", 1)
     return (Path(dir_str), workflow)
 
@@ -363,8 +356,7 @@ def main(argv: list[str] | None = None) -> int:
         "--output-dir",
         type=Path,
         required=True,
-        help="Directory to write calibration_labels.jsonl and "
-        "calibration_matrix.md.",
+        help="Directory to write calibration_labels.jsonl and calibration_matrix.md.",
     )
     args = parser.parse_args(argv)
 
@@ -381,9 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     summaries: list[dict[str, Any]] = []
     for spec in specs:
         if not spec.scenario_dir.is_dir():
-            sys.stderr.write(
-                f"  skipped {spec.scenario_id}: dir absent ({spec.scenario_dir})\n"
-            )
+            sys.stderr.write(f"  skipped {spec.scenario_id}: dir absent ({spec.scenario_dir})\n")
             continue
         rows, summary = scenario_rows(spec)
         all_rows.extend(rows)

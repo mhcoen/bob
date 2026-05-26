@@ -263,22 +263,15 @@ class ArtifactStore:
         existing row is tagged ``legacy`` and any new row is written
         with the strict producer_kind and invocation_id keying.
         """
-        cols = {
-            row[1]
-            for row in self._conn.execute("PRAGMA table_info(versions)").fetchall()
-        }
+        cols = {row[1] for row in self._conn.execute("PRAGMA table_info(versions)").fetchall()}
         if "producer_kind" not in cols:
             self._conn.execute(
-                "ALTER TABLE versions ADD COLUMN producer_kind TEXT "
-                "NOT NULL DEFAULT 'legacy'"
+                "ALTER TABLE versions ADD COLUMN producer_kind TEXT NOT NULL DEFAULT 'legacy'"
             )
         if "invocation_id" not in cols:
-            self._conn.execute(
-                "ALTER TABLE versions ADD COLUMN invocation_id TEXT"
-            )
+            self._conn.execute("ALTER TABLE versions ADD COLUMN invocation_id TEXT")
         self._conn.execute(
-            "CREATE INDEX IF NOT EXISTS versions_by_invocation "
-            "ON versions(invocation_id)"
+            "CREATE INDEX IF NOT EXISTS versions_by_invocation ON versions(invocation_id)"
         )
 
     # ----- declare -------------------------------------------------
@@ -377,16 +370,12 @@ class ArtifactStore:
     # ----- read ----------------------------------------------------
 
     def _artifact_type_unlocked(self, name: str) -> str:
-        row = self._conn.execute(
-            "SELECT type FROM artifacts WHERE name = ?", (name,)
-        ).fetchone()
+        row = self._conn.execute("SELECT type FROM artifacts WHERE name = ?", (name,)).fetchone()
         if row is None:
             raise StoreError(f"unknown artifact: {name!r}")
         return str(row[0])
 
-    def _is_visible(
-        self, producer_kind: str, invocation_id: str | None
-    ) -> bool:
+    def _is_visible(self, producer_kind: str, invocation_id: str | None) -> bool:
         if producer_kind in ("external", "initial", "legacy"):
             return True
         if producer_kind == "state_invocation":
@@ -479,9 +468,7 @@ class ArtifactStore:
             for row in rows
         ]
 
-    def list_committed_by_invocation(
-        self, invocation_id: str
-    ) -> list[VersionRecord]:
+    def list_committed_by_invocation(self, invocation_id: str) -> list[VersionRecord]:
         """Return committed (non-tentative) versions tagged with the
         given ``invocation_id``.
 
@@ -613,14 +600,11 @@ class ArtifactStore:
                         raise StoreError(f"unknown tentative handle: {handle!r}")
                     (seq,) = row
                     vrow = cur.execute(
-                        "SELECT version_id FROM versions "
-                        "WHERE seq = ? AND is_tentative = 1",
+                        "SELECT version_id FROM versions WHERE seq = ? AND is_tentative = 1",
                         (seq,),
                     ).fetchone()
                     if vrow is None:
-                        raise StoreError(
-                            f"tentative handle {handle!r} points at no tentative row"
-                        )
+                        raise StoreError(f"tentative handle {handle!r} points at no tentative row")
                     (version_id,) = vrow
                     cur.execute(
                         "UPDATE versions SET is_tentative = 0, "

@@ -105,8 +105,7 @@ def lint_scenario(scenario_dir: Path) -> LintResult:
     criteria = _read_criteria(cfg_path)
     if not criteria:
         warnings.append(
-            f"no criteria configured in {cfg_path}; "
-            "pre-F2.5a scenario, lint passes trivially"
+            f"no criteria configured in {cfg_path}; pre-F2.5a scenario, lint passes trivially"
         )
         return LintResult(
             ok=True,
@@ -142,8 +141,7 @@ def main(argv: list[str] | None = None) -> int:
     if result.ok:
         if result.configured_ids:
             sys.stderr.write(
-                f"lint OK: {len(result.configured_ids)} criteria "
-                f"all present in task.md\n"
+                f"lint OK: {len(result.configured_ids)} criteria all present in task.md\n"
             )
         return 0
     sys.stderr.write(

@@ -51,18 +51,14 @@ class MockHumanAdapter:
     def prepare(self, request: InvocationRequest) -> PreparedInvocation:
         options = tuple(request.backing_options.get("options") or ())
         if not options:
-            raise AdapterError(
-                f"human state {request.state_id!r} declared no options"
-            )
+            raise AdapterError(f"human state {request.state_id!r} declared no options")
         # Pass-8 fix #1: same redaction discipline as the real
         # subprocess adapters from pass-7 and the mock_model adapter
         # (also pass-8). The actor_prepare summary stores a hex
         # digest for correlation, never the prompt body.
         prompt = request.prompt_artifact or ""
         prompt_bytes = prompt.encode("utf-8") if prompt else b""
-        prompt_sha256 = (
-            hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
-        )
+        prompt_sha256 = hashlib.sha256(prompt_bytes).hexdigest() if prompt_bytes else ""
         prepared = PreparedInvocation(
             request=request,
             summary={
@@ -79,9 +75,7 @@ class MockHumanAdapter:
         options: tuple[str, ...] = prepared.inner["options"]
         choice = self._next_choice()
         if choice not in options:
-            raise AdapterError(
-                f"scripted choice {choice!r} not in options {list(options)!r}"
-            )
+            raise AdapterError(f"scripted choice {choice!r} not in options {list(options)!r}")
         payload: dict[str, Any] = {
             "chosen": choice,
             "notification_id": "mock-notification",

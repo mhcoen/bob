@@ -37,9 +37,7 @@ VALID_EXPECTED: Final[tuple[str, str, str]] = (
 # task.md, history.md, summary.md, progress.jsonl (none of those
 # match the pattern), and importantly implement_<N>_stat.txt (the
 # "_stat" suffix follows _<digits>, so the regex does not match).
-_VERSIONED_ARTIFACT_RE: Final[re.Pattern[str]] = re.compile(
-    r"^.+_\d+\.(?:json|txt|diff)$"
-)
+_VERSIONED_ARTIFACT_RE: Final[re.Pattern[str]] = re.compile(r"^.+_\d+\.(?:json|txt|diff)$")
 
 
 def clean_stale_versioned_artifacts(logs_dir: Path) -> int:
@@ -79,8 +77,7 @@ def read_expected_classifier(expected_path: Path) -> str:
     """
     if not expected_path.is_file():
         raise ExpectedClassifierError(
-            f"expected.txt missing at {expected_path}; cannot determine "
-            "calibration classifier"
+            f"expected.txt missing at {expected_path}; cannot determine calibration classifier"
         )
     for raw in expected_path.read_text().splitlines():
         line = raw.strip()
@@ -93,6 +90,4 @@ def read_expected_classifier(expected_path: Path) -> str:
             f"{line!r}; must be exactly one of {VALID_EXPECTED}. "
             "Prose comments are allowed only after the classifier line."
         )
-    raise ExpectedClassifierError(
-        f"expected.txt at {expected_path} contains no nonempty line"
-    )
+    raise ExpectedClassifierError(f"expected.txt at {expected_path} contains no nonempty line")

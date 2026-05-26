@@ -63,9 +63,7 @@ class _ScriptedModelAdapter:
 
     def invoke(self, prepared: Any) -> dict[str, Any]:
         if not self._responses:
-            raise AssertionError(
-                "scripted model adapter: responses exhausted"
-            )
+            raise AssertionError("scripted model adapter: responses exhausted")
         response = self._responses.pop(0)
         return {
             "output": response,
@@ -102,6 +100,7 @@ def _build_registry(responses: list[str]) -> ProfileRegistry:
     reg.register_actor_backing("human", _DummyAdapterFactory)
     reg.register_actor_backing("shell", _DummyAdapterFactory)
     from orchestra.executor.parsers import identity_text_parser
+
     reg.register_result_parser(identity_text_parser)
     return reg
 
@@ -158,9 +157,7 @@ def test_schema_smoke_accept_first_try(tmp_path: Path) -> None:
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "anything"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "anything"})
     try:
         assert terminal == "done"
         env = envelopes["judge"]
@@ -196,9 +193,7 @@ def test_schema_smoke_iterate_then_accept(tmp_path: Path) -> None:
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "anything"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "anything"})
     try:
         assert terminal == "done"
         verdict = store.read_latest("verdict")
@@ -227,9 +222,7 @@ def test_schema_smoke_parse_error(tmp_path: Path) -> None:
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "anything"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "anything"})
     try:
         assert terminal == "stop"
         env = envelopes["judge"]
@@ -256,9 +249,7 @@ def test_schema_smoke_schema_violation(tmp_path: Path) -> None:
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "q"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "q"})
     try:
         assert terminal == "stop"
         env = envelopes["judge"]
@@ -284,9 +275,7 @@ def test_schema_smoke_missing_required_field_violation(tmp_path: Path) -> None:
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, _ = _run(
-        workflow, registry, run_dir, {"query": "q"}
-    )
+    terminal, envelopes, store, _ = _run(workflow, registry, run_dir, {"query": "q"})
     try:
         assert terminal == "stop"
         env = envelopes["judge"]
@@ -356,9 +345,7 @@ workflow x
 def test_schema_smoke_schema_drift_refused(tmp_path: Path) -> None:
     project_dir = tmp_path / "project"
     project_dir.mkdir()
-    shutil.copytree(
-        FIXTURE_DIR, project_dir, dirs_exist_ok=True
-    )
+    shutil.copytree(FIXTURE_DIR, project_dir, dirs_exist_ok=True)
     workflow = load_workflow(project_dir / "schema_smoke.orc", with_core())
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -451,11 +438,7 @@ workflow x
     )
     (tmp_path / "p.md").write_text("hi {query}\n")
     workflow = load_workflow(src, with_core())
-    responses = [
-        json.dumps(
-            {"decision": "accept", "is_ok": False, "score": 7}
-        )
-    ]
+    responses = [json.dumps({"decision": "accept", "is_ok": False, "score": 7})]
     registry = _build_registry(responses)
     run_dir = tmp_path / "run"
     run_dir.mkdir()
@@ -593,9 +576,7 @@ def test_schema_layer_tolerates_codex_wrapped_verdict(tmp_path: Path) -> None:
     registry = _build_registry([_CODEX_WRAPPED_VERDICT])
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "anything"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "anything"})
     try:
         assert terminal == "done"
         env = envelopes["judge"]
@@ -628,9 +609,7 @@ def test_schema_layer_tolerates_claude_markdown_wrapped_verdict(
     registry = _build_registry([_CLAUDE_WRAPPED_VERDICT])
     run_dir = tmp_path / "run"
     run_dir.mkdir()
-    terminal, envelopes, store, log_path = _run(
-        workflow, registry, run_dir, {"query": "anything"}
-    )
+    terminal, envelopes, store, log_path = _run(workflow, registry, run_dir, {"query": "anything"})
     try:
         assert terminal == "done"
         env = envelopes["judge"]

@@ -30,9 +30,7 @@ from orchestra.errors import OrchestraError
 def _config(default_verb: str | None = None) -> OrchestraConfig:
     cfg = OrchestraConfig(
         roles={
-            "editor": RoleBinding(
-                adapter="claude_code_text", model="opus"
-            ),
+            "editor": RoleBinding(adapter="claude_code_text", model="opus"),
         },
         workflows={
             "ask_single": WorkflowConfig(pattern="ask_single"),
@@ -42,9 +40,7 @@ def _config(default_verb: str | None = None) -> OrchestraConfig:
         },
         verbs={
             "ask": VerbBinding(workflow="ask_single"),
-            "council": VerbBinding(
-                workflow="ask_propose_critique_synthesize"
-            ),
+            "council": VerbBinding(workflow="ask_propose_critique_synthesize"),
         },
     )
     if default_verb is not None:

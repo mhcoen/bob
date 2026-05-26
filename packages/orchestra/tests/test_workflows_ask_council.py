@@ -136,9 +136,7 @@ class _RecordingModelAdapter:
         state_id: str = prepared.inner["state_id"]
         text = self._responses.get(state_id)
         if text is None:
-            raise AssertionError(
-                f"recording adapter has no response for state {state_id!r}"
-            )
+            raise AssertionError(f"recording adapter has no response for state {state_id!r}")
         return {
             "output": text,
             "verdict": None,
@@ -311,9 +309,7 @@ def test_chairman_prompt_contains_named_advisors(tmp_path: Path) -> None:
         "Outsider",
         "Executor",
     ):
-        assert label in chairman_prompt, (
-            f"chairman prompt missing lens label {label!r}"
-        )
+        assert label in chairman_prompt, f"chairman prompt missing lens label {label!r}"
     # Sanity: framed question landed too.
     assert FRAMED_QUESTION_TEXT in chairman_prompt
     # The chairman must NOT receive anonymized-style A through E
@@ -336,8 +332,7 @@ def _config_with_roles(role_names: list[str]) -> OrchestraConfig:
     ``claude_code_text`` adapter so the kind matches the workflow's
     text-role states."""
     roles: dict[str, RoleBinding] = {
-        name: RoleBinding(adapter="claude_code_text", model="opus")
-        for name in role_names
+        name: RoleBinding(adapter="claude_code_text", model="opus") for name in role_names
     }
     workflows = {
         "ask_council": WorkflowConfig(pattern="ask_council"),
@@ -359,8 +354,7 @@ def test_validator_rejects_config_missing_required_role(missing_role: str) -> No
         _validate_role_bindings(workflow, "ask_council", cfg)
     message = str(exc_info.value)
     assert repr(missing_role) in message, (
-        f"ConfigError message {message!r} does not name missing role "
-        f"{missing_role!r}"
+        f"ConfigError message {message!r} does not name missing role {missing_role!r}"
     )
 
 
@@ -386,9 +380,7 @@ def test_validator_enumerates_all_missing_roles_at_once() -> None:
         _validate_role_bindings(workflow, "ask_council", cfg)
     message = str(exc_info.value)
     for required in REQUIRED_ROLES:
-        assert repr(required) in message, (
-            f"missing-all-roles error did not name {required!r}"
-        )
+        assert repr(required) in message, f"missing-all-roles error did not name {required!r}"
 
 
 def test_validator_does_not_require_reviewer_role() -> None:

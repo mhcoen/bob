@@ -159,9 +159,7 @@ def test_validate_accepts_minimal_object(tmp_path):
 
 def test_validate_rejects_extra_property_when_forbidden(tmp_path):
     spec = load_schema(_write_schema(tmp_path, "v.json", _TWO_BRANCH))
-    result = spec.validate(
-        {"decision": "accept", "extra": "x"}
-    )
+    result = spec.validate({"decision": "accept", "extra": "x"})
     assert isinstance(result, Invalid)
     assert any("additional property" in e for e in result.errors)
 
@@ -222,12 +220,8 @@ def test_validate_number_accepts_int_and_float(tmp_path):
     body = json.loads(json.dumps(_TWO_BRANCH))
     body["properties"]["score"] = {"type": "number"}
     spec = load_schema(_write_schema(tmp_path, "v.json", body))
-    assert isinstance(
-        spec.validate({"decision": "accept", "score": 3}), Valid
-    )
-    assert isinstance(
-        spec.validate({"decision": "accept", "score": 3.14}), Valid
-    )
+    assert isinstance(spec.validate({"decision": "accept", "score": 3}), Valid)
+    assert isinstance(spec.validate({"decision": "accept", "score": 3.14}), Valid)
 
 
 # --------------------------------------------------------------------
@@ -251,9 +245,7 @@ def test_additional_property_error_uses_canonical_phrase(tmp_path):
     spec = load_schema(_write_schema(tmp_path, "v.json", _TWO_BRANCH))
     result = spec.validate({"decision": "accept", "unexpected_key": 1})
     assert isinstance(result, Invalid)
-    assert any(
-        "additional property not permitted" in e for e in result.errors
-    )
+    assert any("additional property not permitted" in e for e in result.errors)
 
 
 def test_missing_required_error_uses_canonical_phrase(tmp_path):

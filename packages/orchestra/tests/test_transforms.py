@@ -496,9 +496,7 @@ def test_replay_does_not_reexecute_completed_transform(
 
     invocation_count = [0]
 
-    def counted_anonymize(
-        inputs: dict[str, Any], ctx: TransformContext
-    ) -> dict[str, Any]:
+    def counted_anonymize(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
         invocation_count[0] += 1
         return anonymize_outputs(inputs, ctx)
 
@@ -522,27 +520,20 @@ def test_replay_does_not_reexecute_completed_transform(
         register=register_counted,
         run_id="replay-run",
     )
-    assert invocation_count[0] == 1, (
-        "first-pass run must invoke the transform exactly once"
-    )
+    assert invocation_count[0] == 1, "first-pass run must invoke the transform exactly once"
 
     log_path = run_dir / "log.jsonl"
     records = LogReader(log_path).read_all()
     truncate_at: int | None = None
     seen_state_exit = False
     for r in records:
-        if (
-            r.event == "state_exit"
-            and r.state_id == "anonymize"
-        ):
+        if r.event == "state_exit" and r.state_id == "anonymize":
             seen_state_exit = True
             continue
         if seen_state_exit and r.event == "transition":
             truncate_at = r.seq
             break
-    assert truncate_at is not None, (
-        "expected a transition record after anonymize's state_exit"
-    )
+    assert truncate_at is not None, "expected a transition record after anonymize's state_exit"
     keep = [r for r in records if r.seq < truncate_at]
     with open(log_path, "w", encoding="utf-8") as fh:
         for r in keep:
@@ -559,9 +550,7 @@ def test_replay_does_not_reexecute_completed_transform(
     assert "anonymize" in replay.envelopes
 
     store2 = ArtifactStore(run_dir / "store.sqlite")
-    log2 = LogWriter(
-        log_path, replay.last_run_id, start_seq=replay.next_seq
-    )
+    log2 = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
     from orchestra.visibility import VisibilityIndex
 
     vi = VisibilityIndex(persist_path=run_dir / "visibility.json")
@@ -682,9 +671,7 @@ workflow fan_transform
 
     transform_calls: list[dict[str, Any]] = []
 
-    def reframe(
-        inputs: dict[str, Any], ctx: TransformContext
-    ) -> dict[str, Any]:
+    def reframe(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
         # The snapshot must already contain the parent's framing
         # artifact when the transform runs as a fan-out child.
         framing = inputs.get("framing")
@@ -698,9 +685,7 @@ workflow fan_transform
 
     join_calls: list[dict[str, Any]] = []
 
-    def combine(
-        inputs: dict[str, Any], ctx: TransformContext
-    ) -> dict[str, Any]:
+    def combine(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
         # Round-3 fix: the join must actually consume both fan-out
         # outputs. Raising here if either is missing or unexpected
         # turns the read into observable behavior, so the test can
@@ -708,18 +693,12 @@ workflow fan_transform
         # ``read_latest`` would have returned them.
         a_out = inputs.get("a_out")
         transform_out = inputs.get("transform_out")
-        join_calls.append(
-            {"a_out": a_out, "transform_out": transform_out}
-        )
+        join_calls.append({"a_out": a_out, "transform_out": transform_out})
         if not isinstance(a_out, str) or not a_out:
-            raise AssertionError(
-                f"join did not see advise_a's a_out via reads; "
-                f"got {a_out!r}"
-            )
+            raise AssertionError(f"join did not see advise_a's a_out via reads; got {a_out!r}")
         if not isinstance(transform_out, str):
             raise AssertionError(
-                f"join did not see transform_child's transform_out "
-                f"via reads; got {transform_out!r}"
+                f"join did not see transform_child's transform_out via reads; got {transform_out!r}"
             )
         if not transform_out.startswith("reframed:"):
             raise AssertionError(
@@ -772,34 +751,23 @@ workflow fan_transform
     ]
 
     transform_exit = next(
-        r
-        for r in records
-        if r.event == "state_exit" and r.state_id == "transform_child"
+        r for r in records if r.event == "state_exit" and r.state_id == "transform_child"
     )
-    advise_exit = next(
-        r
-        for r in records
-        if r.event == "state_exit" and r.state_id == "advise_a"
-    )
+    advise_exit = next(r for r in records if r.event == "state_exit" and r.state_id == "advise_a")
     assert transform_exit.fields["status"] == "ok"
     assert advise_exit.fields["status"] == "ok"
 
     fan_end = next(r for r in records if r.event == "fan_out_end")
     assert fan_end.fields["aggregate"] == "success"
-    assert (
-        fan_end.fields["per_child_outcome"]["transform_child"] == "success"
-    )
-    assert (
-        fan_end.fields["per_child_outcome"]["advise_a"] == "success"
-    )
+    assert fan_end.fields["per_child_outcome"]["transform_child"] == "success"
+    assert fan_end.fields["per_child_outcome"]["advise_a"] == "success"
 
     # The transform was invoked exactly once, with the parent's
     # framing artifact provided by the snapshot.
     assert len(transform_calls) == 1
     framing_seen = transform_calls[0]["framing"]
     assert isinstance(framing_seen, str) and framing_seen, (
-        "transform child must observe the parent's framing artifact "
-        "via the fan-out snapshot"
+        "transform child must observe the parent's framing artifact via the fan-out snapshot"
     )
 
     # Round-3 fix: prove the join state actually consumed both
@@ -877,32 +845,21 @@ def test_anonymize_seed_pins_default_json_encoding(
     the implementation uses, then asserts the implementation matches
     the default and not the alternative.
     """
-    inputs = {
-        f"café_{c}": f"value-{c}" for c in ("a", "b", "c", "d", "e")
-    }
+    inputs = {f"café_{c}": f"value-{c}" for c in ("a", "b", "c", "d", "e")}
     run_id = "run-é"
     state_name = "anonymïze"
     sorted_keys = sorted(inputs.keys())
 
     def expected_anon_map(default: bool) -> dict[str, str]:
         if default:
-            seed_material = json.dumps(
-                [run_id, state_name, sorted_keys]
-            )
+            seed_material = json.dumps([run_id, state_name, sorted_keys])
         else:
-            seed_material = json.dumps(
-                [run_id, state_name, sorted_keys], ensure_ascii=False
-            )
-        seed_hash = hashlib.sha256(
-            seed_material.encode("utf-8")
-        ).hexdigest()
+            seed_material = json.dumps([run_id, state_name, sorted_keys], ensure_ascii=False)
+        seed_hash = hashlib.sha256(seed_material.encode("utf-8")).hexdigest()
         rng = random.Random(int(seed_hash, 16))
         shuffled = list(sorted_keys)
         rng.shuffle(shuffled)
-        return {
-            chr(ord("A") + i): inputs[k]
-            for i, k in enumerate(shuffled)
-        }
+        return {chr(ord("A") + i): inputs[k] for i, k in enumerate(shuffled)}
 
     expected_default = expected_anon_map(default=True)
     expected_alt = expected_anon_map(default=False)
@@ -938,9 +895,7 @@ def test_transform_python_exception_produces_error_state_exit_no_retry(
     ``state_exit`` (with the exception message in the envelope) and
     the executor follows ``on error => <target>`` without retrying."""
 
-    def explode(
-        inputs: dict[str, Any], ctx: TransformContext
-    ) -> dict[str, Any]:
+    def explode(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
         raise RuntimeError("boom")
 
     src = tmp_path / "explode.orc"
@@ -990,12 +945,8 @@ workflow explode_test
     assert terminal == "stop"
 
     records = LogReader(run_dir / "log.jsonl").read_all()
-    enters = [
-        r for r in records if r.event == "state_enter" and r.state_id == "s"
-    ]
-    exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "s"
-    ]
+    enters = [r for r in records if r.event == "state_enter" and r.state_id == "s"]
+    exits = [r for r in records if r.event == "state_exit" and r.state_id == "s"]
     # No retry: exactly one enter and exit, attempt 1.
     assert len(enters) == 1
     assert len(exits) == 1
@@ -1020,9 +971,7 @@ def test_transform_runtime_type_violation_produces_error_state_exit(
     types (e.g. a ``dict[str, str]`` schema with a non-string value)
     produces an error ``state_exit``. The output is not committed."""
 
-    def bad_map(
-        inputs: dict[str, Any], ctx: TransformContext
-    ) -> dict[str, Any]:
+    def bad_map(inputs: dict[str, Any], ctx: TransformContext) -> dict[str, Any]:
         # Schema says dict[str, str] but the callable returns a dict
         # whose values include an int.
         return {"out_map": {"A": "ok", "B": 42}}
@@ -1074,9 +1023,7 @@ workflow badmap_test
     assert terminal == "stop"
 
     records = LogReader(run_dir / "log.jsonl").read_all()
-    exits = [
-        r for r in records if r.event == "state_exit" and r.state_id == "s"
-    ]
+    exits = [r for r in records if r.event == "state_exit" and r.state_id == "s"]
     assert len(exits) == 1
     assert exits[0].fields["status"] == "error"
     err = exits[0].fields["error"]

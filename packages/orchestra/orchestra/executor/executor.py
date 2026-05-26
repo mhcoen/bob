@@ -177,9 +177,7 @@ def _extract_last_json_object(text: str) -> Any:
             last_parse_error = exc
             continue
     if last_parse_error is not None:
-        raise _JsonExtractError(
-            f"no balanced JSON object parsed cleanly: {last_parse_error}"
-        )
+        raise _JsonExtractError(f"no balanced JSON object parsed cleanly: {last_parse_error}")
     raise _JsonExtractError("no balanced JSON object parsed cleanly")
 
 
@@ -324,7 +322,8 @@ class Executor:
                 tuple[tuple[str, str | None], ...] | None,
             ],
             None,
-        ] | None = None,
+        ]
+        | None = None,
         # F2.5a decision-consistency invariant. When ``criteria`` is
         # non-empty the executor enforces the configured criteria
         # against each schema-validated verdict's
@@ -332,14 +331,10 @@ class Executor:
         # ``decision_consistency_mode``. Empty tuple ⇒ checks
         # disabled (back-compat for non-calibration workflows).
         criteria: tuple[CriterionDecl, ...] = (),
-        decision_consistency_mode: DecisionConsistencyMode = (
-            DecisionConsistencyMode.ACCEPT_ONLY
-        ),
+        decision_consistency_mode: DecisionConsistencyMode = (DecisionConsistencyMode.ACCEPT_ONLY),
         progress_watchdog_factory: ProgressWatchdogFactory | None = None,
         actor_progress_interval_seconds: float = ACTOR_PROGRESS_INTERVAL_SECONDS,
-        fan_out_progress_interval_seconds: float = (
-            FAN_OUT_PROGRESS_INTERVAL_SECONDS
-        ),
+        fan_out_progress_interval_seconds: float = (FAN_OUT_PROGRESS_INTERVAL_SECONDS),
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -391,14 +386,10 @@ class Executor:
             else _default_progress_watchdog_factory
         )
         self._actor_progress_interval_seconds = actor_progress_interval_seconds
-        self._fan_out_progress_interval_seconds = (
-            fan_out_progress_interval_seconds
-        )
+        self._fan_out_progress_interval_seconds = fan_out_progress_interval_seconds
         # F2.5a decision-consistency invariant configuration.
         self._criteria: tuple[CriterionDecl, ...] = criteria
-        self._decision_consistency_mode: DecisionConsistencyMode = (
-            decision_consistency_mode
-        )
+        self._decision_consistency_mode: DecisionConsistencyMode = decision_consistency_mode
         # Schema-verdict 1.4: per-artifact SchemaSpec cache. Loaded once
         # at executor construction so each state invocation reuses the
         # parsed schema rather than re-reading the file. Schemas are
@@ -450,9 +441,9 @@ class Executor:
             return self._run_transform_linear(state)
 
         # Step 1: increment counters.
-        is_retry_from_self = (
-            self._last_state == state.name
-            and self._last_outcome in ("error", "timeout")
+        is_retry_from_self = self._last_state == state.name and self._last_outcome in (
+            "error",
+            "timeout",
         )
         self._attempts[state.name] = self._attempts.get(state.name, 0) + 1
         if is_retry_from_self:
@@ -637,17 +628,19 @@ class Executor:
         # non-schema-handled writes are already staged) but before
         # commit. On a schema-validation failure all tentative handles
         # are discarded and the state routes to its ``error`` outcome.
-        if status == "ok" and prepared is not None and self._state_schema_artifact(state) is not None:
+        if (
+            status == "ok"
+            and prepared is not None
+            and self._state_schema_artifact(state) is not None
+        ):
             try:
-                schema_handles, decision_outcome, schema_error = (
-                    self._apply_schema_layer(
-                        state,
-                        payload,
-                        attempt,
-                        invocation_id,
-                        tentative_handles,
-                        payload_ref,
-                    )
+                schema_handles, decision_outcome, schema_error = self._apply_schema_layer(
+                    state,
+                    payload,
+                    attempt,
+                    invocation_id,
+                    tentative_handles,
+                    payload_ref,
                 )
             except Exception as exc:
                 self._store.discard_tentative(tentative_handles)
@@ -735,9 +728,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
-        self._emit_progress(
-            "state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0
-        )
+        self._emit_progress("state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0)
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)
         else:
@@ -805,9 +796,7 @@ class Executor:
                 index = child_start
                 self._progress_fan_out_range_starts[state.name] = child_start
             elif kind == "fan_out_progress":
-                index = self._progress_fan_out_range_starts.get(
-                    state.name, index
-                )
+                index = self._progress_fan_out_range_starts.get(state.name, index)
         try:
             self._progress_callback(
                 kind,
@@ -982,9 +971,7 @@ class Executor:
             payload,
         )
 
-    def _derive_outcome(
-        self, state: StateDecl, payload: dict[str, Any], status: str
-    ) -> str:
+    def _derive_outcome(self, state: StateDecl, payload: dict[str, Any], status: str) -> str:
         if status == "timeout":
             return "timeout"
         if status == "error":
@@ -1101,13 +1088,10 @@ class Executor:
         as the json write, after this method returns.
         """
         parser_writes = tuple(
-            w for w in state.writes
-            if w.name not in self._schema_handled_artifacts
+            w for w in state.writes if w.name not in self._schema_handled_artifacts
         )
         write_types = tuple(w.type for w in parser_writes)
-        parsers = self._registry.parsers_for(
-            backing=state.actor.kind, artifact_types=write_types
-        )
+        parsers = self._registry.parsers_for(backing=state.actor.kind, artifact_types=write_types)
         if not parsers:
             return []
         envelope_for_parser = Envelope(
@@ -1123,9 +1107,7 @@ class Executor:
             artifacts_written=[],
             payload={
                 **payload,
-                "_declared_writes": [
-                    {"name": w.name, "type": w.type} for w in parser_writes
-                ],
+                "_declared_writes": [{"name": w.name, "type": w.type} for w in parser_writes],
             },
             error=None,
         )
@@ -1176,13 +1158,10 @@ class Executor:
         ``commit_tentative``'s input.
         """
         parser_writes = tuple(
-            w for w in state.writes
-            if w.name not in self._schema_handled_artifacts
+            w for w in state.writes if w.name not in self._schema_handled_artifacts
         )
         write_types = tuple(w.type for w in parser_writes)
-        parsers = self._registry.parsers_for(
-            backing=state.actor.kind, artifact_types=write_types
-        )
+        parsers = self._registry.parsers_for(backing=state.actor.kind, artifact_types=write_types)
         envelope_for_parser = Envelope(
             state_id=state.name,
             attempt=0,
@@ -1196,9 +1175,7 @@ class Executor:
             artifacts_written=[],
             payload={
                 **payload,
-                "_declared_writes": [
-                    {"name": w.name, "type": w.type} for w in parser_writes
-                ],
+                "_declared_writes": [{"name": w.name, "type": w.type} for w in parser_writes],
             },
             error=None,
         )
@@ -1216,9 +1193,7 @@ class Executor:
             out.append({"artifact": n, "version_id": vid})
         return out
 
-    def _state_schema_artifact(
-        self, state: StateDecl
-    ) -> ArtifactDecl | None:
+    def _state_schema_artifact(self, state: StateDecl) -> ArtifactDecl | None:
         """Return the schema-backed json artifact this state writes,
         or ``None`` when the state has no schema-backed write.
 
@@ -1404,9 +1379,7 @@ class Executor:
         if self._criteria:
             compliance_raw = parsed.get("criteria_compliance")
             compliance: list[dict[str, Any]] = (
-                list(compliance_raw)
-                if isinstance(compliance_raw, list)
-                else []
+                list(compliance_raw) if isinstance(compliance_raw, list) else []
             )
             consistency: DecisionConsistencyResult = check_decision_consistency(
                 decision=decision,
@@ -1429,9 +1402,7 @@ class Executor:
                         "missing_ids": list(consistency.missing_ids),
                         "extra_ids": list(consistency.extra_ids),
                         "duplicate_ids": list(consistency.duplicate_ids),
-                        "noncompliant_required_ids": list(
-                            consistency.noncompliant_required_ids
-                        ),
+                        "noncompliant_required_ids": list(consistency.noncompliant_required_ids),
                         "mode": self._decision_consistency_mode.value,
                         "payload_ref": payload_ref,
                         "invocation_id": invocation_id,
@@ -1439,10 +1410,7 @@ class Executor:
                 )
                 err = ErrorRecord(
                     kind="actor_failure",
-                    message=(
-                        "decision-consistency violation: "
-                        f"{consistency.reason}"
-                    ),
+                    message=(f"decision-consistency violation: {consistency.reason}"),
                     detail={
                         "reason": "decision_consistency_violation",
                         "phase": "decision_consistency",
@@ -1511,9 +1479,7 @@ class Executor:
                 # the same thing (handle row first, then version
                 # row); mirror that order here.
                 for seq in seqs:
-                    cur.execute(
-                        "DELETE FROM tentative_handles WHERE seq = ?", (seq,)
-                    )
+                    cur.execute("DELETE FROM tentative_handles WHERE seq = ?", (seq,))
                     cur.execute("DELETE FROM versions WHERE seq = ?", (seq,))
                 conn.commit()
             except Exception:
@@ -1539,7 +1505,9 @@ class Executor:
         return str(decl.target)
 
     def _select_transition_decl(
-        self, state: StateDecl, envelope: Envelope,
+        self,
+        state: StateDecl,
+        envelope: Envelope,
         *,
         snapshot: FanOutSnapshot | None = None,
     ) -> Any:
@@ -1634,8 +1602,7 @@ class Executor:
         decl = self._select_transition_decl(state, envelope)
         if decl is None:
             raise ExecutorError(
-                f"state {state.name!r}: no transition matched outcome "
-                f"{envelope.outcome!r}"
+                f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
             )
         if decl.is_fan_out():
             target = self._run_fan_out_group(state, envelope, decl)
@@ -1675,9 +1642,7 @@ class Executor:
         transform = self._registry.transforms[state.actor.ref]
 
         with self._attempt_lock:
-            self._attempts[state_name] = (
-                self._attempts.get(state_name, 0) + 1
-            )
+            self._attempts[state_name] = self._attempts.get(state_name, 0) + 1
             attempt = self._attempts[state_name]
             attempts_snapshot = dict(self._attempts)
             retries_snapshot = dict(self._retries)
@@ -1698,10 +1663,7 @@ class Executor:
 
         actor_binding = self._build_actor_binding(state)
         reads = self._read_artifacts(state, snapshot=snapshot)
-        inputs: dict[str, Any] = {
-            name: wrapper.get("value")
-            for name, wrapper in reads.items()
-        }
+        inputs: dict[str, Any] = {name: wrapper.get("value") for name, wrapper in reads.items()}
         sorted_input_keys = sorted(inputs.keys())
         ctx = TransformContext(
             run_id=self._run_id,
@@ -1752,10 +1714,7 @@ class Executor:
             if not isinstance(outputs, dict):
                 error_record = ErrorRecord(
                     kind="actor_failure",
-                    message=(
-                        f"transform returned {type(outputs).__name__}, "
-                        "expected dict"
-                    ),
+                    message=(f"transform returned {type(outputs).__name__}, expected dict"),
                     detail={"phase": "transform_output_shape"},
                 )
             else:
@@ -1774,12 +1733,8 @@ class Executor:
                         detail={"phase": "transform_output_shape"},
                     )
                 else:
-                    for write_name, expected_type in (
-                        transform.output_schema.items()
-                    ):
-                        if not runtime_check(
-                            outputs[write_name], expected_type
-                        ):
+                    for write_name, expected_type in transform.output_schema.items():
+                        if not runtime_check(outputs[write_name], expected_type):
                             error_record = ErrorRecord(
                                 kind="actor_failure",
                                 message=(
@@ -1787,9 +1742,7 @@ class Executor:
                                     "value does not match declared type "
                                     f"{type_label(expected_type)}"
                                 ),
-                                detail={
-                                    "phase": "transform_output_typecheck"
-                                },
+                                detail={"phase": "transform_output_typecheck"},
                             )
                             break
 
@@ -1822,15 +1775,9 @@ class Executor:
                     },
                 )
             if status == "ok" and tentative_handles:
-                committed_ids = self._store.commit_tentative(
-                    tentative_handles
-                )
-                for w, vid in zip(
-                    state.writes, committed_ids, strict=False
-                ):
-                    artifacts_written.append(
-                        {"artifact": w.name, "version_id": vid}
-                    )
+                committed_ids = self._store.commit_tentative(tentative_handles)
+                for w, vid in zip(state.writes, committed_ids, strict=False):
+                    artifacts_written.append({"artifact": w.name, "version_id": vid})
                     self._log.write(
                         "artifact_write",
                         state_id=state.name,
@@ -1876,9 +1823,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
-        self._emit_progress(
-            "state_exit", state, elapsed_seconds=duration_ms / 1000.0
-        )
+        self._emit_progress("state_exit", state, elapsed_seconds=duration_ms / 1000.0)
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)
         else:
@@ -1928,8 +1873,7 @@ class Executor:
         with self._log.lock:
             with self._store.lock:
                 snapshot_envelopes = {
-                    name: _envelope_to_view(env)
-                    for name, env in self._envelopes.items()
+                    name: _envelope_to_view(env) for name, env in self._envelopes.items()
                 }
                 snapshot_artifacts: dict[str, Any] = {}
                 for art in self._wf.artifacts:
@@ -1962,12 +1906,9 @@ class Executor:
         # plus its declared role; the api wrapper enriches each pair
         # with the resolved adapter and model.
         children_with_roles: tuple[tuple[str, str | None], ...] = tuple(
-            (child_name, self._wf.state(child_name).role)
-            for child_name in transition.fan_out
+            (child_name, self._wf.state(child_name).role) for child_name in transition.fan_out
         )
-        self._emit_progress(
-            "fan_out_start", parent_state, children=children_with_roles
-        )
+        self._emit_progress("fan_out_start", parent_state, children=children_with_roles)
 
         registry = _CancellationRegistry()
         for child_name in transition.fan_out:
@@ -2009,11 +1950,10 @@ class Executor:
             child_invocation_ids: dict[str, str] = {}
             group_errored = False
             from concurrent.futures import as_completed
+
             for fut in as_completed(futures.values()):
                 # Map future back to child name.
-                child_name = next(
-                    name for name, f in futures.items() if f is fut
-                )
+                child_name = next(name for name, f in futures.items() if f is fut)
                 try:
                     envelope = fut.result()
                 except Exception as exc:
@@ -2040,9 +1980,7 @@ class Executor:
                 # the aggregate must agree so downstream tooling can
                 # correlate the per-child invocation_ids back to
                 # the durable records.
-                inv_id = make_invocation_id(
-                    self._run_id, child_name, envelope.attempt
-                )
+                inv_id = make_invocation_id(self._run_id, child_name, envelope.attempt)
                 child_invocation_ids[child_name] = inv_id
                 outcome = "success" if envelope.status == "ok" else "error"
                 child_outcomes[child_name] = outcome
@@ -2054,9 +1992,7 @@ class Executor:
             stop_fan_out_watchdog()
 
         # Aggregate outcome.
-        aggregate: Literal["success", "error"] = (
-            "error" if group_errored else "success"
-        )
+        aggregate: Literal["success", "error"] = "error" if group_errored else "success"
         target = transition.error_target if aggregate == "error" else transition.target
         # Cleanup pass: purge state_invocation rows whose producing
         # invocation is not success. Idempotent.
@@ -2113,10 +2049,7 @@ class Executor:
             )
         if decl.is_fan_out():
             target = self._run_fan_out_group(state, envelope, decl)
-        elif (
-            decl.retry_max is not None
-            and self._retries.get(state_name, 0) < decl.retry_max
-        ):
+        elif decl.retry_max is not None and self._retries.get(state_name, 0) < decl.retry_max:
             # The original execution would have re-entered the state
             # under the retry budget. Re-entering is the only correct
             # behavior here too: the state_exit was an error and the
@@ -2208,14 +2141,10 @@ class Executor:
                 # attempts.<sibling> or retries.<sibling>.
                 with self._attempt_lock:
                     snapshot_attempts = {
-                        n: v
-                        for n, v in self._attempts.items()
-                        if n not in excluded_sibling_names
+                        n: v for n, v in self._attempts.items() if n not in excluded_sibling_names
                     }
                     snapshot_retries = {
-                        n: v
-                        for n, v in self._retries.items()
-                        if n not in excluded_sibling_names
+                        n: v for n, v in self._retries.items() if n not in excluded_sibling_names
                     }
             self._log.write(
                 "fan_out_resume",
@@ -2225,17 +2154,13 @@ class Executor:
                     "parent_state": parent_state.name,
                     "children": list(children),
                     "completed": list(completed_children.keys()),
-                    "pending": [
-                        c for c in children if c not in completed_children
-                    ],
+                    "pending": [c for c in children if c not in completed_children],
                     "join_target": join_target,
                     "error_target": error_target,
                 },
             )
 
-        pending_children = [
-            c for c in children if c not in completed_children
-        ]
+        pending_children = [c for c in children if c not in completed_children]
 
         # Seed outcomes from already-completed children; these were
         # committed and durable before the crash.
@@ -2245,9 +2170,7 @@ class Executor:
         for name, env in completed_children.items():
             outcome = "success" if env.status == "ok" else "error"
             child_outcomes[name] = outcome
-            child_invocation_ids[name] = make_invocation_id(
-                self._run_id, name, env.attempt
-            )
+            child_invocation_ids[name] = make_invocation_id(self._run_id, name, env.attempt)
             if outcome == "error":
                 group_errored = True
 
@@ -2280,9 +2203,7 @@ class Executor:
                     "purged_versions": purged,
                 },
             )
-            return self._close_resumed_fan_out_transition(
-                parent_state.name, parent_attempt, target
-            )
+            return self._close_resumed_fan_out_transition(parent_state.name, parent_attempt, target)
 
         registry = _CancellationRegistry()
         for child_name in pending_children:
@@ -2321,9 +2242,7 @@ class Executor:
                 from concurrent.futures import as_completed
 
                 for fut in as_completed(futures.values()):
-                    child_name = next(
-                        name for name, f in futures.items() if f is fut
-                    )
+                    child_name = next(name for name, f in futures.items() if f is fut)
                     try:
                         envelope = fut.result()
                     except Exception as exc:
@@ -2350,9 +2269,7 @@ class Executor:
                         envelope.attempt,
                     )
                     child_invocation_ids[child_name] = inv_id
-                    outcome = (
-                        "success" if envelope.status == "ok" else "error"
-                    )
+                    outcome = "success" if envelope.status == "ok" else "error"
                     child_outcomes[child_name] = outcome
                     if outcome == "error" and not group_errored:
                         group_errored = True
@@ -2376,9 +2293,7 @@ class Executor:
                 "purged_versions": purged,
             },
         )
-        return self._close_resumed_fan_out_transition(
-            parent_state.name, parent_attempt, target
-        )
+        return self._close_resumed_fan_out_transition(parent_state.name, parent_attempt, target)
 
     def _close_resumed_fan_out_transition(
         self,
@@ -2481,9 +2396,7 @@ class Executor:
                 _name: str = child_name,
                 _adapter: Adapter = adapter,
             ) -> None:
-                registry.mark_started(
-                    _name, invocation_id, prepared, _adapter
-                )
+                registry.mark_started(_name, invocation_id, prepared, _adapter)
 
             def _is_cancelled_after_register(
                 _name: str = child_name,
@@ -2508,9 +2421,7 @@ class Executor:
             # followed by `on error retry max 1 then stop`). That
             # routes the child to retry when the workflow author
             # explicitly chose `=> stop` first.
-            selected = self._select_transition_decl(
-                state, envelope, snapshot=snapshot
-            )
+            selected = self._select_transition_decl(state, envelope, snapshot=snapshot)
             should_retry = False
             if selected is not None and selected.retry_max is not None:
                 with self._attempt_lock:
@@ -2534,9 +2445,7 @@ class Executor:
         a monotonic per-state attempt counter. Mirrors
         ``_execute_state_body``'s minting discipline."""
         with self._attempt_lock:
-            self._attempts[child_name] = (
-                self._attempts.get(child_name, 0) + 1
-            )
+            self._attempts[child_name] = self._attempts.get(child_name, 0) + 1
             attempt = self._attempts[child_name]
         invocation_id = make_invocation_id(self._run_id, child_name, attempt)
         self._visibility_index.insert_pending(invocation_id)
@@ -2593,9 +2502,7 @@ class Executor:
         self,
         state_name: str,
         snapshot: FanOutSnapshot | None = None,
-        on_prepared: (
-            Callable[[PreparedInvocation, str], None] | None
-        ) = None,
+        on_prepared: (Callable[[PreparedInvocation, str], None] | None) = None,
         is_cancelled_after_register: Callable[[], bool] | None = None,
         suppress_actor_progress: bool = False,
     ) -> Envelope:
@@ -2620,13 +2527,9 @@ class Executor:
         """
         state = self._wf.state(state_name)
         if state.actor.kind == "transform":
-            return self._execute_transform_body(
-                state_name, snapshot=snapshot
-            )
+            return self._execute_transform_body(state_name, snapshot=snapshot)
         with self._attempt_lock:
-            self._attempts[state_name] = (
-                self._attempts.get(state_name, 0) + 1
-            )
+            self._attempts[state_name] = self._attempts.get(state_name, 0) + 1
             attempt = self._attempts[state_name]
             attempts_snapshot = dict(self._attempts)
             retries_snapshot = dict(self._retries)
@@ -2706,10 +2609,7 @@ class Executor:
             )
             if on_prepared is not None:
                 on_prepared(prepared, invocation_id)
-            if (
-                is_cancelled_after_register is not None
-                and is_cancelled_after_register()
-            ):
+            if is_cancelled_after_register is not None and is_cancelled_after_register():
                 cancelled_post_register = True
 
         started_at = _now_iso()
@@ -2718,10 +2618,7 @@ class Executor:
         if cancelled_post_register:
             error_record = ErrorRecord(
                 kind="cancelled",
-                message=(
-                    "cancelled by fan-out controller after register, "
-                    "before invoke"
-                ),
+                message=("cancelled by fan-out controller after register, before invoke"),
             )
         payload: dict[str, Any] = {}
         if prepared is not None and not cancelled_post_register:
@@ -2811,17 +2708,19 @@ class Executor:
         # Schema-verdict 1.4: parse the model output as JSON, validate
         # against the artifact's schema, and tentative-write the json
         # artifact plus any extraction targets.
-        if status == "ok" and prepared is not None and self._state_schema_artifact(state) is not None:
+        if (
+            status == "ok"
+            and prepared is not None
+            and self._state_schema_artifact(state) is not None
+        ):
             try:
-                schema_handles, decision_outcome, schema_error = (
-                    self._apply_schema_layer(
-                        state,
-                        payload,
-                        attempt,
-                        invocation_id,
-                        tentative_handles,
-                        payload_ref,
-                    )
+                schema_handles, decision_outcome, schema_error = self._apply_schema_layer(
+                    state,
+                    payload,
+                    attempt,
+                    invocation_id,
+                    tentative_handles,
+                    payload_ref,
                 )
             except Exception as exc:
                 self._store.discard_tentative(tentative_handles)
@@ -2903,9 +2802,7 @@ class Executor:
                 "invocation_id": invocation_id,
             },
         )
-        self._emit_progress(
-            "state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0
-        )
+        self._emit_progress("state_exit", state, elapsed_seconds=envelope.duration_ms / 1000.0)
         if status == "ok":
             self._visibility_index.mark_success(invocation_id)
         else:
@@ -2976,9 +2873,7 @@ class _TimeoutSignal(Exception):
     pass
 
 
-def _adapter_manages_own_timeout(
-    adapter: Adapter, prepared: PreparedInvocation
-) -> bool:
+def _adapter_manages_own_timeout(adapter: Adapter, prepared: PreparedInvocation) -> bool:
     """Return whether the actually-selected adapter manages its own
     timeout, accounting for dispatchers that fan out per role.
 
@@ -3156,9 +3051,7 @@ class _CancellationRegistry:
                 return
             entry.state = "done"
 
-    def request_cancel_all(
-        self, futures: dict[str, Future[Envelope]]
-    ) -> None:
+    def request_cancel_all(self, futures: dict[str, Future[Envelope]]) -> None:
         """Cancel every still-running child.
 
         - ``pending`` entries: set ``cancel_requested`` so the worker
@@ -3196,13 +3089,8 @@ class _CancellationRegistry:
                     pending_to_cancel.append(name)
                 elif entry.state == "registered":
                     entry.cancel_requested = True
-                    if (
-                        entry.adapter is not None
-                        and entry.invocation_handle is not None
-                    ):
-                        registered_to_cancel.append(
-                            (entry.adapter, entry.invocation_handle)
-                        )
+                    if entry.adapter is not None and entry.invocation_handle is not None:
+                        registered_to_cancel.append((entry.adapter, entry.invocation_handle))
         for name in pending_to_cancel:
             fut = futures.get(name)
             if fut is not None:

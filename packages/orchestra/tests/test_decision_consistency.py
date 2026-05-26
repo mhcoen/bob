@@ -19,10 +19,7 @@ from orchestra.executor.criteria import (
 
 
 def _conf(*ids: str, required: bool = True) -> tuple[CriterionDecl, ...]:
-    return tuple(
-        CriterionDecl(id=cid, description=f"d-{cid}", required=required)
-        for cid in ids
-    )
+    return tuple(CriterionDecl(id=cid, description=f"d-{cid}", required=required) for cid in ids)
 
 
 def _entry(cid: str, *, compliant: bool, observed: str = "x") -> dict[str, object]:
@@ -47,9 +44,7 @@ def test_empty_configured_passes_for_any_decision() -> None:
                 configured=(),
                 mode=mode,
             )
-            assert result.ok, (
-                f"empty configured should pass for {decision} in {mode}"
-            )
+            assert result.ok, f"empty configured should pass for {decision} in {mode}"
 
 
 # --------------------------------------------------------------------
@@ -228,13 +223,9 @@ def test_mode_for_iterate() -> None:
 
 def test_mode_for_prji() -> None:
     assert (
-        mode_for_workflow("propose_review_judge_implement")
-        is DecisionConsistencyMode.ACCEPT_ONLY
+        mode_for_workflow("propose_review_judge_implement") is DecisionConsistencyMode.ACCEPT_ONLY
     )
 
 
 def test_mode_for_unknown_defaults_to_accept_only() -> None:
-    assert (
-        mode_for_workflow("some_unknown_workflow")
-        is DecisionConsistencyMode.ACCEPT_ONLY
-    )
+    assert mode_for_workflow("some_unknown_workflow") is DecisionConsistencyMode.ACCEPT_ONLY
