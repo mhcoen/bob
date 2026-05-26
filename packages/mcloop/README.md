@@ -1701,7 +1701,7 @@ deepseek() {
   zsh
 }
 
-kimi() {
+kimi_moonshot_fast() {
   ANTHROPIC_BASE_URL="https://openrouter.ai/api" \
   ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" \
   ANTHROPIC_MODEL="moonshotai/kimi-k2.6" \
@@ -1711,6 +1711,8 @@ kimi() {
   CLAUDE_CODE_SUBAGENT_MODEL="moonshotai/kimi-k2.6" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
   ENABLE_TOOL_SEARCH="1" \
+  DISABLE_INTERLEAVED_THINKING="1" \
+  MAX_THINKING_TOKENS="0" \
   zsh
 }
 ```
