@@ -11,7 +11,7 @@ bob-tools = { workspace = true }
 addopts = "-n auto"
 timeout = 60
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "pytest-xdist>=3.5",
     "pytest-timeout>=2.3",
