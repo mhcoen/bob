@@ -1,0 +1,52 @@
+"""mcloop - autonomous build loop driven by PLAN.md."""
+
+# Eager submodule imports so attribute-style access (``mcloop.main.X``,
+# ``mcloop.runner.Y``, etc.) resolves deterministically under
+# ``--import-mode=importlib`` with pytest-xdist. Without these, patch
+# sites like ``monkeypatch.setattr("mcloop.runner.<x>", ...)`` race
+# against worker import state and intermittently raise AttributeError.
+# __main__ is intentionally excluded — it is a script entry point.
+from . import (
+    _planfile_compat,
+    _planfile_precondition,
+    app_interact,
+    audit,
+    checks,
+    claude_md_check,
+    claude_md_sync,
+    code_edit,
+    config,
+    conftest_guard,
+    dep_validator,
+    errors,
+    formatting,
+    git_ops,
+    idea_cmd,
+    install_cmd,
+    investigate_cmd,
+    investigator,
+    ledger_config,
+    ledger_emit,
+    ledger_pause,
+    lifecycle,
+    main,
+    maintain,
+    notify,
+    orchestra_override,
+    output,
+    process_monitor,
+    prompts,
+    pytest_optimizations,
+    ratelimit,
+    review_integration,
+    reviewer,
+    run_summary,
+    runner,
+    session_context,
+    sync_cmd,
+    targeted,
+    test_runner,
+    web_interact,
+    worktree,
+    wrap,
+)

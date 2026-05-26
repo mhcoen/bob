@@ -26,6 +26,33 @@ from orchestra.config import (
     load_config,
 )
 
+# Eager submodule imports so attribute-style access (``orchestra.api.X``,
+# ``orchestra.cli.Y``, etc.) resolves deterministically under
+# ``--import-mode=importlib`` with pytest-xdist. Without these, patch
+# sites racing across xdist workers can hit a partially-loaded
+# package and raise AttributeError on otherwise-valid submodule access.
+from . import (  # noqa: E402, F401
+    adapters,
+    calibration,
+    cli,
+    errors,
+    executor,
+    loader,
+    log,
+    payloads,
+    progress,
+    prompt_snapshot,
+    prompts,
+    registry,
+    repl,
+    resume,
+    schema,
+    spine,
+    store,
+    transforms,
+    visibility,
+)
+
 __version__ = "0.0.1"
 
 __all__ = [
