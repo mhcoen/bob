@@ -8,6 +8,36 @@
 
 ## Observations
 
+- 2026-05-26 [1.4] [T-000004] `resolve_global` lives in `fileio.py`
+  rather than `operations.py` because it is intrinsically an I/O
+  helper (it walks the filesystem under `root` and parses every
+  PLAN.md it finds). Three design choices worth re-checking once a
+  real caller lands: (a) parse errors from any walked PLAN.md
+  propagate unchanged — a malformed file blocks resolution of every
+  id below its directory; tolerant callers must catch `PlanSyntaxError`
+  themselves. (b) Ambiguous ids (the same `T-XX-NNNNNN` appearing in
+  two PLAN.md files — invariant violation but possible from author
+  error) return the first sorted-path match silently; no diagnostic
+  is raised. If the workspace ever observes such a collision, prefer
+  raising over silent first-match. (c) Legacy unprefixed `T-NNNNNN`
+  ids are rejected with `ValueError` rather than searched, because the
+  resolver's contract is "fully-qualified" id resolution; cross-file
+  search of legacy ids is undefined without a per-file namespace.
+
+- 2026-05-26 [1.4] [T-000004] Workspace pytest (`.venv/bin/pytest` from
+  repo root) reports 58 failed / 6099 passed / 118 skipped / 9 errors;
+  every failure and error is under `packages/duplo/tests/` (test_reauthor,
+  test_spec_writer, test_pipeline, test_phase5_integration, test_init,
+  test_platform_integration, test_claude_cli). None are in
+  `packages/bob-tools/` — the 13 new `TestResolveGlobal` cases all pass
+  and the rest of the bob-tools planfile suite is green. The BUG
+  INVESTIGATION list from the prior attempt referenced the same duplo
+  failures (73 failed / 24 errors then vs 58 / 9 now, so the absolute
+  count went down rather than up across the workspace); they are
+  pre-existing duplo issues unrelated to the cross-file resolver added
+  here, parallel to the workspace-pytest-not-clean caveat first
+  recorded in the 2026-05-26 [1.1] entry below.
+
 - 2026-05-26 [1.1] [T-000001] Workspace pytest exits with code 1 due
   to pre-existing collection errors in `packages/mcloop/tests` and
   `packages/orchestra/tests`, independent of this task. The mcloop

@@ -13,7 +13,14 @@ All exported names are implemented and live.
 
 from __future__ import annotations
 
-from bob_tools.planfile.fileio import ConcurrentUpdateError, load, save, update
+from bob_tools.planfile.fileio import (
+    ConcurrentUpdateError,
+    TaskNotFoundError,
+    load,
+    resolve_global,
+    save,
+    update,
+)
 from bob_tools.planfile.model import (
     BugsSection,
     Outcome,
@@ -74,6 +81,7 @@ __all__ = [
     "Subsection",
     "Task",
     "TaskContext",
+    "TaskNotFoundError",
     "TaskStatus",
     "add_bug_task",
     "add_phase_task",
@@ -95,6 +103,7 @@ __all__ = [
     "replace_phase",
     "replace_phase_validated",
     "reset_task",
+    "resolve_global",
     "resolve_task_context",
     "sanitize_plan_artifact",
     "save",

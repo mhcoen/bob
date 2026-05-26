@@ -47,17 +47,35 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import os
+import re
 import tempfile
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Literal
 
-from bob_tools.planfile.model import Plan
-from bob_tools.planfile.operations import assert_mcloop_canonical
+from bob_tools.planfile.model import Plan, Task
+from bob_tools.planfile.operations import _iter_plan_tasks, assert_mcloop_canonical
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import render_plan
 
 ValidationMode = Literal["canonical", "unchecked"]
+
+
+_FULLY_QUALIFIED_TASK_ID_RE = re.compile(r"^T-[A-Za-z]{2}-\d{6}$")
+
+
+class TaskNotFoundError(LookupError):
+    """Raised by :func:`resolve_global` when no PLAN.md carries the id.
+
+    Carries the searched id and the workspace root so callers writing
+    cross-file lookups can surface the same context to the user without
+    re-stringifying the inputs.
+    """
+
+    def __init__(self, task_id: str, root: Path) -> None:
+        super().__init__(f"task {task_id!r} not found in any PLAN.md under {root}")
+        self.task_id = task_id
+        self.root = root
 
 
 class ConcurrentUpdateError(Exception):
@@ -89,6 +107,38 @@ def load(path: Path) -> Plan:
     """
     text = path.read_text()
     return parse_plan(text, source_path=path)
+
+
+def resolve_global(task_id: str, root: Path) -> tuple[Path, Task]:
+    """Resolve a fully-qualified namespaced task id across the workspace.
+
+    Walks every ``PLAN.md`` under ``root`` (recursively, sorted by path
+    for determinism), parses each, and returns ``(file, task)`` for the
+    first task whose ``task_id`` equals ``task_id``. Raises
+    :class:`TaskNotFoundError` when no PLAN.md carries the id.
+
+    ``task_id`` must be in the fully-qualified namespaced form
+    ``T-XX-NNNNNN`` (T-000003 grammar). Legacy unprefixed ``T-NNNNNN``
+    ids are not addressable through this resolver — they are ambiguous
+    across files by construction, which is precisely the reason the
+    namespace prefix was added. :class:`ValueError` is raised when the
+    input does not match the canonical form.
+
+    Parse errors from any walked PLAN.md propagate unchanged so a
+    malformed file is visible to the caller rather than silently
+    skipped; a caller that wants tolerant scanning can ``except
+    PlanSyntaxError`` around the call.
+    """
+    if _FULLY_QUALIFIED_TASK_ID_RE.fullmatch(task_id) is None:
+        raise ValueError(
+            f"task_id must be fully qualified (T-XX-NNNNNN), got {task_id!r}"
+        )
+    for plan_path in sorted(root.rglob("PLAN.md")):
+        plan = load(plan_path)
+        for task in _iter_plan_tasks(plan):
+            if task.task_id == task_id:
+                return plan_path, task
+    raise TaskNotFoundError(task_id, root)
 
 
 def _lock_path(path: Path) -> Path:
