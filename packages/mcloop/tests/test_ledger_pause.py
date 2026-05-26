@@ -215,8 +215,8 @@ class TestAutoReauthorFailureModes:
             raise _FakeLineageError("lineage check failed")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -246,8 +246,8 @@ class TestAutoReauthorFailureModes:
             raise _FakeReauthorError("council error: timeout")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -262,6 +262,7 @@ class TestAutoReauthorFailureModes:
     def test_unexpected_exception_hard_stops_with_reauthor_failed(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import sys
         import types
@@ -276,8 +277,8 @@ class TestAutoReauthorFailureModes:
             raise RuntimeError("network unreachable")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -292,6 +293,7 @@ class TestAutoReauthorFailureModes:
     def test_success_returns_result(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         import sys
         import types
@@ -307,8 +309,8 @@ class TestAutoReauthorFailureModes:
             return sentinel
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         result = ledger_pause.auto_reauthor(
             decision=self._decision(),
@@ -321,6 +323,7 @@ class TestAutoReauthorFailureModes:
     def test_plan_artifact_error_hard_stops_with_plan_artifact_invalid(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A duplo.reauthor.PlanArtifactError must surface as a
         HardStop with reason 'plan_artifact_invalid', distinct from
@@ -343,8 +346,8 @@ class TestAutoReauthorFailureModes:
             )
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -361,6 +364,7 @@ class TestAutoReauthorFailureModes:
     def test_older_duplo_without_plan_artifact_error_falls_back(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Older duplo installations don't export PlanArtifactError.
         mcloop must still import cleanly and treat any ReauthorError
@@ -380,8 +384,8 @@ class TestAutoReauthorFailureModes:
             raise _FakeReauthorError("plain reauthor failure")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -398,6 +402,7 @@ class TestAutoReauthorFailureModes:
     def test_commit_attribution_error_hard_stops_with_distinct_reason(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A duplo.reauthor.CommitAttributionError must surface as a
         HardStop with reason 'commit_attribution_invalid', distinct
@@ -421,8 +426,8 @@ class TestAutoReauthorFailureModes:
             )
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -437,6 +442,7 @@ class TestAutoReauthorFailureModes:
     def test_older_duplo_without_commit_attribution_error_falls_back(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Older duplo installations don't export
         CommitAttributionError. mcloop must still import cleanly
@@ -457,8 +463,8 @@ class TestAutoReauthorFailureModes:
             raise _FakeReauthorError("plain reauthor failure")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -472,6 +478,7 @@ class TestAutoReauthorFailureModes:
     def test_schema_validation_error_hard_stops_with_distinct_reason(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A duplo.reauthor.SchemaValidationError must surface as a
         HardStop with reason 'schema_validation_invalid', distinct
@@ -501,8 +508,8 @@ class TestAutoReauthorFailureModes:
             )
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -517,6 +524,7 @@ class TestAutoReauthorFailureModes:
     def test_older_duplo_without_schema_validation_error_falls_back(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Older duplo installations don't export
         SchemaValidationError. mcloop must still import cleanly and
@@ -536,8 +544,8 @@ class TestAutoReauthorFailureModes:
             raise _FakeReauthorError("plain reauthor failure")
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
         with pytest.raises(HardStop) as exc_info:
             ledger_pause.auto_reauthor(
@@ -565,7 +573,7 @@ class _CapturingFakeReauthorModule:
         self.calls: list[dict[str, Any]] = []
         self.return_value: Any = object()
 
-    def install(self) -> None:
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import sys
         import types
 
@@ -573,8 +581,8 @@ class _CapturingFakeReauthorModule:
         fake_mod.LineageValidationError = _FakeLineageError  # type: ignore[attr-defined]
         fake_mod.ReauthorError = _FakeReauthorError  # type: ignore[attr-defined]
         fake_mod.reauthor_plan = self._fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
     def _fake_reauthor_plan(self, **kwargs: Any) -> Any:
         self.calls.append(dict(kwargs))
@@ -586,11 +594,12 @@ class TestAutoReauthorPhaseScoping:
     def test_phase_scoped_decision_passes_target_phase_id(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         from mcloop import ledger_pause
 
         fake = _CapturingFakeReauthorModule()
-        fake.install()
+        fake.install(monkeypatch)
 
         decision = PauseDecision(
             crossing_event_id="00000000-0000-7000-8000-000000000001",
@@ -612,6 +621,7 @@ class TestAutoReauthorPhaseScoping:
     def test_phase_scoped_without_target_hard_stops(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """recommended_action=reauthor_phase but the crossing's
         triggering event has no extractable phase_id (e.g.,
@@ -621,7 +631,7 @@ class TestAutoReauthorPhaseScoping:
         from mcloop import ledger_pause
 
         fake = _CapturingFakeReauthorModule()
-        fake.install()
+        fake.install(monkeypatch)
 
         decision = PauseDecision(
             crossing_event_id="00000000-0000-7000-8000-000000000002",
@@ -645,6 +655,7 @@ class TestAutoReauthorPhaseScoping:
     def test_plan_scoped_decision_passes_none_target_phase_id(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Plan-scoped crossings (unattributable_commit,
         invariant_declared, exploratory_count_exceeded) call
@@ -654,7 +665,7 @@ class TestAutoReauthorPhaseScoping:
         from mcloop import ledger_pause
 
         fake = _CapturingFakeReauthorModule()
-        fake.install()
+        fake.install(monkeypatch)
 
         decision = PauseDecision(
             crossing_event_id="00000000-0000-7000-8000-000000000003",
@@ -671,6 +682,40 @@ class TestAutoReauthorPhaseScoping:
         )
         assert len(fake.calls) == 1
         assert fake.calls[0]["target_phase_id"] is None
+
+
+# ---------------------------------------------------------------------
+# Regression: fake-duplo install must clean up on teardown
+# ---------------------------------------------------------------------
+
+
+class TestFakeDuploInstallCleanup:
+    """Pin the requirement that this module's fake-duplo install
+    helpers use monkeypatch (not raw ``sys.modules[...] = ...``) so
+    the real ``duplo`` package is restored after each test ends.
+
+    The prior bug: raw assignment to ``sys.modules['duplo']`` leaked
+    a stub module into the workspace-root pytest run, breaking any
+    later duplo test that did ``monkeypatch.setattr('duplo.main.X',
+    ...)`` (AttributeError: module 'duplo' has no attribute 'main').
+    """
+
+    def test_capturing_fake_install_restores_sys_modules_on_teardown(self) -> None:
+        import sys
+
+        before_duplo = sys.modules.get("duplo")
+        before_reauthor = sys.modules.get("duplo.reauthor")
+
+        with pytest.MonkeyPatch.context() as mp:
+            fake = _CapturingFakeReauthorModule()
+            fake.install(mp)
+            # Inside the context, the fake is installed.
+            assert sys.modules.get("duplo") is not before_duplo
+            assert sys.modules.get("duplo.reauthor") is not before_reauthor
+
+        # After the context exits, sys.modules is restored.
+        assert sys.modules.get("duplo") is before_duplo
+        assert sys.modules.get("duplo.reauthor") is before_reauthor
 
 
 # ---------------------------------------------------------------------

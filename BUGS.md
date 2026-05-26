@@ -28,7 +28,7 @@
   has the active log path. Cost is trivial: read last few KB of the
   log, find most recent tool_use block, format.
 
-- [ ] T-000002: Workspace-root pytest has non-deterministic test-state pollution.
+- [x] T-000002: Workspace-root pytest has non-deterministic test-state pollution.
   Running `.venv/bin/pytest` from the workspace root produces 0-270
   failures across runs (order-dependent), with the signature
   `AttributeError: module 'duplo' has no attribute 'X'` (or

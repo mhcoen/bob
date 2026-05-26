@@ -84,6 +84,31 @@
   and `monkeypatch.setattr("duplo.main.…", …)` reaching for a submodule
   the worker has not yet imported, not to any T-000003 change.
 
+- 2026-05-26 [2] [T-000002]: Root cause of the workspace-pytest pollution
+  was `packages/mcloop/tests/test_ledger_pause.py` and
+  `packages/mcloop/tests/test_integration_slice_d.py`. Both used raw
+  `sys.modules["duplo"] = types.ModuleType("duplo")` /
+  `sys.modules["duplo.reauthor"] = fake_mod` to mock the duplo import
+  path for `mcloop.ledger_pause.auto_reauthor`. The assignment was
+  never restored, so the real `duplo` package (with its eager
+  submodule imports) got replaced by an empty stub for the remainder
+  of the xdist worker's life. Any subsequent test on the same worker
+  that referenced `duplo.main`, `duplo.spec_writer`, etc. via
+  `monkeypatch.setattr("duplo.main.X", ...)` raised `AttributeError:
+  module 'duplo' has no attribute 'main'`. Random test order made the
+  failure set shift run-to-run because xdist assigns tests to workers
+  arbitrarily — sometimes the polluting test ran before duplo tests
+  on the same worker, sometimes not. Fix: convert every assignment
+  to `monkeypatch.setitem(sys.modules, ...)` so pytest restores the
+  prior entries on teardown; thread `monkeypatch` through the helper
+  methods (`_install_fake_duplo`, `_CapturingFakeReauthorModule.install`)
+  and the test methods that previously didn't take it. Three
+  back-to-back workspace-root `pytest` runs now report 6179 passed,
+  118 skipped with no errors. The new
+  `TestFakeDuploInstallCleanup` class pins the cleanup behavior so
+  the next person who copies the install pattern gets caught if they
+  go back to raw assignment.
+
 ## Hypotheses
 
 ## Eliminated

@@ -88,6 +88,7 @@ class TestSliceDEndToEnd:
 
     def _install_fake_duplo(
         self,
+        monkeypatch: pytest.MonkeyPatch,
         *,
         succeed: bool = True,
         record_calls: dict | None = None,
@@ -117,10 +118,12 @@ class TestSliceDEndToEnd:
             )
 
         fake_mod.reauthor_plan = _fake_reauthor_plan  # type: ignore[attr-defined]
-        sys.modules["duplo"] = types.ModuleType("duplo")
-        sys.modules["duplo.reauthor"] = fake_mod
+        monkeypatch.setitem(sys.modules, "duplo", types.ModuleType("duplo"))
+        monkeypatch.setitem(sys.modules, "duplo.reauthor", fake_mod)
 
-    def test_full_flow_with_mocked_reauthor(self, tmp_path: Path) -> None:
+    def test_full_flow_with_mocked_reauthor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from mcloop.ledger_pause import auto_reauthor, evaluate_and_maybe_pause
 
         ledger_dir = tmp_path / "ledger"
@@ -142,7 +145,7 @@ class TestSliceDEndToEnd:
             return
 
         record_calls: dict = {}
-        self._install_fake_duplo(succeed=True, record_calls=record_calls)
+        self._install_fake_duplo(monkeypatch, succeed=True, record_calls=record_calls)
         result = auto_reauthor(
             decision=decision,
             plan_path=tmp_path / "PLAN.md",
@@ -175,14 +178,16 @@ class TestSliceDEndToEnd:
             "reauthor_plan",
         }
 
-    def test_failed_reauthor_hard_stops(self, tmp_path: Path) -> None:
+    def test_failed_reauthor_hard_stops(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         from mcloop.ledger_pause import (
             HardStop,
             PauseDecision,
             auto_reauthor,
         )
 
-        self._install_fake_duplo(succeed=False)
+        self._install_fake_duplo(monkeypatch, succeed=False)
         decision = PauseDecision(
             crossing_event_id="00000000-0000-7000-8000-000000000005",
             rule_id="unattributable_commit",
