@@ -8,16 +8,10 @@ orchestra = { workspace = true }
 bob-tools = { workspace = true }
 
 [tool.pytest.ini_options]
-addopts = "-n auto"
+addopts = "-n auto --import-mode=importlib"
 timeout = 60
 
 [dependency-groups]
-dev = [
-    "pytest-xdist>=3.5",
-    "pytest-timeout>=2.3",
-]
-
-[project.optional-dependencies]
 dev = [
     "pytest-xdist>=3.5",
     "pytest-timeout>=2.3",
