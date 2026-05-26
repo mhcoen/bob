@@ -79,13 +79,20 @@ def _resolve_project_venv_python(project_dir: Path) -> Path | None:
     return None
 
 
-def _pip_show_check(venv_python: Path, name: str) -> bool:
-    """Return True when ``name`` is installed in the venv hosting ``venv_python``."""
-    pip_path = venv_python.parent / "pip"
-    if pip_path.is_file() or pip_path.is_symlink():
-        cmd = [str(pip_path), "show", name]
-    else:
-        cmd = [str(venv_python), "-m", "pip", "show", name]
+def _is_installed_check(venv_python: Path, name: str) -> bool:
+    """Return True when ``name`` is installed in the venv hosting ``venv_python``.
+
+    Uses ``importlib.metadata`` from the venv's Python, which works on
+    distribution names (matching pyproject.toml declarations) and does
+    not require pip to be installed in the venv. uv-managed venvs do
+    not include pip by default, so the historical ``pip show`` path
+    falsely reported every package as missing.
+    """
+    cmd = [
+        str(venv_python),
+        "-c",
+        f"import importlib.metadata as m; m.distribution({name!r})",
+    ]
     try:
         result = subprocess.run(
             cmd,
@@ -121,16 +128,16 @@ def validate_project_dependencies(project_dir: Path) -> None:
     if venv_python is None:
         return
 
-    missing = [name for name in declared if not _pip_show_check(venv_python, name)]
+    missing = [name for name in declared if not _is_installed_check(venv_python, name)]
     if not missing:
         return
 
     venv_dir = venv_python.parent.parent
-    venv_pip = venv_python.parent / "pip"
     raise MissingDependenciesError(
         "Project declares dependencies that are not installed in "
         f"{venv_dir}: {', '.join(missing)}. "
-        f"Run `{venv_pip} install -e '.[dev]'` to fix."
+        f"Run `uv pip install {' '.join(missing)}` to fix "
+        f"(or `uv sync --all-extras` from the workspace root)."
     )
 
 
