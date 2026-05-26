@@ -43,23 +43,27 @@ def _make_fake_venv(project_dir: Path) -> Path:
     return py
 
 
-def _drop_stub_pip(venv_python: Path, *, installed: set[str]) -> None:
-    """Replace the venv's ``pip`` with a shell stub that knows a fixed
+def _drop_stub_python(venv_python: Path, *, installed: set[str]) -> None:
+    """Replace the venv's ``python`` with a shell stub that knows a fixed
     install set.
 
-    The stub returns 0 from ``pip show <name>`` when ``name`` is in
-    ``installed`` and 1 otherwise. No network access, no real pip.
+    The new ``_is_installed_check`` invokes the venv's python with a
+    ``-c`` arg of the form ``import importlib.metadata as m; m.distribution('pkg')``.
+    This stub parses the ``-c`` arg to extract the quoted package name,
+    returns 0 when the package is in ``installed`` and 1 otherwise. No real
+    python or pip needed.
     """
-    pip_path = venv_python.parent / "pip"
     listed = " ".join(sorted(installed))
-    pip_path.write_text(
+    venv_python.write_text(
         textwrap.dedent(
             f"""\
             #!/bin/sh
-            # stub pip used by tests/test_dep_validator.py
-            if [ "$1" = "show" ]; then
-                for name in {listed}; do
-                    if [ "$name" = "$2" ]; then
+            # stub python used by tests/test_dep_validator.py
+            if [ "$1" = "-c" ]; then
+                # Extract the single-quoted package name from the -c arg.
+                name=$(printf '%s' "$2" | sed -n "s/.*'\\([^']*\\)'.*/\\1/p")
+                for pkg in {listed}; do
+                    if [ "$pkg" = "$name" ]; then
                         exit 0
                     fi
                 done
@@ -69,7 +73,11 @@ def _drop_stub_pip(venv_python: Path, *, installed: set[str]) -> None:
             """
         )
     )
-    pip_path.chmod(0o755)
+    venv_python.chmod(0o755)
+
+
+# Backwards-compatible alias for tests that still spell it the old way.
+_drop_stub_pip = _drop_stub_python
 
 
 # -- _dep_name ---------------------------------------------------------------
@@ -184,7 +192,7 @@ def test_passes_when_all_deps_installed(tmp_path: Path) -> None:
         )
     )
     venv_python = _make_fake_venv(tmp_path)
-    _drop_stub_pip(venv_python, installed={"watchdog", "pytest", "pytest-xdist"})
+    _drop_stub_python(venv_python, installed={"watchdog", "pytest", "pytest-xdist"})
     validate_project_dependencies(tmp_path)
 
 
@@ -202,13 +210,13 @@ def test_raises_when_a_single_dep_is_missing(tmp_path: Path) -> None:
         )
     )
     venv_python = _make_fake_venv(tmp_path)
-    _drop_stub_pip(venv_python, installed={"pytest"})
+    _drop_stub_python(venv_python, installed={"pytest"})
     with pytest.raises(MissingDependenciesError) as ei:
         validate_project_dependencies(tmp_path)
     msg = str(ei.value)
     assert "pytest-xdist" in msg
     assert "pytest" not in msg.split(":", 1)[1].split(".")[0] or "pytest-xdist" in msg
-    assert "install -e '.[dev]'" in msg
+    assert "uv pip install" in msg
 
 
 def test_raises_listing_every_missing_dep(tmp_path: Path) -> None:
@@ -225,7 +233,7 @@ def test_raises_listing_every_missing_dep(tmp_path: Path) -> None:
         )
     )
     venv_python = _make_fake_venv(tmp_path)
-    _drop_stub_pip(venv_python, installed=set())
+    _drop_stub_python(venv_python, installed=set())
     with pytest.raises(MissingDependenciesError) as ei:
         validate_project_dependencies(tmp_path)
     msg = str(ei.value)
@@ -239,14 +247,20 @@ def test_error_message_names_venv_dir(tmp_path: Path) -> None:
         '[project.optional-dependencies]\ndev = ["pytest>=8"]\n'
     )
     venv_python = _make_fake_venv(tmp_path)
-    _drop_stub_pip(venv_python, installed=set())
+    _drop_stub_python(venv_python, installed=set())
     with pytest.raises(MissingDependenciesError) as ei:
         validate_project_dependencies(tmp_path)
     assert str(tmp_path / ".venv") in str(ei.value)
 
 
-def test_real_venv_with_pip_show(tmp_path: Path) -> None:
-    """End-to-end with a real venv (no stubs)."""
+def test_real_venv_without_packages(tmp_path: Path) -> None:
+    """End-to-end with a real --without-pip venv that has no packages.
+
+    The new ``_is_installed_check`` uses ``importlib.metadata`` (stdlib),
+    not pip. The venv's python is real, but ``importlib.metadata.distribution('pytest')``
+    raises ``PackageNotFoundError`` because pytest is not installed in this
+    venv. The check returns False, the validator raises.
+    """
     if os.environ.get("MCLOOP_SKIP_REAL_VENV"):
         pytest.skip("MCLOOP_SKIP_REAL_VENV set")
     (tmp_path / "pyproject.toml").write_text(
@@ -254,9 +268,6 @@ def test_real_venv_with_pip_show(tmp_path: Path) -> None:
         '[project.optional-dependencies]\ndev = ["pytest"]\n'
     )
     venv_python = _make_venv(tmp_path)
-    # No pip in this --without-pip venv. _pip_show_check should fall
-    # back to ``python -m pip show`` and find no pip module either,
-    # returning False -> validator raises.
     _ = venv_python
     with pytest.raises(MissingDependenciesError):
         validate_project_dependencies(tmp_path)
