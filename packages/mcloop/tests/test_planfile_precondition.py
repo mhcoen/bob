@@ -45,7 +45,10 @@ _EXPECTED: dict[str, str] = {
 
 def _load_corpus() -> list[dict]:
     if not CORPUS_PATH.exists():
-        pytest.skip(f"corpus not found at {CORPUS_PATH}; run .scratch/harvest_plans.py first")
+        pytest.skip(
+            f"corpus not found at {CORPUS_PATH}; run .scratch/harvest_plans.py first",
+            allow_module_level=True,
+        )
     data = json.loads(CORPUS_PATH.read_text())
     return data["corpus"]
 
