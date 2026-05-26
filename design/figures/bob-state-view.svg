@@ -1,0 +1,65 @@
+<svg viewBox="0 0 1300 700" xmlns="http://www.w3.org/2000/svg"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+
+  <rect width="1300" height="700" fill="#ffffff"/>
+
+  <defs>
+    <marker id="askd" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <text x="650" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">state of the system</text>
+  <text x="650" y="80" text-anchor="middle" font-size="16" font-style="italic" fill="#64748b">persistent stores and execution surfaces</text>
+
+  <!-- ROW 1: plan-state (left), execution (right) -->
+
+  <!-- PLAN.md -->
+  <rect x="80" y="140" width="260" height="120" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <text x="210" y="195" text-anchor="middle" font-size="32" font-weight="700" fill="#78350f">PLAN.md</text>
+  <text x="210" y="225" text-anchor="middle" font-size="16" fill="#92400e">canonical plan</text>
+  <text x="210" y="248" text-anchor="middle" font-size="14" fill="#b45309">tasks · phases · ledger</text>
+
+  <!-- BUGS.md -->
+  <rect x="380" y="140" width="260" height="120" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <text x="510" y="195" text-anchor="middle" font-size="32" font-weight="700" fill="#78350f">BUGS.md</text>
+  <text x="510" y="225" text-anchor="middle" font-size="16" fill="#92400e">deferred work</text>
+  <text x="510" y="248" text-anchor="middle" font-size="14" fill="#b45309">bugs · ideas · followups</text>
+
+  <!-- git -->
+  <rect x="680" y="140" width="260" height="120" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <text x="810" y="195" text-anchor="middle" font-size="32" font-weight="700" fill="#78350f">git</text>
+  <text x="810" y="225" text-anchor="middle" font-size="16" fill="#92400e">version control</text>
+  <text x="810" y="248" text-anchor="middle" font-size="14" fill="#b45309">commits · branches · history</text>
+
+  <!-- user software execution -->
+  <rect x="980" y="140" width="260" height="120" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <text x="1110" y="190" text-anchor="middle" font-size="22" font-weight="700" fill="#78350f">user software</text>
+  <text x="1110" y="216" text-anchor="middle" font-size="22" font-weight="700" fill="#78350f">execution</text>
+  <text x="1110" y="240" text-anchor="middle" font-size="14" fill="#92400e">run · test · build · verify</text>
+  <text x="1110" y="256" text-anchor="middle" font-size="13" font-style="italic" fill="#b45309">the only honest signal</text>
+
+  <!-- ROW 2: knowledge bases -->
+
+  <!-- learned mistakes -->
+  <rect x="680" y="380" width="260" height="120" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2.5"/>
+  <text x="810" y="425" text-anchor="middle" font-size="24" font-weight="700" fill="#1e293b">learned mistakes</text>
+  <text x="810" y="453" text-anchor="middle" font-size="15" fill="#475569">failure patterns</text>
+  <text x="810" y="475" text-anchor="middle" font-size="13" fill="#64748b">past errors · regressions</text>
+
+  <!-- architecture patterns -->
+  <rect x="980" y="380" width="260" height="120" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2.5"/>
+  <text x="1110" y="420" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">architecture</text>
+  <text x="1110" y="447" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">patterns</text>
+  <text x="1110" y="472" text-anchor="middle" font-size="14" fill="#475569">Swift · web · mobile · ML</text>
+
+  <!-- ROW 3: the everything log (full width) -->
+  <rect x="80" y="560" width="1160" height="100" rx="12" fill="#ffedd5" stroke="#ea580c" stroke-width="2.5"/>
+  <text x="660" y="608" text-anchor="middle" font-size="30" font-weight="700" fill="#7c2d12">the everything log</text>
+  <text x="660" y="638" text-anchor="middle" font-size="15" fill="#9a3412">every action · every commit · every outcome · tagged to PLAN.md</text>
+
+  <!-- user software execution -> learned mistakes (slate dashed, the one inter-state arrow) -->
+  <path d="M 1080 260 L 850 380" stroke="#64748b" stroke-width="2" stroke-dasharray="6,4" fill="none" marker-end="url(#askd)"/>
+  <text x="940" y="320" text-anchor="middle" font-size="14" font-style="italic" fill="#64748b">failures populate</text>
+
+</svg>

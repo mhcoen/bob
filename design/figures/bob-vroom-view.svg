@@ -1,0 +1,52 @@
+<svg viewBox="0 0 1100 700" xmlns="http://www.w3.org/2000/svg"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+
+  <rect width="1100" height="700" fill="#ffffff"/>
+
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c"/>
+    </marker>
+  </defs>
+
+  <text x="550" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">vroom view</text>
+  <text x="550" y="80" text-anchor="middle" font-size="16" font-style="italic" fill="#64748b">what the controller talks to</text>
+
+  <!-- vroom (top center) -->
+  <rect x="385" y="140" width="330" height="110" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2.5"/>
+  <text x="550" y="195" text-anchor="middle" font-size="42" font-weight="700" fill="#1e3a8a">vroom</text>
+  <text x="550" y="225" text-anchor="middle" font-size="18" fill="#1e40af">recursive controller</text>
+
+  <!-- mcloop (middle left) -->
+  <rect x="160" y="340" width="280" height="110" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.5"/>
+  <text x="300" y="395" text-anchor="middle" font-size="38" font-weight="700" fill="#4c1d95">mcloop</text>
+  <text x="300" y="425" text-anchor="middle" font-size="17" fill="#5b21b6">build loop</text>
+
+  <!-- duplo (middle right) -->
+  <rect x="660" y="340" width="280" height="110" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="2.5"/>
+  <text x="800" y="395" text-anchor="middle" font-size="38" font-weight="700" fill="#4c1d95">duplo</text>
+  <text x="800" y="425" text-anchor="middle" font-size="17" fill="#5b21b6">plan author</text>
+
+  <!-- the everything log (bottom center) -->
+  <rect x="335" y="540" width="430" height="100" rx="12" fill="#ffedd5" stroke="#ea580c" stroke-width="2.5"/>
+  <text x="550" y="592" text-anchor="middle" font-size="32" font-weight="700" fill="#7c2d12">the everything log</text>
+  <text x="550" y="620" text-anchor="middle" font-size="16" fill="#9a3412">every action · every outcome</text>
+
+  <!-- vroom -> mcloop (dispatch, blue) -->
+  <path d="M 470 250 L 360 340" stroke="#2563eb" stroke-width="3" fill="none" marker-end="url(#ab)"/>
+  <text x="380" y="305" text-anchor="middle" font-size="14" font-style="italic" fill="#2563eb">dispatch</text>
+
+  <!-- vroom -> duplo (dispatch, blue) -->
+  <path d="M 630 250 L 740 340" stroke="#2563eb" stroke-width="3" fill="none" marker-end="url(#ab)"/>
+  <text x="720" y="305" text-anchor="middle" font-size="14" font-style="italic" fill="#2563eb">dispatch</text>
+
+  <!-- log -> vroom (reflection, orange).
+       Cubic from (765, 590) via (1000, 590), (1000, 195) to (715, 195).
+       Routed on far right exterior, clear of duplo (x_max=940). -->
+  <path d="M 765 590 C 1000 590, 1000 195, 715 195" stroke="#ea580c" stroke-width="3.5" fill="none" marker-end="url(#ao)"/>
+  <text x="1025" y="395" font-size="16" font-style="italic" font-weight="600" fill="#ea580c" transform="rotate(-90 1025 395)" text-anchor="middle">reflection</text>
+
+</svg>

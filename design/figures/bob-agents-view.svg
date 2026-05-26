@@ -1,0 +1,117 @@
+<svg viewBox="0 0 1300 850" xmlns="http://www.w3.org/2000/svg"
+     font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+
+  <rect width="1300" height="850" fill="#ffffff"/>
+
+  <defs>
+    <marker id="ab" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb"/>
+    </marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7c3aed"/>
+    </marker>
+    <marker id="agn" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a"/>
+    </marker>
+    <marker id="ask" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+    <marker id="askd" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <text x="650" y="50" text-anchor="middle" font-size="26" font-weight="700" fill="#0f172a">agents view</text>
+  <text x="650" y="80" text-anchor="middle" font-size="16" font-style="italic" fill="#64748b">what mcloop and duplo connect to (direct neighbors only)</text>
+
+  <!-- vroom (top center) -->
+  <rect x="500" y="120" width="300" height="90" rx="12" fill="#eff6ff" stroke="#2563eb" stroke-width="2.5"/>
+  <text x="650" y="170" text-anchor="middle" font-size="34" font-weight="700" fill="#1e3a8a">vroom</text>
+  <text x="650" y="195" text-anchor="middle" font-size="15" fill="#1e40af">recursive controller</text>
+
+  <!-- mcloop (center left) -->
+  <rect x="160" y="370" width="300" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3"/>
+  <text x="310" y="425" text-anchor="middle" font-size="38" font-weight="700" fill="#4c1d95">mcloop</text>
+  <text x="310" y="455" text-anchor="middle" font-size="17" fill="#5b21b6">build loop</text>
+  <text x="310" y="475" text-anchor="middle" font-size="15" fill="#7c3aed">drives editor agents</text>
+
+  <!-- duplo (center right) -->
+  <rect x="840" y="370" width="300" height="120" rx="12" fill="#f5f3ff" stroke="#7c3aed" stroke-width="3"/>
+  <text x="990" y="425" text-anchor="middle" font-size="38" font-weight="700" fill="#4c1d95">duplo</text>
+  <text x="990" y="455" text-anchor="middle" font-size="17" fill="#5b21b6">plan author</text>
+  <text x="990" y="475" text-anchor="middle" font-size="15" fill="#7c3aed">spec → PLAN.md</text>
+
+  <!-- orchestra (mid left, below mcloop) -->
+  <rect x="60" y="600" width="240" height="100" rx="12" fill="#ecfeff" stroke="#0891b2" stroke-width="2.5"/>
+  <text x="180" y="645" text-anchor="middle" font-size="28" font-weight="700" fill="#155e75">orchestra</text>
+  <text x="180" y="672" text-anchor="middle" font-size="15" fill="#0e7490">multi-model workflows</text>
+
+  <!-- bob-tools (center bottom) -->
+  <rect x="525" y="600" width="250" height="100" rx="12" fill="#ecfdf5" stroke="#16a34a" stroke-width="2.5"/>
+  <text x="650" y="645" text-anchor="middle" font-size="28" font-weight="700" fill="#14532d">bob-tools</text>
+  <text x="650" y="672" text-anchor="middle" font-size="15" fill="#166534">planfile + ledger API</text>
+
+  <!-- git (mid right of mcloop) -->
+  <rect x="340" y="600" width="160" height="100" rx="12" fill="#fef3c7" stroke="#d97706" stroke-width="2.5"/>
+  <text x="420" y="650" text-anchor="middle" font-size="30" font-weight="700" fill="#78350f">git</text>
+  <text x="420" y="675" text-anchor="middle" font-size="14" fill="#92400e">version control</text>
+
+  <!-- learned mistakes (right of duplo) -->
+  <rect x="800" y="600" width="230" height="100" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2.5"/>
+  <text x="915" y="640" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">learned</text>
+  <text x="915" y="665" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">mistakes</text>
+  <text x="915" y="685" text-anchor="middle" font-size="13" fill="#475569">failure patterns</text>
+
+  <!-- architecture patterns (far right of duplo) -->
+  <rect x="1060" y="600" width="230" height="100" rx="12" fill="#f1f5f9" stroke="#64748b" stroke-width="2.5"/>
+  <text x="1175" y="640" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">architecture</text>
+  <text x="1175" y="665" text-anchor="middle" font-size="22" font-weight="700" fill="#1e293b">patterns</text>
+  <text x="1175" y="685" text-anchor="middle" font-size="13" fill="#475569">Swift · web · mobile · ML</text>
+
+  <!-- vroom -> mcloop (dispatch, blue) -->
+  <path d="M 575 210 L 380 370" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#ab)"/>
+  <!-- vroom -> duplo (dispatch, blue) -->
+  <path d="M 725 210 L 920 370" stroke="#2563eb" stroke-width="2.5" fill="none" marker-end="url(#ab)"/>
+
+  <!-- mcloop -> duplo (re-author, purple). Arrow on top half. -->
+  <path d="M 462 410 L 838 410" stroke="#7c3aed" stroke-width="2.5" fill="none" marker-end="url(#ap)"/>
+  <text x="650" y="400" text-anchor="middle" font-size="15" font-style="italic" fill="#7c3aed">re-author</text>
+
+  <!-- mcloop -> orchestra (mechanism, slate solid) -->
+  <path d="M 240 490 L 200 600" stroke="#64748b" stroke-width="2" fill="none" marker-end="url(#ask)"/>
+
+  <!-- mcloop <-> bob-tools (bidirectional green) -->
+  <path d="M 360 490 L 605 600" stroke="#16a34a" stroke-width="2.5" fill="none" marker-end="url(#agn)"/>
+  <path d="M 625 600 L 380 490" stroke="#16a34a" stroke-width="2.5" fill="none" marker-end="url(#agn)"/>
+
+  <!-- mcloop -> git (commit, green) -->
+  <path d="M 400 490 L 415 600" stroke="#16a34a" stroke-width="2.5" fill="none" marker-end="url(#agn)"/>
+
+  <!-- duplo -> bob-tools (green) -->
+  <path d="M 940 490 L 695 600" stroke="#16a34a" stroke-width="2.5" fill="none" marker-end="url(#agn)"/>
+
+  <!-- learned mistakes -> duplo (slate dashed, consult) -->
+  <path d="M 915 600 L 980 490" stroke="#64748b" stroke-width="2" stroke-dasharray="6,4" fill="none" marker-end="url(#askd)"/>
+
+  <!-- architecture patterns -> duplo (slate dashed, consult) -->
+  <path d="M 1130 600 L 1040 490" stroke="#64748b" stroke-width="2" stroke-dasharray="6,4" fill="none" marker-end="url(#askd)"/>
+
+  <!-- ====== LEGEND (single row) ====== -->
+  <g font-size="14" fill="#475569">
+    <line x1="120" y1="790" x2="160" y2="790" stroke="#2563eb" stroke-width="2.5"/>
+    <text x="168" y="795">dispatch</text>
+
+    <line x1="270" y1="790" x2="310" y2="790" stroke="#7c3aed" stroke-width="2.5"/>
+    <text x="318" y="795">re-author</text>
+
+    <line x1="430" y1="790" x2="470" y2="790" stroke="#16a34a" stroke-width="2.5"/>
+    <text x="478" y="795">state read / write</text>
+
+    <line x1="650" y1="790" x2="690" y2="790" stroke="#64748b" stroke-width="2"/>
+    <text x="698" y="795">mechanism call</text>
+
+    <line x1="870" y1="790" x2="910" y2="790" stroke="#64748b" stroke-width="2" stroke-dasharray="6,4"/>
+    <text x="918" y="795">knowledge consult</text>
+  </g>
+
+</svg>
