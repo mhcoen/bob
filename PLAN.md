@@ -24,7 +24,7 @@ after Phase 2: Phase 3 calls `orchestra.run_role`, returns the
 <!-- phase_id: phase_001 -->
 
 - [x] T-000001: Add optional `created_at` (ISO 8601 UTC) field to `Task` in `bob_tools.planfile.model`; populate it in `add_task` and `add_phase_task`; preserve it round-trip through the canonical parser and renderer (encoded as an HTML-comment annotation on the task line) <!-- created_at: 2026-05-26T07:11:58Z -->
-- [ ] T-000002: Backfill `created_at` for existing tasks in every PLAN.md in the workspace, best-effort from `git log --diff-filter=A` on the task line; leave null where git cannot resolve it <!-- created_at: 2026-05-26T07:11:58Z -->
+- [x] T-000002: Backfill `created_at` for existing tasks in every PLAN.md in the workspace, best-effort from `git log --diff-filter=A` on the task line; leave null where git cannot resolve it <!-- created_at: 2026-05-26T07:11:58Z -->
 - [ ] T-000003: Add namespace prefix support to task IDs: extend the canonical ID grammar from `T-NNNNNN` to `T-XX-NNNNNN` where `XX` is a 2-letter per-file namespace declared once in the PLAN.md preamble as `<!-- task_namespace: XX -->`; legacy unprefixed IDs continue to parse but the canonical validator warns once per file <!-- created_at: 2026-05-26T07:11:58Z -->
 - [ ] T-000004: Add cross-file ID resolver `bob_tools.planfile.resolve_global(id)`: given a fully-qualified `T-XX-NNNNNN`, walk PLAN.md files under the workspace root and return the (file, task) pair or raise <!-- created_at: 2026-05-26T07:11:58Z -->
 - [ ] T-000005: Document the namespace scheme and the resolver in `bob_tools/README.md` <!-- created_at: 2026-05-26T07:11:58Z -->
