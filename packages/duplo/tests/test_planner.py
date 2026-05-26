@@ -123,9 +123,7 @@ class TestGeneratePhasePlan:
         phase = result.phases[0]
         assert phase.phase_id == "phase_001"
         assert phase.title == "Core Auth"
-        assert any(
-            "Set up project structure" in t.text for t in phase.tasks
-        )
+        assert any("Set up project structure" in t.text for t in phase.tasks)
 
     def test_passes_source_url_to_prompt(self):
         with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
@@ -381,9 +379,7 @@ class TestGeneratePhasePlanH1Heading:
         """
         from bob_tools.planfile import PlanValidationError
 
-        no_phase_header = (
-            "Some preamble describing the phase.\n\n- [ ] Build thing\n"
-        )
+        no_phase_header = "Some preamble describing the phase.\n\n- [ ] Build thing\n"
         with patch("duplo.planner.query", return_value=no_phase_header):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
@@ -402,9 +398,7 @@ class TestGeneratePhasePlanH1Heading:
         """
         from bob_tools.planfile import PlanValidationError
 
-        wrong_id_body = _canonical_body(
-            phase_id="phase_007", title="Wrong"
-        )
+        wrong_id_body = _canonical_body(phase_id="phase_007", title="Wrong")
         with patch("duplo.planner.query", return_value=wrong_id_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
@@ -504,9 +498,7 @@ class TestEnsureH1Heading:
         """Synthesizer emits an H1 with project name 'App' and ordinal
         1; Duplo's roadmap state says project 'X' and ordinal 1. The
         canonical H1 wins regardless of what the synthesizer wrote."""
-        result = _ensure_h1_heading(
-            "\n\n# App — Phase 1: Core\n", "X", 1, "Core"
-        )
+        result = _ensure_h1_heading("\n\n# App — Phase 1: Core\n", "X", 1, "Core")
         assert result == "# X — Phase 1: Core\n"
 
     def test_overrides_when_synthesizer_uses_wrong_ordinal(self):
@@ -523,13 +515,7 @@ class TestEnsureH1Heading:
     def test_strips_multiple_phase_h1s(self):
         """Synthesizer emits multiple stray phase H1s; all are
         stripped, only Duplo's canonical H1 remains."""
-        body = (
-            "# Foo — Phase 1: Stray one\n"
-            "\n"
-            "# Bar — Phase 5: Stray two\n"
-            "\n"
-            "- [ ] Real task\n"
-        )
+        body = "# Foo — Phase 1: Stray one\n\n# Bar — Phase 5: Stray two\n\n- [ ] Real task\n"
         result = _ensure_h1_heading(body, "Real", 3, "Real Title")
         phase_h1_count = sum(
             1 for line in result.splitlines() if " — Phase " in line and line.startswith("# ")
@@ -598,11 +584,7 @@ class TestEnsureH1Heading:
         survive the strip; it's the phase_id boundary that mcloop's
         Slice C parser anchors on. Strip is anchored at ``# ``
         (single hash), not ``## ``."""
-        body = (
-            "## Phase phase_001: Inner header\n"
-            "\n"
-            "- [ ] Task\n"
-        )
+        body = "## Phase phase_001: Inner header\n\n- [ ] Task\n"
         result = _ensure_h1_heading(body, "Real", 3, "Real Title")
         assert "## Phase phase_001:" in result, (
             "the inner Slice C semantic header must be preserved"
@@ -663,9 +645,7 @@ class TestEnsureH1Heading:
         assert "---" not in result
         # Exactly one phase H1 line in the result.
         phase_h1_count = sum(
-            1
-            for line in result.splitlines()
-            if line.startswith("# ") and " — Phase " in line
+            1 for line in result.splitlines() if line.startswith("# ") and " — Phase " in line
         )
         assert phase_h1_count == 1
 
@@ -842,9 +822,7 @@ class TestPlanAnnotationOutput:
         for line in text.splitlines():
             if _ANNOTATION_RE.search(line):
                 stripped = line.lstrip()
-                assert stripped.startswith("- [ ]") or stripped.startswith(
-                    "- [x]"
-                )
+                assert stripped.startswith("- [ ]") or stripped.startswith("- [x]")
 
     def test_next_phase_plan_contains_feat_annotations(self):
         with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
@@ -873,11 +851,7 @@ class TestPlanAnnotationOutput:
             )
         # The "Set up project structure ..." scaffolding task carries
         # no [feat:] / [fix:] annotation in the typed plan.
-        scaffold_tasks = [
-            t
-            for t in self._walk_all_tasks(result)
-            if "project structure" in t.text
-        ]
+        scaffold_tasks = [t for t in self._walk_all_tasks(result) if "project structure" in t.text]
         assert scaffold_tasks, "scaffolding task must survive parsing"
         for task in scaffold_tasks:
             assert task.annotations == ()
@@ -1153,11 +1127,7 @@ class TestStripValidateRegexSplit:
         """Synthesizer wrote a prose H1 mid-body that mentions
         ``Phase N``. Strip removes it (acceptable false positive
         because Duplo prepends the canonical envelope anyway)."""
-        body = (
-            "## Phase phase_001: real header\n\n"
-            f"{self.PROSE_H1}"
-            "\n- [ ] Real task\n"
-        )
+        body = f"## Phase phase_001: real header\n\n{self.PROSE_H1}\n- [ ] Real task\n"
         result = _ensure_h1_heading(body, "App", 1, "Core")
         assert "Background" not in result
         assert "## Phase phase_001:" in result
@@ -1235,12 +1205,7 @@ class TestValidateH1OrdinalSequence:
         """Even without a duplicate, gap-skip is invalid: a phase
         ordinal that skips a value indicates one was lost
         somewhere in the rendering pipeline."""
-        text = (
-            "# App — Phase 0: A\n"
-            "# App — Phase 1: B\n"
-            "# App — Phase 3: C\n"
-            "# App — Phase 4: D\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 3: C\n# App — Phase 4: D\n"
         with pytest.raises(CanonicalH1OrdinalError) as ei:
             validate_h1_ordinal_sequence(text)
         msg = str(ei.value)
@@ -1248,11 +1213,7 @@ class TestValidateH1OrdinalSequence:
         assert "[0, 1, 2, 3]" in msg
 
     def test_raises_on_out_of_order_ordinal(self):
-        text = (
-            "# App — Phase 0: A\n"
-            "# App — Phase 2: C\n"
-            "# App — Phase 1: B\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 2: C\n# App — Phase 1: B\n"
         with pytest.raises(CanonicalH1OrdinalError) as ei:
             validate_h1_ordinal_sequence(text)
         msg = str(ei.value)
@@ -1269,33 +1230,22 @@ class TestValidateH1OrdinalSequence:
     def test_ignores_non_phase_h1s(self):
         """A plain ``# Heading`` line is not a phase H1 and does
         not participate in the ordinal-sequence check."""
-        text = (
-            "# Some other heading\n\n"
-            "# App — Phase 0: A\n"
-            "# App — Phase 1: B\n"
-        )
+        text = "# Some other heading\n\n# App — Phase 0: A\n# App — Phase 1: B\n"
         validate_h1_ordinal_sequence(text)
 
     # --------- Defect 2: expected_ordinals source-of-truth check --
 
     def test_validator_with_expected_passes_on_match(self):
-        text = (
-            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
         validate_h1_ordinal_sequence(text, expected_ordinals=[0, 1, 2])
 
     def test_validator_with_expected_fails_on_mismatch(self):
         """Plan has ordinals [0, 1, 2, 4] but Duplo's roadmap state
         emitted [0, 1, 2, 3]. Source-of-truth match fails. Error
         names BOTH observed and expected sequences."""
-        text = (
-            "# App — Phase 0: A\n# App — Phase 1: B\n"
-            "# App — Phase 2: C\n# App — Phase 4: D\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n# App — Phase 4: D\n"
         with pytest.raises(CanonicalH1OrdinalError) as ei:
-            validate_h1_ordinal_sequence(
-                text, expected_ordinals=[0, 1, 2, 3]
-            )
+            validate_h1_ordinal_sequence(text, expected_ordinals=[0, 1, 2, 3])
         msg = str(ei.value)
         assert "[0, 1, 2, 4]" in msg
         assert "[0, 1, 2, 3]" in msg
@@ -1306,32 +1256,22 @@ class TestValidateH1OrdinalSequence:
         Source-of-truth match fails (missing phase 2)."""
         text = "# App — Phase 0: A\n# App — Phase 1: B\n"
         with pytest.raises(CanonicalH1OrdinalError):
-            validate_h1_ordinal_sequence(
-                text, expected_ordinals=[0, 1, 2]
-            )
+            validate_h1_ordinal_sequence(text, expected_ordinals=[0, 1, 2])
 
     def test_validator_with_expected_fails_on_extra_phase(self):
         """Plan has [0, 1, 2] but roadmap emitted [0, 1].
         Source-of-truth match fails (extra phase)."""
-        text = (
-            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
         with pytest.raises(CanonicalH1OrdinalError):
-            validate_h1_ordinal_sequence(
-                text, expected_ordinals=[0, 1]
-            )
+            validate_h1_ordinal_sequence(text, expected_ordinals=[0, 1])
 
     def test_validator_with_expected_fails_on_wrong_starting_ordinal(self):
         """Roadmap emitted [3, 4, 5] (Phase 0/1/2 already complete
         in a prior run); plan was rendered with [0, 1, 2]. Wrong
         starting ordinal."""
-        text = (
-            "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
-        )
+        text = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 2: C\n"
         with pytest.raises(CanonicalH1OrdinalError):
-            validate_h1_ordinal_sequence(
-                text, expected_ordinals=[3, 4, 5]
-            )
+            validate_h1_ordinal_sequence(text, expected_ordinals=[3, 4, 5])
 
     def test_validator_without_expected_falls_back_to_contiguity(self):
         """Backward-compatible: callers that don't provide
@@ -1395,11 +1335,7 @@ class TestStripIsSupersetOfMcloopParser:
         # The bare phase header is stripped.
         result_lines = result.splitlines()
         # The only "Phase" line is Duplo's canonical envelope.
-        phase_lines = [
-            ln
-            for ln in result_lines
-            if "Phase" in ln and ln.startswith("# ")
-        ]
+        phase_lines = [ln for ln in result_lines if "Phase" in ln and ln.startswith("# ")]
         assert len(phase_lines) == 1
         assert phase_lines[0].startswith("# App — Phase 1: Core")
 
@@ -1409,9 +1345,7 @@ class TestStripIsSupersetOfMcloopParser:
         between "phase" and the digit (the underscore breaks the
         `\\bphase\\s+\\d+\\b` pattern), so Slice C headers are
         invisible to mcloop's STAGE_RE and to Duplo's strip."""
-        body = (
-            "## Phase phase_003: Glob filtering\n\n- [ ] Task\n"
-        )
+        body = "## Phase phase_003: Glob filtering\n\n- [ ] Task\n"
         result = _ensure_h1_heading(body, "App", 1, "Core")
         assert "## Phase phase_003: Glob filtering" in result
         assert result.startswith("# App — Phase 1: Core")
@@ -1430,15 +1364,10 @@ class TestSavePlanAcceptsExpectedOrdinals:
     contract. These tests pin that intent against the new form.
     """
 
-    def test_save_plan_renders_contiguous_ordinals_after_append(
-        self, tmp_path: Path
-    ):
+    def test_save_plan_renders_contiguous_ordinals_after_append(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "## Phase phase_001: A\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: a\n",
+            "## Phase phase_001: A\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: a\n",
             encoding="utf-8",
         )
         save_plan(
@@ -1447,14 +1376,10 @@ class TestSavePlanAcceptsExpectedOrdinals:
             expected_h1_ordinals=[1, 2],
         )
         text = plan_path.read_text(encoding="utf-8")
-        h2_lines = [
-            ln for ln in text.splitlines() if ln.startswith("## Phase ")
-        ]
+        h2_lines = [ln for ln in text.splitlines() if ln.startswith("## Phase ")]
         assert h2_lines == ["## Phase 1: A", "## Phase 2: B"]
 
-    def test_save_plan_renumbers_duplicate_inbound_ordinals(
-        self, tmp_path: Path
-    ):
+    def test_save_plan_renumbers_duplicate_inbound_ordinals(self, tmp_path: Path):
         """The inbound Plan independently arrives with ordinal=1
         (each synthesis is self-contained); the merge step in
         :func:`_merge_existing_plan` renumbers so the final on-disk
@@ -1465,23 +1390,16 @@ class TestSavePlanAcceptsExpectedOrdinals:
         """
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "## Phase phase_001: A\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: a\n",
+            "## Phase phase_001: A\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: a\n",
             encoding="utf-8",
         )
         # The inbound body uses phase_002 (per
         # ``compute_required_phase_id(highest+1)``); the renumber
         # step gives the final file H2 line ``## Phase 2: ...``,
         # not a stale ``## Phase 1: ...`` duplicate.
-        save_plan(
-            "## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path
-        )
+        save_plan("## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path)
         text = plan_path.read_text(encoding="utf-8")
-        h2_lines = [
-            ln for ln in text.splitlines() if ln.startswith("## Phase ")
-        ]
+        h2_lines = [ln for ln in text.splitlines() if ln.startswith("## Phase ")]
         assert h2_lines == ["## Phase 1: A", "## Phase 2: B"]
 
 
@@ -1499,9 +1417,7 @@ class TestStripAndRenderEndToEnd:
     contract; the on-disk PLAN.md stays untouched.
     """
 
-    def test_synthesizer_wrong_phase_id_raises_end_to_end(
-        self, tmp_path: Path
-    ) -> None:
+    def test_synthesizer_wrong_phase_id_raises_end_to_end(self, tmp_path: Path) -> None:
         from bob_tools.planfile import PlanValidationError
 
         # Seed PLAN.md with phases 1 and 2 (the canonical 1-indexed
@@ -1524,11 +1440,7 @@ class TestStripAndRenderEndToEnd:
         # Synthesizer body uses the wrong phase_id; runtime expects
         # ``phase_003`` (compute_required_phase_id reads the seed
         # above and returns ``phase_003``).
-        wrong_body = (
-            "## Phase phase_007: Wrong\n"
-            "\n"
-            "- [ ] Phase real task\n"
-        )
+        wrong_body = "## Phase phase_007: Wrong\n\n- [ ] Phase real task\n"
 
         phase = {
             "phase": 2,
@@ -1555,9 +1467,7 @@ class TestStripAndRenderEndToEnd:
         # PLAN.md on disk is untouched.
         assert plan_path.read_text(encoding="utf-8") == seed
 
-    def test_synthesizer_correct_phase_id_lands_canonical(
-        self, tmp_path: Path
-    ) -> None:
+    def test_synthesizer_correct_phase_id_lands_canonical(self, tmp_path: Path) -> None:
         """Companion test: the synthesizer DOES use the
         runtime-required ``phase_003`` id; the body lands with the
         canonical contiguous-ordinal contract intact.
@@ -1576,11 +1486,7 @@ class TestStripAndRenderEndToEnd:
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(seed, encoding="utf-8")
 
-        right_body = (
-            "## Phase phase_003: Polish\n"
-            "\n"
-            "- [ ] Phase 3 real task\n"
-        )
+        right_body = "## Phase phase_003: Polish\n\n- [ ] Phase 3 real task\n"
         phase = {
             "phase": 2,
             "title": "Polish",
@@ -1605,18 +1511,13 @@ class TestStripAndRenderEndToEnd:
         final = plan_path.read_text(encoding="utf-8")
         # The accumulated PLAN.md now has three phases with monotonic
         # 1..3 ordinals from the canonical renderer.
-        h2_lines = [
-            ln for ln in final.splitlines() if ln.startswith("## Phase ")
-        ]
+        h2_lines = [ln for ln in final.splitlines() if ln.startswith("## Phase ")]
         assert h2_lines == [
             "## Phase 1: Scaffold",
             "## Phase 2: Core",
             "## Phase 3: Polish",
         ]
         assert "Phase 3 real task" in final
-
-
-
 
 
 class TestSavePlanH1OrdinalValidation:
@@ -1634,22 +1535,15 @@ class TestSavePlanH1OrdinalValidation:
     def test_save_plan_passes_on_valid_sequence(self, tmp_path: Path):
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "## Phase phase_001: A\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: a\n",
+            "## Phase phase_001: A\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: a\n",
             encoding="utf-8",
         )
-        save_plan(
-            "## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path
-        )
+        save_plan("## Phase phase_002: B\n\n- [ ] b\n", target_dir=tmp_path)
         text = plan_path.read_text(encoding="utf-8")
         assert "## Phase 1: A" in text
         assert "## Phase 2: B" in text
 
-    def test_save_plan_runtime_supplies_next_phase_id_not_a_duplicate(
-        self, tmp_path: Path
-    ):
+    def test_save_plan_runtime_supplies_next_phase_id_not_a_duplicate(self, tmp_path: Path):
         """Pre-T-000186 a duplicate-ordinal append raised
         :class:`CanonicalH1OrdinalError` at save-time. Post-T-000186
         duplicate phase_ids cannot arrive through
@@ -1667,18 +1561,11 @@ class TestSavePlanH1OrdinalValidation:
 
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "## Phase phase_001: A\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: a\n",
+            "## Phase phase_001: A\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: a\n",
             encoding="utf-8",
         )
 
-        wrong_body = (
-            "## Phase phase_001: Dup\n"
-            "\n"
-            "- [ ] dup\n"
-        )
+        wrong_body = "## Phase phase_001: Dup\n\n- [ ] dup\n"
         with patch("duplo.planner.query", return_value=wrong_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
@@ -1692,9 +1579,7 @@ class TestSavePlanH1OrdinalValidation:
         # save_plan).
         assert "Dup" not in plan_path.read_text(encoding="utf-8")
 
-    def test_save_plan_renumbers_gap_in_inbound_ordinal(
-        self, tmp_path: Path
-    ):
+    def test_save_plan_renumbers_gap_in_inbound_ordinal(self, tmp_path: Path):
         """Pre-T-000186 a gap-skipped append (``Phase 0`` then
         ``Phase 2``) raised :class:`CanonicalH1OrdinalError`. After
         T-000186 phase ordinals are renumbered at merge time to be
@@ -1705,10 +1590,7 @@ class TestSavePlanH1OrdinalValidation:
         """
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(
-            "## Phase phase_001: A\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: a\n",
+            "## Phase phase_001: A\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: a\n",
             encoding="utf-8",
         )
         save_plan(
@@ -1717,9 +1599,7 @@ class TestSavePlanH1OrdinalValidation:
         )
         text = plan_path.read_text(encoding="utf-8")
         # Both H2 lines render with contiguous 1..2 ordinals.
-        h2_lines = [
-            ln for ln in text.splitlines() if ln.startswith("## Phase ")
-        ]
+        h2_lines = [ln for ln in text.splitlines() if ln.startswith("## Phase ")]
         assert h2_lines == ["## Phase 1: A", "## Phase 2: Skipped"]
 
     def test_save_plan_passes_when_no_h1_phases_present(self, tmp_path: Path):
@@ -1994,13 +1874,7 @@ class TestSavePlanNeverEmitsBugsSection:
             "- [ ] T-000001: Existing\n",
             encoding="utf-8",
         )
-        appended = (
-            "## Phase phase_002: Added\n"
-            "\n"
-            "## Bugs\n"
-            "\n"
-            "- [ ] New task\n"
-        )
+        appended = "## Phase phase_002: Added\n\n## Bugs\n\n- [ ] New task\n"
         save_plan(appended, target_dir=tmp_path)
         result = plan_path.read_text(encoding="utf-8")
         assert "## Bugs" not in result
@@ -2149,9 +2023,7 @@ class TestStripTrailingCommentary:
         assert isinstance(result, Plan)
         text = _plan_to_text(result)
         # Three task lines survive in document order.
-        task_lines = [
-            ln for ln in text.splitlines() if ln.lstrip().startswith("- [ ]")
-        ]
+        task_lines = [ln for ln in text.splitlines() if ln.lstrip().startswith("- [ ]")]
         assert any("First task" in ln for ln in task_lines)
         assert any("Second task" in ln for ln in task_lines)
         assert any("Third task" in ln for ln in task_lines)
@@ -2299,13 +2171,7 @@ class TestStripFences:
         the assertion is on the parsed phase header and surviving
         task.
         """
-        fenced = (
-            "```markdown\n"
-            "## Phase phase_001: Core\n"
-            "\n"
-            "- [ ] Task\n"
-            "```"
-        )
+        fenced = "```markdown\n## Phase phase_001: Core\n\n- [ ] Task\n```"
         with patch("duplo.planner.query", return_value=fenced):
             result = generate_phase_plan(
                 "https://example.com",
@@ -2317,9 +2183,7 @@ class TestStripFences:
         text = _plan_to_text(result)
         assert "```" not in text
         assert "## Phase 1: Core" in text
-        assert any(
-            "Task" in t.text for t in result.phases[0].tasks
-        )
+        assert any("Task" in t.text for t in result.phases[0].tasks)
 
     def test_generate_next_phase_plan_strips_fences(self):
         fenced = "```markdown\n# Phase 2: Search\n\n- [ ] Task\n```"

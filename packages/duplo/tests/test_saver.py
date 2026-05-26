@@ -2770,5 +2770,3 @@ class TestWriteClaudeMd:
         content = path.read_text(encoding="utf-8")
         assert "# MyApp" in content
         assert "## Stack" in content
-
-

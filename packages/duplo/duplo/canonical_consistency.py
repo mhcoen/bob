@@ -50,13 +50,8 @@ class SpecPyprojectInconsistencyError(RuntimeError):
             "project's script and package identifiers:"
         ]
         for d in drifts:
-            lines.append(
-                f"  - {d.field} = {d.value!r}, expected {d.expected!r}"
-            )
-        lines.append(
-            "Reconcile the declarations before re-running canonical "
-            "plan authoring."
-        )
+            lines.append(f"  - {d.field} = {d.value!r}, expected {d.expected!r}")
+        lines.append("Reconcile the declarations before re-running canonical plan authoring.")
         super().__init__("\n".join(lines))
 
 
@@ -115,7 +110,7 @@ def _extract_runsh_module(run_sh_text: str) -> str | None:
     early and the project invocation is the final command.
     """
     matches: list[str] = re.findall(
-        r'-m\s+([A-Za-z0-9_\-][A-Za-z0-9_\-.]*)',
+        r"-m\s+([A-Za-z0-9_\-][A-Za-z0-9_\-.]*)",
         run_sh_text,
     )
     for raw in reversed(matches):
@@ -171,10 +166,7 @@ def validate_spec_pyproject_runsh_consistency(project_dir: Path) -> None:
             ConsistencyDrift(
                 field="SPEC.md console script",
                 value=spec_name,
-                expected=(
-                    ", ".join(sorted(pyproject_script_names))
-                    or "<none>"
-                ),
+                expected=(", ".join(sorted(pyproject_script_names)) or "<none>"),
             )
         )
 
@@ -183,10 +175,7 @@ def validate_spec_pyproject_runsh_consistency(project_dir: Path) -> None:
     }
 
     find_section = (
-        pyproject_data.get("tool", {})
-        .get("setuptools", {})
-        .get("packages", {})
-        .get("find", {})
+        pyproject_data.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {})
     )
     include_patterns = list(find_section.get("include", []) or [])
     include_packages = {_strip_glob(str(p)) for p in include_patterns if p}
@@ -198,10 +187,7 @@ def validate_spec_pyproject_runsh_consistency(project_dir: Path) -> None:
             if mod not in include_packages:
                 drifts.append(
                     ConsistencyDrift(
-                        field=(
-                            f"pyproject [project.scripts].{script_name} "
-                            "module"
-                        ),
+                        field=(f"pyproject [project.scripts].{script_name} module"),
                         value=mod,
                         expected=", ".join(sorted(include_packages)),
                     )

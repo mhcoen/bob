@@ -422,22 +422,26 @@ class TestIsFetchableHtmlUrl:
 
     def test_accepts_extensionless(self):
         from duplo.fetcher import _is_fetchable_html_url
+
         assert _is_fetchable_html_url("https://example.com/docs/intro")
         assert _is_fetchable_html_url("https://example.com/")
         assert _is_fetchable_html_url("https://example.com")
 
     def test_accepts_html_suffixes(self):
         from duplo.fetcher import _is_fetchable_html_url
+
         for s in (".html", ".htm", ".xhtml", ".php", ".aspx", ".md"):
             assert _is_fetchable_html_url(f"https://example.com/page{s}"), s
 
     def test_rejects_installers(self):
         from duplo.fetcher import _is_fetchable_html_url
+
         for s in (".dmg", ".exe", ".msi", ".pkg", ".deb", ".rpm"):
             assert not _is_fetchable_html_url(f"https://example.com/app{s}"), s
 
     def test_rejects_archives_and_media(self):
         from duplo.fetcher import _is_fetchable_html_url
+
         # .tar.gz: Path(...).suffix returns ".gz", which is in the
         # denylist, so this should reject correctly.
         for s in (".zip", ".tar.gz", ".7z", ".mp3", ".png", ".svg", ".pdf"):
@@ -445,6 +449,7 @@ class TestIsFetchableHtmlUrl:
 
     def test_case_insensitive(self):
         from duplo.fetcher import _is_fetchable_html_url
+
         assert not _is_fetchable_html_url("https://example.com/App.DMG")
         assert not _is_fetchable_html_url("https://example.com/Setup.EXE")
 
@@ -465,6 +470,7 @@ class TestFetchSitePreFetchFilter:
     def test_shallow_rejects_binary_seed(self):
         """Seed URL with a binary suffix returns empty without an
         HTTP request."""
+
         def fake_get(*a, **k):
             raise AssertionError("httpx.get must not be invoked")
 
@@ -499,9 +505,7 @@ class TestFetchSitePreFetchFilter:
             return self._make_response(seed_html, url=url)
 
         with patch("duplo.fetcher.httpx.get", side_effect=fake_get):
-            text, _examples, _structs, _records, _raw = fetch_site(
-                "https://example.com"
-            )
+            text, _examples, _structs, _records, _raw = fetch_site("https://example.com")
 
         # The seed and the docs page are fetched; the .dmg and .exe
         # links are filtered before they reach the HTTP layer.

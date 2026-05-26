@@ -30,9 +30,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-_HEADER_RE = re.compile(
-    r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$"
-)
+_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")
 
 _VALID_ACTIONS = frozenset(["preserve", "supersede", "split", "merge", "new"])
 _NO_FROM_ACTIONS = frozenset(["preserve", "new"])
@@ -165,16 +163,14 @@ def validate_lineage(
     prior_set = set(prior)
     if len(prior_set) != len(prior):
         raise LineageValidationError(
-            "internal: prior_plan_ids contains duplicates: "
-            + ", ".join(sorted(_dups(prior)))
+            "internal: prior_plan_ids contains duplicates: " + ", ".join(sorted(_dups(prior)))
         )
 
     new_list = list(new_plan_ids)
     new_set = set(new_list)
     if len(new_set) != len(new_list):
         raise LineageValidationError(
-            "duplicate phase id in plan headers: "
-            + ", ".join(sorted(_dups(new_list)))
+            "duplicate phase id in plan headers: " + ", ".join(sorted(_dups(new_list)))
         )
 
     if not isinstance(lineage, Mapping):
@@ -190,9 +186,7 @@ def validate_lineage(
     elif isinstance(abandoned_raw, list):
         abandoned = abandoned_raw
     else:
-        raise LineageValidationError(
-            "lineage.abandoned must be a list when present"
-        )
+        raise LineageValidationError("lineage.abandoned must be a list when present")
 
     errors: list[str] = []
     seen_phase_ids: set[str] = set()
@@ -209,9 +203,7 @@ def validate_lineage(
         from_field = entry.get("from")
 
         if not isinstance(pid, str) or not pid:
-            errors.append(
-                f"lineage.phases[{index}].id missing or not a non-empty string"
-            )
+            errors.append(f"lineage.phases[{index}].id missing or not a non-empty string")
             continue
         if pid in seen_phase_ids:
             errors.append(f"lineage.phases has duplicate id {pid!r}")
@@ -256,8 +248,7 @@ def validate_lineage(
             )
         if not isinstance(from_field, list) or not from_field:
             errors.append(
-                f"lineage.phases entry {pid!r} action={action!r} requires "
-                "a non-empty 'from' list"
+                f"lineage.phases entry {pid!r} action={action!r} requires a non-empty 'from' list"
             )
             continue
         if action == "merge" and len(from_field) < 2:
@@ -287,8 +278,7 @@ def validate_lineage(
             )
         if extra_in_phases:
             errors.append(
-                "lineage.phases has entries with no plan header: "
-                + ", ".join(extra_in_phases)
+                "lineage.phases has entries with no plan header: " + ", ".join(extra_in_phases)
             )
 
     abandoned_ids: list[str] = []
@@ -299,18 +289,12 @@ def validate_lineage(
         aid = entry.get("id")
         reason = entry.get("reason")
         if not isinstance(aid, str) or not aid:
-            errors.append(
-                f"lineage.abandoned[{index}].id missing or not a non-empty string"
-            )
+            errors.append(f"lineage.abandoned[{index}].id missing or not a non-empty string")
             continue
         if not isinstance(reason, str) or not reason:
-            errors.append(
-                f"lineage.abandoned entry {aid!r} missing 'reason' string"
-            )
+            errors.append(f"lineage.abandoned entry {aid!r} missing 'reason' string")
         if aid not in prior_set:
-            errors.append(
-                f"lineage.abandoned entry {aid!r} is not a prior plan id"
-            )
+            errors.append(f"lineage.abandoned entry {aid!r} is not a prior plan id")
             continue
         if aid in preserved_ids:
             errors.append(
@@ -350,8 +334,7 @@ def validate_lineage(
     bad_preserved = sorted(preserved_ids & consumed_set)
     if bad_preserved:
         errors.append(
-            "preserved phase id(s) also appear in a 'from' list: "
-            + ", ".join(bad_preserved)
+            "preserved phase id(s) also appear in a 'from' list: " + ", ".join(bad_preserved)
         )
     # preserved/abandoned and consumed/abandoned overlaps were caught
     # above per-abandoned-entry; preserved/abandoned likewise.
@@ -361,8 +344,7 @@ def validate_lineage(
     if missing:
         errors.append(
             "prior plan id(s) not accounted for (must be preserved, "
-            "consumed by supersede/split/merge, or abandoned): "
-            + ", ".join(missing)
+            "consumed by supersede/split/merge, or abandoned): " + ", ".join(missing)
         )
 
     if errors:
@@ -382,9 +364,7 @@ def compute_lineage_diff(lineage: Mapping[str, Any]) -> LineageDiff:
     phases_obj = lineage.get("phases", [])
     phases: list[Any] = list(phases_obj) if isinstance(phases_obj, list) else []
     abandoned_obj = lineage.get("abandoned") or []
-    abandoned: list[Any] = (
-        list(abandoned_obj) if isinstance(abandoned_obj, list) else []
-    )
+    abandoned: list[Any] = list(abandoned_obj) if isinstance(abandoned_obj, list) else []
 
     superseded: list[tuple[str, str]] = []
     split_buckets: dict[str, list[str]] = {}
@@ -404,16 +384,10 @@ def compute_lineage_diff(lineage: Mapping[str, Any]) -> LineageDiff:
             merged.append((list(from_field), pid))
 
     superseded.sort()
-    split_list = [
-        (old_id, sorted(new_ids))
-        for old_id, new_ids in sorted(split_buckets.items())
-    ]
+    split_list = [(old_id, sorted(new_ids)) for old_id, new_ids in sorted(split_buckets.items())]
     merged.sort(key=lambda e: (sorted(e[0]), e[1]))
 
-    abandoned_pairs = sorted(
-        (entry["id"], entry.get("reason", ""))
-        for entry in abandoned
-    )
+    abandoned_pairs = sorted((entry["id"], entry.get("reason", "")) for entry in abandoned)
 
     return LineageDiff(
         superseded=superseded,

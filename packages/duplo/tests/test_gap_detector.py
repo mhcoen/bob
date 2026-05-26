@@ -209,9 +209,7 @@ class TestFormatGapTasks:
         )
         tasks = format_gap_tasks(result)
         assert len(tasks) == 1
-        assert (
-            tasks[0].text == "Add test/implementation for hello world demo (No test)"
-        )
+        assert tasks[0].text == "Add test/implementation for hello world demo (No test)"
 
     def test_example_without_summary_uses_index(self):
         result = GapResult(
@@ -474,9 +472,7 @@ class TestFormatGapTasksAppendOnly:
         tasks = format_gap_tasks(result)
         assert tasks, "expected at least one task"
         for task in tasks:
-            assert task.status == TaskStatus.TODO, (
-                f"Non-TODO gap task: {task!r}"
-            )
+            assert task.status == TaskStatus.TODO, f"Non-TODO gap task: {task!r}"
 
 
 # ---------------------------------------------------------------------------

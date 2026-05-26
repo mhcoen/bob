@@ -45,6 +45,7 @@ from duplo.reauthor_phase_ids import (
 # tests above this guard run unconditionally.
 try:
     import bob_tools.ledger  # noqa: F401
+
     _BOB_TOOLS_AVAILABLE = True
 except ImportError:
     _BOB_TOOLS_AVAILABLE = False
@@ -98,11 +99,7 @@ class TestParsePlanPhases:
         assert phases[2].title == "Third"
 
     def test_pre_slice_c_headers_ignored(self) -> None:
-        text = (
-            "# stopwatch -- Phase 1: Stopwatch core\n"
-            "\n"
-            "- [ ] do thing\n"
-        )
+        text = "# stopwatch -- Phase 1: Stopwatch core\n\n- [ ] do thing\n"
         phases = parse_plan_phases(text)
         assert phases == []
 
@@ -110,10 +107,7 @@ class TestParsePlanPhases:
         # The HTML-comment lineage protocol is gone. The parser
         # ignores any inline comments and returns only header info;
         # lineage lives in the verdict JSON now.
-        text = (
-            "## Phase phase_002b: Refactored auth\n"
-            "<!-- supersedes: phase_002 -->\n"
-        )
+        text = "## Phase phase_002b: Refactored auth\n<!-- supersedes: phase_002 -->\n"
         phases = parse_plan_phases(text)
         assert len(phases) == 1
         assert phases[0].id == "phase_002b"
@@ -135,9 +129,7 @@ class TestParsePlanPhases:
 # ---------------------------------------------------------------------
 
 
-def _phase_entry(
-    pid: str, action: str, *, from_: list[str] | None = None
-) -> dict[str, Any]:
+def _phase_entry(pid: str, action: str, *, from_: list[str] | None = None) -> dict[str, Any]:
     entry: dict[str, Any] = {"id": pid, "action": action}
     if from_ is not None:
         entry["from"] = list(from_)
@@ -181,13 +173,7 @@ class TestValidateLineagePositive:
         validate_lineage(
             ["phase_001"],
             ["phase_001b"],
-            _sidecar(
-                phases=[
-                    _phase_entry(
-                        "phase_001b", "supersede", from_=["phase_001"]
-                    )
-                ]
-            ),
+            _sidecar(phases=[_phase_entry("phase_001b", "supersede", from_=["phase_001"])]),
         )
 
     def test_split_two_branches(self) -> None:
@@ -206,9 +192,7 @@ class TestValidateLineagePositive:
         validate_lineage(
             ["a", "b"],
             ["c"],
-            _sidecar(
-                phases=[_phase_entry("c", "merge", from_=["a", "b"])]
-            ),
+            _sidecar(phases=[_phase_entry("c", "merge", from_=["a", "b"])]),
         )
 
     def test_new_phase(self) -> None:
@@ -252,9 +236,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_999"],
-                _sidecar(
-                    phases=[_phase_entry("phase_999", "preserve")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_999", "preserve")]),
             )
 
     def test_preserve_with_from_field(self) -> None:
@@ -262,13 +244,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001"],
-                _sidecar(
-                    phases=[
-                        _phase_entry(
-                            "phase_001", "preserve", from_=["phase_001"]
-                        )
-                    ]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "preserve", from_=["phase_001"])]),
             )
 
     def test_new_with_existing_id(self) -> None:
@@ -276,9 +252,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001"],
-                _sidecar(
-                    phases=[_phase_entry("phase_001", "new")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "new")]),
             )
 
     def test_new_with_from_field(self) -> None:
@@ -299,9 +273,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_002"],
-                _sidecar(
-                    phases=[_phase_entry("phase_002", "supersede")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_002", "supersede")]),
             )
 
     def test_supersede_with_unknown_predecessor(self) -> None:
@@ -309,11 +281,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_002"],
-                _sidecar(
-                    phases=[
-                        _phase_entry("phase_002", "supersede", from_=["ghost"])
-                    ]
-                ),
+                _sidecar(phases=[_phase_entry("phase_002", "supersede", from_=["ghost"])]),
             )
 
     def test_supersede_reusing_existing_id(self) -> None:
@@ -321,13 +289,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001"],
-                _sidecar(
-                    phases=[
-                        _phase_entry(
-                            "phase_001", "supersede", from_=["phase_001"]
-                        )
-                    ]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "supersede", from_=["phase_001"])]),
             )
 
     def test_split_without_from(self) -> None:
@@ -335,9 +297,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_002"],
-                _sidecar(
-                    phases=[_phase_entry("phase_002", "split")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_002", "split")]),
             )
 
     def test_merge_with_only_one_prior(self) -> None:
@@ -345,9 +305,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["a"],
                 ["c"],
-                _sidecar(
-                    phases=[_phase_entry("c", "merge", from_=["a"])]
-                ),
+                _sidecar(phases=[_phase_entry("c", "merge", from_=["a"])]),
             )
 
     def test_duplicate_id_in_phases(self) -> None:
@@ -368,9 +326,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001", "phase_001"],
-                _sidecar(
-                    phases=[_phase_entry("phase_001", "preserve")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "preserve")]),
             )
 
     def test_phases_missing_for_plan_header(self) -> None:
@@ -381,9 +337,7 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001", "phase_002"],
-                _sidecar(
-                    phases=[_phase_entry("phase_001", "preserve")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "preserve")]),
             )
 
     def test_phases_has_entry_with_no_plan_header(self) -> None:
@@ -407,17 +361,11 @@ class TestValidateLineageRejections:
             validate_lineage(
                 ["phase_001"],
                 ["phase_001"],
-                _sidecar(
-                    phases=[
-                        {"id": "phase_001", "action": "fork"}
-                    ]
-                ),
+                _sidecar(phases=[{"id": "phase_001", "action": "fork"}]),
             )
 
     def test_abandoned_id_not_in_prior(self) -> None:
-        with pytest.raises(
-            LineageValidationError, match="not a prior plan id"
-        ):
+        with pytest.raises(LineageValidationError, match="not a prior plan id"):
             validate_lineage(
                 ["phase_001"],
                 ["phase_001"],
@@ -450,25 +398,17 @@ class TestValidateLineageRejections:
                 ["phase_001"],
                 ["phase_001b"],
                 _sidecar(
-                    phases=[
-                        _phase_entry(
-                            "phase_001b", "supersede", from_=["phase_001"]
-                        )
-                    ],
+                    phases=[_phase_entry("phase_001b", "supersede", from_=["phase_001"])],
                     abandoned=[_abandoned_entry("phase_001", "n/a")],
                 ),
             )
 
     def test_prior_id_not_accounted_for(self) -> None:
-        with pytest.raises(
-            LineageValidationError, match="not accounted for"
-        ):
+        with pytest.raises(LineageValidationError, match="not accounted for"):
             validate_lineage(
                 ["phase_001", "phase_002"],
                 ["phase_001"],
-                _sidecar(
-                    phases=[_phase_entry("phase_001", "preserve")]
-                ),
+                _sidecar(phases=[_phase_entry("phase_001", "preserve")]),
             )
 
     def test_prior_id_double_superseded(self) -> None:
@@ -477,36 +417,24 @@ class TestValidateLineageRejections:
         # Multiple split entries sharing a prior is the natural
         # split case and remains allowed -- see
         # TestValidateLineagePositive.test_split_two_branches.
-        with pytest.raises(
-            LineageValidationError, match="multiple entries"
-        ):
+        with pytest.raises(LineageValidationError, match="multiple entries"):
             validate_lineage(
                 ["phase_001"],
                 ["phase_002", "phase_003"],
                 _sidecar(
                     phases=[
-                        _phase_entry(
-                            "phase_002", "supersede", from_=["phase_001"]
-                        ),
-                        _phase_entry(
-                            "phase_003", "supersede", from_=["phase_001"]
-                        ),
+                        _phase_entry("phase_002", "supersede", from_=["phase_001"]),
+                        _phase_entry("phase_003", "supersede", from_=["phase_001"]),
                     ]
                 ),
             )
 
     def test_lineage_phases_must_be_list(self) -> None:
-        with pytest.raises(
-            LineageValidationError, match="phases must be a list"
-        ):
-            validate_lineage(
-                [], [], {"phases": "not a list"}
-            )
+        with pytest.raises(LineageValidationError, match="phases must be a list"):
+            validate_lineage([], [], {"phases": "not a list"})
 
     def test_lineage_must_be_object(self) -> None:
-        with pytest.raises(
-            LineageValidationError, match="must be a JSON object"
-        ):
+        with pytest.raises(LineageValidationError, match="must be a JSON object"):
             validate_lineage([], [], "not a dict")  # type: ignore[arg-type]
 
 
@@ -518,13 +446,7 @@ class TestValidateLineageRejections:
 class TestComputeLineageDiff:
     def test_supersede(self) -> None:
         diff = compute_lineage_diff(
-            _sidecar(
-                phases=[
-                    _phase_entry(
-                        "phase_001b", "supersede", from_=["phase_001"]
-                    )
-                ]
-            )
+            _sidecar(phases=[_phase_entry("phase_001b", "supersede", from_=["phase_001"])])
         )
         assert diff.superseded == [("phase_001", "phase_001b")]
         assert diff.split == []
@@ -545,9 +467,7 @@ class TestComputeLineageDiff:
 
     def test_merge(self) -> None:
         diff = compute_lineage_diff(
-            _sidecar(
-                phases=[_phase_entry("c", "merge", from_=["b", "a"])]
-            )
+            _sidecar(phases=[_phase_entry("c", "merge", from_=["b", "a"])])
         )
         # The synthesizer's declared 'from' order is preserved on the
         # merged entry; the audit trail matches what the synthesizer
@@ -628,9 +548,7 @@ class TestReauthorPlan:
         for phase_id in plan_phases:
             ev = storage.append(
                 event_type=EventType.PHASE_STARTED,
-                payload=make_phase_started_payload(
-                    phase_id=phase_id, title=f"Phase {phase_id}"
-                ),
+                payload=make_phase_started_payload(phase_id=phase_id, title=f"Phase {phase_id}"),
                 run_id="seed",
             )
             if first_phase_id is None:
@@ -655,9 +573,7 @@ class TestReauthorPlan:
         commit_id = commit_ev.event_id
 
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted = record_crossings(storage, crossings, run_id="seed")
         assert emitted, "expected at least one threshold_crossed event"
 
@@ -695,14 +611,10 @@ class TestReauthorPlan:
         from duplo import reauthor
 
         def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
-            text = new_plan_text + (
-                "\n" if not new_plan_text.endswith("\n") else ""
-            )
+            text = new_plan_text + ("\n" if not new_plan_text.endswith("\n") else "")
             return text, dict(verdict)
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
     def test_happy_path_emits_lifecycle_then_plan_reauthored(
         self,
@@ -712,9 +624,7 @@ class TestReauthorPlan:
         from bob_tools.ledger import EventType, Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
@@ -779,9 +689,7 @@ class TestReauthorPlan:
         assert "do phase_002 thing" not in assembled
         assert "<!-- phase_id: phase_002 -->" not in assembled
 
-        assert result.lineage_diff.superseded == [
-            ("phase_002", "phase_002b")
-        ]
+        assert result.lineage_diff.superseded == [("phase_002", "phase_002b")]
         assert result.lineage_diff.abandoned == []
 
         reader = Storage(ledger_dir, writer_id="check")
@@ -808,9 +716,7 @@ class TestReauthorPlan:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
@@ -863,8 +769,14 @@ class TestReauthorPlan:
         # bob_tools.planfile-canonical output renumbers ordinals
         # 1..N; the new phases land at the end after the preserved
         # phase_001.
-        assert "## Phase 2: Runtime Loop" in assembled or "## Phase 2: Adopted CLI Surface" in assembled
-        assert "## Phase 3: Runtime Loop" in assembled or "## Phase 3: Adopted CLI Surface" in assembled
+        assert (
+            "## Phase 2: Runtime Loop" in assembled
+            or "## Phase 2: Adopted CLI Surface" in assembled
+        )
+        assert (
+            "## Phase 3: Runtime Loop" in assembled
+            or "## Phase 3: Adopted CLI Surface" in assembled
+        )
         assert "The council rationale" not in assembled
 
     def test_abandoned_emits_phase_abandoned_with_synth_reason(
@@ -875,16 +787,12 @@ class TestReauthorPlan:
         from bob_tools.ledger import EventType, Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
         new_plan = _wrap_synth_plan(
-            "## Phase phase_001: Phase phase_001 title (preserved)\n"
-            "\n"
-            "- [ ] retained\n"
+            "## Phase phase_001: Phase phase_001 title (preserved)\n\n- [ ] retained\n"
         )
         verdict = {
             "decision": "accept",
@@ -933,10 +841,7 @@ class TestReauthorPlan:
         # Synthesizer-supplied reason carries through to the event
         # payload (vs the prior protocol's hardcoded "elided in
         # re-author"). Better fidelity for the audit trail.
-        assert (
-            abandon.payload["reason"]
-            == "out of scope after assumption falsified"
-        )
+        assert abandon.payload["reason"] == "out of scope after assumption falsified"
 
     def test_validation_failure_emits_no_events(
         self,
@@ -946,32 +851,24 @@ class TestReauthorPlan:
         from bob_tools.ledger import Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
 
         # Synthesizer claims a brand-new id is "preserved"; the
         # validator catches the mismatch with the prior plan.
-        bad_plan = _wrap_synth_plan(
-            "## Phase phase_002: New phase\n\n- [ ] x\n"
-        )
+        bad_plan = _wrap_synth_plan("## Phase phase_002: New phase\n\n- [ ] x\n")
         bad_verdict = {
             "decision": "accept",
             "feedback": "ok",
             "agreements": [],
             "disagreements": [],
             "rejected_options": [],
-            "lineage": {
-                "phases": [{"id": "phase_002", "action": "preserve"}]
-            },
+            "lineage": {"phases": [{"id": "phase_002", "action": "preserve"}]},
         }
         self._patch_council(monkeypatch, bad_plan, bad_verdict)
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
 
         from duplo.reauthor import reauthor_plan
 
@@ -983,9 +880,7 @@ class TestReauthorPlan:
                 project_dir=tmp_path,
             )
 
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
         assert "phase_002" not in plan_path.read_text()
 
@@ -997,15 +892,11 @@ class TestReauthorPlan:
         from bob_tools.ledger import Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
 
-        new_plan = _wrap_synth_plan(
-            "## Phase phase_001: Preserved\n\n- [ ] x\n"
-        )
+        new_plan = _wrap_synth_plan("## Phase phase_001: Preserved\n\n- [ ] x\n")
         verdict_no_lineage = {
             "decision": "accept",
             "feedback": "ok",
@@ -1018,9 +909,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError, match="lineage"):
             reauthor_plan(
                 plan_path=plan_path,
@@ -1028,9 +917,7 @@ class TestReauthorPlan:
                 crossing_event_id=crossing_id,
                 project_dir=tmp_path,
             )
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
         assert "Preserved" not in plan_path.read_text()
 
@@ -1043,9 +930,7 @@ class TestReauthorPlan:
         ledger_dir = tmp_path / "ledger"
         ledger_dir.mkdir(parents=True)
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text(
-            "# proj — Phase 0: env\n## Phase phase_001: x\n\n- [ ] x\n"
-        )
+        plan_path.write_text("# proj — Phase 0: env\n## Phase phase_001: x\n\n- [ ] x\n")
 
         with pytest.raises(ReauthorError, match="not found"):
             reauthor_plan(
@@ -1071,9 +956,7 @@ class TestReauthorPlan:
             run_id="seed",
         )
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text(
-            "# proj — Phase 0: env\n## Phase p1: x\n\n- [ ] x\n"
-        )
+        plan_path.write_text("# proj — Phase 0: env\n## Phase p1: x\n\n- [ ] x\n")
 
         with pytest.raises(ReauthorError, match="threshold_crossed"):
             reauthor_plan(
@@ -1149,8 +1032,7 @@ class TestReauthorPlan:
 
         # Synthesizer returns ONLY phase_002b.
         partial_plan = _wrap_synth_plan(
-            "## Phase phase_002b: Refactored phase_002\n\n"
-            "- [ ] new b work\n"
+            "## Phase phase_002b: Refactored phase_002\n\n- [ ] new b work\n"
         )
         # Lineage accounts ONLY for phase_002. The other priors are
         # left for Duplo to preserve.
@@ -1214,20 +1096,14 @@ class TestReauthorPlan:
 
         # Lineage diff reflects only the synthesizer's actions
         # (preserves are not lifecycle events).
-        assert result.lineage_diff.superseded == [
-            ("phase_002", "phase_002b")
-        ]
+        assert result.lineage_diff.superseded == [("phase_002", "phase_002b")]
         assert result.lineage_diff.abandoned == []
 
         # Single phase_superseded event emitted (one per consumed
         # prior); no events for the four preserves.
         reader = Storage(ledger_dir, writer_id="probe")
         all_events = reader.read_all()
-        reauthor_events = [
-            e
-            for e in all_events
-            if e.writer_id.startswith("duplo-reauthor")
-        ]
+        reauthor_events = [e for e in all_events if e.writer_id.startswith("duplo-reauthor")]
         from bob_tools.ledger import EventType
 
         types = [e.type for e in reauthor_events]
@@ -1249,9 +1125,7 @@ class TestReauthorPlan:
         from bob_tools.ledger import Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
         original_plan_text = plan_path.read_text()
@@ -1282,9 +1156,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError):
             reauthor_plan(
                 plan_path=plan_path,
@@ -1295,9 +1167,7 @@ class TestReauthorPlan:
 
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_full_plan_reauthor_path_still_works(
@@ -1317,9 +1187,7 @@ class TestReauthorPlan:
             ledger_dir, plan_phases=["phase_001", "phase_002", "phase_003"]
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_002", "phase_003"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_002", "phase_003"])
 
         # Synthesizer writes the FULL plan: preserves 1 and 3,
         # supersedes 2.
@@ -1371,19 +1239,13 @@ class TestReauthorPlan:
         # Synth's supersede content lands.
         assert "new b" in text
 
-        assert result.lineage_diff.superseded == [
-            ("phase_002", "phase_002b")
-        ]
+        assert result.lineage_diff.superseded == [("phase_002", "phase_002b")]
 
         reader = Storage(ledger_dir, writer_id="probe")
         from bob_tools.ledger import EventType
 
         all_events = reader.read_all()
-        reauthor_events = [
-            e
-            for e in all_events
-            if e.writer_id.startswith("duplo-reauthor")
-        ]
+        reauthor_events = [e for e in all_events if e.writer_id.startswith("duplo-reauthor")]
         types = [e.type for e in reauthor_events]
         assert types == [
             EventType.PHASE_SUPERSEDED,
@@ -1406,9 +1268,7 @@ class TestReauthorPlan:
             ledger_dir, plan_phases=["phase_001", "phase_002", "phase_003"]
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_002", "phase_003"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_002", "phase_003"])
 
         captured: dict[str, Any] = {}
 
@@ -1416,9 +1276,7 @@ class TestReauthorPlan:
 
         def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
             captured["question"] = kwargs["question"]
-            text = _wrap_synth_plan(
-                "## Phase phase_002b: Refactored\n\n- [ ] new b\n"
-            )
+            text = _wrap_synth_plan("## Phase phase_002b: Refactored\n\n- [ ] new b\n")
             verdict = {
                 "decision": "accept",
                 "feedback": "ok",
@@ -1437,9 +1295,7 @@ class TestReauthorPlan:
             }
             return text, verdict
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
         from duplo.reauthor import reauthor_plan
 
@@ -1465,9 +1321,7 @@ class TestReauthorPlan:
         An unknown id is a caller error and raises ReauthorError
         (not LineageValidationError) before the council is invoked."""
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
@@ -1503,9 +1357,7 @@ class TestReauthorPlan:
         no scope clause and the synthesizer authors plan-wide as
         before."""
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
 
@@ -1535,9 +1387,7 @@ class TestReauthorPlan:
                 },
             )
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
         from duplo.reauthor import reauthor_plan
 
@@ -1561,9 +1411,7 @@ class TestReauthorPlan:
         from duplo.reauthor_assemble import ReauthorAssemblyError
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001", "phase_002"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001", "phase_002"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001", "phase_002"])
         original_plan_text = plan_path.read_text()
@@ -1590,9 +1438,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(ReauthorAssemblyError, match="phase_002b"):
             reauthor_plan(
                 plan_path=plan_path,
@@ -1602,9 +1448,7 @@ class TestReauthorPlan:
             )
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     # -----------------------------------------------------------------
@@ -1637,9 +1481,7 @@ class TestReauthorPlan:
             "phase_008",
             "phase_009",
         ]
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=prior_phase_ids
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=prior_phase_ids)
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, prior_phase_ids)
         original_plan_text = plan_path.read_text()
@@ -1685,9 +1527,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError) as exc_info:
             reauthor_plan(
                 plan_path=plan_path,
@@ -1705,9 +1545,7 @@ class TestReauthorPlan:
 
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_structural_validator_rejects_unknown_from_historical_id(
@@ -1728,16 +1566,12 @@ class TestReauthorPlan:
             "phase_008",
             "phase_009",
         ]
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=prior_phase_ids
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=prior_phase_ids)
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, prior_phase_ids)
         original_plan_text = plan_path.read_text()
 
-        synth_plan = _wrap_synth_plan(
-            "## Phase phase_010: Derived from history\n\n- [ ] x\n"
-        )
+        synth_plan = _wrap_synth_plan("## Phase phase_010: Derived from history\n\n- [ ] x\n")
         verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -1758,9 +1592,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError) as exc_info:
             reauthor_plan(
                 plan_path=plan_path,
@@ -1776,9 +1608,7 @@ class TestReauthorPlan:
 
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_structural_validator_accepts_correct_floor_and_from(
@@ -1798,15 +1628,11 @@ class TestReauthorPlan:
             "phase_008",
             "phase_009",
         ]
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=prior_phase_ids
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=prior_phase_ids)
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, prior_phase_ids)
 
-        synth_plan = _wrap_synth_plan(
-            "## Phase phase_010: Refactored\n\n- [ ] new b\n"
-        )
+        synth_plan = _wrap_synth_plan("## Phase phase_010: Refactored\n\n- [ ] new b\n")
         verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -1845,9 +1671,7 @@ class TestReauthorPlan:
         # Lifecycle event was emitted.
         assert result.lifecycle_event_ids
         events = list(Storage(ledger_dir, writer_id="probe").read_all())
-        assert any(
-            "phase_010" in repr(ev.payload) for ev in events
-        )
+        assert any("phase_010" in repr(ev.payload) for ev in events)
 
     def test_normalize_does_not_remap_historical_to_current_ids(
         self,
@@ -1874,36 +1698,26 @@ class TestReauthorPlan:
                 }
             ]
         }
-        normalized = normalize_lineage_for_preservation(
-            prior_ids, synth_lineage
-        )
+        normalized = normalize_lineage_for_preservation(prior_ids, synth_lineage)
         # The supersede entry's `from` is unchanged.
-        supersede = next(
-            p for p in normalized["phases"] if p.get("id") == "phase_010"
-        )
+        supersede = next(p for p in normalized["phases"] if p.get("id") == "phase_010")
         assert supersede["from"] == ["phase_002"]
         # Preserve defaults are appended for unaccounted prior ids
         # (phase_006 and phase_007), but no remapping happened.
         preserve_ids = sorted(
-            p["id"]
-            for p in normalized["phases"]
-            if p.get("action") == "preserve"
+            p["id"] for p in normalized["phases"] if p.get("action") == "preserve"
         )
         assert preserve_ids == ["phase_006", "phase_007"]
 
         # End-to-end: the historical `from` must reach the structural
         # validator and trigger a rejection. Atomic on failure.
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=prior_ids
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=prior_ids)
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, prior_ids)
         original_plan_text = plan_path.read_text()
 
-        synth_plan = _wrap_synth_plan(
-            "## Phase phase_010: Refactor\n\n- [ ] x\n"
-        )
+        synth_plan = _wrap_synth_plan("## Phase phase_010: Refactor\n\n- [ ] x\n")
         verdict = {
             "decision": "accept",
             "feedback": "ok",
@@ -1916,9 +1730,7 @@ class TestReauthorPlan:
 
         from duplo.reauthor import reauthor_plan
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError) as exc_info:
             reauthor_plan(
                 plan_path=plan_path,
@@ -1931,9 +1743,7 @@ class TestReauthorPlan:
 
         # Atomicity preserved on rejection.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     # -----------------------------------------------------------------
@@ -1961,9 +1771,7 @@ class TestReauthorPlan:
         from duplo.reauthor import ReauthorError
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
         original_plan_text = plan_path.read_text()
@@ -2024,12 +1832,8 @@ class TestReauthorPlan:
             lambda council, project_dir: object(),
         )
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
-        with pytest.raises(
-            ReauthorError, match="plan_artifact_contained_verdict_json"
-        ):
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
+        with pytest.raises(ReauthorError, match="plan_artifact_contained_verdict_json"):
             reauthor_mod.reauthor_plan(
                 plan_path=plan_path,
                 ledger_dir=ledger_dir,
@@ -2040,9 +1844,7 @@ class TestReauthorPlan:
         # Atomicity: PLAN.md unchanged, no new events, no
         # plan_reauthored event.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_reauthor_accepts_trailing_verdict_fence_canonical_shape(
@@ -2060,9 +1862,7 @@ class TestReauthorPlan:
         from bob_tools.ledger import EventType, Storage
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
 
@@ -2074,19 +1874,11 @@ class TestReauthorPlan:
             "rejected_options": [],
             "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
         }
-        plan_body = (
-            "## Phase phase_001: phase_001 title\n\n"
-            "- [ ] do phase_001 thing\n"
-        )
+        plan_body = "## Phase phase_001: phase_001 title\n\n- [ ] do phase_001 thing\n"
         # The full text adapter response: plan body + trailing
         # fenced verdict.
         plan_artifact_value = (
-            plan_body
-            + "\n"
-            + "```json\n"
-            + json.dumps(verdict, sort_keys=True)
-            + "\n"
-            + "```\n"
+            plan_body + "\n" + "```json\n" + json.dumps(verdict, sort_keys=True) + "\n" + "```\n"
         )
 
         from duplo import reauthor as reauthor_mod
@@ -2153,9 +1945,7 @@ class TestReauthorPlan:
         from duplo.reauthor import ReauthorError
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         self._write_old_plan(plan_path, ["phase_001"])
         original_plan_text = plan_path.read_text()
@@ -2175,10 +1965,7 @@ class TestReauthorPlan:
         plan_artifact_value = (
             "# proj — Phase 0: env\n"
             "## Phase phase_001: First\n\n- [ ] x\n\n"
-            "```json\n"
-            + json.dumps(embedded_verdict)
-            + "\n"
-            + "```\n"
+            "```json\n" + json.dumps(embedded_verdict) + "\n" + "```\n"
         )
 
         from duplo import reauthor as reauthor_mod
@@ -2207,12 +1994,8 @@ class TestReauthorPlan:
             lambda council, project_dir: object(),
         )
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
-        with pytest.raises(
-            ReauthorError, match="plan_artifact_verdict_mismatch"
-        ):
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
+        with pytest.raises(ReauthorError, match="plan_artifact_verdict_mismatch"):
             reauthor_mod.reauthor_plan(
                 plan_path=plan_path,
                 ledger_dir=ledger_dir,
@@ -2221,9 +2004,7 @@ class TestReauthorPlan:
             )
 
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_reauthor_rejects_corrupt_prior_plan(
@@ -2243,28 +2024,19 @@ class TestReauthorPlan:
         from duplo.reauthor import ReauthorError
 
         ledger_dir = tmp_path / "ledger"
-        crossing_id, _, _ = self._seed_ledger(
-            ledger_dir, plan_phases=["phase_001"]
-        )
+        crossing_id, _, _ = self._seed_ledger(ledger_dir, plan_phases=["phase_001"])
         plan_path = tmp_path / "PLAN.md"
         # Duplicate top-level H1: bob_tools.planfile's structural
         # sanity check rejects this form (mirrors mcloop's
         # ``_check_structural_sanity``).
         plan_path.write_text(
-            "# proj\n\n"
-            "# proj\n\n"
-            "## Phase phase_001: First\n\n"
-            "- [ ] task\n",
+            "# proj\n\n# proj\n\n## Phase phase_001: First\n\n- [ ] task\n",
             encoding="utf-8",
         )
         original_plan_text = plan_path.read_text()
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
-        with pytest.raises(
-            ReauthorError, match="cannot be parsed as a canonical plan document"
-        ):
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
+        with pytest.raises(ReauthorError, match="cannot be parsed as a canonical plan document"):
             from duplo.reauthor import reauthor_plan
 
             reauthor_plan(
@@ -2275,9 +2047,7 @@ class TestReauthorPlan:
             )
         # Atomicity preserved.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
 
@@ -2295,9 +2065,7 @@ def _captured_invoke(captured: dict[str, str]) -> Any:
         captured["ledger_slice"] = kwargs["ledger_slice_md"]
         captured["design_context"] = kwargs["design_context_md"]
         plan_text = _wrap_synth_plan(
-            "## Phase phase_001: Phase phase_001 title (preserved)\n"
-            "\n"
-            "- [ ] x\n"
+            "## Phase phase_001: Phase phase_001 title (preserved)\n\n- [ ] x\n"
         )
         verdict = {
             "decision": "accept",
@@ -2305,9 +2073,7 @@ def _captured_invoke(captured: dict[str, str]) -> Any:
             "agreements": [],
             "disagreements": [],
             "rejected_options": [],
-            "lineage": {
-                "phases": [{"id": "phase_001", "action": "preserve"}]
-            },
+            "lineage": {"phases": [{"id": "phase_001", "action": "preserve"}]},
         }
         return plan_text, verdict
 
@@ -2344,9 +2110,7 @@ class TestLedgerSliceShape:
         storage = Storage(ledger_dir, writer_id="seed")
         storage.append(
             event_type=EventType.PHASE_STARTED,
-            payload=make_phase_started_payload(
-                phase_id="phase_001", title="t"
-            ),
+            payload=make_phase_started_payload(phase_id="phase_001", title="t"),
             run_id="seed",
         )
         storage.append(
@@ -2366,20 +2130,13 @@ class TestLedgerSliceShape:
             run_id="seed",
         )
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted = record_crossings(storage, crossings, run_id="seed")
 
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text(
-            "# proj\n"
-            "## Phase phase_001: Phase phase_001 title\n\n- [ ] x\n"
-        )
+        plan_path.write_text("# proj\n## Phase phase_001: Phase phase_001 title\n\n- [ ] x\n")
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured)
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured))
 
         reauthor_plan(
             plan_path=plan_path,
@@ -2424,9 +2181,7 @@ class TestLedgerSliceShape:
         storage = Storage(ledger_dir, writer_id="seed")
         storage.append(
             event_type=EventType.PHASE_STARTED,
-            payload=make_phase_started_payload(
-                phase_id="phase_001", title="t"
-            ),
+            payload=make_phase_started_payload(phase_id="phase_001", title="t"),
             run_id="seed",
         )
         storage.append(
@@ -2446,9 +2201,7 @@ class TestLedgerSliceShape:
             run_id="seed",
         )
         events = storage.read_all()
-        crossings = evaluate_thresholds(
-            project(events), events, ThresholdParams()
-        )
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
         emitted = record_crossings(storage, crossings, run_id="seed")
 
         plan_path = tmp_path / "PLAN.md"
@@ -2461,9 +2214,7 @@ class TestLedgerSliceShape:
             "Network access is restricted.\n"
         )
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured)
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured))
         reauthor_plan(
             plan_path=plan_path,
             ledger_dir=ledger_dir,
@@ -2515,8 +2266,7 @@ class TestNextAvailablePhaseIdFromPriors:
         from duplo.reauthor import _next_available_phase_id_from_priors
 
         priors = [
-            ParsedHeader(id=f"phase_{i:03d}", title="t", header_line_index=i)
-            for i in range(1, 6)
+            ParsedHeader(id=f"phase_{i:03d}", title="t", header_line_index=i) for i in range(1, 6)
         ]
         assert _next_available_phase_id_from_priors(priors) == "phase_006"
 
@@ -2570,8 +2320,7 @@ class TestStateBlobIncludesNextAvailableId:
         from duplo.reauthor import _build_state_blob
 
         plan_text = (
-            "## Phase phase_001: Scaffold\n- [ ] x\n"
-            "## Phase phase_006: After-gap\n- [ ] y\n"
+            "## Phase phase_001: Scaffold\n- [ ] x\n## Phase phase_006: After-gap\n- [ ] y\n"
         )
         priors = [
             ParsedHeader(id="phase_001", title="Scaffold", header_line_index=0),
@@ -2743,16 +2492,12 @@ class TestValidateLineageStructural:
         floor = "phase_008"
         # phase_002b is non-strict; it's also not a current prior;
         # collision check passes; floor check skipped.
-        lineage = {
-            "phases": [{"id": "phase_002b", "action": "new"}]
-        }
+        lineage = {"phases": [{"id": "phase_002b", "action": "new"}]}
         _validate_lineage_structural(prior, floor, lineage)
 
         # But a non-strict id that collides with a current prior is
         # still rejected.
-        lineage = {
-            "phases": [{"id": "phase_006", "action": "new"}]
-        }
+        lineage = {"phases": [{"id": "phase_006", "action": "new"}]}
         with pytest.raises(LineageValidationError):
             _validate_lineage_structural(prior, floor, lineage)
 
@@ -2848,8 +2593,7 @@ class TestLineageFeedbackFormatter:
         from duplo.reauthor import _format_lineage_feedback_for_retry
 
         err = LineageValidationError(
-            "structural lineage violations:\n"
-            "  - one minimal violation only"
+            "structural lineage violations:\n  - one minimal violation only"
         )
         out = _format_lineage_feedback_for_retry(
             error=err,
@@ -2875,9 +2619,7 @@ class TestLineageFeedbackFormatter:
         bullet so the model still sees the named cause."""
         from duplo.reauthor import _format_lineage_feedback_for_retry
 
-        err = LineageValidationError(
-            "lineage.phases has duplicate id 'phase_002b'"
-        )
+        err = LineageValidationError("lineage.phases has duplicate id 'phase_002b'")
         out = _format_lineage_feedback_for_retry(
             error=err,
             prior_plan_ids=["phase_001"],
@@ -2912,9 +2654,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             plan_phases=["phase_001", "phase_006", "phase_007"],
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_006", "phase_007"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_006", "phase_007"])
 
         from duplo import reauthor
 
@@ -2924,9 +2664,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             captured.append(dict(kwargs))
             attempt_num = len(captured)
             if attempt_num == 1:
-                plan_text = _wrap_synth_plan(
-                    "## Phase phase_010: Refactored\n\n- [ ] x\n"
-                )
+                plan_text = _wrap_synth_plan("## Phase phase_010: Refactored\n\n- [ ] x\n")
                 verdict: dict[str, Any] = {
                     "decision": "accept",
                     "feedback": "ok",
@@ -2944,9 +2682,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
                     },
                 }
                 return plan_text, verdict
-            plan_text = _wrap_synth_plan(
-                "## Phase phase_010: Refactored from 006\n\n- [ ] y\n"
-            )
+            plan_text = _wrap_synth_plan("## Phase phase_010: Refactored from 006\n\n- [ ] y\n")
             verdict = {
                 "decision": "accept",
                 "feedback": "ok",
@@ -2965,9 +2701,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             }
             return plan_text, verdict
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
         from duplo.reauthor import reauthor_plan
 
@@ -3010,9 +2744,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             plan_phases=["phase_001", "phase_006", "phase_007"],
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_006", "phase_007"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_006", "phase_007"])
         original_plan_text = plan_path.read_text()
 
         from duplo import reauthor
@@ -3021,9 +2753,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
 
         def fake_invoke(**kwargs: Any) -> tuple[str, dict[str, Any]]:
             captured.append(dict(kwargs))
-            plan_text = _wrap_synth_plan(
-                "## Phase phase_010: Refactored\n\n- [ ] x\n"
-            )
+            plan_text = _wrap_synth_plan("## Phase phase_010: Refactored\n\n- [ ] x\n")
             verdict: dict[str, Any] = {
                 "decision": "accept",
                 "feedback": "ok",
@@ -3042,13 +2772,9 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
             }
             return plan_text, verdict
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(LineageValidationError):
             from duplo.reauthor import reauthor_plan
 
@@ -3063,9 +2789,7 @@ class TestReauthorBoundedRetry(TestReauthorPlan):
         assert len(captured) == 2
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
 
@@ -3096,9 +2820,7 @@ class TestCommitAttributionsValidator:
                     "rationale": "touches files added in phase_004",
                 }
             ],
-            triggering_unattributable_commits=[
-                "abc1234def5678901234567890abcdef"
-            ],
+            triggering_unattributable_commits=["abc1234def5678901234567890abcdef"],
             prior_plan_ids=["phase_001", "phase_004"],
             new_plan_ids=["phase_005"],
         )
@@ -3118,9 +2840,7 @@ class TestCommitAttributionsValidator:
                         "rationale": "x",
                     }
                 ],
-                triggering_unattributable_commits=[
-                    "abc1234def5678901234567890abcdef"
-                ],
+                triggering_unattributable_commits=["abc1234def5678901234567890abcdef"],
                 prior_plan_ids=["phase_001", "phase_004"],
                 new_plan_ids=[],
             )
@@ -3228,9 +2948,7 @@ class TestCommitAttributionsValidator:
                     "rationale": "ok",
                 }
             ],
-            triggering_unattributable_commits=[
-                "abc1234def5678901234567890abcdef0123"
-            ],
+            triggering_unattributable_commits=["abc1234def5678901234567890abcdef0123"],
             prior_plan_ids=["phase_001"],
             new_plan_ids=[],
         )
@@ -3268,10 +2986,7 @@ class TestSchemaFailureClassifier:
         )
 
         result = classify_schema_failure(
-            [
-                "lineage.phases[3].attributed_commits: additional "
-                "property not permitted"
-            ]
+            ["lineage.phases[3].attributed_commits: additional property not permitted"]
         )
         assert result.primary is SchemaFailureKind.ADDITIONAL_PROPERTIES
         assert SchemaFailureKind.ADDITIONAL_PROPERTIES in result.kinds
@@ -3293,9 +3008,7 @@ class TestSchemaFailureClassifier:
             classify_schema_failure,
         )
 
-        result = classify_schema_failure(
-            ["feedback: required field missing"]
-        )
+        result = classify_schema_failure(["feedback: required field missing"])
         assert result.primary is SchemaFailureKind.MISSING_REQUIRED
 
     def test_classifies_malformed_array(self) -> None:
@@ -3304,9 +3017,7 @@ class TestSchemaFailureClassifier:
             classify_schema_failure,
         )
 
-        result = classify_schema_failure(
-            ["agreements: expected array, got str"]
-        )
+        result = classify_schema_failure(["agreements: expected array, got str"])
         assert result.primary is SchemaFailureKind.MALFORMED_ARRAY
 
     def test_classifies_json_parse_outcome(self) -> None:
@@ -3356,9 +3067,7 @@ class TestSchemaFailureClassifier:
         )
         assert result.primary is SchemaFailureKind.OTHER
 
-    def test_read_schema_validation_failures_from_log(
-        self, tmp_path: Path
-    ) -> None:
+    def test_read_schema_validation_failures_from_log(self, tmp_path: Path) -> None:
         """read_schema_validation_failures scans log.jsonl, surfaces
         schema_validation records whose outcome is not 'valid', and
         skips a truncated final line (single-fsync crash window
@@ -3393,8 +3102,7 @@ class TestSchemaFailureClassifier:
                     "outcome": "schema_error",
                     "decision": None,
                     "validation_errors": [
-                        "lineage.phases[3].status: additional "
-                        "property not permitted"
+                        "lineage.phases[3].status: additional property not permitted"
                     ],
                     "payload_ref": None,
                     "invocation_id": "i1",
@@ -3482,9 +3190,7 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
             plan_phases=["phase_001", "phase_006", "phase_007"],
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_006", "phase_007"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_006", "phase_007"])
 
         from duplo import reauthor
 
@@ -3495,14 +3201,9 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
             attempt_num = len(captured)
             if attempt_num == 1:
                 raise self._make_schema_error(
-                    [
-                        "lineage.phases[3].attributed_commits: "
-                        "additional property not permitted"
-                    ]
+                    ["lineage.phases[3].attributed_commits: additional property not permitted"]
                 )
-            plan_text = _wrap_synth_plan(
-                "## Phase phase_010: Refactored from 006\n\n- [ ] y\n"
-            )
+            plan_text = _wrap_synth_plan("## Phase phase_010: Refactored from 006\n\n- [ ] y\n")
             verdict = {
                 "decision": "accept",
                 "feedback": "ok",
@@ -3521,9 +3222,7 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
             }
             return plan_text, verdict
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
         from duplo.reauthor import reauthor_plan
 
@@ -3567,9 +3266,7 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
             plan_phases=["phase_001", "phase_006", "phase_007"],
         )
         plan_path = tmp_path / "PLAN.md"
-        self._write_old_plan(
-            plan_path, ["phase_001", "phase_006", "phase_007"]
-        )
+        self._write_old_plan(plan_path, ["phase_001", "phase_006", "phase_007"])
         original_plan_text = plan_path.read_text()
 
         from duplo import reauthor
@@ -3583,9 +3280,7 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
                 # Attempt 1: produces lineage with historical 'from'
                 # — _validate_lineage_structural will raise
                 # LineageValidationError after _invoke returns.
-                plan_text = _wrap_synth_plan(
-                    "## Phase phase_010: Bad\n\n- [ ] x\n"
-                )
+                plan_text = _wrap_synth_plan("## Phase phase_010: Bad\n\n- [ ] x\n")
                 verdict: dict[str, Any] = {
                     "decision": "accept",
                     "feedback": "ok",
@@ -3604,17 +3299,11 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
                 }
                 return plan_text, verdict
             # Attempt 2: orchestra rejects the verdict outright.
-            raise self._make_schema_error(
-                ["decision: value 'unknown' is not in enum [...]"]
-            )
+            raise self._make_schema_error(["decision: value 'unknown' is not in enum [...]"])
 
-        monkeypatch.setattr(
-            reauthor, "_invoke_council_for_reauthor", fake_invoke
-        )
+        monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", fake_invoke)
 
-        events_before = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_before = list(Storage(ledger_dir, writer_id="probe").read_all())
         with pytest.raises(SchemaValidationError):
             from duplo.reauthor import reauthor_plan
 
@@ -3629,14 +3318,10 @@ class TestReauthorSchemaRetry(TestReauthorPlan):
         assert len(captured) == 2
         # First call had no feedback; second received lineage feedback.
         assert captured[0].get("previous_attempt_error") is None
-        assert "phase_002" in (
-            captured[1].get("previous_attempt_error") or ""
-        )
+        assert "phase_002" in (captured[1].get("previous_attempt_error") or "")
         # Atomicity: PLAN.md unchanged, no new events.
         assert plan_path.read_text() == original_plan_text
-        events_after = list(
-            Storage(ledger_dir, writer_id="probe").read_all()
-        )
+        events_after = list(Storage(ledger_dir, writer_id="probe").read_all())
         assert len(events_after) == len(events_before)
 
     def test_schema_validation_error_is_exported(self) -> None:

@@ -177,9 +177,7 @@ _ANY_HEADING_RE = re.compile(r"^#+\s+\S")
 # `## Phase phase_NNN: title`: the `phase_001` token has no
 # whitespace between "phase" and the digit (the underscore breaks
 # the `phase\s+\d+` pattern), so Slice C headers survive the strip.
-_PHASE_H1_STRIP_RE = re.compile(
-    r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE
-)
+_PHASE_H1_STRIP_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
 
 # Validate pattern: STRICT match of the canonical envelope shape Duplo
 # renders. This is the regex used by validate_h1_ordinal_sequence to
@@ -357,9 +355,7 @@ def validate_h1_ordinal_sequence(
             f"Observed: {ordinals}. Expected: {expected_ordinals}."
         )
 
-    expected_contig = list(
-        range(ordinals[0], ordinals[0] + len(ordinals))
-    )
+    expected_contig = list(range(ordinals[0], ordinals[0] + len(ordinals)))
     if ordinals == expected_contig:
         return
     raise CanonicalH1OrdinalError(
@@ -603,16 +599,12 @@ Generate the phase body now.
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
     if council.is_enabled():
-        return council.author_phase_plan(
-            prompt=prompt, system=system, phase_num=phase_num
-        )
+        return council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
 
     raw = _strip_fences(query(prompt, system=system))
     plan_path = Path(target_dir) / _PLAN_FILENAME
     required_phase_id = council.compute_required_phase_id(plan_path)
-    return council.typed_plan_from_synthesizer_text(
-        raw, required_phase_id=required_phase_id
-    )
+    return council.typed_plan_from_synthesizer_text(raw, required_phase_id=required_phase_id)
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
@@ -763,9 +755,7 @@ def save_plan(
 
     if expected_h1_ordinals is not None:
         accumulated = path.read_text(encoding="utf-8")
-        validate_h1_ordinal_sequence(
-            accumulated, expected_ordinals=expected_h1_ordinals
-        )
+        validate_h1_ordinal_sequence(accumulated, expected_ordinals=expected_h1_ordinals)
 
     return path
 
@@ -809,14 +799,11 @@ def _merge_existing_plan(existing: Plan, new: Plan) -> Plan:
     # carry their own ``T-000001..`` sequences (each ``migrate`` call
     # restarts at ``T-000001`` for a fresh plan), producing duplicate
     # ids when the phases are concatenated.
-    new_phases_no_ids = tuple(
-        _phase_with_clean_task_ids(phase) for phase in new.phases
-    )
+    new_phases_no_ids = tuple(_phase_with_clean_task_ids(phase) for phase in new.phases)
 
     combined = tuple(existing.phases) + new_phases_no_ids
     renumbered = tuple(
-        dataclasses.replace(phase, ordinal=index + 1)
-        for index, phase in enumerate(combined)
+        dataclasses.replace(phase, ordinal=index + 1) for index, phase in enumerate(combined)
     )
     merged = dataclasses.replace(
         existing,
@@ -879,14 +866,10 @@ def _append_extra_tasks(plan: Plan, extra_tasks: tuple[Task, ...]) -> Plan:
         return plan
 
     if plan.magic_version is None or any(
-        task.task_id is None
-        for phase in plan.phases
-        for task in phase.tasks
+        task.task_id is None for phase in plan.phases for task in phase.tasks
     ):
         plan = planfile_migrate(
-            dataclasses.replace(plan, magic_version=1)
-            if plan.magic_version is None
-            else plan
+            dataclasses.replace(plan, magic_version=1) if plan.magic_version is None else plan
         )
 
     last_phase = plan.phases[-1]
@@ -896,9 +879,7 @@ def _append_extra_tasks(plan: Plan, extra_tasks: tuple[Task, ...]) -> Plan:
 
     merged = plan
     for task in extra_tasks:
-        merged, _assigned = add_phase_task(
-            merged, target_phase_id, _rebuild_task(task)
-        )
+        merged, _assigned = add_phase_task(merged, target_phase_id, _rebuild_task(task))
     return merged
 
 

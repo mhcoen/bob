@@ -431,9 +431,7 @@ def _scrape_declared_sources(spec: ProductSpec) -> ScrapeResult:
         # source.scrape is validated to one of {"deep", "shallow",
         # "none"} on parse (see spec_reader). Cast to satisfy the
         # Literal-typed parameter.
-        scrape_depth = cast(
-            Literal["deep", "shallow", "none"], source.scrape
-        )
+        scrape_depth = cast(Literal["deep", "shallow", "none"], source.scrape)
         try:
             (
                 scraped_text,
@@ -607,9 +605,7 @@ def _bug_fix_text(desc: str) -> str:
     return f"Fix: {oneline}"
 
 
-def _add_bug_tasks_to_plan(
-    plan_path: Path, entries: list[tuple[str, str]]
-) -> int:
+def _add_bug_tasks_to_plan(plan_path: Path, entries: list[tuple[str, str]]) -> int:
     """Add each ``(text, fix_key)`` entry to the plan's Bugs section.
 
     Each entry becomes a task built with :func:`make_task` and carries a
@@ -791,9 +787,7 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        entries = [
-            (_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses
-        ]
+        entries = [(_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses]
         writes = _add_bug_tasks_to_plan(plan_path, entries)
         print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
@@ -821,9 +815,7 @@ def _fix_mode(args: argparse.Namespace) -> None:
             print("Run duplo to generate a plan, then run mcloop.")
             return
 
-        entries = [
-            (_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses
-        ]
+        entries = [(_diagnosis_fix_text(diag), diag.symptom) for diag in result.diagnoses]
         writes = _add_bug_tasks_to_plan(plan_path, entries)
         print(f"Updated {writes} diagnosed fix task(s) in PLAN.md.")
         print("Run mcloop to start fixing.")
@@ -1133,9 +1125,7 @@ def _rescrape_product_url(
             if design.colors or design.fonts or design.layout:
                 spec_path = Path.cwd() / "SPEC.md"
                 existing_spec_text = (
-                    spec_path.read_text(encoding="utf-8")
-                    if spec_path.exists()
-                    else ""
+                    spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
                 )
                 body = format_design_block(design)
                 if body:
@@ -1386,9 +1376,7 @@ def _walk_plan_tasks(tasks):
         yield from _walk_plan_tasks(task.children)
 
 
-_OBSERVED_PHASE_HEADER_RE = re.compile(
-    r"^##\s+(?:Phase|Stage)\s+\S+:\s+\S"
-)
+_OBSERVED_PHASE_HEADER_RE = re.compile(r"^##\s+(?:Phase|Stage)\s+\S+:\s+\S")
 
 
 def _observed_phase_count(plan_text: str) -> int:
@@ -1410,11 +1398,7 @@ def _observed_phase_count(plan_text: str) -> int:
     references like ``## Notes about Phase 1`` are excluded by the
     leading-keyword requirement.
     """
-    return sum(
-        1
-        for line in plan_text.splitlines()
-        if _OBSERVED_PHASE_HEADER_RE.match(line)
-    )
+    return sum(1 for line in plan_text.splitlines() if _OBSERVED_PHASE_HEADER_RE.match(line))
 
 
 def _run_phase_generation_loop(
@@ -1441,6 +1425,7 @@ def _run_phase_generation_loop(
     on disk are untouched.
     """
     from duplo.claude_cli import _TIMEOUT_SECONDS
+
     total_phases = len(roadmap)
     saved_count = 0
     for idx in range(start_idx, total_phases):
@@ -1451,9 +1436,7 @@ def _run_phase_generation_loop(
             phase_number_i = phases_completed + idx + 1
         phase_title = phase_dict.get("title", "")
         phase_label_i = (
-            f"Phase {phase_number_i}: {phase_title}"
-            if phase_title
-            else f"Phase {phase_number_i}"
+            f"Phase {phase_number_i}: {phase_title}" if phase_title else f"Phase {phase_number_i}"
         )
         print(f"Generating {phase_label_i} PLAN.md …")
         try:
@@ -1481,10 +1464,7 @@ def _run_phase_generation_loop(
                     spec_tasks = format_contracts_as_verification(spec)
                     if spec_tasks:
                         extra_tasks.extend(spec_tasks)
-                        print(
-                            f"  {len(spec.behavior_contracts)} spec "
-                            f"verification case(s) added."
-                        )
+                        print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
             saved_plan_path = save_plan(content, extra_tasks=extra_tasks)
             prior_phases_files.extend(_extract_created_files_from_plan(content))
         except ClaudeCliError as exc:
@@ -1827,24 +1807,16 @@ def _subsequent_run() -> None:
             resume_phases_completed = len(data.get("phases", []))
             resume_prior_files = _extract_created_files(plan_text)
 
-            resume_source_url = (
-                _source_url_from_spec(spec) or data.get("source_url", "")
-            )
-            resume_features = [
-                _feature_from_dict(f) for f in data.get("features", [])
-            ]
+            resume_source_url = _source_url_from_spec(spec) or data.get("source_url", "")
+            resume_features = [_feature_from_dict(f) for f in data.get("features", [])]
             resume_preferences = _load_preferences(data, spec)
             resume_profiles = _resolve_platform_profiles(resume_preferences)
             _announce_profiles(resume_profiles)
 
             scaffold_notice = ""
             if resume_phases_completed == 0 and resume_profiles:
-                written = write_scaffold(
-                    resume_profiles, app_name, target_dir=Path.cwd()
-                )
-                scaffold_notice = format_scaffold_notice(
-                    written, target_dir=Path.cwd()
-                )
+                written = write_scaffold(resume_profiles, app_name, target_dir=Path.cwd())
+                scaffold_notice = format_scaffold_notice(written, target_dir=Path.cwd())
             local_md_content = _read_local_md(Path.cwd())
             local_overrides = format_local_overrides(local_md_content)
             if resume_profiles:
@@ -1856,9 +1828,7 @@ def _subsequent_run() -> None:
                     target_dir=Path.cwd(),
                 )
             resume_addendum = (
-                format_planner_system_addendum(resume_profiles)
-                + scaffold_notice
-                + local_overrides
+                format_planner_system_addendum(resume_profiles) + scaffold_notice + local_overrides
             )
 
             print(
@@ -1892,9 +1862,7 @@ def _subsequent_run() -> None:
 
         phase_num, phase_info = get_current_phase()
         phase_label = (
-            f"Phase {phase_num}: {phase_info['title']}"
-            if phase_info
-            else f"Phase {phase_num}"
+            f"Phase {phase_num}: {phase_info['title']}" if phase_info else f"Phase {phase_num}"
         )
         print(f"{phase_label} has uncompleted tasks in PLAN.md.")
         print("Run mcloop to continue building.")

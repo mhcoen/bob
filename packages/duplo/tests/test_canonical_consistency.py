@@ -130,10 +130,7 @@ def test_extract_runsh_module() -> None:
 
 
 def test_extract_runsh_module_strips_submodule() -> None:
-    assert (
-        _extract_runsh_module('"$PYTHON" -m fswatch_run.cli "$@"')
-        == "fswatch_run"
-    )
+    assert _extract_runsh_module('"$PYTHON" -m fswatch_run.cli "$@"') == "fswatch_run"
 
 
 def test_extract_runsh_module_returns_none_when_absent() -> None:

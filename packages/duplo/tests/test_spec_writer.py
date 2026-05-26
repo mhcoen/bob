@@ -1978,7 +1978,7 @@ class TestProposeFileRole:
         monkeypatch.chdir(tmp_path)
         monkeypatch.setattr(
             "duplo.spec_writer.query_with_images",
-            lambda prompt, image_paths, **kwargs: ('{"description": "A logo", "role": "mascot"}'),
+            lambda prompt, image_paths, **kwargs: '{"description": "A logo", "role": "mascot"}',
         )
         path = tmp_path / "x.png"
         path.write_bytes(b"")

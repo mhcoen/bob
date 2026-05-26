@@ -153,9 +153,7 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
         if kind == "fan_out_start":
             children = event.children or ()
             count = len(children)
-            _emit(
-                f"[duplo] fan_out start ({count} parallel proposers)"
-            )
+            _emit(f"[duplo] fan_out start ({count} parallel proposers)")
             return
         if kind == "fan_out_end":
             _emit("[duplo] fan_out end")
@@ -164,17 +162,11 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
             return
         model = event.model or event.adapter or "transform"
         if kind == "state_enter":
-            _emit(
-                f"[duplo] state={event.state_name} model={model} "
-                "status=running"
-            )
+            _emit(f"[duplo] state={event.state_name} model={model} status=running")
             return
         elapsed = event.elapsed_seconds
         if elapsed is None:
-            _emit(
-                f"[duplo] state={event.state_name} model={model} "
-                "status=complete"
-            )
+            _emit(f"[duplo] state={event.state_name} model={model} status=complete")
         else:
             _emit(
                 f"[duplo] state={event.state_name} model={model} "
@@ -182,6 +174,7 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
             )
 
     return callback
+
 
 _TRUTHY = ("1", "true", "yes", "on")
 
@@ -297,9 +290,7 @@ def _rebuild_task_constructed(task: Task) -> Task:
     them; :func:`migrate` assigns ids on the rebuilt plan later.
     """
     rebuilt_children = tuple(_rebuild_task_constructed(child) for child in task.children)
-    rebuilt_ruled_out = tuple(
-        RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out
-    )
+    rebuilt_ruled_out = tuple(RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out)
     return make_task(
         task.text,
         status=task.status,
@@ -325,9 +316,7 @@ def _rebuild_phase_constructed(phase: Phase, *, ordinal: int) -> Phase:
         )
         for sub in phase.subsections
     )
-    phase_id_source = (
-        phase.phase_id_source if phase.phase_id_source != "none" else "none"
-    )
+    phase_id_source = phase.phase_id_source if phase.phase_id_source != "none" else "none"
     # Normalize `explicit_header` to `explicit_comment` so the renderer
     # emits a `<!-- phase_id: ... -->` line that survives round-trip
     # under constructed-mode field-stability checks.
@@ -380,10 +369,7 @@ def typed_plan_from_synthesizer_text(
         parsed = parse_plan(plan_text)
     except PlanSyntaxError as exc:
         raise PlanValidationError(
-            [
-                "synthesizer plan body could not be parsed as PLAN.md: "
-                f"{exc}"
-            ]
+            [f"synthesizer plan body could not be parsed as PLAN.md: {exc}"]
         ) from exc
 
     rebuilt_phases = tuple(
@@ -495,10 +481,7 @@ def author_phase_plan(
     )
 
     state_text = _build_state_text(prompt=prompt, system=system)
-    question = (
-        f"Author the Phase {phase_num} plan from the reference "
-        "material above."
-    )
+    question = f"Author the Phase {phase_num} plan from the reference material above."
     # Compute required_phase_id deterministically from the existing
     # PLAN.md (Codex's safe rule: highest+1, NOT the smallest gap).
     # The synthesizer is told to use this id verbatim; the canonical
@@ -528,9 +511,7 @@ def author_phase_plan(
             progress_callback=make_duplo_progress_callback(),
         )
     except Exception as exc:  # noqa: BLE001 — surface any wiring failure
-        raise CouncilError(
-            f"council_four_canonical invocation failed: {exc}"
-        ) from exc
+        raise CouncilError(f"council_four_canonical invocation failed: {exc}") from exc
     elapsed_s = time.time() - started_at
 
     if result.terminal != "done":
@@ -553,14 +534,10 @@ def author_phase_plan(
 
     plan_view = result.artifacts.get("plan")
     if plan_view is None or not isinstance(plan_view.value, str):
-        raise CouncilError(
-            "council_four_canonical accepted but produced no 'plan' artifact"
-        )
+        raise CouncilError("council_four_canonical accepted but produced no 'plan' artifact")
     plan_text: str = plan_view.value.strip()
     if not plan_text:
-        raise CouncilError(
-            "council_four_canonical accepted but the 'plan' artifact is empty"
-        )
+        raise CouncilError("council_four_canonical accepted but the 'plan' artifact is empty")
 
     _write_audit(
         audits_root / result.run_id,
@@ -577,9 +554,7 @@ def author_phase_plan(
     # Audit dir is already written; PLAN.md is NOT written by
     # ``author_phase_plan`` itself, so a raise here means PLAN.md stays
     # untouched.
-    return typed_plan_from_synthesizer_text(
-        plan_text, required_phase_id=required_phase_id
-    )
+    return typed_plan_from_synthesizer_text(plan_text, required_phase_id=required_phase_id)
 
 
 def _env_truthy(name: str) -> bool:
@@ -634,18 +609,12 @@ def _load_or_fallback_config(
     if explicit:
         explicit_path = Path(explicit).expanduser()
         if not explicit_path.exists():
-            raise CouncilError(
-                f"DUPLO_COUNCIL_CONFIG path does not exist: {explicit_path}"
-            )
+            raise CouncilError(f"DUPLO_COUNCIL_CONFIG path does not exist: {explicit_path}")
         try:
             cfg = load_config(project_dir=explicit_path.parent)
         except config_error as exc:
-            raise CouncilError(
-                f"failed to load council config at {explicit_path}: {exc}"
-            ) from exc
-        return _ensure_council_workflow(
-            cfg, config_cls=config_cls, workflow_cls=workflow_cls
-        )
+            raise CouncilError(f"failed to load council config at {explicit_path}: {exc}") from exc
+        return _ensure_council_workflow(cfg, config_cls=config_cls, workflow_cls=workflow_cls)
 
     try:
         project_cfg = load_config(project_dir=project_dir)
@@ -671,9 +640,7 @@ _CANONICAL_WORKFLOW_NAME = "council_four_canonical"
 _REAUTHOR_WORKFLOW_NAME = "council_four_reauthor"
 
 
-def _ensure_council_workflow(
-    cfg: Any, *, config_cls: Any, workflow_cls: Any
-) -> Any:
+def _ensure_council_workflow(cfg: Any, *, config_cls: Any, workflow_cls: Any) -> Any:
     """Ensure both council variants exist in ``cfg.workflows``.
 
     The canonical and reauthor workflows are independently named in
@@ -733,8 +700,10 @@ def _write_audit(
         view = result.artifacts.get(key)
         if view is None or view.value is None:
             return
-        body = view.value if isinstance(view.value, str) else json.dumps(
-            view.value, indent=2, sort_keys=True
+        body = (
+            view.value
+            if isinstance(view.value, str)
+            else json.dumps(view.value, indent=2, sort_keys=True)
         )
         (audit_dir / name).write_text(body)
 
@@ -748,9 +717,7 @@ def _write_audit(
     verdict_view = result.artifacts.get("judge_verdict")
     if verdict_view is not None:
         verdict_path = audit_dir / "verdict.json"
-        verdict_path.write_text(
-            json.dumps(verdict_view.value, indent=2, sort_keys=True)
-        )
+        verdict_path.write_text(json.dumps(verdict_view.value, indent=2, sort_keys=True))
 
     run_meta = {
         "run_id": result.run_id,
@@ -759,6 +726,4 @@ def _write_audit(
         "question": question,
         "log_path": str(result.log_path),
     }
-    (audit_dir / "run_meta.json").write_text(
-        json.dumps(run_meta, indent=2, sort_keys=True)
-    )
+    (audit_dir / "run_meta.json").write_text(json.dumps(run_meta, indent=2, sort_keys=True))

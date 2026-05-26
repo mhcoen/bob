@@ -150,9 +150,7 @@ def rebuild_task_constructed(task: Task) -> Task:
     assigns ids on the rebuilt plan later.
     """
     rebuilt_children = tuple(rebuild_task_constructed(child) for child in task.children)
-    rebuilt_ruled_out = tuple(
-        RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out
-    )
+    rebuilt_ruled_out = tuple(RuledOut(text=ruled.text, line_number=0) for ruled in task.ruled_out)
     return make_task(
         task.text,
         status=task.status,
@@ -245,9 +243,7 @@ def assemble_reauthored_plan(
     """
     prior_phase_ids = [p.phase_id for p in prior_plan.phases if p.phase_id is not None]
     if len(set(prior_phase_ids)) != len(prior_phase_ids):
-        raise ReauthorAssemblyError(
-            "prior plan has duplicate phase ids; refusing to assemble"
-        )
+        raise ReauthorAssemblyError("prior plan has duplicate phase ids; refusing to assemble")
 
     synth_by_id: dict[str, Phase] = {}
     for phase in synth_phases:
@@ -356,10 +352,7 @@ def assemble_reauthored_plan(
 
     one_to_one_supersedes: dict[str, str] = {}
     for prior_id, new_ids in replacement_at_prior.items():
-        if (
-            len(new_ids) == 1
-            and merge_first_source.get(new_ids[0]) is None
-        ):
+        if len(new_ids) == 1 and merge_first_source.get(new_ids[0]) is None:
             # Genuine 1:1 supersede (or a single-source split or a
             # single-source 'merge' that the validator rejects later;
             # we treat all of these uniformly here since the lineage
@@ -411,8 +404,7 @@ def assemble_reauthored_plan(
 
     # Renumber ordinals 1..N (canonical for constructed plans).
     renumbered = tuple(
-        dataclasses.replace(phase, ordinal=index + 1)
-        for index, phase in enumerate(out_phases)
+        dataclasses.replace(phase, ordinal=index + 1) for index, phase in enumerate(out_phases)
     )
 
     assembled = dataclasses.replace(working_plan, phases=renumbered)

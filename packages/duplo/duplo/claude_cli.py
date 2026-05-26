@@ -36,9 +36,7 @@ def _drain_stream(stream, sink: list[str]) -> None:
         pass
 
 
-def _with_retry(
-    func: Callable[..., str], *args: Any, **kwargs: Any
-) -> str:
+def _with_retry(func: Callable[..., str], *args: Any, **kwargs: Any) -> str:
     """Call ``func`` with up to ``_MAX_ATTEMPTS`` attempts on ClaudeCliError.
 
     Sleeps ``_RETRY_SLEEP_SECONDS`` between attempts and prints a progress

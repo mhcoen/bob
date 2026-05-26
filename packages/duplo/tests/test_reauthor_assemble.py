@@ -129,9 +129,7 @@ def test_normalize_does_not_duplicate_explicit_preserve() -> None:
     }
     out = normalize_lineage_for_preservation(prior_ids, lineage)
     preserve_count = sum(
-        1
-        for e in out["phases"]
-        if e["action"] == "preserve" and e["id"] == "phase_001"
+        1 for e in out["phases"] if e["action"] == "preserve" and e["id"] == "phase_001"
     )
     assert preserve_count == 1
 
@@ -371,9 +369,7 @@ def test_assemble_raises_on_duplicate_synth_phase_id() -> None:
             {"id": "phase_010", "action": "new"},
         ]
     }
-    with pytest.raises(
-        ReauthorAssemblyError, match="duplicate phase id 'phase_010'"
-    ):
+    with pytest.raises(ReauthorAssemblyError, match="duplicate phase id 'phase_010'"):
         assemble_reauthored_plan(
             prior_plan=prior,
             synth_phases=[dup_a, dup_b],
@@ -411,9 +407,7 @@ def test_assemble_preamble_carries_through() -> None:
 
 
 def test_assemble_project_title_carries_through() -> None:
-    prior = _plan(
-        _phase("phase_001", "A"), project_title="my-special-project"
-    )
+    prior = _plan(_phase("phase_001", "A"), project_title="my-special-project")
     prior = migrate(prior)
     lineage = {"phases": [{"id": "phase_001", "action": "preserve"}]}
     assembled = assemble_reauthored_plan(

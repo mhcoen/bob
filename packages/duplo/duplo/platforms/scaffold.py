@@ -83,9 +83,7 @@ def write_scaffold(
     package_name = project_name_to_package_name(project_name)
 
     def _expand(s: str) -> str:
-        return s.replace("{project_name}", project_name).replace(
-            "{package_name}", package_name
-        )
+        return s.replace("{project_name}", project_name).replace("{package_name}", package_name)
 
     for profile in profiles:
         for sf in profile.scaffold_files:

@@ -201,9 +201,7 @@ class TestPlanProjectHeader:
         # synthesizer body and runs the pipeline end-to-end, then
         # checks the structural project-header invariant against the
         # new on-disk shape.
-        llm_output = (
-            "## Phase phase_001: Scaffold\n\n- [ ] Scaffold project\n"
-        )
+        llm_output = "## Phase phase_001: Scaffold\n\n- [ ] Scaffold project\n"
         with (
             patch("duplo.main.select_features", side_effect=lambda f, **kw: f),
             patch("duplo.pipeline.generate_phase_plan", return_value=llm_output),
@@ -217,20 +215,12 @@ class TestPlanProjectHeader:
         # renderer prefixes the file with a magic-version comment;
         # the project H1 lives on the first non-blank, non-comment
         # line.
-        first_h1 = next(
-            (ln for ln in lines if ln.startswith("# ")), None
-        )
-        assert first_h1 == "# numi", (
-            f"PLAN.md project header must be '# numi', got: {first_h1!r}"
-        )
+        first_h1 = next((ln for ln in lines if ln.startswith("# ")), None)
+        assert first_h1 == "# numi", f"PLAN.md project header must be '# numi', got: {first_h1!r}"
         # The project header appears before any phase header.
         h1_idx = lines.index(first_h1)
         phase_idx = next(
-            (
-                i
-                for i, ln in enumerate(lines)
-                if ln.startswith("## Phase ")
-            ),
+            (i for i, ln in enumerate(lines) if ln.startswith("## Phase ")),
             None,
         )
         assert phase_idx is not None and phase_idx > h1_idx, (
@@ -266,8 +256,7 @@ class TestSubsequentRunResume:
         # with a phase-id comment beneath, which
         # :func:`pipeline._observed_phase_count` matches.
         (tmp_path / "PLAN.md").write_text(
-            "## Phase phase_001: Core\n"
-            "<!-- phase_id: phase_001 -->\n",
+            "## Phase phase_001: Core\n<!-- phase_id: phase_001 -->\n",
             encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
@@ -284,9 +273,7 @@ class TestSubsequentRunResume:
         # exercises the "PLAN.md complete for current cycle but tasks
         # unchecked" branch, not the new partial-write resume branch.
         (tmp_path / "PLAN.md").write_text(
-            "## Phase phase_001: Core\n"
-            "<!-- phase_id: phase_001 -->\n\n"
-            "- [ ] Task\n",
+            "## Phase phase_001: Core\n<!-- phase_id: phase_001 -->\n\n- [ ] Task\n",
             encoding="utf-8",
         )
         monkeypatch.chdir(tmp_path)
@@ -5655,10 +5642,7 @@ class TestVerificationTasksAppendToLastPhase:
         # project-header preamble write (no phase body, no extras);
         # the remaining saves are the per-phase generation calls in
         # roadmap order.
-        all_extras = [
-            call.kwargs.get("extra_tasks", [])
-            for call in mock_save.call_args_list
-        ]
+        all_extras = [call.kwargs.get("extra_tasks", []) for call in mock_save.call_args_list]
         # Phase saves are those whose first positional arg is a
         # markdown string carrying the ``_gen_plan`` side_effect's
         # body marker. The first save in a multi-phase run is the
@@ -5667,8 +5651,7 @@ class TestVerificationTasksAppendToLastPhase:
         phase_extras = [
             call.kwargs.get("extra_tasks", [])
             for call in mock_save.call_args_list
-            if isinstance(call.args[0], str)
-            and "task for phase" in call.args[0]
+            if isinstance(call.args[0], str) and "task for phase" in call.args[0]
         ]
         assert len(phase_extras) == 3, (
             f"expected one save per phase, got {len(phase_extras)} "
@@ -5676,17 +5659,11 @@ class TestVerificationTasksAppendToLastPhase:
         )
         # Verification belongs only on the LAST phase.
         assert "Verify: click submit" not in self._texts(phase_extras[0])
-        assert "Verify: type `1+1`, expect result `2`" not in self._texts(
-            phase_extras[0]
-        )
+        assert "Verify: type `1+1`, expect result `2`" not in self._texts(phase_extras[0])
         assert "Verify: click submit" not in self._texts(phase_extras[1])
-        assert "Verify: type `1+1`, expect result `2`" not in self._texts(
-            phase_extras[1]
-        )
+        assert "Verify: type `1+1`, expect result `2`" not in self._texts(phase_extras[1])
         assert "Verify: click submit" in self._texts(phase_extras[2])
-        assert "Verify: type `1+1`, expect result `2`" in self._texts(
-            phase_extras[2]
-        )
+        assert "Verify: type `1+1`, expect result `2`" in self._texts(phase_extras[2])
 
     def test_verify_lines_only_after_last_phase_heading_in_plan_md(self, tmp_path, monkeypatch):
         """Read PLAN.md after a 3-phase run; every ``- [ ] Verify:`` line
@@ -5723,17 +5700,10 @@ class TestVerificationTasksAppendToLastPhase:
 
         def _gen_plan(*_args, phase=None, phase_number=None, **_kw):
             num = (
-                phase_number
-                if phase_number is not None
-                else (phase.get("phase") if phase else 0)
+                phase_number if phase_number is not None else (phase.get("phase") if phase else 0)
             )
-            required_id = _council.compute_required_phase_id(
-                tmp_path / "PLAN.md"
-            )
-            return (
-                f"## Phase {required_id}: Dummy\n\n"
-                f"- [ ] dummy task for phase {num}\n"
-            )
+            required_id = _council.compute_required_phase_id(tmp_path / "PLAN.md")
+            return f"## Phase {required_id}: Dummy\n\n- [ ] dummy task for phase {num}\n"
 
         with (
             patch("duplo.pipeline.read_spec", return_value=spec),
@@ -5768,9 +5738,7 @@ class TestVerificationTasksAppendToLastPhase:
             for i, ln in enumerate(lines):
                 if ln.startswith(target):
                     return i
-            raise AssertionError(
-                f"Phase {n} heading not found in PLAN.md:\n{plan_text}"
-            )
+            raise AssertionError(f"Phase {n} heading not found in PLAN.md:\n{plan_text}")
 
         h0 = _heading_index(1)
         h1 = _heading_index(2)
@@ -5782,9 +5750,7 @@ class TestVerificationTasksAppendToLastPhase:
         # match must accept either bare ``- [ ] Verify:`` or the
         # id-prefixed ``- [ ] T-NNNNNN: Verify:`` form.
         verify_indices = [
-            i
-            for i, ln in enumerate(lines)
-            if "Verify:" in ln and ln.lstrip().startswith("- [ ]")
+            i for i, ln in enumerate(lines) if "Verify:" in ln and ln.lstrip().startswith("- [ ]")
         ]
         assert verify_indices, (
             "No '- [ ] Verify:' lines found in PLAN.md; "
@@ -9547,9 +9513,7 @@ class TestSubsequentRunProductNameSync:
         # Per T-000190 the pipeline calls
         # ``save_plan(content, extra_tasks=...)`` so the mock must
         # accept arbitrary keyword arguments.
-        monkeypatch.setattr(
-            m, "save_plan", lambda c, **_kw: tmp_path / "PLAN.md"
-        )
+        monkeypatch.setattr(m, "save_plan", lambda c, **_kw: tmp_path / "PLAN.md")
         monkeypatch.setattr(m, "notify_phase_complete", lambda *a, **kw: None)
 
         main()
@@ -9802,4 +9766,3 @@ class TestLocalMdWiring:
         assert "Local overrides" not in addendum
 
         assert mock_claude.call_args.kwargs["local_md_content"] == ""
-

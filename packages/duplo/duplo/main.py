@@ -304,18 +304,12 @@ def main() -> None:
             dest="ledger_dir",
             default=None,
             metavar="PATH",
-            help=(
-                "Path to the Plan Ledger directory "
-                "(default: ./.duplo/ledger)."
-            ),
+            help=("Path to the Plan Ledger directory (default: ./.duplo/ledger)."),
         )
         reauthor_parser.add_argument(
             "crossing_event_id",
             metavar="EVENT_ID",
-            help=(
-                "event_id of the threshold_crossed event that "
-                "triggered this re-author."
-            ),
+            help=("event_id of the threshold_crossed event that triggered this re-author."),
         )
         reauthor_parser.add_argument(
             "--out",
@@ -329,10 +323,7 @@ def main() -> None:
             dest="council_config",
             default=None,
             metavar="PATH",
-            help=(
-                "Optional .orchestra/config.json forwarded to the "
-                "council invocation."
-            ),
+            help=("Optional .orchestra/config.json forwarded to the council invocation."),
         )
         reauthor_args = reauthor_parser.parse_args(sys.argv[2:])
 
@@ -342,13 +333,9 @@ def main() -> None:
             if reauthor_args.ledger_dir
             else default_ledger_dir(Path.cwd())
         )
-        out_path = (
-            Path(reauthor_args.out) if reauthor_args.out else None
-        )
+        out_path = Path(reauthor_args.out) if reauthor_args.out else None
         council_config_path = (
-            Path(reauthor_args.council_config)
-            if reauthor_args.council_config
-            else None
+            Path(reauthor_args.council_config) if reauthor_args.council_config else None
         )
 
         try:
@@ -374,8 +361,7 @@ def main() -> None:
         fix_parser = argparse.ArgumentParser(
             prog=f"duplo {subcmd}",
             description=(
-                "Diagnose uncertain causes — observed wrongness without "
-                "a captured crash."
+                "Diagnose uncertain causes — observed wrongness without a captured crash."
                 if subcmd == "investigate"
                 else "Append fix tasks to PLAN.md for known bugs or failures."
             ),
@@ -480,6 +466,7 @@ def main() -> None:
         if args.council_config is not None and args.use_council is None:
             args.use_council = True
         from duplo import council as _council
+
         if args.use_council is not None:
             _council.set_enabled(args.use_council)
         if args.council_config is not None:

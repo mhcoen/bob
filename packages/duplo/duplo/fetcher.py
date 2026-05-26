@@ -40,40 +40,111 @@ _VIDEO_EXTS = {".mp4", ".mov", ".webm"}
 # Suffix match is case-insensitive on the URL path (before query/
 # fragment); a URL with no recognized suffix is treated as HTML
 # because most CMS routes have no file extension.
-_NON_HTML_PATH_EXTS: frozenset[str] = frozenset({
-    # Installers / OS packages
-    ".dmg", ".exe", ".msi", ".pkg", ".deb", ".rpm", ".apk",
-    ".appimage", ".snap", ".flatpak",
-    # Archives
-    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".tbz2", ".xz",
-    ".txz", ".7z", ".rar", ".iso", ".cab",
-    # Documents handled elsewhere or not by this fetcher
-    ".pdf", ".epub", ".mobi", ".doc", ".docx", ".xls", ".xlsx",
-    ".ppt", ".pptx", ".odt", ".ods", ".odp", ".rtf",
-    # Audio
-    ".mp3", ".wav", ".flac", ".ogg", ".m4a", ".aac",
-    # Images / video / icons. These have their own pipeline via
-    # extract_media_urls / download_media and must not enter the
-    # HTML crawl queue.
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico",
-    ".bmp", ".tiff",
-    ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v",
-    # Source / data blobs not worth crawling for product narrative
-    ".json", ".xml", ".yaml", ".yml", ".toml", ".csv", ".tsv",
-    ".js", ".css", ".map", ".woff", ".woff2", ".ttf", ".otf",
-    ".eot",
-})
+_NON_HTML_PATH_EXTS: frozenset[str] = frozenset(
+    {
+        # Installers / OS packages
+        ".dmg",
+        ".exe",
+        ".msi",
+        ".pkg",
+        ".deb",
+        ".rpm",
+        ".apk",
+        ".appimage",
+        ".snap",
+        ".flatpak",
+        # Archives
+        ".zip",
+        ".tar",
+        ".gz",
+        ".tgz",
+        ".bz2",
+        ".tbz2",
+        ".xz",
+        ".txz",
+        ".7z",
+        ".rar",
+        ".iso",
+        ".cab",
+        # Documents handled elsewhere or not by this fetcher
+        ".pdf",
+        ".epub",
+        ".mobi",
+        ".doc",
+        ".docx",
+        ".xls",
+        ".xlsx",
+        ".ppt",
+        ".pptx",
+        ".odt",
+        ".ods",
+        ".odp",
+        ".rtf",
+        # Audio
+        ".mp3",
+        ".wav",
+        ".flac",
+        ".ogg",
+        ".m4a",
+        ".aac",
+        # Images / video / icons. These have their own pipeline via
+        # extract_media_urls / download_media and must not enter the
+        # HTML crawl queue.
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".svg",
+        ".ico",
+        ".bmp",
+        ".tiff",
+        ".mp4",
+        ".mov",
+        ".webm",
+        ".mkv",
+        ".avi",
+        ".m4v",
+        # Source / data blobs not worth crawling for product narrative
+        ".json",
+        ".xml",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".csv",
+        ".tsv",
+        ".js",
+        ".css",
+        ".map",
+        ".woff",
+        ".woff2",
+        ".ttf",
+        ".otf",
+        ".eot",
+    }
+)
 
 # Path suffixes the fetcher explicitly accepts as HTML. The empty
 # string covers extensionless CMS routes (e.g. /docs/intro). Any
 # suffix not in _NON_HTML_PATH_EXTS that also isn't in this set
 # is accepted by default to avoid being overly conservative; the
 # denylist is the authoritative gate.
-_HTML_PATH_EXTS: frozenset[str] = frozenset({
-    "", ".html", ".htm", ".xhtml", ".shtml",
-    ".php", ".aspx", ".asp", ".jsp", ".cfm",
-    ".md", ".markdown",
-})
+_HTML_PATH_EXTS: frozenset[str] = frozenset(
+    {
+        "",
+        ".html",
+        ".htm",
+        ".xhtml",
+        ".shtml",
+        ".php",
+        ".aspx",
+        ".asp",
+        ".jsp",
+        ".cfm",
+        ".md",
+        ".markdown",
+    }
+)
 
 
 def _path_suffix(url: str) -> str:
@@ -97,6 +168,8 @@ def _is_fetchable_html_url(url: str) -> bool:
     if suffix in _NON_HTML_PATH_EXTS:
         return False
     return True
+
+
 _MIN_IMAGE_BYTES = 10_000  # skip tiny icons/favicons
 _TIMEOUT = 30.0
 _USER_AGENT = (

@@ -214,7 +214,7 @@ _PROFILE = PlatformProfile(
             "the project name (hyphens replaced with underscores). Plan "
             "tasks that import the package MUST use the underscore form, "
             "e.g. `from fswatch_run_smoke.cli import main`, never "
-            "`importlib.import_module(\"fswatch-run-smoke.cli\")`."
+            '`importlib.import_module("fswatch-run-smoke.cli")`.'
         ),
         (
             "Always use pyproject.toml for project metadata, not "

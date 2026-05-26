@@ -219,9 +219,7 @@ def _write_orchestra_council_config(cwd: Path) -> None:
     if config_path.exists():
         return
     orchestra_dir.mkdir(exist_ok=True)
-    config_path.write_text(
-        json.dumps(_ORCHESTRA_COUNCIL_CONFIG, indent=2, sort_keys=True) + "\n"
-    )
+    config_path.write_text(json.dumps(_ORCHESTRA_COUNCIL_CONFIG, indent=2, sort_keys=True) + "\n")
     print("Created .orchestra/config.json (council_four defaults).")
 
 
@@ -359,9 +357,7 @@ def _run_url(args: argparse.Namespace, url: str) -> None:
         sys.exit(1)
 
     canonical = canonicalize_url(url)
-    scrape_depth: Literal["deep", "shallow", "none"] = (
-        "deep" if deep else "shallow"
-    )
+    scrape_depth: Literal["deep", "shallow", "none"] = "deep" if deep else "shallow"
     depth_label = "deep scrape" if deep else "shallow scrape"
 
     try:
@@ -634,9 +630,7 @@ def _run_combined(args: argparse.Namespace, url: str, path_arg: str) -> None:
         source_label = path_arg
 
     canonical = canonicalize_url(url)
-    scrape_depth: Literal["deep", "shallow", "none"] = (
-        "deep" if deep else "shallow"
-    )
+    scrape_depth: Literal["deep", "shallow", "none"] = "deep" if deep else "shallow"
     depth_label = "deep scrape" if deep else "shallow scrape"
 
     try:

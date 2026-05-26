@@ -18,9 +18,7 @@ from duplo.claude_cli import ClaudeCliError
 from duplo.hasher import HashDiff
 
 
-def _typed_phase(
-    phase_id: str, ordinal: int, title: str, *, done: bool = False
-) -> Phase:
+def _typed_phase(phase_id: str, ordinal: int, title: str, *, done: bool = False) -> Phase:
     """Build a typed :class:`Phase` matching the canonical renderer output.
 
     After T-000186 the planfile renderer is the source of truth for
@@ -118,12 +116,7 @@ class TestObservedPhaseCount:
     def test_counts_stage_headers_too(self) -> None:
         # mcloop also recognizes the ``Stage`` keyword as a phase
         # heading; the resume counter mirrors that.
-        text = (
-            "## Stage 1: Foundations\n"
-            "<!-- phase_id: phase_001 -->\n"
-            "\n"
-            "- [ ] T-000001: task\n"
-        )
+        text = "## Stage 1: Foundations\n<!-- phase_id: phase_001 -->\n\n- [ ] T-000001: task\n"
         assert pipeline._observed_phase_count(text) == 1
 
 
@@ -143,29 +136,17 @@ def _resume_patches(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(pipeline, "compute_hashes", lambda *a, **kw: {})
     monkeypatch.setattr(pipeline, "diff_hashes", lambda *a, **kw: HashDiff())
     monkeypatch.setattr(pipeline, "_plan_is_complete", lambda *a, **kw: False)
-    monkeypatch.setattr(
-        pipeline, "_plan_has_unchecked_tasks", lambda *a, **kw: False
-    )
-    monkeypatch.setattr(
-        pipeline, "_detect_and_append_gaps", lambda *a, **kw: (0, 0, 0, 0)
-    )
-    monkeypatch.setattr(
-        pipeline, "_rescrape_product_url", lambda *a, **kw: (0, 0, "")
-    )
+    monkeypatch.setattr(pipeline, "_plan_has_unchecked_tasks", lambda *a, **kw: False)
+    monkeypatch.setattr(pipeline, "_detect_and_append_gaps", lambda *a, **kw: (0, 0, 0, 0))
+    monkeypatch.setattr(pipeline, "_rescrape_product_url", lambda *a, **kw: (0, 0, ""))
     monkeypatch.setattr(pipeline, "_load_preferences", lambda *a, **kw: [])
-    monkeypatch.setattr(
-        pipeline, "_resolve_platform_profiles", lambda *a, **kw: []
-    )
+    monkeypatch.setattr(pipeline, "_resolve_platform_profiles", lambda *a, **kw: [])
     monkeypatch.setattr(pipeline, "_announce_profiles", _noop)
     monkeypatch.setattr(pipeline, "write_scaffold", lambda *a, **kw: [])
-    monkeypatch.setattr(
-        pipeline, "format_scaffold_notice", lambda *a, **kw: ""
-    )
+    monkeypatch.setattr(pipeline, "format_scaffold_notice", lambda *a, **kw: "")
     monkeypatch.setattr(pipeline, "write_claude_md", _noop)
     monkeypatch.setattr(pipeline, "format_local_overrides", lambda *a, **kw: "")
-    monkeypatch.setattr(
-        pipeline, "format_planner_system_addendum", lambda *a, **kw: ""
-    )
+    monkeypatch.setattr(pipeline, "format_planner_system_addendum", lambda *a, **kw: "")
 
 
 def _write_state(tmp_path: Path, *, roadmap: list[dict], plan_text: str) -> None:
@@ -194,27 +175,21 @@ class TestResumePath:
     """Integration tests for the State 2 resume branch."""
 
     _ROADMAP_4 = [
-        {"phase": i, "title": f"P{i}", "goal": "g", "features": [], "test": "ok"}
-        for i in range(4)
+        {"phase": i, "title": f"P{i}", "goal": "g", "features": [], "test": "ok"} for i in range(4)
     ]
     _ROADMAP_3 = [
-        {"phase": i, "title": f"P{i}", "goal": "g", "features": [], "test": "ok"}
-        for i in range(3)
+        {"phase": i, "title": f"P{i}", "goal": "g", "features": [], "test": "ok"} for i in range(3)
     ]
 
     @staticmethod
     def _partial_plan(num_phases: int) -> str:
         phases = tuple(
-            _typed_phase(
-                f"phase_{i + 1:03d}", i + 1, f"P{i}", done=True
-            )
+            _typed_phase(f"phase_{i + 1:03d}", i + 1, f"P{i}", done=True)
             for i in range(num_phases)
         )
         return _typed_plan("MyApp", phases)
 
-    def test_exits_75_on_partial(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_exits_75_on_partial(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         _write_state(
             tmp_path,
             roadmap=self._ROADMAP_4,
@@ -269,9 +244,7 @@ class TestResumePath:
 
             phase_num = kwargs["phase_number"]
             phase_title = kwargs["phase"].get("title", "")
-            required_phase_id = council.compute_required_phase_id(
-                _Path("PLAN.md")
-            )
+            required_phase_id = council.compute_required_phase_id(_Path("PLAN.md"))
             phase = _typed_phase(required_phase_id, 1, phase_title)
             # phase_num is unused for the typed contract; the runtime
             # owns ordinal numbering. The reference is retained so

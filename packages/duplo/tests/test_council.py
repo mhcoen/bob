@@ -44,9 +44,7 @@ def _sample_features() -> list[Feature]:
 
 
 def _sample_prefs() -> BuildPreferences:
-    return BuildPreferences(
-        platform="web", language="Python", constraints=[], preferences=[]
-    )
+    return BuildPreferences(platform="web", language="Python", constraints=[], preferences=[])
 
 
 class _StubArtifactView:
@@ -60,9 +58,7 @@ class _StubResult:
         *,
         run_id: str = "test-run-1",
         terminal: str = "done",
-        plan_text: str = (
-            "## Phase phase_001: Core Auth\n\n- [ ] Set up.\n"
-        ),
+        plan_text: str = ("## Phase phase_001: Core Auth\n\n- [ ] Set up.\n"),
         verdict: dict[str, Any] | None = None,
         proposals: dict[str, str] | None = None,
         brief: str = "COUNCIL BRIEF: how to author phase 1.",
@@ -171,10 +167,7 @@ class TestAuthorPhasePlan:
         from bob_tools.planfile import Plan
 
         monkeypatch.chdir(tmp_path)
-        body = (
-            "## Phase phase_001: synthesized plan body\n\n"
-            "- [ ] do the thing\n"
-        )
+        body = "## Phase phase_001: synthesized plan body\n\n- [ ] do the thing\n"
         result = _StubResult(plan_text=body)
         with _patch_run_workflow(result):
             plan = council.author_phase_plan(
@@ -186,9 +179,7 @@ class TestAuthorPhasePlan:
         assert isinstance(plan, Plan)
         assert [phase.phase_id for phase in plan.phases] == ["phase_001"]
         assert plan.phases[0].title == "synthesized plan body"
-        assert [task.text for task in plan.phases[0].tasks] == [
-            "do the thing"
-        ]
+        assert [task.text for task in plan.phases[0].tasks] == ["do the thing"]
 
     def test_passes_canonical_question_for_phase_num(self, tmp_path):
         captured: dict[str, Any] = {}
@@ -200,9 +191,7 @@ class TestAuthorPhasePlan:
                 project_dir=tmp_path,
             )
         inputs = captured["args"][1]
-        assert inputs["question"] == (
-            "Author the Phase 3 plan from the reference material above."
-        )
+        assert inputs["question"] == ("Author the Phase 3 plan from the reference material above.")
 
     def test_state_includes_prompt_and_system(self, tmp_path):
         captured: dict[str, Any] = {}
@@ -220,9 +209,7 @@ class TestAuthorPhasePlan:
     def test_ledger_and_design_inputs_are_empty_strings(self, tmp_path):
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         inputs = captured["args"][1]
         assert inputs["ledger_slice"] == ""
         assert inputs["design_context"] == ""
@@ -233,26 +220,20 @@ class TestAuthorPhasePlan:
         # mode routes through council_four_reauthor instead.
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         assert captured["args"][0] == "council_four_canonical"
 
     def test_data_root_under_audits_council(self, tmp_path):
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         data_root = captured["kwargs"]["data_root"]
         assert tmp_path / ".duplo" / "audits" / "council" / "_runs" == data_root
 
     def test_audit_dir_written_after_success(self, tmp_path):
         result = _StubResult(run_id="r-42")
         with _patch_run_workflow(result):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         audit_dir = tmp_path / ".duplo" / "audits" / "council" / "r-42"
         assert audit_dir.is_dir()
         for name in (
@@ -270,12 +251,8 @@ class TestAuthorPhasePlan:
     def test_audit_run_meta_records_terminal_and_question(self, tmp_path):
         result = _StubResult(run_id="r-7")
         with _patch_run_workflow(result):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=2, project_dir=tmp_path
-            )
-        meta_path = (
-            tmp_path / ".duplo" / "audits" / "council" / "r-7" / "run_meta.json"
-        )
+            council.author_phase_plan(prompt="p", system="s", phase_num=2, project_dir=tmp_path)
+        meta_path = tmp_path / ".duplo" / "audits" / "council" / "r-7" / "run_meta.json"
         meta = json.loads(meta_path.read_text())
         assert meta["run_id"] == "r-7"
         assert meta["terminal"] == "done"
@@ -283,9 +260,7 @@ class TestAuthorPhasePlan:
 
     def test_prints_council_notice_to_stderr(self, tmp_path, capsys):
         with _patch_run_workflow(_StubResult()):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         captured = capsys.readouterr()
         assert "council mode" in captured.err
         assert "6 LLM calls" in captured.err
@@ -393,8 +368,7 @@ class TestComputeRequiredPhaseId:
         # coexist with new entries under the same identifier.
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text(
-            "## Phase phase_001: A\n\n- [ ] a\n\n"
-            "## Phase phase_003: C\n\n- [ ] c\n"
+            "## Phase phase_001: A\n\n- [ ] a\n\n## Phase phase_003: C\n\n- [ ] c\n"
         )
         assert council.compute_required_phase_id(plan_path) == "phase_004"
 
@@ -423,35 +397,25 @@ class TestRequiredPhaseIdInjection:
     / design_context. Pinned so a future refactor cannot drop the
     field silently."""
 
-    def test_inputs_dict_carries_required_phase_id(
-        self, tmp_path: Path
-    ) -> None:
+    def test_inputs_dict_carries_required_phase_id(self, tmp_path: Path) -> None:
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         inputs = captured["args"][1]
         assert "required_phase_id" in inputs
         assert inputs["required_phase_id"] == "phase_001"
 
-    def test_required_phase_id_increments_with_existing_plan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_required_phase_id_increments_with_existing_plan(self, tmp_path: Path) -> None:
         plan_path = tmp_path / "PLAN.md"
         plan_path.write_text("## Phase phase_001: First\n\n- [ ] x\n")
 
         # _StubResult default returns phase_001 — but the validator
         # now requires phase_002 (since PLAN.md already has phase_001).
         # Provide a stub plan that satisfies the new constraint.
-        body = (
-            "## Phase phase_002: Second\n\n- [ ] do the thing\n"
-        )
+        body = "## Phase phase_002: Second\n\n- [ ] do the thing\n"
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(plan_text=body), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=2, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=2, project_dir=tmp_path)
         inputs = captured["args"][1]
         assert inputs["required_phase_id"] == "phase_002"
 
@@ -478,9 +442,7 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_002: Tests\n\n"
             "- [ ] Add unit tests\n"
         )
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == [
             "phase_001",
             "phase_002",
@@ -488,9 +450,7 @@ class TestCanonicalPlanFormatValidator:
 
     def test_passes_with_required_phase_id_match(self) -> None:
         body = "## Phase phase_003: Third\n\n- [ ] task\n"
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_003"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_003")
         assert [phase.phase_id for phase in plan.phases] == ["phase_003"]
 
     def test_check5_rejects_required_phase_id_mismatch(self) -> None:
@@ -501,9 +461,7 @@ class TestCanonicalPlanFormatValidator:
             PlanValidationError,
             match=r"required_phase_id 'phase_002' not present",
         ):
-            council.typed_plan_from_synthesizer_text(
-                body, required_phase_id="phase_002"
-            )
+            council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_002")
 
     def test_check5_passes_when_required_id_present_among_multiple(
         self,
@@ -511,13 +469,8 @@ class TestCanonicalPlanFormatValidator:
         # Plan body has multiple phases; required_phase_id need only be
         # one of them (the synthesizer's authoring of THIS invocation's
         # new phase is the load-bearing one).
-        body = (
-            "## Phase phase_002: Second\n\n- [ ] a\n\n"
-            "## Phase phase_003: Third\n\n- [ ] b\n"
-        )
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_002"
-        )
+        body = "## Phase phase_002: Second\n\n- [ ] a\n\n## Phase phase_003: Third\n\n- [ ] b\n"
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_002")
         assert "phase_002" in [phase.phase_id for phase in plan.phases]
 
     def test_non_strict_phase_id_is_accepted_now(self) -> None:
@@ -530,9 +483,7 @@ class TestCanonicalPlanFormatValidator:
         following the ``## Phase`` keyword.
         """
         body = "## Phase phase1: First\n\n- [ ] task\n"
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase1"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase1")
         assert [phase.phase_id for phase in plan.phases] == ["phase1"]
 
     def test_short_phase_id_suffix_is_accepted_now(self) -> None:
@@ -542,25 +493,18 @@ class TestCanonicalPlanFormatValidator:
         ``compute_required_phase_id`` emits), not a validation rule.
         """
         body = "## Phase phase_1: First\n\n- [ ] task\n"
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_1"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_1")
         assert [phase.phase_id for phase in plan.phases] == ["phase_1"]
 
     def test_check4_rejects_duplicate_phase_id(self) -> None:
         from bob_tools.planfile import PlanValidationError
 
-        body = (
-            "## Phase phase_001: First\n\n- [ ] a\n\n"
-            "## Phase phase_001: Duplicate\n\n- [ ] b\n"
-        )
+        body = "## Phase phase_001: First\n\n- [ ] a\n\n## Phase phase_001: Duplicate\n\n- [ ] b\n"
         with pytest.raises(
             PlanValidationError,
             match="duplicate phase_id",
         ):
-            council.typed_plan_from_synthesizer_text(
-                body, required_phase_id="phase_001"
-            )
+            council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
 
     def test_check4_names_all_duplicates(self) -> None:
         from bob_tools.planfile import PlanValidationError
@@ -574,9 +518,7 @@ class TestCanonicalPlanFormatValidator:
         # The typed validator surfaces every duplicate id pair, in
         # whichever order ``validate_plan`` walks the phases.
         with pytest.raises(PlanValidationError) as excinfo:
-            council.typed_plan_from_synthesizer_text(
-                body, required_phase_id="phase_001"
-            )
+            council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         message = str(excinfo.value)
         assert "phase_001" in message
         assert "phase_002" in message
@@ -598,9 +540,7 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_003: C\n\n- [ ] c\n\n"
             "## Phase phase_002: B\n\n- [ ] b\n"
         )
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == [
             "phase_001",
             "phase_003",
@@ -613,9 +553,7 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_002: B\n\n- [ ] b\n\n"
             "## Phase phase_005: C\n\n- [ ] c\n"
         )
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == [
             "phase_001",
             "phase_002",
@@ -624,9 +562,7 @@ class TestCanonicalPlanFormatValidator:
 
     def test_passes_on_single_phase_single_task(self) -> None:
         body = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert len(plan.phases) == 1
         assert len(plan.phases[0].tasks) == 1
 
@@ -646,9 +582,7 @@ class TestCanonicalPlanFormatValidator:
             "## Phase phase_002: Tests\n\n"
             "More prose without a checklist.\n"
         )
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert all(len(phase.tasks) == 0 for phase in plan.phases)
 
     def test_no_phase_headers_rejected_via_required_id_check(self) -> None:
@@ -664,9 +598,7 @@ class TestCanonicalPlanFormatValidator:
             PlanValidationError,
             match="required_phase_id 'phase_001' not present",
         ):
-            council.typed_plan_from_synthesizer_text(
-                body, required_phase_id="phase_001"
-            )
+            council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
 
     def test_pre_slice_c_header_form_gets_auto_id(self) -> None:
         """Pre-Slice C plans used ``# Phase 1: ...``: a single-hash
@@ -678,14 +610,10 @@ class TestCanonicalPlanFormatValidator:
         matches the caller-supplied ``required_phase_id``.
         """
         body = "# Phase 1: legacy form\n\n- [ ] task\n"
-        plan = council.typed_plan_from_synthesizer_text(
-            body, required_phase_id="phase_001"
-        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == ["phase_001"]
 
-    def test_atomicity_validation_failure_does_not_write_plan(
-        self, tmp_path: Path
-    ) -> None:
+    def test_atomicity_validation_failure_does_not_write_plan(self, tmp_path: Path) -> None:
         """When the synthesizer's body cannot be turned into a valid
         typed Plan (here, the body has no phase headers so the
         ``required_phase_id`` check fires), ``author_phase_plan``
@@ -724,9 +652,7 @@ class TestConfigResolution:
     def test_falls_back_when_no_project_config(self, tmp_path):
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         cfg = captured["args"][2]
         for role in (
             "framer",
@@ -738,15 +664,9 @@ class TestConfigResolution:
         ):
             assert role in cfg.roles, role
         assert "council_four_canonical" in cfg.workflows
-        assert (
-            cfg.workflows["council_four_canonical"].pattern
-            == "council_four_canonical"
-        )
+        assert cfg.workflows["council_four_canonical"].pattern == "council_four_canonical"
         assert "council_four_reauthor" in cfg.workflows
-        assert (
-            cfg.workflows["council_four_reauthor"].pattern
-            == "council_four_reauthor"
-        )
+        assert cfg.workflows["council_four_reauthor"].pattern == "council_four_reauthor"
 
     def test_fallback_proposers_pairwise_distinct(self, tmp_path):
         """Cross-model diversity at the proposer layer is what the
@@ -757,9 +677,7 @@ class TestConfigResolution:
         """
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         cfg = captured["args"][2]
         proposers = (
             "proposer_code",
@@ -771,14 +689,10 @@ class TestConfigResolution:
         for role in proposers:
             b = cfg.roles[role]
             key = (b.adapter, b.model)
-            assert key not in seen, (
-                f"proposer {role} collides with {seen[key]} on {key}"
-            )
+            assert key not in seen, f"proposer {role} collides with {seen[key]} on {key}"
             seen[key] = role
 
-    def test_uses_project_config_when_six_council_roles_present(
-        self, tmp_path
-    ):
+    def test_uses_project_config_when_six_council_roles_present(self, tmp_path):
         orchestra_dir = tmp_path / ".orchestra"
         orchestra_dir.mkdir()
         config = {
@@ -817,9 +731,7 @@ class TestConfigResolution:
         (orchestra_dir / "config.json").write_text(json.dumps(config))
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
-            council.author_phase_plan(
-                prompt="p", system="s", phase_num=1, project_dir=tmp_path
-            )
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
         cfg = captured["args"][2]
         # Project config wins -> the extra_role survives.
         assert "extra_role" in cfg.roles
@@ -835,12 +747,8 @@ class TestPlannerCouncilBranch:
         monkeypatch.delenv("DUPLO_USE_COUNCIL", raising=False)
         monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
         with (
-            patch(
-                "duplo.planner.query", return_value="# Phase 1: legacy"
-            ) as mock_query,
-            patch(
-                "duplo.planner.council.author_phase_plan"
-            ) as mock_council,
+            patch("duplo.planner.query", return_value="# Phase 1: legacy") as mock_query,
+            patch("duplo.planner.council.author_phase_plan") as mock_council,
         ):
             generate_phase_plan(
                 "https://example.com",
@@ -862,9 +770,7 @@ class TestPlannerCouncilBranch:
             patch("duplo.planner.query") as mock_query,
             patch(
                 "duplo.planner.council.author_phase_plan",
-                return_value=(
-                    "# Council Phase 1\n\n- [ ] task-from-council\n"
-                ),
+                return_value=("# Council Phase 1\n\n- [ ] task-from-council\n"),
             ) as mock_council,
         ):
             result = generate_phase_plan(
@@ -925,18 +831,10 @@ class TestInitWritesOrchestraConfig:
             "proposer_deepseek",
             "synthesizer",
         }
-        assert (
-            cfg["workflows"]["council_four_canonical"]["pattern"]
-            == "council_four_canonical"
-        )
-        assert (
-            cfg["workflows"]["council_four_reauthor"]["pattern"]
-            == "council_four_reauthor"
-        )
+        assert cfg["workflows"]["council_four_canonical"]["pattern"] == "council_four_canonical"
+        assert cfg["workflows"]["council_four_reauthor"]["pattern"] == "council_four_reauthor"
 
-    def test_init_does_not_overwrite_existing_orchestra_config(
-        self, tmp_path, monkeypatch
-    ):
+    def test_init_does_not_overwrite_existing_orchestra_config(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         orchestra_dir = tmp_path / ".orchestra"
         orchestra_dir.mkdir()

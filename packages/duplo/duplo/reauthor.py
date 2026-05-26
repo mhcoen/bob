@@ -299,12 +299,8 @@ def reauthor_plan(
     crossing = _find_crossing(events, crossing_event_id)
 
     since_event_id = _previous_plan_reauthored_event_id(events)
-    ledger_slice_md = _build_ledger_slice(
-        events, state, crossing, since_event_id, old_phases
-    )
-    design_context_md = _build_design_context(
-        events, state, plan_text_old, old_phases
-    )
+    ledger_slice_md = _build_ledger_slice(events, state, crossing, since_event_id, old_phases)
+    design_context_md = _build_design_context(events, state, plan_text_old, old_phases)
 
     # Build the question string. Slice C invokes the same
     # council_four workflow Duplo's canonical mode uses; the question
@@ -333,9 +329,7 @@ def reauthor_plan(
         scope_clause = ""
     question = (
         "Re-author the plan in light of the following triggering "
-        f"threshold crossing: {crossing_summary}. "
-        + scope_clause
-        + "Preserve phase ids "
+        f"threshold crossing: {crossing_summary}. " + scope_clause + "Preserve phase ids "
         "from the prior plan where the phase remains valid; introduce "
         f"new ids for derived phases STARTING AT {next_available_phase_id} "
         "(the runtime computes this; the prior plan's ids are listed "
@@ -398,9 +392,7 @@ def reauthor_plan(
                 previous_attempt_error=previous_attempt_error,
             )
 
-            lineage_obj = (
-                verdict.get("lineage") if isinstance(verdict, dict) else None
-            )
+            lineage_obj = verdict.get("lineage") if isinstance(verdict, dict) else None
             if not isinstance(lineage_obj, dict):
                 raise LineageValidationError(
                     "synthesizer verdict is missing the required "
@@ -428,13 +420,9 @@ def reauthor_plan(
             # collision with current prior ids, below-floor ids,
             # and historical 'from' references — all the cases the
             # retry feedback can name precisely for the model.
-            _validate_lineage_structural(
-                prior_ids, next_new_phase_id_floor, lineage_obj
-            )
+            _validate_lineage_structural(prior_ids, next_new_phase_id_floor, lineage_obj)
 
-            normalized_lineage = normalize_lineage_for_preservation(
-                prior_ids, lineage_obj
-            )
+            normalized_lineage = normalize_lineage_for_preservation(prior_ids, lineage_obj)
 
             # Lineage check on the normalized sidecar. Runs BEFORE
             # assembly because assembly composes around
@@ -457,8 +445,7 @@ def reauthor_plan(
             lineage_seen_ids = [
                 entry["id"]
                 for entry in normalized_lineage.get("phases", [])
-                if isinstance(entry, dict)
-                and isinstance(entry.get("id"), str)
+                if isinstance(entry, dict) and isinstance(entry.get("id"), str)
             ]
             validate_lineage(
                 prior_ids,
@@ -492,23 +479,15 @@ def reauthor_plan(
             # Runs after assembly so new_plan_ids includes any new
             # phases the synthesizer introduced this pass.
             attributions = (
-                verdict.get("commit_attributions")
-                if isinstance(verdict, dict)
-                else None
+                verdict.get("commit_attributions") if isinstance(verdict, dict) else None
             )
             if isinstance(attributions, list) and attributions:
-                triggering_commits = _triggering_unattributable_commits(
-                    crossing, events
-                )
+                triggering_commits = _triggering_unattributable_commits(crossing, events)
                 _validate_commit_attributions(
                     attributions,
                     triggering_commits,
                     prior_ids,
-                    [
-                        p.phase_id
-                        for p in assembled_plan.phases
-                        if p.phase_id is not None
-                    ],
+                    [p.phase_id for p in assembled_plan.phases if p.phase_id is not None],
                 )
             break
         except LineageValidationError as exc:
@@ -545,9 +524,7 @@ def reauthor_plan(
     # mode is "canonical"), which renders and writes exactly the
     # validated bytes.
     try:
-        assembled_plan_text = assert_mcloop_canonical(
-            assembled_plan, source_path=plan_path
-        )
+        assembled_plan_text = assert_mcloop_canonical(assembled_plan, source_path=plan_path)
     except PlanValidationError as exc:
         raise ReauthorError(
             "assembled reauthor plan failed the canonical contract: "
@@ -616,15 +593,10 @@ def _find_crossing(events: Iterable[Any], crossing_event_id: str) -> Any:
                     f"{ev.type.value!r}, expected threshold_crossed"
                 )
             return ev
-    raise ReauthorError(
-        f"threshold_crossed event {crossing_event_id!r} not found in "
-        "ledger"
-    )
+    raise ReauthorError(f"threshold_crossed event {crossing_event_id!r} not found in ledger")
 
 
-def _triggering_unattributable_commits(
-    crossing: Any, events: Iterable[Any]
-) -> list[str]:
+def _triggering_unattributable_commits(crossing: Any, events: Iterable[Any]) -> list[str]:
     """Return the list of full commit SHAs from the unattributable
     commit_landed events that triggered ``crossing``.
 
@@ -756,15 +728,9 @@ def _build_ledger_slice(
         lines.append(f"- created_event_id: {phase.created_event_id}")
         lines.append(f"- status: {phase.status}")
         if phase.lineage.predecessors:
-            lines.append(
-                "- lineage.predecessors: "
-                + ", ".join(phase.lineage.predecessors)
-            )
+            lines.append("- lineage.predecessors: " + ", ".join(phase.lineage.predecessors))
         if phase.lineage.successors:
-            lines.append(
-                "- lineage.successors: "
-                + ", ".join(phase.lineage.successors)
-            )
+            lines.append("- lineage.successors: " + ", ".join(phase.lineage.successors))
         if phase.lineage.supersession is not None:
             lines.append(
                 "- lineage.supersession: superseded_by="
@@ -772,28 +738,18 @@ def _build_ledger_slice(
                 f"reason={phase.lineage.supersession.reason}"
             )
         if phase.modification_history:
-            lines.append(
-                "- modification_history: "
-                + ", ".join(phase.modification_history)
-            )
+            lines.append("- modification_history: " + ", ".join(phase.modification_history))
         if phase.evidence_refs:
-            lines.append(
-                "- evidence_refs: " + ", ".join(phase.evidence_refs)
-            )
+            lines.append("- evidence_refs: " + ", ".join(phase.evidence_refs))
         if phase.design_reasoning_refs:
-            lines.append(
-                "- design_reasoning_refs: "
-                + ", ".join(phase.design_reasoning_refs)
-            )
+            lines.append("- design_reasoning_refs: " + ", ".join(phase.design_reasoning_refs))
         lines.append("")
 
     if state.invariants:
         lines.append("## Invariants")
         lines.append("")
         for inv in state.invariants:
-            scope = (
-                f"phase={inv.phase_id}" if inv.phase_id else "scope=plan"
-            )
+            scope = f"phase={inv.phase_id}" if inv.phase_id else "scope=plan"
             lines.append(
                 f"- {inv.invariant_id}: {inv.statement} "
                 f"({scope}, declared_event_id={inv.declared_event_id})"
@@ -804,11 +760,7 @@ def _build_ledger_slice(
         lines.append("## Assumptions")
         lines.append("")
         for ar in state.assumptions:
-            falsified = (
-                f", falsified_event_id={ar.falsified_event_id}"
-                if ar.falsified
-                else ""
-            )
+            falsified = f", falsified_event_id={ar.falsified_event_id}" if ar.falsified else ""
             scope = f"phase={ar.phase_id}" if ar.phase_id else "scope=plan"
             lines.append(
                 f"- {ar.assumption_id} ({scope}, "
@@ -823,9 +775,7 @@ def _build_ledger_slice(
         lines.append("## Human decisions")
         lines.append("")
         for decision in state.human_decisions:
-            applies = (
-                ", ".join(decision.applies_to_phase_ids) or "(plan-wide)"
-            )
+            applies = ", ".join(decision.applies_to_phase_ids) or "(plan-wide)"
             lines.append(
                 f"- {decision.decision_id} "
                 f"(decided_event_id={decision.decided_event_id}, "
@@ -900,16 +850,12 @@ def _build_design_context(
     from bob_tools.ledger import EventType
 
     reasoning_events_by_id = {
-        ev.event_id: ev
-        for ev in events
-        if ev.type is EventType.DESIGN_REASONING_RECORDED
+        ev.event_id: ev for ev in events if ev.type is EventType.DESIGN_REASONING_RECORDED
     }
 
     lines: list[str] = ["# Design context", ""]
 
-    structured_present = any(
-        phase.design_reasoning_refs for phase in state.phases
-    )
+    structured_present = any(phase.design_reasoning_refs for phase in state.phases)
 
     if structured_present:
         lines.append("## Per-phase design reasoning (from ledger)")
@@ -930,23 +876,18 @@ def _build_design_context(
                 payload = ev.payload
                 rationale = payload.get("rationale", "")
                 lines.append(
-                    f"- decision_id: {payload.get('decision_id', '?')} "
-                    f"(event_id={ev.event_id})"
+                    f"- decision_id: {payload.get('decision_id', '?')} (event_id={ev.event_id})"
                 )
                 if rationale:
                     lines.append(f"  - rationale: {rationale}")
                 constraints = payload.get("constraints") or []
                 if constraints:
-                    lines.append(
-                        "  - constraints: " + "; ".join(constraints)
-                    )
+                    lines.append("  - constraints: " + "; ".join(constraints))
                 rejected = payload.get("approaches_rejected") or []
                 for entry in rejected:
                     approach = entry.get("approach", "?")
                     reason = entry.get("reason", "")
-                    lines.append(
-                        f"  - rejected: {approach} ({reason})"
-                    )
+                    lines.append(f"  - rejected: {approach} ({reason})")
             lines.append("")
 
     fallback = _extract_plan_text_design_context(plan_text)
@@ -960,8 +901,9 @@ def _build_design_context(
             lines.append("")
 
     if not structured_present and not fallback:
-        lines.append("(no structured design reasoning or recognizable "
-                     "rationale sections in PLAN.md)")
+        lines.append(
+            "(no structured design reasoning or recognizable rationale sections in PLAN.md)"
+        )
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
@@ -1007,10 +949,7 @@ def _extract_plan_text_design_context(
                 j = i + 1
                 while j < len(lines):
                     next_match = re.match(r"^(#{1,6})\s+", lines[j])
-                    if (
-                        next_match is not None
-                        and len(next_match.group(1)) <= level
-                    ):
+                    if next_match is not None and len(next_match.group(1)) <= level:
                         break
                     body_lines.append(lines[j])
                     j += 1
@@ -1058,9 +997,7 @@ def _next_available_phase_id_from_priors(
     return f"phase_{highest + 1:03d}"
 
 
-_NEW_ID_ACTIONS_STRUCTURAL = frozenset(
-    ["supersede", "split", "merge", "new"]
-)
+_NEW_ID_ACTIONS_STRUCTURAL = frozenset(["supersede", "split", "merge", "new"])
 _FROM_BEARING_ACTIONS_STRUCTURAL = frozenset(["supersede", "split", "merge"])
 _STRICT_PHASE_ID_RE = re.compile(r"^phase_(\d{3,})$")
 
@@ -1159,9 +1096,7 @@ def _validate_lineage_structural(
                     f"{next_new_phase_id_floor!r}; use the floor or higher"
                 )
 
-        if action in _FROM_BEARING_ACTIONS_STRUCTURAL and isinstance(
-            from_field, list
-        ):
+        if action in _FROM_BEARING_ACTIONS_STRUCTURAL and isinstance(from_field, list):
             for fid in from_field:
                 if not isinstance(fid, str) or not fid:
                     continue
@@ -1176,8 +1111,7 @@ def _validate_lineage_structural(
 
     if errors:
         raise LineageValidationError(
-            "structural lineage violations:\n  - "
-            + "\n  - ".join(errors)
+            "structural lineage violations:\n  - " + "\n  - ".join(errors)
         )
 
 
@@ -1218,32 +1152,21 @@ def _validate_commit_attributions(
         if triggering_unattributable_commits
         else "(none)"
     )
-    valid_phase_repr = (
-        ", ".join(sorted(valid_phase_ids))
-        if valid_phase_ids
-        else "(none)"
-    )
+    valid_phase_repr = ", ".join(sorted(valid_phase_ids)) if valid_phase_ids else "(none)"
 
     errors: list[str] = []
     for index, entry in enumerate(attributions):
         if not isinstance(entry, dict):
-            errors.append(
-                f"commit_attributions[{index}] is not an object"
-            )
+            errors.append(f"commit_attributions[{index}] is not an object")
             continue
         sha = entry.get("commit_sha")
         pid = entry.get("phase_id")
         rationale = entry.get("rationale")
 
         if not isinstance(sha, str) or not sha:
-            errors.append(
-                f"commit_attributions[{index}].commit_sha is missing or "
-                "empty"
-            )
+            errors.append(f"commit_attributions[{index}].commit_sha is missing or empty")
         elif not any(
-            isinstance(c, str)
-            and c
-            and (c.startswith(sha) or sha.startswith(c))
+            isinstance(c, str) and c and (c.startswith(sha) or sha.startswith(c))
             for c in triggering_unattributable_commits
         ):
             errors.append(
@@ -1254,10 +1177,7 @@ def _validate_commit_attributions(
             )
 
         if not isinstance(pid, str) or not pid:
-            errors.append(
-                f"commit_attributions[{index}].phase_id is missing or "
-                "empty"
-            )
+            errors.append(f"commit_attributions[{index}].phase_id is missing or empty")
         elif pid not in valid_phase_ids:
             errors.append(
                 f"commit_attributions[{index}].phase_id={pid!r} is not "
@@ -1266,10 +1186,7 @@ def _validate_commit_attributions(
                 f"ids: [{valid_phase_repr}]"
             )
 
-        if (
-            not isinstance(rationale, str)
-            or not rationale.strip()
-        ):
+        if not isinstance(rationale, str) or not rationale.strip():
             errors.append(
                 f"commit_attributions[{index}].rationale must be a "
                 "non-empty string explaining the attribution; got "
@@ -1278,8 +1195,7 @@ def _validate_commit_attributions(
 
     if errors:
         raise CommitAttributionError(
-            "commit_attribution violations:\n  - "
-            + "\n  - ".join(errors)
+            "commit_attribution violations:\n  - " + "\n  - ".join(errors)
         )
 
 
@@ -1360,8 +1276,7 @@ def _format_schema_feedback_for_retry(
         "or attribution checks could run. Classified kinds:",
         *kind_lines,
         "",
-        "Raw validator errors (verbatim from the schema_validation log "
-        "record):",
+        "Raw validator errors (verbatim from the schema_validation log record):",
         *raw_lines,
         "",
         "Regenerate the plan and verdict. Keep correct content; fix "
@@ -1417,8 +1332,7 @@ def _format_lineage_feedback_for_retry(
 
     prior_repr = ", ".join(prior_plan_ids) if prior_plan_ids else "(none)"
     lines: list[str] = [
-        "RETRY ATTEMPT "
-        f"{attempt + 1} of {max_attempts}",
+        f"RETRY ATTEMPT {attempt + 1} of {max_attempts}",
         "",
         "PREVIOUS ATTEMPT REJECTED. Reasons:",
     ]
@@ -1453,9 +1367,7 @@ def _format_lineage_feedback_for_retry(
     return "\n".join(lines)
 
 
-def _build_state_blob(
-    plan_text: str, old_phases: list[ParsedHeader], state: Any
-) -> str:
+def _build_state_blob(plan_text: str, old_phases: list[ParsedHeader], state: Any) -> str:
     """The ``state`` external input passed into council_four.
 
     Slice C concatenates the plan text with a short summary of the
@@ -1478,8 +1390,7 @@ def _build_state_blob(
             summary_lines.append(f"  - {phase.id}: {phase.title}")
     else:
         summary_lines.append(
-            "  - (none recognized; this is a fresh-id labeling pass "
-            "on a pre-Slice C plan)"
+            "  - (none recognized; this is a fresh-id labeling pass on a pre-Slice C plan)"
         )
 
     next_id = _next_available_phase_id_from_priors(old_phases)
@@ -1495,13 +1406,7 @@ def _build_state_blob(
         "list above; the validator rejects collisions."
     )
 
-    return (
-        "Existing PLAN.md:\n"
-        + plan_text.strip()
-        + "\n\n"
-        + "\n".join(summary_lines)
-        + "\n"
-    )
+    return "Existing PLAN.md:\n" + plan_text.strip() + "\n\n" + "\n".join(summary_lines) + "\n"
 
 
 def _invoke_council_for_reauthor(
@@ -1596,9 +1501,7 @@ def _invoke_council_for_reauthor(
 
     plan_view = result.artifacts.get("plan")
     if plan_view is None or not isinstance(plan_view.value, str):
-        raise ReauthorError(
-            "council_four_reauthor accepted but produced no 'plan' artifact"
-        )
+        raise ReauthorError("council_four_reauthor accepted but produced no 'plan' artifact")
     plan_text: str = plan_view.value.strip()
     if not plan_text:
         raise ReauthorError("council_four_reauthor produced an empty plan")
@@ -1714,10 +1617,7 @@ def _emit_lifecycle_events(
             payload=make_phase_superseded_payload(
                 phase_id=old_id,
                 superseded_by_phase_id=new_id,
-                reason=(
-                    "re-author triggered by threshold crossing "
-                    f"{crossing_event_id}"
-                ),
+                reason=(f"re-author triggered by threshold crossing {crossing_event_id}"),
             ),
             run_id=run_id,
             git=git,
@@ -1730,10 +1630,7 @@ def _emit_lifecycle_events(
             payload=make_phase_split_payload(
                 phase_id=old_id,
                 into_phase_ids=new_ids,
-                reason=(
-                    "re-author triggered by threshold crossing "
-                    f"{crossing_event_id}"
-                ),
+                reason=(f"re-author triggered by threshold crossing {crossing_event_id}"),
             ),
             run_id=run_id,
             git=git,
@@ -1746,10 +1643,7 @@ def _emit_lifecycle_events(
             payload=make_phase_merged_payload(
                 merged_phase_ids=merged_ids,
                 into_phase_id=into_id,
-                reason=(
-                    "re-author triggered by threshold crossing "
-                    f"{crossing_event_id}"
-                ),
+                reason=(f"re-author triggered by threshold crossing {crossing_event_id}"),
             ),
             run_id=run_id,
             git=git,
