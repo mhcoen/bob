@@ -10,6 +10,7 @@ __pycache__/
 pytest-of-*/
 build/
 *.egg-info/
+design/figures/*.svg.png
 logs/
 local/
 .scratch/
