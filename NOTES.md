@@ -181,6 +181,42 @@
   case the resolver would need to read from the registry instance
   rather than the module constant.
 
+- 2026-05-26 [2.10] [T-000015]: Six of the eleven mechanical test
+  scenarios from T-000015 are pinned by tests; six skip with an
+  explicit reason because the workflow wiring they target is not yet
+  in place. Specifically: (a) `design_loop.orc` still references
+  `iterate_judge_verdict.json` and the `iterate_*.md` templates with
+  the old accept/iterate/stuck vocabulary — task T-000006 added the
+  workflow file but did not switch the schema and template paths,
+  even though T-000008 through T-000011 created the new design_loop_*
+  artifacts. (b) the orchestra v0 schema layer rejects the
+  `oneOf`-rooted shape of the new `design_loop_judge.json`; the
+  schema would need either oneOf support or restructure to a single
+  object with a `decision` enum before it can be bound. (c) neither
+  `judge` nor `review` declares `on error retry max 1 then stop`, so
+  malformed-output retry-once-then-fail cannot be exercised. The
+  skipped tests are deliberately spelled out in
+  `tests/test_workflows_design_loop.py` so the next wiring step has a
+  checklist of cases to re-enable. The mechanical contract for the
+  currently-wired behaviors (round threading, cap enforcement,
+  same-model rejection, adapter failure with transcript preserved,
+  incremental transcript JSONL, schema-violation error routing) is
+  pinned in twelve passing tests in that same file.
+
+- 2026-05-26 [2.10] [T-000015]: The api-level `_derive_termination`
+  classifier expects judge outcome=="done" for CONVERGED; under the
+  current iterate-vocab design_loop, a judge `accept` outcome
+  produces target=done with outcome=accept, which the classifier
+  routes to CAPPED (target==done && outcome != "done"). That is a
+  latent classification mismatch between the api and the workflow
+  vocabulary: it does not affect the run itself (terminal=done is
+  correct) but it does mean `IterativeDesignResult.termination` will
+  read CAPPED for a successful convergence until the workflow is
+  re-wired to emit `done` as the success outcome. The mechanical
+  test for round threading asserts terminal=done and outcome=accept
+  rather than checking `_derive_termination` so it remains green
+  through the transition.
+
 ## Hypotheses
 
 ## Eliminated
