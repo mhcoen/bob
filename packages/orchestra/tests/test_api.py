@@ -14,12 +14,19 @@ workflow shape ``run_workflow`` uses at runtime.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from orchestra.api import (
+    ErrorRecord,
+    WorkflowApiError,
+    _derive_termination,
     _pre_load_registry,
     _resolve_role_binding,
     _validate_role_bindings,
+    run_role,
 )
 from orchestra.config import (
     ConfigError,
@@ -260,3 +267,223 @@ def test_validate_dangling_override_errors() -> None:
     msg = str(excinfo.value)
     assert "editor" in msg
     assert "no corresponding top-level binding" in msg
+
+
+# --------------------------------------------------------------------
+# _derive_termination: CONVERGED / CAPPED / ERROR classification from
+# the run log (see T-000007 termination-resolution spec).
+# --------------------------------------------------------------------
+
+
+def _write_synthetic_log(
+    path: Path,
+    records: list[dict[str, object]],
+) -> None:
+    """Write JSONL records in LogReader-compatible format with
+    contiguous sequence numbers starting at 0."""
+    with open(path, "w", encoding="utf-8") as fh:
+        for seq, body in enumerate(records):
+            row = {
+                "ts": "2026-05-26T00:00:00.000Z",
+                "run_id": "test",
+                "seq": seq,
+                "state_id": None,
+                "attempt": None,
+            }
+            row.update(body)
+            fh.write(json.dumps(row, sort_keys=True))
+            fh.write("\n")
+
+
+def test_derive_termination_converged(tmp_path: Path) -> None:
+    log_path = tmp_path / "log.jsonl"
+    _write_synthetic_log(
+        log_path,
+        [
+            {"event": "run_start"},
+            {
+                "event": "transition",
+                "state_id": "judge",
+                "attempt": 1,
+                "outcome": "done",
+                "target": "done",
+            },
+            {"event": "run_end", "terminal": "done"},
+        ],
+    )
+    termination, error = _derive_termination(log_path)
+    assert termination == "CONVERGED"
+    assert error is None
+
+
+def test_derive_termination_capped(tmp_path: Path) -> None:
+    """A cap-hit transition routes the judge's ``iterate`` outcome to
+    ``done`` without it being the judge's own done action; that is
+    CAPPED rather than CONVERGED."""
+    log_path = tmp_path / "log.jsonl"
+    _write_synthetic_log(
+        log_path,
+        [
+            {"event": "run_start"},
+            {
+                "event": "transition",
+                "state_id": "judge",
+                "attempt": 4,
+                "outcome": "iterate",
+                "target": "done",
+            },
+            {"event": "run_end", "terminal": "done"},
+        ],
+    )
+    termination, error = _derive_termination(log_path)
+    assert termination == "CAPPED"
+    assert error is None
+
+
+def test_derive_termination_error_on_stop(tmp_path: Path) -> None:
+    log_path = tmp_path / "log.jsonl"
+    _write_synthetic_log(
+        log_path,
+        [
+            {"event": "run_start"},
+            {
+                "event": "state_exit",
+                "state_id": "review",
+                "attempt": 1,
+                "status": "error",
+                "outcome": "error",
+                "error": {
+                    "kind": "actor_failure",
+                    "message": "boom",
+                    "detail": {"phase": "invoke"},
+                },
+            },
+            {
+                "event": "transition",
+                "state_id": "review",
+                "attempt": 1,
+                "outcome": "error",
+                "target": "stop",
+            },
+            {"event": "run_end", "terminal": "stop"},
+        ],
+    )
+    termination, error = _derive_termination(log_path)
+    assert termination == "ERROR"
+    assert error is not None
+    assert error.kind == "actor_failure"
+    assert error.message == "boom"
+    assert error.state == "review"
+    assert error.detail == {"phase": "invoke"}
+
+
+def test_derive_termination_error_when_no_transition(tmp_path: Path) -> None:
+    """A log with no transition records (e.g. crash during setup)
+    classifies as ERROR with a runner_failure marker so callers see
+    why they got no progress."""
+    log_path = tmp_path / "log.jsonl"
+    _write_synthetic_log(
+        log_path,
+        [
+            {"event": "run_start"},
+            {"event": "run_end", "terminal": "stop"},
+        ],
+    )
+    termination, error = _derive_termination(log_path)
+    assert termination == "ERROR"
+    assert error is not None
+    assert error.kind == "runner_failure"
+
+
+def test_derive_termination_error_on_timeout_transition(tmp_path: Path) -> None:
+    """``timeout`` is one of the failure outcomes that the workflow
+    routes to stop, producing an ERROR result."""
+    log_path = tmp_path / "log.jsonl"
+    _write_synthetic_log(
+        log_path,
+        [
+            {"event": "run_start"},
+            {
+                "event": "state_exit",
+                "state_id": "judge",
+                "attempt": 1,
+                "status": "timeout",
+                "outcome": "timeout",
+                "error": {"kind": "timeout", "message": "ran too long"},
+            },
+            {
+                "event": "transition",
+                "state_id": "judge",
+                "attempt": 1,
+                "outcome": "timeout",
+                "target": "stop",
+            },
+            {"event": "run_end", "terminal": "stop"},
+        ],
+    )
+    termination, error = _derive_termination(log_path)
+    assert termination == "ERROR"
+    assert error is not None
+    assert error.kind == "timeout"
+    assert error.message == "ran too long"
+
+
+# --------------------------------------------------------------------
+# run_role pre-flight: unknown role raises WorkflowApiError with a
+# diagnostic that lists what *was* configured.
+# --------------------------------------------------------------------
+
+
+@pytest.fixture
+def _isolated_home(
+    tmp_path_factory: pytest.TempPathFactory,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+def test_run_role_unknown_role_raises(
+    _isolated_home: Path,
+    tmp_path: Path,
+) -> None:
+    """``run_role`` resolves the role against the merged config; an
+    unknown role surfaces as ``WorkflowApiError`` so the duplo wrapper
+    in T-000017 can wrap it into a typed exception, instead of being
+    forwarded to ``run_workflow`` where the error would mislead."""
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "role_bindings": {
+                    "design": {
+                        "pattern": "design_loop",
+                        "judge": {"adapter": "claude_code_text"},
+                        "reviewer": {"adapter": "codex_text"},
+                    },
+                },
+            }
+        )
+    )
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("not_a_role", project_dir=tmp_path)
+    msg = str(excinfo.value)
+    assert "not_a_role" in msg
+    assert "design" in msg  # lists what was configured
+
+
+def test_run_role_error_record_dataclass_shape() -> None:
+    """The api's ErrorRecord is the public surface; confirm the
+    fields run_role consumers (and duplo's T-000017 wrapper) will
+    pattern-match against stay stable."""
+    err = ErrorRecord(
+        kind="actor_failure",
+        message="boom",
+        state="judge",
+        detail={"phase": "invoke"},
+    )
+    assert err.kind == "actor_failure"
+    assert err.state == "judge"
+    assert err.detail == {"phase": "invoke"}

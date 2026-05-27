@@ -186,6 +186,71 @@ def _role_optional_fields(role_name: str, raw: dict[str, Any]) -> dict[str, Any]
 
 
 @dataclass(frozen=True)
+class CompoundRoleBinding:
+    """A user-facing role-to-workflow binding consumed by
+    ``orchestra.run_role(role_name, ...)``.
+
+    Names the workflow pattern to run and, nested under it, the
+    per-workflow-role bindings (e.g. ``judge``, ``reviewer``) the
+    workflow's states will resolve at runtime. Distinct from the
+    leaf ``RoleBinding`` form in ``OrchestraConfig.roles``: a leaf
+    binding maps one workflow role to (adapter, model, ...) for
+    ``run_workflow``, whereas a CompoundRoleBinding wraps a workflow
+    plus a table of leaf bindings under one logical role name.
+
+    ``max_rounds`` is a Phase-2 design-loop knob; it is parsed here
+    so the schema accepts it without forcing every consumer to
+    re-validate. ``extra`` captures any future top-level keys so
+    forward-compatible config additions do not require schema
+    surgery (the consumer reads them by name).
+    """
+
+    pattern: str
+    bindings: dict[str, RoleBinding] = field(default_factory=dict)
+    max_rounds: int | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, role_name: str, raw: dict[str, Any]) -> CompoundRoleBinding:
+        if not isinstance(raw, dict):
+            raise ConfigError(
+                f"role_binding {role_name!r}: expected an object, got {type(raw).__name__}"
+            )
+        pattern = raw.get("pattern")
+        if not isinstance(pattern, str) or not pattern:
+            raise ConfigError(
+                f"role_binding {role_name!r}: missing or empty 'pattern' key"
+            )
+        reserved = {"pattern", "max_rounds"}
+        max_rounds_raw = raw.get("max_rounds")
+        if max_rounds_raw is not None and not isinstance(max_rounds_raw, int):
+            raise ConfigError(
+                f"role_binding {role_name!r}: 'max_rounds' must be an integer or omitted"
+            )
+        if isinstance(max_rounds_raw, bool):
+            # bool is a subclass of int; reject explicitly to avoid
+            # silently accepting True/False as a round count.
+            raise ConfigError(
+                f"role_binding {role_name!r}: 'max_rounds' must be an integer, got bool"
+            )
+        bindings: dict[str, RoleBinding] = {}
+        extra: dict[str, Any] = {}
+        for key, value in raw.items():
+            if key in reserved:
+                continue
+            if isinstance(value, dict) and "adapter" in value:
+                bindings[key] = RoleBinding.from_dict(f"{role_name}.{key}", value)
+            else:
+                extra[key] = value
+        return cls(
+            pattern=pattern,
+            bindings=bindings,
+            max_rounds=max_rounds_raw,
+            extra=extra,
+        )
+
+
+@dataclass(frozen=True)
 class VerbBinding:
     """Maps a verb name to a workflow name.
 
@@ -270,6 +335,11 @@ class OrchestraConfig:
     roles: dict[str, RoleBinding] = field(default_factory=dict)
     workflows: dict[str, WorkflowConfig] = field(default_factory=dict)
     verbs: dict[str, VerbBinding] = field(default_factory=dict)
+    role_bindings: dict[str, CompoundRoleBinding] = field(default_factory=dict)
+    """Compound role bindings consumed by ``orchestra.run_role(name)``.
+    Distinct from ``roles``: each entry wraps a workflow pattern plus a
+    nested table of leaf RoleBindings the workflow's states resolve at
+    runtime. See ``CompoundRoleBinding`` for the schema."""
     criteria: tuple[CriterionDecl, ...] = ()
 
     def workflow(self, name: str) -> WorkflowConfig:
@@ -304,6 +374,13 @@ class OrchestraConfig:
         if not isinstance(verbs_raw, dict):
             raise ConfigError("'verbs' must be an object")
         verbs = {name: VerbBinding.from_dict(name, body) for name, body in verbs_raw.items()}
+        role_bindings_raw = raw.get("role_bindings") or {}
+        if not isinstance(role_bindings_raw, dict):
+            raise ConfigError("'role_bindings' must be an object")
+        role_bindings = {
+            name: CompoundRoleBinding.from_dict(name, body)
+            for name, body in role_bindings_raw.items()
+        }
         criteria_raw = raw.get("criteria") or []
         if not isinstance(criteria_raw, list):
             raise ConfigError("'criteria' must be an array")
@@ -317,6 +394,7 @@ class OrchestraConfig:
             roles=roles,
             workflows=workflows,
             verbs=verbs,
+            role_bindings=role_bindings,
             criteria=tuple(criteria_list),
         )
 
@@ -392,6 +470,7 @@ def _merge_configs(
         roles={**base.roles, **overlay.roles},
         workflows={**base.workflows, **overlay.workflows},
         verbs={**base.verbs, **overlay.verbs},
+        role_bindings={**base.role_bindings, **overlay.role_bindings},
     )
 
 

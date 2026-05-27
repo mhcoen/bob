@@ -17,11 +17,13 @@ global-plus-project merge.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
 
 from orchestra.config import (
+    CompoundRoleBinding,
     ConfigError,
     OrchestraConfig,
     RoleBinding,
@@ -569,3 +571,129 @@ def test_load_global_config_returns_global_when_present(
     )
     cfg = load_global_config()
     assert cfg.verbs["ask"].workflow == "ask_single"
+
+
+# --------------------------------------------------------------------
+# CompoundRoleBinding parsing (consumed by orchestra.run_role)
+# --------------------------------------------------------------------
+
+
+def test_compound_role_binding_parses_nested_form() -> None:
+    cfg = OrchestraConfig.from_dict(
+        {
+            "role_bindings": {
+                "design": {
+                    "pattern": "design_loop",
+                    "judge": {"adapter": "claude_code_text", "model": "opus"},
+                    "reviewer": {"adapter": "codex_text", "model": "gpt-5"},
+                    "max_rounds": 4,
+                },
+            },
+        }
+    )
+    assert "design" in cfg.role_bindings
+    rb = cfg.role_bindings["design"]
+    assert rb.pattern == "design_loop"
+    assert rb.max_rounds == 4
+    assert set(rb.bindings) == {"judge", "reviewer"}
+    assert rb.bindings["judge"].adapter == "claude_code_text"
+    assert rb.bindings["judge"].model == "opus"
+    assert rb.bindings["reviewer"].adapter == "codex_text"
+    assert rb.bindings["reviewer"].model == "gpt-5"
+
+
+def test_compound_role_binding_missing_pattern_errors() -> None:
+    raw = {
+        "role_bindings": {
+            "design": {
+                "judge": {"adapter": "claude_code_text"},
+            },
+        },
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(raw)
+    msg = str(excinfo.value)
+    assert "design" in msg
+    assert "pattern" in msg
+
+
+def test_compound_role_binding_rejects_bool_max_rounds() -> None:
+    raw = {
+        "role_bindings": {
+            "design": {
+                "pattern": "design_loop",
+                "max_rounds": True,
+            },
+        },
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(raw)
+    assert "max_rounds" in str(excinfo.value)
+
+
+def test_compound_role_binding_accepts_no_sub_bindings() -> None:
+    """A compound binding with only a pattern (no sub-role bindings)
+    is legal: the workflow may declare no roles, or callers may
+    intentionally let workflow defaults supply the bindings."""
+    cfg = OrchestraConfig.from_dict(
+        {
+            "role_bindings": {
+                "design": {"pattern": "design_loop"},
+            },
+        }
+    )
+    rb = cfg.role_bindings["design"]
+    assert rb.pattern == "design_loop"
+    assert rb.bindings == {}
+    assert rb.max_rounds is None
+
+
+def test_compound_role_binding_merges_across_layers(tmp_path: Path) -> None:
+    """Project-local role_bindings replace entries of the same key in
+    the global config; entries the project does not redefine are
+    inherited."""
+    home_dir = Path(os.environ["HOME"])
+    _write_global_config(
+        home_dir,
+        {
+            "role_bindings": {
+                "design": {
+                    "pattern": "design_loop",
+                    "judge": {"adapter": "claude_code_text", "model": "opus"},
+                },
+                "other": {"pattern": "single"},
+            },
+        },
+    )
+    _write_config(
+        tmp_path,
+        {
+            "role_bindings": {
+                "design": {
+                    "pattern": "design_loop",
+                    "judge": {"adapter": "codex_text", "model": "gpt-5"},
+                    "max_rounds": 2,
+                },
+            },
+        },
+    )
+    cfg = load_config(tmp_path)
+    assert cfg.role_bindings["design"].bindings["judge"].adapter == "codex_text"
+    assert cfg.role_bindings["design"].max_rounds == 2
+    assert cfg.role_bindings["other"].pattern == "single"
+
+
+def test_compound_role_binding_from_dict_used_directly() -> None:
+    rb = CompoundRoleBinding.from_dict(
+        "design",
+        {
+            "pattern": "design_loop",
+            "judge": {"adapter": "claude_code_text"},
+            "reviewer": {"adapter": "codex_text"},
+            "max_rounds": 5,
+            "future_knob": "ignored-but-preserved",
+        },
+    )
+    assert rb.pattern == "design_loop"
+    assert rb.max_rounds == 5
+    assert rb.extra == {"future_knob": "ignored-but-preserved"}

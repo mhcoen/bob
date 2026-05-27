@@ -56,10 +56,11 @@ that rely on the role's default prompt.
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from orchestra.adapters._subprocess import get_current_activity
 from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
@@ -67,8 +68,16 @@ from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
 from orchestra.adapters.codex_agent import CodexAgentAdapter
 from orchestra.adapters.codex_text import CodexTextAdapter
-from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
+from orchestra.config import (
+    CompoundRoleBinding,
+    ConfigError,
+    OrchestraConfig,
+    RoleBinding,
+    WorkflowConfig,
+    load_config,
+)
 from orchestra.errors import OrchestraError
+from orchestra.log import LogReader
 from orchestra.executor.criteria import mode_for_workflow
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.executor.parsers import _identity_text_parse_fn
@@ -186,6 +195,103 @@ class WorkflowRunResult:
     artifacts: dict[str, ArtifactView]
     log_path: Path
     summary: dict[str, Any] = field(default_factory=dict)
+
+
+# --------------------------------------------------------------------
+# run_role result types
+#
+# These are the public surface for ``orchestra.run_role`` consumers
+# (duplo's iterative-design entry point and the design_loop Phase-2
+# tests). The names ``Turn``, ``ErrorRecord``, and
+# ``IterativeDesignResult`` are intentionally specific to the
+# iterative-design pattern even though run_role itself is generic; the
+# only consumer pattern in scope is design_loop, and the dataclass
+# field set is shaped around that workflow's lifecycle (one judge or
+# reviewer completion per Turn; CONVERGED/CAPPED/ERROR terminations).
+# Note: ``ErrorRecord`` here is the api-level surface and is distinct
+# from ``orchestra.spine.ErrorRecord`` (the internal executor-level
+# record). The two have overlapping fields by design but the api copy
+# is shaped to be JSON-serializable and stable across releases.
+# --------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Turn:
+    """One role completion in a ``run_role`` transcript.
+
+    Captures the salient envelope fields for a single state's
+    successful or failed completion: which role ran, in which state,
+    on which attempt, the duration, the status/outcome, and the
+    artifact payload the model produced. The transcript is a
+    chronologically-ordered list of these.
+    """
+
+    role: str
+    state: str
+    attempt: int
+    started_at: str
+    ended_at: str
+    duration_ms: int
+    status: str
+    outcome: str
+    output: str
+    artifacts_written: list[dict[str, str]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ErrorRecord:
+    """A run_role-level error record.
+
+    Populated on ``IterativeDesignResult.error`` iff
+    ``termination == "ERROR"``. The ``state`` field names the state
+    that produced the failing transition (or None when the failure
+    happened before any state ran). ``detail`` is a free-form payload
+    for the consumer's postmortem.
+    """
+
+    kind: str
+    message: str
+    state: str | None = None
+    detail: dict[str, Any] | None = None
+
+
+@dataclass
+class IterativeDesignResult:
+    """Outcome of an ``orchestra.run_role`` invocation against a
+    design_loop-shaped workflow.
+
+    Field semantics:
+
+    - ``termination``: derived from the workflow's final transition.
+      ``CONVERGED`` when the judge emitted ``done``; ``CAPPED`` when
+      the round-cap guard routed the judge's ``iterate`` outcome to
+      ``done``; ``ERROR`` for ``stuck``/``error``/``timeout`` or any
+      pre-run failure.
+    - ``rounds_completed``: count of successful judge-role state
+      completions observed in the log. One judge call = one round.
+    - ``final_artifact``: the most recent judge-produced artifact text
+      (the workflow's primary text-typed write). Empty string when
+      ``termination == "ERROR"`` and no judge artifact has been
+      committed yet.
+    - ``transcript``: in-memory chronological list of ``Turn`` records,
+      one per state completion (judge or reviewer).
+    - ``transcript_path``: absolute path to the JSONL on-disk
+      transcript. Each line is a JSON-serialized Turn. Written
+      incrementally by the api after run completion (so a crashed run
+      still leaves the partial transcript on disk via the underlying
+      log, which is also available at ``<transcript_path>.log``).
+    - ``run_id``: the orchestra-assigned run id (also the directory
+      name under ``~/.orchestra/runs/``).
+    - ``error``: populated iff ``termination == "ERROR"``.
+    """
+
+    termination: Literal["CONVERGED", "CAPPED", "ERROR"]
+    rounds_completed: int
+    final_artifact: str
+    transcript: list[Turn]
+    transcript_path: Path
+    run_id: str
+    error: ErrorRecord | None = None
 
 
 # --------------------------------------------------------------------
@@ -1369,3 +1475,291 @@ def run_verb(
             f"{result.log_path}"
         )
     return output
+
+
+# --------------------------------------------------------------------
+# run_role: user-facing role-to-workflow entry point
+# --------------------------------------------------------------------
+
+
+# Outcomes that indicate the workflow ended in a failure transition
+# (as opposed to a judge-driven convergence or a cap-driven CAPPED
+# termination). Per T-000007: stuck/error/timeout transitions map to
+# ERROR; the executor uses the same names for adapter failures and
+# the loader-side stuck condition.
+_ERROR_OUTCOMES: frozenset[str] = frozenset({"stuck", "error", "timeout", "cancelled"})
+
+
+def run_role(
+    role_name: str,
+    **kwargs: Any,
+) -> IterativeDesignResult:
+    """Run the workflow bound to ``role_name`` and return an
+    ``IterativeDesignResult``.
+
+    Reads the merged config (``~/.orchestra/config.json`` plus, when
+    ``project_dir`` is in ``kwargs``, the project-local override) and
+    resolves ``role_name`` against ``OrchestraConfig.role_bindings``.
+    The matched ``CompoundRoleBinding`` names the workflow pattern to
+    run plus the per-workflow-role leaf bindings the workflow's states
+    will resolve at runtime; the api builds a synthetic
+    ``OrchestraConfig`` carrying just those entries and dispatches to
+    ``run_workflow``.
+
+    ``**kwargs`` carries:
+
+    - Reserved keys consumed by run_role itself: ``project_dir``,
+      ``quiet``, ``progress_callback``, ``max_rounds``,
+      ``invocation_options``.
+    - Everything else is forwarded to ``run_workflow`` as workflow
+      inputs (must match the workflow's declared ``external_input``s).
+
+    Termination is derived from the final ``transition`` log record's
+    outcome and target — see ``_derive_termination`` and T-000007.
+
+    Existing ``run_workflow`` callers are unaffected: this function
+    constructs its own derived OrchestraConfig and never mutates the
+    caller's config.
+    """
+    project_dir = kwargs.pop("project_dir", None)
+    quiet = kwargs.pop("quiet", False)
+    progress_callback = kwargs.pop("progress_callback", None)
+    max_rounds_override = kwargs.pop("max_rounds", None)
+    invocation_options = dict(kwargs.pop("invocation_options", {}) or {})
+    inputs: dict[str, Any] = dict(kwargs)
+
+    config = load_config(project_dir)
+    compound = config.role_bindings.get(role_name)
+    if compound is None:
+        raise WorkflowApiError(
+            f"unknown role {role_name!r}. Configured role_bindings: "
+            f"{sorted(config.role_bindings)}"
+        )
+
+    max_rounds = max_rounds_override if max_rounds_override is not None else compound.max_rounds
+    if max_rounds is not None:
+        # Thread the resolved cap through invocation_options so the
+        # workflow guard (T-000012) can read it via the same
+        # backing_options channel adapters use. Per-call kwargs win
+        # over the compound's default.
+        invocation_options.setdefault("max_rounds", max_rounds)
+
+    derived_cfg = OrchestraConfig(
+        roles=dict(compound.bindings),
+        workflows={compound.pattern: WorkflowConfig(pattern=compound.pattern)},
+        verbs={},
+        role_bindings={},
+    )
+
+    result = run_workflow(
+        compound.pattern,
+        inputs,
+        derived_cfg,
+        invocation_options=invocation_options,
+        project_dir=project_dir,
+        progress_callback=progress_callback,
+        quiet=quiet,
+    )
+
+    run_dir = result.log_path.parent
+    workflow_path = resolve_workflow_path(compound.pattern, project_dir=project_dir)
+    workflow = load_workflow(workflow_path, _pre_load_registry())
+
+    transcript = _build_transcript(result.log_path, run_dir, workflow)
+    transcript_path = run_dir / "transcript.jsonl"
+    _write_transcript_jsonl(transcript_path, transcript)
+
+    termination, error = _derive_termination(result.log_path)
+    rounds_completed = _count_judge_rounds(transcript, workflow)
+    final_artifact = _select_final_artifact(workflow, result.artifacts, transcript)
+    if termination == "ERROR" and not final_artifact:
+        final_artifact = ""
+
+    return IterativeDesignResult(
+        termination=termination,
+        rounds_completed=rounds_completed,
+        final_artifact=final_artifact,
+        transcript=transcript,
+        transcript_path=transcript_path,
+        run_id=result.run_id,
+        error=error,
+    )
+
+
+def _derive_termination(
+    log_path: Path,
+) -> tuple[Literal["CONVERGED", "CAPPED", "ERROR"], ErrorRecord | None]:
+    """Classify a finished run's terminal disposition from the log.
+
+    Walks the JSONL log to find the last ``transition`` record. The
+    executor only recognizes ``done``/``stop`` as terminal targets, so
+    CONVERGED/CAPPED/ERROR has to be inferred from the *outcome* of
+    the transition that landed on a terminal:
+
+    - target == "done" AND outcome == "done"
+      → CONVERGED (judge emitted the ``done`` action)
+    - target == "done" AND outcome != "done"
+      → CAPPED (cap-hit transition routed ``iterate``/``revise`` to
+      ``done``)
+    - target == "stop" OR outcome in {stuck, error, timeout, cancelled}
+      → ERROR (with an ErrorRecord built from the last state_exit's
+      error field when available)
+    - no transition record found → ERROR (workflow never produced a
+      transition; e.g. crashed during setup)
+    """
+    records = LogReader(log_path).read_all()
+    last_transition = None
+    last_state_exit_error: dict[str, Any] | None = None
+    last_state_exit_state: str | None = None
+    for r in records:
+        if r.event == "transition":
+            last_transition = r
+        elif r.event == "state_exit":
+            err = r.fields.get("error")
+            if isinstance(err, dict):
+                last_state_exit_error = err
+                last_state_exit_state = r.state_id
+    if last_transition is None:
+        return "ERROR", ErrorRecord(
+            kind="runner_failure",
+            message="workflow produced no transition records",
+        )
+    outcome = str(last_transition.fields.get("outcome") or "")
+    target = str(last_transition.fields.get("target") or "")
+    if target == "done" and outcome == "done":
+        return "CONVERGED", None
+    if target == "done":
+        return "CAPPED", None
+    # target == "stop" or an unexpected terminal: classify as ERROR
+    # and attach the last error envelope we observed (if any) so the
+    # consumer can postmortem.
+    err_kind = "runner_failure"
+    err_message = (
+        f"workflow terminated via outcome={outcome!r} target={target!r}"
+    )
+    err_detail: dict[str, Any] | None = None
+    if last_state_exit_error is not None:
+        err_kind = str(last_state_exit_error.get("kind") or err_kind)
+        err_message = str(last_state_exit_error.get("message") or err_message)
+        raw_detail = last_state_exit_error.get("detail")
+        if isinstance(raw_detail, dict):
+            err_detail = dict(raw_detail)
+    return "ERROR", ErrorRecord(
+        kind=err_kind,
+        message=err_message,
+        state=last_state_exit_state,
+        detail=err_detail,
+    )
+
+
+def _build_transcript(
+    log_path: Path,
+    run_dir: Path,
+    workflow: Workflow,
+) -> list[Turn]:
+    """Reconstruct an ordered Turn list from the run log.
+
+    Each successful or failed ``state_exit`` record becomes one Turn.
+    The ``output`` field is populated by loading the referenced
+    payload file from ``<run_dir>/payloads/`` when available; if the
+    payload is missing or unreadable the field defaults to empty
+    string so the transcript stays well-formed.
+    """
+    from orchestra.payloads import load_payload
+
+    records = LogReader(log_path).read_all()
+    role_by_state = {s.name: (s.role or "") for s in workflow.states}
+    turns: list[Turn] = []
+    for r in records:
+        if r.event != "state_exit":
+            continue
+        state_name = r.state_id or ""
+        fields = r.fields
+        payload_ref = fields.get("payload_ref")
+        output = ""
+        if isinstance(payload_ref, str) and payload_ref:
+            try:
+                payload = load_payload(run_dir, payload_ref)
+            except Exception:
+                payload = {}
+            raw_output = payload.get("output")
+            if isinstance(raw_output, str):
+                output = raw_output
+        artifacts_written_raw = fields.get("artifacts_written") or []
+        artifacts_written: list[dict[str, str]] = []
+        if isinstance(artifacts_written_raw, list):
+            for entry in artifacts_written_raw:
+                if isinstance(entry, dict):
+                    artifacts_written.append(
+                        {str(k): str(v) for k, v in entry.items()}
+                    )
+        turns.append(
+            Turn(
+                role=role_by_state.get(state_name, ""),
+                state=state_name,
+                attempt=int(r.attempt or 0),
+                started_at=str(r.ts or ""),
+                ended_at=str(r.ts or ""),
+                duration_ms=int(fields.get("duration_ms") or 0),
+                status=str(fields.get("status") or ""),
+                outcome=str(fields.get("outcome") or ""),
+                output=output,
+                artifacts_written=artifacts_written,
+            )
+        )
+    return turns
+
+
+def _write_transcript_jsonl(path: Path, transcript: list[Turn]) -> None:
+    """Persist the transcript as JSONL alongside the orchestra log."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        for turn in transcript:
+            fh.write(json.dumps(asdict(turn), sort_keys=True, ensure_ascii=False))
+            fh.write("\n")
+
+
+def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:
+    """Count successful judge-role completions in the transcript.
+
+    The design_loop pattern issues one judge call per round (produce
+    on the first turn, then revise or done on subsequent turns), so a
+    judge-state success count is the round count. The judge role's
+    name is whichever role is bound to the workflow's first
+    judge-style state; for design_loop that is the state named
+    ``judge``.
+
+    Falls back to counting all successful state completions when the
+    workflow has no state named ``judge`` so non-design_loop callers
+    still get a meaningful number.
+    """
+    judge_state_names = {s.name for s in workflow.states if s.name == "judge"}
+    if not judge_state_names:
+        return sum(1 for t in transcript if t.status == "ok")
+    return sum(
+        1 for t in transcript if t.state in judge_state_names and t.status == "ok"
+    )
+
+
+def _select_final_artifact(
+    workflow: Workflow,
+    artifacts: dict[str, ArtifactView],
+    transcript: list[Turn],
+) -> str:
+    """Pick the most recently judge-produced artifact text.
+
+    Design_loop's primary text output lives in the ``proposal``
+    artifact; prefer it when present. Otherwise walk the transcript
+    in reverse for the last successful judge-state turn's payload
+    output, which the workflow restructure (T-000009/10) will replace
+    with a schema-extracted artifact. The fallback path keeps
+    run_role usable against the current ``design_loop.orc`` shape
+    before the restructure lands.
+    """
+    proposal = artifacts.get("proposal")
+    if proposal is not None and isinstance(proposal.value, str) and proposal.value:
+        return proposal.value
+    for turn in reversed(transcript):
+        if turn.state == "judge" and turn.status == "ok" and turn.output:
+            return turn.output
+    return ""
