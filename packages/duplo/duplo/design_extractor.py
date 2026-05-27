@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from duplo.claude_cli import ClaudeCliError, query_with_images
+from duplo.design import IterativeDesignError, run_iterative_design
 from duplo.parsing import extract_json
 
 _SYSTEM = """\
@@ -52,8 +52,12 @@ class DesignRequirements:
 def extract_design(images: list[Path]) -> DesignRequirements:
     """Analyse reference images and extract visual design requirements.
 
-    Sends up to ``_MAX_IMAGES`` images to ``claude -p`` and returns
-    structured design details (colors, fonts, spacing, layout, components).
+    Routes the extraction through ``duplo.design.run_iterative_design``
+    so the judge/reviewer loop produces and critiques the visual-design
+    JSON instead of a single-model invocation. The seed input embeds
+    the system instructions plus absolute paths to up to ``_MAX_IMAGES``
+    images so the bound roles can read them. Returns the same
+    :class:`DesignRequirements` shape as before so callers do not change.
 
     Args:
         images: Paths to reference image files (PNG, JPG, GIF, WEBP).
@@ -69,13 +73,16 @@ def extract_design(images: list[Path]) -> DesignRequirements:
     to_send = images[:_MAX_IMAGES]
     source_names = [img.name for img in to_send]
 
-    prompt = (
-        "Analyse these screenshot(s) and extract the visual design details.\n"
-        "Return ONLY the JSON object as described."
+    image_lines = "\n".join(f"- {Path(p).resolve()}" for p in to_send)
+    seed_input = (
+        f"{_SYSTEM}\n"
+        "Read the following image files using the Read tool, then "
+        "analyse them and return ONLY the JSON object as described.\n\n"
+        f"Image files:\n{image_lines}\n"
     )
     try:
-        raw = query_with_images(prompt, to_send, system=_SYSTEM)
-    except ClaudeCliError:
+        raw = run_iterative_design(seed_input)
+    except IterativeDesignError:
         return DesignRequirements(source_images=source_names)
     result = _parse_design(raw)
     result.source_images = source_names

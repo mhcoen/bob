@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from duplo.claude_cli import ClaudeCliError
+from duplo.design import IterativeDesignError
 from duplo.design_extractor import (
     DesignRequirements,
     _parse_design,
@@ -14,6 +14,7 @@ from duplo.design_extractor import (
     format_design_block,
     format_design_section,
 )
+from orchestra import ErrorRecord
 
 
 # Minimal valid 1x1 PNG bytes for test images.
@@ -109,7 +110,7 @@ class TestExtractDesign:
     def test_extracts_design_from_images(self, tmp_path):
         img = _make_image(tmp_path, "screenshot.png")
         response = json.dumps(_sample_response())
-        with patch("duplo.design_extractor.query_with_images", return_value=response):
+        with patch("duplo.design_extractor.run_iterative_design", return_value=response):
             result = extract_design([img])
         assert result.colors["primary"] == "#1a73e8"
         assert result.source_images == ["screenshot.png"]
@@ -118,40 +119,47 @@ class TestExtractDesign:
         img1 = _make_image(tmp_path, "a.png")
         img2 = _make_image(tmp_path, "b.jpg")
         with patch(
-            "duplo.design_extractor.query_with_images",
+            "duplo.design_extractor.run_iterative_design",
             return_value=json.dumps({"colors": {}}),
         ) as mock_q:
             extract_design([img1, img2])
-        image_paths = mock_q.call_args[0][1]
-        assert len(image_paths) == 2
-        assert image_paths[0] == img1
-        assert image_paths[1] == img2
+        seed_input = mock_q.call_args[0][0]
+        assert str(img1.resolve()) in seed_input
+        assert str(img2.resolve()) in seed_input
 
     def test_limits_to_max_images(self, tmp_path):
         images = [_make_image(tmp_path, f"img{i}.png") for i in range(15)]
         with patch(
-            "duplo.design_extractor.query_with_images",
+            "duplo.design_extractor.run_iterative_design",
             return_value=json.dumps({"colors": {}}),
         ) as mock_q:
             result = extract_design(images)
         assert len(result.source_images) == 10
-        image_paths = mock_q.call_args[0][1]
-        assert len(image_paths) == 10
+        seed_input = mock_q.call_args[0][0]
+        for img in images[:10]:
+            assert str(img.resolve()) in seed_input
+        for img in images[10:]:
+            assert str(img.resolve()) not in seed_input
 
     def test_returns_empty_on_bad_response(self, tmp_path):
         img = _make_image(tmp_path, "test.png")
         with patch(
-            "duplo.design_extractor.query_with_images",
+            "duplo.design_extractor.run_iterative_design",
             return_value="I cannot analyse this image.",
         ):
             result = extract_design([img])
         assert result.colors == {}
 
-    def test_returns_empty_on_claude_cli_error(self, tmp_path):
+    def test_returns_empty_on_iterative_design_error(self, tmp_path):
         img = _make_image(tmp_path, "test.png")
+        err = IterativeDesignError(
+            error=ErrorRecord(kind="adapter_failure", message="boom"),
+            transcript_path=Path("/tmp/transcript.jsonl"),
+            run_id="run-id",
+        )
         with patch(
-            "duplo.design_extractor.query_with_images",
-            side_effect=ClaudeCliError("claude CLI timed out"),
+            "duplo.design_extractor.run_iterative_design",
+            side_effect=err,
         ):
             result = extract_design([img])
         assert result.colors == {}
