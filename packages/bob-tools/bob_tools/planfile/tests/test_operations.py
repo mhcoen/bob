@@ -1006,7 +1006,7 @@ class TestAssertMcloopCanonical:
         # pin that the contract's forwarding behavior is intact (so a
         # rendered-text parse failure surfaces with the correct file
         # context for the caller).
-        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile import canonical as ops
         from bob_tools.planfile.parser import parse_plan as _real_parse
 
         captured: dict[str, Path | None] = {}
@@ -1039,7 +1039,7 @@ class TestAssertMcloopCanonical:
         # parse calls via ``source_path``: the Contract 5 reparse is the
         # only call that forwards a non-None ``source_path``, so a test
         # marker is unambiguous here.
-        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile import canonical as ops
         from bob_tools.planfile.parser import parse_plan as _real_parse
 
         plan = self._cplan()
@@ -1075,7 +1075,7 @@ class TestAssertMcloopCanonical:
         # is the specific contract under test here). Discriminate from
         # the internal field-stability parse calls via ``source_path``
         # exactly as the v3-leak test does.
-        from bob_tools.planfile import operations as ops
+        from bob_tools.planfile import canonical as ops
         from bob_tools.planfile.parser import parse_plan as _real_parse
 
         plan = self._cplan()

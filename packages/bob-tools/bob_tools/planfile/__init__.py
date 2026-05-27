@@ -36,26 +36,32 @@ from bob_tools.planfile.model import (
     TaskContext,
     TaskStatus,
 )
-from bob_tools.planfile.operations import (
-    add_bug_task,
-    add_phase_task,
-    add_task,
+from bob_tools.planfile.canonical import (
     assert_mcloop_canonical,
-    bug_count,
+    resolve_task_context,
+)
+from bob_tools.planfile.construction import make_task
+from bob_tools.planfile.iteration import bug_count
+from bob_tools.planfile.migration import (
+    migrate,
+    replace_phase,
+    replace_phase_validated,
+)
+from bob_tools.planfile.scheduling import next_tasks
+from bob_tools.planfile.status import (
     check_consistency,
     clear_failed,
     complete_task,
     fail_task,
-    make_task,
-    migrate,
-    next_tasks,
     purge_done_bug_tasks,
-    replace_phase,
-    replace_phase_validated,
     reset_task,
-    resolve_task_context,
-    validate_plan,
 )
+from bob_tools.planfile.task_addition import (
+    add_bug_task,
+    add_phase_task,
+    add_task,
+)
+from bob_tools.planfile.validation import validate_plan
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.plan_artifact import (
     PlanArtifactRejected,
