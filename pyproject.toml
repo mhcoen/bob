@@ -10,6 +10,9 @@ bob-tools = { workspace = true }
 [tool.pytest.ini_options]
 addopts = "-n auto --import-mode=importlib"
 timeout = 60
+markers = [
+    "integration: marks tests as integration tests (deselect with '-m not integration')",
+]
 
 [dependency-groups]
 dev = [

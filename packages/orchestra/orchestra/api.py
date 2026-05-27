@@ -69,7 +69,6 @@ from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
 from orchestra.adapters.codex_agent import CodexAgentAdapter
 from orchestra.adapters.codex_text import CodexTextAdapter
 from orchestra.config import (
-    CompoundRoleBinding,
     ConfigError,
     OrchestraConfig,
     RoleBinding,
@@ -77,13 +76,12 @@ from orchestra.config import (
     load_config,
 )
 from orchestra.errors import OrchestraError
-from orchestra.log import LogReader
 from orchestra.executor.criteria import mode_for_workflow
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.loader import load_workflow
 from orchestra.loader.lookup import resolve_workflow_path
-from orchestra.log import LogWriter
+from orchestra.log import LogReader, LogWriter
 from orchestra.progress import (
     ChildBinding,
     ProgressCallback,
@@ -1532,8 +1530,7 @@ def run_role(
     compound = config.role_bindings.get(role_name)
     if compound is None:
         raise WorkflowApiError(
-            f"unknown role {role_name!r}. Configured role_bindings: "
-            f"{sorted(config.role_bindings)}"
+            f"unknown role {role_name!r}. Configured role_bindings: {sorted(config.role_bindings)}"
         )
 
     max_rounds = max_rounds_override if max_rounds_override is not None else compound.max_rounds
@@ -1634,9 +1631,7 @@ def _derive_termination(
     # and attach the last error envelope we observed (if any) so the
     # consumer can postmortem.
     err_kind = "runner_failure"
-    err_message = (
-        f"workflow terminated via outcome={outcome!r} target={target!r}"
-    )
+    err_message = f"workflow terminated via outcome={outcome!r} target={target!r}"
     err_detail: dict[str, Any] | None = None
     if last_state_exit_error is not None:
         err_kind = str(last_state_exit_error.get("kind") or err_kind)
@@ -1690,9 +1685,7 @@ def _build_transcript(
         if isinstance(artifacts_written_raw, list):
             for entry in artifacts_written_raw:
                 if isinstance(entry, dict):
-                    artifacts_written.append(
-                        {str(k): str(v) for k, v in entry.items()}
-                    )
+                    artifacts_written.append({str(k): str(v) for k, v in entry.items()})
         turns.append(
             Turn(
                 role=role_by_state.get(state_name, ""),
@@ -1736,9 +1729,7 @@ def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:
     judge_state_names = {s.name for s in workflow.states if s.name == "judge"}
     if not judge_state_names:
         return sum(1 for t in transcript if t.status == "ok")
-    return sum(
-        1 for t in transcript if t.state in judge_state_names and t.status == "ok"
-    )
+    return sum(1 for t in transcript if t.state in judge_state_names and t.status == "ok")
 
 
 def _select_final_artifact(

@@ -218,9 +218,7 @@ class CompoundRoleBinding:
             )
         pattern = raw.get("pattern")
         if not isinstance(pattern, str) or not pattern:
-            raise ConfigError(
-                f"role_binding {role_name!r}: missing or empty 'pattern' key"
-            )
+            raise ConfigError(f"role_binding {role_name!r}: missing or empty 'pattern' key")
         reserved = {"pattern", "max_rounds"}
         max_rounds_raw = raw.get("max_rounds")
         if max_rounds_raw is not None and not isinstance(max_rounds_raw, int):

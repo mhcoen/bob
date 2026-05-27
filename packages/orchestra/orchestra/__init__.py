@@ -13,11 +13,16 @@ integration-plan.md`` for the integration design.
 
 from orchestra.api import (
     ArtifactView,
+    ErrorRecord,
+    IterativeDesignResult,
+    Turn,
     WorkflowApiError,
     WorkflowRunResult,
+    run_role,
     run_workflow,
 )
 from orchestra.config import (
+    CompoundRoleBinding,
     ConfigError,
     OrchestraConfig,
     RoleBinding,
@@ -57,13 +62,18 @@ __version__ = "0.0.1"
 
 __all__ = [
     "ArtifactView",
+    "CompoundRoleBinding",
     "ConfigError",
+    "ErrorRecord",
+    "IterativeDesignResult",
     "OrchestraConfig",
     "RoleBinding",
+    "Turn",
     "WorkflowApiError",
     "WorkflowConfig",
     "WorkflowRunResult",
     "default_config",
     "load_config",
+    "run_role",
     "run_workflow",
 ]
