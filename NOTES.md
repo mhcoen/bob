@@ -158,3 +158,5 @@ c38a500: Added live activity tracking for agent-routed sessions. The subprocess 
 c646bc9: Added a public API function `run_role` to execute iterative design workflows via role bindings, returning a structured result with termination status, transcript, and error details. Updated the config schema to support nested role bindings for judge and reviewer models. Marked the corresponding development task as completed.
 
 ef8a634: Improved max_rounds handling for design workflows. The round cap now defaults to 4, can be set in role bindings, or overridden per call. Validation ensures max_rounds is a positive integer before workflow start, preventing premature termination. The design_loop workflow now reads max_rounds as an external input for consistent behavior.
+
+561010a: Added an incremental transcript writer that appends each state completion to a JSONL file as the run progresses, ensuring durability even after a crash. The executor now supports an optional on_state_exit callback for this purpose, called after each state_exit is logged. This eliminates the need to rebuild the transcript file at the end of a run.
