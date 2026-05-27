@@ -1,5 +1,0 @@
-{
-  "checks": [
-    "bash -c 'set -e; for p in bob-tools duplo orchestra mcloop; do echo \"=== $p ===\"; (cd /Users/mhcoen/proj/bob/packages/$p && /Users/mhcoen/proj/bob/.venv/bin/pytest); done'"
-  ]
-}
