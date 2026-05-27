@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["issues", "rationale"],
+  "properties": {
+    "issues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "summary", "detail"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["structural", "behavioral", "unrecoverable"]
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "detail": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "rationale": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}
