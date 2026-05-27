@@ -15,6 +15,7 @@ from . import (
     collector,
     comparator,
     council,
+    design,
     design_extractor,
     diagnostics,
     doc_examples,
