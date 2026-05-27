@@ -487,3 +487,67 @@ def test_run_role_error_record_dataclass_shape() -> None:
     assert err.kind == "actor_failure"
     assert err.state == "judge"
     assert err.detail == {"phase": "invoke"}
+
+
+# --------------------------------------------------------------------
+# T-000012: max_rounds validation at workflow-start. The cap defaults
+# to 4, comes from the compound binding when set, and can be overridden
+# per call. run_role refuses to start when the resolved cap is not a
+# positive int so the cap-hit transition can never fire before the
+# first judge round completes.
+# --------------------------------------------------------------------
+
+
+def _write_design_config(tmp_path: Path, extra: dict[str, object] | None = None) -> None:
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    body: dict[str, object] = {
+        "pattern": "design_loop",
+        "judge": {"adapter": "claude_code_text"},
+        "reviewer": {"adapter": "codex_text"},
+    }
+    if extra:
+        body.update(extra)
+    (cfg_dir / "config.json").write_text(json.dumps({"role_bindings": {"design": body}}))
+
+
+@pytest.mark.parametrize("bad_cap", [0, -1, -42])
+def test_run_role_rejects_non_positive_max_rounds_override(
+    _isolated_home: Path,
+    tmp_path: Path,
+    bad_cap: int,
+) -> None:
+    """A per-call ``max_rounds=N`` with N <= 0 fails before any
+    workflow run begins."""
+    _write_design_config(tmp_path)
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", max_rounds=bad_cap, project_dir=tmp_path)
+    assert "max_rounds" in str(excinfo.value)
+
+
+def test_run_role_rejects_non_positive_max_rounds_in_binding(
+    _isolated_home: Path,
+    tmp_path: Path,
+) -> None:
+    """A compound binding declaring ``max_rounds: 0`` is rejected at
+    workflow start so a misconfigured project cannot silently produce
+    a CAPPED termination before any round runs."""
+    _write_design_config(tmp_path, extra={"max_rounds": 0})
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    assert "max_rounds" in str(excinfo.value)
+
+
+def test_run_role_rejects_non_int_max_rounds_override(
+    _isolated_home: Path,
+    tmp_path: Path,
+) -> None:
+    """A per-call ``max_rounds`` that is not an int (including bool,
+    which is technically an int subclass) fails before workflow run."""
+    _write_design_config(tmp_path)
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", max_rounds=True, project_dir=tmp_path)
+    assert "max_rounds" in str(excinfo.value)
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", max_rounds="four", project_dir=tmp_path)  # type: ignore[arg-type]
+    assert "max_rounds" in str(excinfo.value)

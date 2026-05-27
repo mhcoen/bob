@@ -4,6 +4,7 @@ workflow design_loop
 
   external_input query text
   external_input history text
+  external_input max_rounds int
 
   max_total_steps 60
 
@@ -37,7 +38,7 @@ workflow design_loop
     writes judge_decision text
     writes judge_feedback text
     on accept => done
-    on iterate when attempts.judge < 6 => review
+    on iterate when attempts.judge < max_rounds => review
     on iterate => done
     on stuck => stop
     on error => stop

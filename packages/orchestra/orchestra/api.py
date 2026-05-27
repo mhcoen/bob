@@ -1533,13 +1533,37 @@ def run_role(
             f"unknown role {role_name!r}. Configured role_bindings: {sorted(config.role_bindings)}"
         )
 
-    max_rounds = max_rounds_override if max_rounds_override is not None else compound.max_rounds
-    if max_rounds is not None:
-        # Thread the resolved cap through invocation_options so the
-        # workflow guard (T-000012) can read it via the same
-        # backing_options channel adapters use. Per-call kwargs win
-        # over the compound's default.
-        invocation_options.setdefault("max_rounds", max_rounds)
+    # T-000012: resolve the effective round cap. Per-call override
+    # wins, otherwise fall back to the compound binding's
+    # ``max_rounds``, otherwise default to 4. The workflow refuses to
+    # start when the resolved value is not a positive int so a
+    # zero/negative cap can never produce a cap-hit transition that
+    # would terminate the workflow before any judge round completes.
+    if max_rounds_override is not None:
+        effective_max_rounds = max_rounds_override
+    elif compound.max_rounds is not None:
+        effective_max_rounds = compound.max_rounds
+    else:
+        effective_max_rounds = 4
+    if isinstance(effective_max_rounds, bool) or not isinstance(effective_max_rounds, int):
+        raise WorkflowApiError(
+            f"role {role_name!r}: max_rounds must be an int, got "
+            f"{type(effective_max_rounds).__name__}"
+        )
+    if effective_max_rounds <= 0:
+        raise WorkflowApiError(
+            f"role {role_name!r}: max_rounds must be > 0, got {effective_max_rounds}"
+        )
+
+    # Load the workflow up front so we can decide whether to inject
+    # ``max_rounds`` as an external_input. Workflows that declare it
+    # (design_loop) read the resolved cap through the GuardContext's
+    # external_inputs lookup; other workflows would reject an
+    # undeclared input and are left alone.
+    workflow_path = resolve_workflow_path(compound.pattern, project_dir=project_dir)
+    workflow = load_workflow(workflow_path, _pre_load_registry())
+    if any(ext.name == "max_rounds" for ext in workflow.external_inputs):
+        inputs["max_rounds"] = effective_max_rounds
 
     derived_cfg = OrchestraConfig(
         roles=dict(compound.bindings),
@@ -1559,8 +1583,6 @@ def run_role(
     )
 
     run_dir = result.log_path.parent
-    workflow_path = resolve_workflow_path(compound.pattern, project_dir=project_dir)
-    workflow = load_workflow(workflow_path, _pre_load_registry())
 
     transcript = _build_transcript(result.log_path, run_dir, workflow)
     transcript_path = run_dir / "transcript.jsonl"
