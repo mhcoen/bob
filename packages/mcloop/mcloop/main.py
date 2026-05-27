@@ -68,6 +68,7 @@ from mcloop.git_ops import (
     _changed_files,
     _checkpoint,
     _commit,
+    _committed_files_since,
     _ensure_git,
     _get_git_hash,
     _git,
@@ -1549,6 +1550,13 @@ def run_loop(
 
         eliminated = get_eliminated(tasks, task)
         task_start = time.monotonic()
+        # Capture HEAD after the pre-task checkpoint above so the
+        # task-execution window starts at a clean baseline. The
+        # rate-limit handler inside the attempt loop also calls
+        # _checkpoint, which can commit work the editor produced
+        # before being session-limited; that's the cumulative work
+        # the no-op verdict must consider (see T-000001 in BUGS.md).
+        task_start_sha = _get_git_hash(project_dir)
         success = False
         # Reset per-task parity-field locals so the no-success summary
         # entry does not leak the previous task's result or
@@ -1699,6 +1707,93 @@ def run_loop(
                     continue
 
                 if not _has_meaningful_changes(project_dir):
+                    cumulative_committed = _committed_files_since(
+                        project_dir,
+                        task_start_sha,
+                    )
+                    if cumulative_committed:
+                        # An earlier attempt of this task committed
+                        # work (typically via the rate-limit
+                        # checkpoint upstream). The current attempt
+                        # correctly observed "task already complete"
+                        # and made no further edits. Verify the
+                        # cumulative state still passes the gate
+                        # before declaring success; this matches
+                        # option (b) in BUGS.md T-000001.
+                        _lifecycle._current_phase = "checks"
+                        cumulative_check = run_checks(
+                            project_dir,
+                            changed_files=cumulative_committed,
+                        )
+                        if cumulative_check.passed:
+                            elapsed = _format_elapsed(
+                                time.monotonic() - task_start,
+                            )
+                            check_off(active_file, task)
+                            if active_file == plan_path and active_phase_name:
+                                acceptance_evidence_phases.add(active_phase_name)
+                            completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                            task_entries.append(
+                                TaskEntry(
+                                    label=label,
+                                    text=task.text,
+                                    outcome="success",
+                                    elapsed=round(
+                                        time.monotonic() - task_start,
+                                        2,
+                                    ),
+                                    model=task_model or "",
+                                    attempts=attempt,
+                                    success=True,
+                                    exit_code=result.exit_code,
+                                    log_path=(str(result.log_path) if result.log_path else ""),
+                                    changed_files=list(cumulative_committed),
+                                    task_id=task.task_id or "",
+                                )
+                            )
+                            print(
+                                formatting.system_msg(
+                                    "Task already complete from earlier"
+                                    " attempt; cumulative commits pass"
+                                    " the gate"
+                                ),
+                                flush=True,
+                            )
+                            print(
+                                formatting.task_complete(label, elapsed),
+                                flush=True,
+                            )
+                            ctx.add(
+                                label,
+                                task.text,
+                                elapsed,
+                                result.output,
+                                changed_files=cumulative_committed,
+                            )
+                            _ledger_settle(
+                                label,
+                                TaskOutcome(
+                                    success=True,
+                                    abandoned=False,
+                                    summary=task.text[:200],
+                                    changed_files=tuple(cumulative_committed),
+                                ),
+                            )
+                            success = True
+                            break
+                        last_error = (
+                            "Earlier attempt landed work but the"
+                            " cumulative state fails the gate:"
+                            f" {cumulative_check.command}"
+                        )
+                        print(
+                            formatting.error_msg(
+                                f"Cumulative-commit gate failed: {cumulative_check.command}"
+                            ),
+                            flush=True,
+                        )
+                        _print_error_tail(cumulative_check.output)
+                        break
                     if active_file == bugs_path:
                         last_error = (
                             "Bug task produced no file changes. A bug task"

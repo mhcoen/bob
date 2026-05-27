@@ -2,7 +2,7 @@
 
 ## Bugs
 
-- [ ] T-000001: mcloop task verdict misses work landed in earlier attempts during session-limit cycles.
+- [x] T-000001: mcloop task verdict misses work landed in earlier attempts during session-limit cycles.
 
   mcloop's task-level verdict ("session produced no file changes and no
   task-specific acceptance evidence") inspects only the final attempt's

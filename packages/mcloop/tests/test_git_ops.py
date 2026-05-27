@@ -21,8 +21,10 @@ from mcloop.checks import run_checks
 from mcloop.git_ops import (
     _changed_files,
     _committed_files,
+    _committed_files_since,
     _ensure_git,
     _get_committed_diff,
+    _get_git_hash,
     _snapshot_worktree,
     _worktree_status,
 )
@@ -427,3 +429,98 @@ def test_snapshot_worktree_consolidated_layout_returns_package_relative(tmp_path
 
     assert modified == ["foo.py"]
     assert untracked == ["bar.py"]
+
+
+# ── _committed_files_since (T-000001) ─────────────────────────────────
+
+
+def test_committed_files_since_empty_base_returns_empty(tmp_path):
+    """An empty base SHA short-circuits to an empty list."""
+    _init_repo(tmp_path)
+    assert _committed_files_since(tmp_path, "") == []
+
+
+def test_committed_files_since_no_repo_returns_empty(tmp_path):
+    """No git repo -> empty list, no subprocess call."""
+    assert _committed_files_since(tmp_path, "abc123") == []
+
+
+def test_committed_files_since_head_at_base_returns_empty(tmp_path):
+    """When HEAD has not advanced past the base SHA, nothing has landed."""
+    _init_repo(tmp_path)
+    head = _get_git_hash(tmp_path)
+    assert _committed_files_since(tmp_path, head) == []
+
+
+def test_committed_files_since_returns_cumulative_meaningful(tmp_path):
+    """Cumulative diff across multiple commits, skipping metadata paths."""
+    _init_repo(tmp_path)
+    base = _get_git_hash(tmp_path)
+    # First commit lands real work.
+    (tmp_path / "src.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "mcloop: checkpoint"],
+        cwd=tmp_path,
+        check=True,
+    )
+    # Second commit only modifies a metadata path; this must be filtered.
+    (tmp_path / "logs").mkdir()
+    (tmp_path / "logs" / "run.log").write_text("noise\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "log noise"],
+        cwd=tmp_path,
+        check=True,
+    )
+    # Third commit edits the same source file again.
+    (tmp_path / "src.py").write_text("x = 2\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "follow-up"],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    files = _committed_files_since(tmp_path, base)
+
+    # Deduplicated, metadata excluded, package-relative.
+    assert files == ["src.py"]
+
+
+def test_committed_files_since_skips_plan_md_and_mcloop(tmp_path):
+    """PLAN.md and .mcloop/ touched in commits are still treated as noise."""
+    _init_repo(tmp_path)
+    base = _get_git_hash(tmp_path)
+    (tmp_path / "PLAN.md").write_text("- [ ] task\n")
+    (tmp_path / ".mcloop").mkdir()
+    (tmp_path / ".mcloop" / "state.json").write_text("{}\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "metadata only"],
+        cwd=tmp_path,
+        check=True,
+    )
+
+    assert _committed_files_since(tmp_path, base) == []
+
+
+def test_committed_files_since_consolidated_layout_is_package_relative(tmp_path):
+    """Paths are emitted relative to the subprocess cwd, not the repo root."""
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    package = workspace / "packages" / "mcloop"
+    package.mkdir(parents=True)
+    _init_repo(workspace)
+    base = _get_git_hash(package)
+    (package / "foo.py").write_text("x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=workspace, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "add foo"],
+        cwd=workspace,
+        check=True,
+    )
+
+    files = _committed_files_since(package, base)
+
+    assert files == ["foo.py"]

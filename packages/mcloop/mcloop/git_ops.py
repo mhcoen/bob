@@ -559,6 +559,58 @@ def _committed_files(project_dir: Path, commit_sha: str) -> list[str]:
     return files
 
 
+def _committed_files_since(project_dir: Path, base_sha: str) -> list[str]:
+    """Return meaningful files changed between *base_sha* and HEAD.
+
+    Used by the task verdict to detect work that earlier attempts of
+    the same task committed via the rate-limit / session-limit
+    checkpoint (see ``_checkpoint`` callsite in the task loop). When a
+    task runs multiple attempts and an early attempt's work was
+    committed before a later attempt observed "task already complete,"
+    the working tree is clean at task end but the cumulative diff
+    against the task-start SHA is not. This helper surfaces that
+    cumulative diff so the verdict counts it as success rather than a
+    no-op failure.
+
+    Filters out the same metadata paths as :func:`_has_meaningful_changes`
+    and :func:`_committed_files` (``logs/``, ``.mcloop/``, ``PLAN.md``).
+    Returns an empty list when *base_sha* is empty, when HEAD is at
+    *base_sha*, or when the repo lookup fails.
+    """
+    if not base_sha:
+        return []
+    if not _has_git_repo(project_dir):
+        return []
+    head_sha = _get_git_hash(project_dir)
+    if not head_sha or head_sha == base_sha:
+        return []
+    result = _git(
+        [
+            "git",
+            "diff",
+            "--name-only",
+            "--relative",
+            f"{base_sha}..HEAD",
+        ],
+        cwd=project_dir,
+        label="committed files since",
+        silent=True,
+    )
+    if result.returncode != 0:
+        return []
+    files: list[str] = []
+    seen: set[str] = set()
+    for f in result.stdout.strip().splitlines():
+        f = f.strip()
+        if not f or f in seen:
+            continue
+        if f.startswith("logs/") or f.startswith(".mcloop/") or f == "PLAN.md":
+            continue
+        seen.add(f)
+        files.append(f)
+    return files
+
+
 def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
     """Return the diff introduced by *commit_sha*.
 

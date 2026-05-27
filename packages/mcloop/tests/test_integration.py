@@ -459,6 +459,132 @@ def test_single_task_noop_false_positive_does_not_check_off_without_acceptance_e
     assert "- [x] T-" not in content
 
 
+# --- T-000001: cumulative-commit verdict ---
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch(
+    "mcloop.main._committed_files_since",
+    return_value=["src/feature.py"],
+)
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_noop_with_prior_commit_marks_task_successful(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_committed_since,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """T-000001: editor exits with no uncommitted diff, but earlier
+    attempts of the same task already committed work; cumulative state
+    passes the gate -> task is checked off, not flagged [!]."""
+    md = _make_project(tmp_path, "- [ ] Already-landed task\n")
+    mock_run.return_value = _ok_run_result(
+        output="design.py already exists; task is complete; nothing to change"
+    )
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert result.ok
+    assert mock_run.call_count == 1
+    # The cumulative-commit branch trusts the prior commit; it does
+    # not call _commit (no new staged work) but does verify via run_checks.
+    mock_commit.assert_not_called()
+    # The first run_checks invocation is the cumulative-commit gate;
+    # the phase-boundary suite (called with no changed_files kwarg)
+    # may run afterward.
+    first_call = mock_checks.call_args_list[0]
+    assert first_call.kwargs.get("changed_files") == ["src/feature.py"]
+    content = md.read_text()
+    assert_canonical_checkbox(content, "x", "Already-landed task")
+
+    calls = _notify_calls(mock_notify)
+    assert calls == [("All tasks completed!", "info")]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch(
+    "mcloop.main._committed_files_since",
+    return_value=["src/feature.py"],
+)
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
+@patch("mcloop.main.run_task")
+def test_noop_with_prior_commit_but_failing_gate_marks_failure(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_committed_since,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """T-000001: cumulative commits land but the gate is red -> the
+    task must be marked [!], not [x]. The bug fix must not blanket-
+    accept any prior commit."""
+    md = _make_project(tmp_path, "- [ ] Half-finished task\n")
+    mock_run.return_value = _ok_run_result()
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert not result.ok
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    mock_checks.assert_called_once()
+    content = md.read_text()
+    assert_canonical_checkbox(content, "!", "Half-finished task")
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch(
+    "mcloop.main._committed_files_since",
+    return_value=["src/fixed.py"],
+)
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_noop_bug_task_with_prior_commit_marks_successful(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_committed_since,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """T-000001: a bug task whose fix landed during an earlier attempt
+    must not be flagged [!]; the cumulative-commit branch runs before
+    the bug-task no-op short-circuit."""
+    md = _make_project(tmp_path, "- [x] Already done plan task\n")
+    (tmp_path / "BUGS.md").write_text(canonical_plan_text("## Bugs\n\n- [ ] Already-fixed bug\n"))
+    mock_run.return_value = _ok_run_result(
+        output="bug already fixed in earlier attempt; nothing further to do"
+    )
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert result.ok
+    bugs_content = (tmp_path / "BUGS.md").read_text()
+    # Completed bugs are purged from BUGS.md; "[!]" would mean the
+    # cumulative-commit branch was bypassed and the bug-task no-op
+    # short-circuit fired instead.
+    assert "[!]" not in bugs_content
+    assert "Already-fixed bug" not in bugs_content
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
