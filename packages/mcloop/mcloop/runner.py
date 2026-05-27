@@ -23,6 +23,21 @@ from mcloop.prompts import (
     build_sync_prompt,
 )
 
+def _decode_subprocess_output(value: bytes | str | None) -> str:
+    """Normalize subprocess output to str.
+
+    subprocess.run(..., text=True) decodes result.stdout/stderr to str on the
+    happy path, but subprocess.TimeoutExpired.stdout/stderr may still carry
+    raw bytes captured before the decoder ran. Callers that string-concat
+    output across both paths need a single normalizer.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
+
+
 DEFAULT_TASK_TIMEOUT = 3600  # 60 minutes; override with --timeout
 SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
 SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
@@ -301,7 +316,7 @@ def ensure_subscription_preflight(
             check=False,
         )
     except subprocess.TimeoutExpired as exc:
-        output = (exc.stdout or "") + (exc.stderr or "")
+        output = _decode_subprocess_output(exc.stdout) + _decode_subprocess_output(exc.stderr)
         raise SubscriptionPreflightError(
             "Claude Code subscription preflight timed out. Run `claude /login` and retry mcloop.",
             output,

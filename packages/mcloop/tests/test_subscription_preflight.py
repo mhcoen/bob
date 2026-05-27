@@ -173,3 +173,40 @@ def test_subscription_preflight_skips_non_subscription_claude_paths(
         env=env,
         cwd=tmp_path,
     )
+
+
+def test_decode_subprocess_output_handles_bytes() -> None:
+    assert runner._decode_subprocess_output(None) == ""
+    assert runner._decode_subprocess_output("hello") == "hello"
+    assert runner._decode_subprocess_output(b"hello") == "hello"
+    # Undecodable bytes must not crash; errors="replace" is the contract.
+    assert runner._decode_subprocess_output(b"a\xffb") == "a�b"
+
+
+def test_preflight_timeout_with_bytes_stdout_raises_preflight_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)}
+
+    def _fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=runner.SUBSCRIPTION_PREFLIGHT_TIMEOUT,
+            output=b"partial stdout\n",
+            stderr=b"partial stderr\n",
+        )
+
+    monkeypatch.setattr("mcloop.runner.subprocess.run", _fake_run)
+
+    with pytest.raises(runner.SubscriptionPreflightError) as excinfo:
+        runner.ensure_subscription_preflight(
+            cli="claude",
+            model="opus",
+            env=env,
+            cwd=tmp_path,
+        )
+
+    assert "timed out" in str(excinfo.value)
+    assert "partial stdout" in excinfo.value.output
+    assert "partial stderr" in excinfo.value.output
