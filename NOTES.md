@@ -261,3 +261,5 @@ ef8a634: Improved max_rounds handling for design workflows. The round cap now de
 561010a: Added an incremental transcript writer that appends each state completion to a JSONL file as the run progresses, ensuring durability even after a crash. The executor now supports an optional on_state_exit callback for this purpose, called after each state_exit is logged. This eliminates the need to rebuild the transcript file at the end of a run.
 
 878b63a: Added compound role bindings with short model identifiers (e.g., "opus", "codex") that resolve via ProfileRegistry. The default config now includes a "design" role binding for the design_loop workflow, enforcing distinct actors for judge and reviewer to ensure independent critique. Validation prevents unregistered identifiers and same-actor bindings at workflow start.
+
+8b8728c: Retired the iterate_until_acceptable workflow in favor of design_loop. Removed workflow-specific validation rules, calibration runner, and associated tests. The decision-consistency e2e coverage is temporarily lost but will be restored when design_loop adopts criteria-aware judge schemas.
