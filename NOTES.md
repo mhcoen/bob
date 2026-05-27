@@ -114,3 +114,5 @@
 ## Eliminated
 
 c38a500: Added live activity tracking for agent-routed sessions. The subprocess adapter now parses tool_use events from the CLI's JSON stream and surfaces them as a second line under the elapsed-time progress ticker. This shows users what the agent is currently doing (e.g., "Read /path/to/file") without coupling the reporter to the subprocess module. The feature is wired by default in the API, CLI, and REPL.
+
+c646bc9: Added a public API function `run_role` to execute iterative design workflows via role bindings, returning a structured result with termination status, transcript, and error details. Updated the config schema to support nested role bindings for judge and reviewer models. Marked the corresponding development task as completed.
