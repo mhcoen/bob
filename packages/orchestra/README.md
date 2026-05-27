@@ -628,6 +628,66 @@ colliding under one binding. A single config can define both:
 }
 ```
 
+### Compound role bindings
+
+The `role_bindings` table wraps a workflow plus a nested table of
+leaf role bindings under one logical role name, consumed by
+`orchestra.run_role(name, ...)`. Library callers like Duplo invoke a
+compound role rather than naming a specific workflow: the role
+identity (`design`) is stable, while the underlying pattern and
+per-role actors are policy.
+
+```json
+"role_bindings": {
+  "design": {
+    "pattern": "design_loop",
+    "judge_role": { "model": "opus" },
+    "reviewer":   { "model": "codex" },
+    "max_rounds": 4
+  }
+}
+```
+
+The shipped `design` binding wraps the `design_loop` workflow. The
+judge defaults to a strong model (`opus`) for judgement-shaped
+calls; the reviewer defaults to a different model (`codex`) so the
+critique is independent of the judge's training data. Workflow
+start refuses to run when both bindings resolve to the same actor,
+so the reviewer's independence is enforced rather than left to
+configuration discipline.
+
+### Model identifier resolution
+
+A compound role binding leaf may name a short model identifier in
+place of spelling out `adapter` and `model` separately:
+
+```json
+"judge_role": { "model": "opus" }
+```
+
+Each identifier resolves to an `(adapter, model)` tuple through
+orchestra's `ProfileRegistry`, the same registry that backs every
+`.orc` workflow's actor lookup. `orchestra.run_role` performs the
+lookup at workflow start; an identifier not registered fails
+startup with an error naming both the missing identifier and the
+available identifiers, so a typo never reaches the executor.
+
+The identifiers shipped today are:
+
+| Identifier | Adapter                        | Model            |
+| ---------- | ------------------------------ | ---------------- |
+| `opus`     | `claude_code_text`             | `opus`           |
+| `sonnet`   | `claude_code_text`             | `sonnet`         |
+| `haiku`    | `claude_code_text`             | `haiku`          |
+| `kimi`     | `claude_code_text_kimi`        | `kimi-k2.6`      |
+| `deepseek` | `claude_code_text_deepseek`    | `deepseek-v4-pro`|
+| `codex`    | `codex_text`                   | `gpt-5-codex`    |
+
+Long-form bindings (`{"adapter": "...", "model": "..."}`) still
+work and bypass the lookup; the short form is a convenience for
+the common cases. Both forms compose with the same `parameters`,
+`tools`, and `instruction_template` keys.
+
 ## Choosing model bindings
 
 The role-to-model bindings in the quick-start config are not

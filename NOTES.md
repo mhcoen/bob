@@ -149,6 +149,38 @@
   pre-dates this task and is purely timing-sensitive; my changes
   are no-ops when `on_state_exit=None` (the default for that test).
 
+- 2026-05-26 [2.9] [T-000014]: The compound `design` role binding's
+  leaf keys must match the workflow's role names for the executor to
+  resolve them. `design_loop.orc` declares `role judge_role` and `role
+  reviewer`, so the canonical binding keys are `judge_role` and
+  `reviewer`. The existing test fixture at
+  `tests/test_api.py::test_run_role_unknown_role_raises` uses `judge`
+  (not `judge_role`) but never reaches workflow execution, so the
+  mismatch is latent. The same-actor validator
+  (`_validate_design_distinct_actors`) accepts either spelling for the
+  judge slot to stay compatible with the existing fixture, but a real
+  run with the `judge` key would fail at role resolution. Leaving the
+  fixture as-is and documenting the canonical keys in
+  `orchestra/README.md`.
+- 2026-05-26 [2.9] [T-000014]: `default_config()`'s new `design` entry
+  only kicks in when neither `~/.orchestra/config.json` nor the
+  project-local config exists. A user with a global config that omits
+  `role_bindings` does NOT inherit the default `design` binding; the
+  `load_config` merge function only falls back to `default_config`
+  when both layers are absent. Worth revisiting if the inherited-vs-
+  declared-default ergonomics surface as a real complaint — a "merge
+  default_config as base" change has bigger blast radius than this
+  task warrants.
+- 2026-05-26 [2.9] [T-000014]: `BUILTIN_MODEL_IDENTIFIERS` is exposed
+  both as a module-level constant and via `ProfileRegistry.model_identifiers`.
+  The constant is the source of truth used by run_role's resolver; the
+  registry copy is populated by `with_core()` so the data is visible
+  to any future code that iterates the registry. Keeping both in sync
+  is currently trivial (one-time population in `with_core()`), but if
+  per-process customization of model identifiers becomes a real use
+  case the resolver would need to read from the registry instance
+  rather than the module constant.
+
 ## Hypotheses
 
 ## Eliminated

@@ -551,3 +551,127 @@ def test_run_role_rejects_non_int_max_rounds_override(
     with pytest.raises(WorkflowApiError) as excinfo:
         run_role("design", max_rounds="four", project_dir=tmp_path)  # type: ignore[arg-type]
     assert "max_rounds" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------
+# T-000014: compound role binding model-identifier resolution and the
+# design-role same-actor rejection rule. Bindings may name a short
+# identifier (``opus``, ``codex``, ...) in lieu of explicit
+# adapter+model; an unregistered identifier fails workflow start with
+# a clear error. The ``design`` role binding additionally rejects
+# judge and reviewer resolving to the same actor.
+# --------------------------------------------------------------------
+
+
+def test_resolve_compound_model_identifiers_fills_in_adapter_and_model() -> None:
+    """A short-form leaf binding (``{"model": "opus"}``) resolves to a
+    full ``(adapter, model)`` tuple via the ProfileRegistry's built-in
+    model identifier table."""
+    from orchestra.api import _resolve_compound_model_identifiers
+
+    bindings = {
+        "judge_role": RoleBinding(adapter=None, model="opus"),
+        "reviewer": RoleBinding(adapter=None, model="codex"),
+    }
+    resolved = _resolve_compound_model_identifiers("design", bindings)
+    assert resolved["judge_role"].adapter == "claude_code_text"
+    assert resolved["judge_role"].model == "opus"
+    assert resolved["reviewer"].adapter == "codex_text"
+    assert resolved["reviewer"].model == "gpt-5-codex"
+
+
+def test_resolve_compound_model_identifiers_preserves_explicit_bindings() -> None:
+    """When a leaf binding already names ``adapter``, the resolver
+    leaves it alone (model strings are passed to the adapter verbatim
+    without any registry lookup)."""
+    from orchestra.api import _resolve_compound_model_identifiers
+
+    explicit = RoleBinding(adapter="claude_code_text", model="anything-goes")
+    resolved = _resolve_compound_model_identifiers("design", {"judge_role": explicit})
+    assert resolved["judge_role"] is explicit
+
+
+def test_run_role_rejects_unregistered_model_identifier(
+    _isolated_home: Path,
+    tmp_path: Path,
+) -> None:
+    """A short-form binding naming an identifier not in the registry
+    fails workflow start, listing both the missing identifier and the
+    available identifiers so the user can correct the config."""
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "role_bindings": {
+                    "design": {
+                        "pattern": "design_loop",
+                        "judge_role": {"model": "not-a-real-model"},
+                        "reviewer": {"model": "codex"},
+                    },
+                },
+            }
+        )
+    )
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    msg = str(excinfo.value)
+    assert "not-a-real-model" in msg
+    # The error lists the available identifiers so the user can pick a
+    # valid one without consulting external docs.
+    assert "opus" in msg
+    assert "codex" in msg
+
+
+def test_run_role_design_rejects_same_actor_for_judge_and_reviewer(
+    _isolated_home: Path,
+    tmp_path: Path,
+) -> None:
+    """``design`` requires the reviewer to be a different actor from
+    the judge so the critique is independent. Identical short-form
+    identifiers on both slots fail workflow start."""
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "role_bindings": {
+                    "design": {
+                        "pattern": "design_loop",
+                        "judge_role": {"model": "opus"},
+                        "reviewer": {"model": "opus"},
+                    },
+                },
+            }
+        )
+    )
+    with pytest.raises(WorkflowApiError) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    msg = str(excinfo.value)
+    assert "design" in msg
+    assert "same actor" in msg
+
+
+def test_default_config_carries_design_role_binding() -> None:
+    """The shipped default config provides a ``design`` compound
+    binding so ``orchestra.run_role('design', ...)`` works out of the
+    box without explicit configuration. Judge defaults to a strong
+    model and reviewer to a different one so the same-actor rejection
+    rule is satisfied without further setup."""
+    from orchestra.config import default_config
+
+    cfg = default_config()
+    assert "design" in cfg.role_bindings
+    compound = cfg.role_bindings["design"]
+    assert compound.pattern == "design_loop"
+    judge = compound.bindings.get("judge_role") or compound.bindings.get("judge")
+    reviewer = compound.bindings.get("reviewer")
+    assert judge is not None
+    assert reviewer is not None
+    # Default judge and reviewer resolve to distinct actors. Concrete
+    # identities are documented in orchestra/README.md; the test
+    # captures the contract that the defaults satisfy the
+    # same-actor rule.
+    assert judge.model == "opus"
+    assert reviewer.model == "codex"
+    assert judge.model != reviewer.model

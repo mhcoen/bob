@@ -66,6 +66,48 @@ class ResultParser:
     fn: ParserFn
 
 
+@dataclass(frozen=True)
+class ModelIdentifier:
+    """A short model name registered to an (adapter, model) tuple.
+
+    Compound role bindings in ``~/.orchestra/config.json`` may name a
+    model identifier in lieu of spelling out both ``adapter`` and
+    ``model``. At workflow start ``orchestra.run_role`` resolves the
+    identifier through the ``ProfileRegistry`` so the workflow's
+    actor binding lands on a concrete adapter class plus the
+    model-string the adapter forwards to the underlying CLI.
+    """
+
+    name: str
+    adapter: str
+    model: str
+
+
+BUILTIN_MODEL_IDENTIFIERS: dict[str, ModelIdentifier] = {
+    # Anthropic Claude family via Claude Code CLI (read-only, text role).
+    "opus": ModelIdentifier(name="opus", adapter="claude_code_text", model="opus"),
+    "sonnet": ModelIdentifier(name="sonnet", adapter="claude_code_text", model="sonnet"),
+    "haiku": ModelIdentifier(name="haiku", adapter="claude_code_text", model="haiku"),
+    # Direct-provider bindings (read-only, text role).
+    "kimi": ModelIdentifier(
+        name="kimi",
+        adapter="claude_code_text_kimi",
+        model="kimi-k2.6",
+    ),
+    "deepseek": ModelIdentifier(
+        name="deepseek",
+        adapter="claude_code_text_deepseek",
+        model="deepseek-v4-pro",
+    ),
+    # Codex via the OpenAI CLI (read-only, text role).
+    "codex": ModelIdentifier(name="codex", adapter="codex_text", model="gpt-5-codex"),
+}
+"""Built-in model identifiers, registered onto every ``ProfileRegistry``
+``with_core()`` produces. Acts as the default lookup table for the
+compound-role-binding short form (``{"model": "opus"}``) in
+``~/.orchestra/config.json``."""
+
+
 # --------------------------------------------------------------------
 # The registry
 # --------------------------------------------------------------------
@@ -97,6 +139,7 @@ class ProfileRegistry:
     default_policies: dict[str, Any] = field(default_factory=dict)
     resume_hooks: dict[str, Any] = field(default_factory=dict)
     transforms: dict[str, Transform] = field(default_factory=dict)
+    model_identifiers: dict[str, ModelIdentifier] = field(default_factory=dict)
     _adapter_cache: dict[str, Any] = field(default_factory=dict, repr=False)
 
     # ----- registration -------------------------------------------
@@ -122,6 +165,18 @@ class ProfileRegistry:
         if name in self.validation_rules:
             raise RegistryConflict(f"validation rule already registered: {name!r}")
         self.validation_rules[name] = fn
+
+    def register_model_identifier(self, identifier: ModelIdentifier) -> None:
+        """Register a model identifier short name.
+
+        The registered name is what compound role bindings name in their
+        ``model`` field when the binding omits ``adapter``; resolution
+        replaces the leaf binding's adapter+model with the registered
+        values. Re-registering an existing name is a conflict.
+        """
+        if identifier.name in self.model_identifiers:
+            raise RegistryConflict(f"model identifier already registered: {identifier.name!r}")
+        self.model_identifiers[identifier.name] = identifier
 
     def register_transform(
         self,
@@ -203,5 +258,13 @@ def with_core() -> ProfileRegistry:
     from orchestra.executor.parsers import identity_text_parser
 
     reg.register_result_parser(identity_text_parser)
+
+    # Built-in model identifiers. Compound role bindings in
+    # ``~/.orchestra/config.json`` reference these by their short
+    # name (``opus``, ``codex``, ``kimi``, ...); ``orchestra.run_role``
+    # resolves the short name through this registry at workflow
+    # start. See ``BUILTIN_MODEL_IDENTIFIERS`` for the shipped set.
+    for identifier in BUILTIN_MODEL_IDENTIFIERS.values():
+        reg.register_model_identifier(identifier)
 
     return reg

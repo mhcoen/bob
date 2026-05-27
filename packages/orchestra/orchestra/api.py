@@ -93,6 +93,7 @@ from orchestra.progress import (
 )
 from orchestra.prompts import build_code_edit_prompt
 from orchestra.registry.registry import (
+    BUILTIN_MODEL_IDENTIFIERS,
     ProfileRegistry,
     ResultParser,
     with_core,
@@ -1494,6 +1495,93 @@ def run_verb(
 _ERROR_OUTCOMES: frozenset[str] = frozenset({"stuck", "error", "timeout", "cancelled"})
 
 
+def _resolve_compound_model_identifiers(
+    role_name: str,
+    bindings: dict[str, RoleBinding],
+) -> dict[str, RoleBinding]:
+    """Replace short-form leaf bindings with their resolved (adapter,
+    model) tuples.
+
+    A leaf binding with ``adapter is None`` is the short form: its
+    ``model`` field names a registered model identifier (``opus``,
+    ``codex``, ``kimi``, ...). Look the identifier up in the built-in
+    model identifier table (the same table ``ProfileRegistry`` is
+    populated from in ``with_core()``) and synthesize a new
+    ``RoleBinding`` with both adapter and model filled in. Other
+    binding fields (``instruction_template``, ``tools``,
+    ``parameters``) are carried through unchanged.
+
+    Raises ``WorkflowApiError`` when a short-form binding names an
+    identifier that is not registered. The error names both the
+    missing identifier and the available identifiers so the user can
+    correct the config without guessing.
+    """
+    resolved: dict[str, RoleBinding] = {}
+    for leaf_name, binding in bindings.items():
+        if binding.adapter is not None:
+            resolved[leaf_name] = binding
+            continue
+        model_id = binding.model
+        if not isinstance(model_id, str) or not model_id:
+            raise WorkflowApiError(
+                f"role {role_name!r}: leaf binding {leaf_name!r} omits "
+                "'adapter' and 'model'; one of them is required"
+            )
+        identifier = BUILTIN_MODEL_IDENTIFIERS.get(model_id)
+        if identifier is None:
+            available = sorted(BUILTIN_MODEL_IDENTIFIERS)
+            raise WorkflowApiError(
+                f"role {role_name!r}: leaf binding {leaf_name!r} names "
+                f"unregistered model identifier {model_id!r}. "
+                f"Available identifiers: {available}"
+            )
+        resolved[leaf_name] = RoleBinding(
+            adapter=identifier.adapter,
+            model=identifier.model,
+            instruction_template=binding.instruction_template,
+            tools=binding.tools,
+            parameters=dict(binding.parameters),
+        )
+    return resolved
+
+
+def _validate_design_distinct_actors(
+    role_name: str,
+    bindings: dict[str, RoleBinding],
+) -> None:
+    """Reject a ``design`` role binding whose judge and reviewer
+    resolve to the same actor.
+
+    The design loop's reviewer is supposed to be independent of the
+    judge so the critique catches failure modes the judge would not
+    catch on its own. Same-actor bindings collapse that independence
+    silently; the workflow refuses to start so the misconfiguration
+    is visible up front.
+
+    The pair is identified by name (``judge_role`` or ``judge`` as
+    the judge slot, ``reviewer`` as the reviewer slot); when the
+    expected names are not present, this validator is a no-op so a
+    differently-named pair pattern can reuse the ``design`` role
+    binding shape without forcing this specific naming.
+    """
+    judge: RoleBinding | None = None
+    for candidate in ("judge_role", "judge"):
+        if candidate in bindings:
+            judge = bindings[candidate]
+            break
+    reviewer = bindings.get("reviewer")
+    if judge is None or reviewer is None:
+        return
+    if (judge.adapter, judge.model) == (reviewer.adapter, reviewer.model):
+        raise WorkflowApiError(
+            f"role {role_name!r}: judge and reviewer resolve to the "
+            f"same actor (adapter={judge.adapter!r}, model={judge.model!r}). "
+            "The design loop requires the reviewer to be a different "
+            "actor so the critique is independent of the judge's "
+            "training data and blind spots."
+        )
+
+
 def run_role(
     role_name: str,
     **kwargs: Any,
@@ -1571,8 +1659,24 @@ def run_role(
     if any(ext.name == "max_rounds" for ext in workflow.external_inputs):
         inputs["max_rounds"] = effective_max_rounds
 
+    # T-000014: resolve model identifiers on the compound binding's
+    # leaf bindings. A leaf binding may name only ``model`` (e.g.
+    # ``{"model": "opus"}``); look the identifier up in the
+    # ProfileRegistry and fill in both adapter and model. An
+    # unregistered identifier fails startup here, naming the missing
+    # identifier and the available ones, so the downstream registry
+    # builder never sees an unresolved binding.
+    resolved_bindings = _resolve_compound_model_identifiers(role_name, compound.bindings)
+
+    # T-000014: enforce that the design role binding's leaf bindings
+    # resolve to distinct actors so the reviewer's critique is
+    # independent of the judge's training data. Other compound
+    # bindings are unconstrained.
+    if role_name == "design":
+        _validate_design_distinct_actors(role_name, resolved_bindings)
+
     derived_cfg = OrchestraConfig(
-        roles=dict(compound.bindings),
+        roles=resolved_bindings,
         workflows={compound.pattern: WorkflowConfig(pattern=compound.pattern)},
         verbs={},
         role_bindings={},

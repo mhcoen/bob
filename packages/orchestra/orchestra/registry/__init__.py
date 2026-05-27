@@ -6,7 +6,9 @@ profile by registration alone.
 """
 
 from orchestra.registry.registry import (
+    BUILTIN_MODEL_IDENTIFIERS,
     AdapterFactory,
+    ModelIdentifier,
     ParserFn,
     ProfileRegistry,
     ResultParser,
@@ -19,7 +21,9 @@ from orchestra.transforms import (
 )
 
 __all__ = [
+    "BUILTIN_MODEL_IDENTIFIERS",
     "AdapterFactory",
+    "ModelIdentifier",
     "ParserFn",
     "ProfileRegistry",
     "ResultParser",

@@ -94,19 +94,51 @@ class CriterionDecl:
 
 @dataclass(frozen=True)
 class RoleBinding:
-    """One role's binding to an adapter, model, template, and parameters."""
+    """One role's binding to an adapter, model, template, and parameters.
 
-    adapter: str
+    ``adapter`` is required for top-level ``roles`` entries, but a leaf
+    binding under a compound ``role_bindings`` entry may omit it when
+    ``model`` names a registered model identifier (``opus``, ``codex``,
+    ``kimi``, ...). ``orchestra.run_role`` resolves the identifier
+    through the ``ProfileRegistry`` at workflow start and synthesizes
+    the missing adapter+model pair from the registered tuple. See
+    ``orchestra.registry.BUILTIN_MODEL_IDENTIFIERS`` for the shipped
+    set and ``orchestra/README.md`` for the resolution path.
+    """
+
+    adapter: str | None = None
     model: str | None = None
     instruction_template: str | None = None
     tools: str | None = None
     parameters: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, role_name: str, raw: dict[str, Any]) -> RoleBinding:
+    def from_dict(
+        cls,
+        role_name: str,
+        raw: dict[str, Any],
+        *,
+        require_adapter: bool = True,
+    ) -> RoleBinding:
         if not isinstance(raw, dict):
             raise ConfigError(f"role {role_name!r}: expected an object, got {type(raw).__name__}")
         adapter = raw.get("adapter")
+        if adapter is None and not require_adapter:
+            # Compound role binding leaf: adapter may be omitted when
+            # ``model`` names a registered identifier. run_role
+            # resolves the identifier to an (adapter, model) tuple at
+            # workflow start; the model field is required so the
+            # resolution has something to look up.
+            optional = _role_optional_fields(role_name, raw)
+            if optional.get("model") is None:
+                raise ConfigError(
+                    f"role {role_name!r}: either 'adapter' or 'model' "
+                    "must be set. A bare-model binding looks up the "
+                    "model identifier (e.g. 'opus', 'codex') through "
+                    "the ProfileRegistry to derive both adapter and "
+                    "model at workflow start."
+                )
+            return cls(adapter=None, **optional)
         if not isinstance(adapter, str) or not adapter:
             raise ConfigError(f"role {role_name!r}: missing or empty 'adapter' key")
         return cls(
@@ -236,8 +268,17 @@ class CompoundRoleBinding:
         for key, value in raw.items():
             if key in reserved:
                 continue
-            if isinstance(value, dict) and "adapter" in value:
-                bindings[key] = RoleBinding.from_dict(f"{role_name}.{key}", value)
+            if isinstance(value, dict) and ("adapter" in value or "model" in value):
+                # Leaf role binding. Adapter may be omitted when the
+                # ``model`` field names a registered model identifier;
+                # the actual lookup happens in run_role so an
+                # unregistered identifier produces the documented
+                # startup error at the right point in the lifecycle.
+                bindings[key] = RoleBinding.from_dict(
+                    f"{role_name}.{key}",
+                    value,
+                    require_adapter=False,
+                )
             else:
                 extra[key] = value
         return cls(
@@ -407,6 +448,14 @@ def default_config() -> OrchestraConfig:
     ``.orchestra/config.json``: the consumer (mcloop) can call
     ``run_workflow("code_edit", ...)`` without first creating a config
     file and still get the current behavior.
+
+    A default ``design`` compound role binding is also included so
+    ``orchestra.run_role("design", ...)`` works without explicit
+    configuration. Judge defaults to ``opus`` (a strong model for
+    judgement-shaped roles); reviewer defaults to ``codex`` so the
+    review is independent of the judge's training data. Both model
+    fields are short identifiers resolved through the
+    ``ProfileRegistry`` at workflow start.
     """
     return OrchestraConfig(
         roles={
@@ -420,6 +469,15 @@ def default_config() -> OrchestraConfig:
         },
         workflows={
             "code_edit": WorkflowConfig(pattern="single"),
+        },
+        role_bindings={
+            "design": CompoundRoleBinding(
+                pattern="design_loop",
+                bindings={
+                    "judge_role": RoleBinding(adapter=None, model="opus"),
+                    "reviewer": RoleBinding(adapter=None, model="codex"),
+                },
+            ),
         },
     )
 
