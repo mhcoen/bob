@@ -263,3 +263,5 @@ ef8a634: Improved max_rounds handling for design workflows. The round cap now de
 878b63a: Added compound role bindings with short model identifiers (e.g., "opus", "codex") that resolve via ProfileRegistry. The default config now includes a "design" role binding for the design_loop workflow, enforcing distinct actors for judge and reviewer to ensure independent critique. Validation prevents unregistered identifiers and same-actor bindings at workflow start.
 
 8b8728c: Retired the iterate_until_acceptable workflow in favor of design_loop. Removed workflow-specific validation rules, calibration runner, and associated tests. The decision-consistency e2e coverage is temporarily lost but will be restored when design_loop adopts criteria-aware judge schemas.
+
+5a58ba3: Fixed a bug where mcloop's task verdict incorrectly marked tasks as failed when earlier attempts had already committed work. The system now checks cumulative committed changes since the task started and validates them against the gate before declaring success or failure. This ensures tasks that land work across multiple attempts are properly recognized as completed.
