@@ -203,6 +203,37 @@
   incremental transcript JSONL, schema-violation error routing) is
   pinned in twelve passing tests in that same file.
 
+- 2026-05-26 [2.11] [T-000016]: Files that the task asked to be removed
+  with `git rm` were left on disk because the session is operating
+  under a `Never delete any file` constraint that overrides per-task
+  removal requests. The retirement was carried out by emptying the
+  contents (replacing them with retirement-marker docstrings) and
+  removing every code-side registration: `_validate_iterate_until_acceptable`
+  and its `_WORKFLOW_RULES` entry in `packages/orchestra/orchestra/api.py`,
+  the `iterate_until_acceptable` row in `_DECISION_CONSISTENCY_MODE_BY_WORKFLOW`
+  in `packages/orchestra/orchestra/executor/criteria.py`,
+  `tests/test_workflows_iterate.py`, `tests/test_e2e_decision_consistency.py`,
+  `orchestra/calibration/iterate_runner.py`, the name-string references
+  in `tests/test_decision_consistency.py::test_mode_for_iterate` and
+  the two `ScenarioSpec(... workflow="iterate_until_acceptable")` callsites
+  in `tests/test_calibration.py`, plus the descriptive references in
+  `orchestra/calibration/extract_labels.py`'s docstring, help text, and
+  matrix-rendering short-name branch. The following files should be
+  removed by the workspace owner: `packages/orchestra/orchestra/workflows/iterate_until_acceptable.orc`,
+  `packages/orchestra/orchestra/workflows/templates/iterate_proposer.md`.
+  The schema `schemas/iterate_judge_verdict.json` and templates
+  `iterate_judge.md` and `iterate_reviewer.md` are NOT exclusive to the
+  retired workflow — `design_loop.orc` still references them — and
+  must stay.
+- 2026-05-26 [2.11] [T-000016]: The F2.5a end-to-end coverage that
+  rode on `iterate_until_acceptable` (the file
+  `tests/test_e2e_decision_consistency.py`) is now empty. The
+  pure-function invariant remains pinned in
+  `tests/test_decision_consistency.py`, but the runtime path through
+  the executor's schema layer is no longer exercised end-to-end. If
+  the design_loop workflow is later wired to use the criteria-aware
+  judge schema, an analogous e2e file should be re-introduced against
+  design_loop to restore that coverage.
 - 2026-05-26 [2.10] [T-000015]: The api-level `_derive_termination`
   classifier expects judge outcome=="done" for CONVERGED; under the
   current iterate-vocab design_loop, a judge `accept` outcome

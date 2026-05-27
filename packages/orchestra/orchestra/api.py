@@ -906,13 +906,11 @@ def _validate_role_bindings(
 # Workflow-specific config validation rules
 #
 # Some shipped workflows enforce binding-level invariants the grammar
-# cannot express. The Iterate-Until-Acceptable workflow requires the
-# proposer and reviewer to resolve to distinct actors so the review
-# is independent. The Propose-Review-Judge-Implement workflow has the
-# same distinct-actor rule plus a workspace-mutation rule (only the
-# implementer may be bound to a "mutating" adapter). Both checks run
-# after role-binding resolution and adapter-kind matching but before
-# the executor starts.
+# cannot express. The Propose-Review-Judge-Implement workflow requires
+# proposer, reviewer, and implementer to resolve to pairwise distinct
+# actors plus a workspace-mutation rule (only the implementer may be
+# bound to a "mutating" adapter). The check runs after role-binding
+# resolution and adapter-kind matching but before the executor starts.
 # --------------------------------------------------------------------
 
 
@@ -978,35 +976,6 @@ def _apply_workflow_specific_rules(
     if rule is None:
         return
     rule(workflow, role_bindings, workflow_name)
-
-
-def _validate_iterate_until_acceptable(
-    workflow: Workflow,
-    role_bindings: dict[str, RoleBinding],
-    workflow_name: str,
-) -> None:
-    """Enforce the iterate_until_acceptable distinct-actor rule:
-    proposer and reviewer must resolve to distinct (adapter, model)
-    tuples. Judge typically resolves to the same actor as proposer;
-    that is permitted.
-    """
-    missing = [r for r in ("proposer", "reviewer") if r not in role_bindings]
-    if missing:
-        raise ConfigError(
-            f"workflow {workflow_name!r}: missing required role bindings: {missing!r}"
-        )
-    proposer_identity = _actor_identity(role_bindings["proposer"])
-    reviewer_identity = _actor_identity(role_bindings["reviewer"])
-    if proposer_identity == reviewer_identity:
-        raise ConfigError(
-            f"workflow {workflow_name!r}: 'proposer' and 'reviewer' "
-            "resolve to the same actor "
-            f"(adapter={proposer_identity[0]!r}, "
-            f"model={proposer_identity[1]!r}). The iterate-until-"
-            "acceptable pattern requires the reviewer to be a "
-            "different actor so the critique is independent of the "
-            "proposer's training data and blind spots."
-        )
 
 
 def _validate_prji(
@@ -1127,7 +1096,6 @@ _WORKFLOW_RULES: dict[
     str,
     Callable[[Workflow, dict[str, RoleBinding], str], None],
 ] = {
-    "iterate_until_acceptable": _validate_iterate_until_acceptable,
     "propose_review_judge_implement": _validate_prji,
     # The canonical / reauthor split landed alongside Slice D's
     # smoke. The same role-binding rule applies to all three names;

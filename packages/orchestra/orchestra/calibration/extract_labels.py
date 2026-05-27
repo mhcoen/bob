@@ -8,8 +8,8 @@ sandbox (REPORT.md Addendum 6).
 Usage::
 
     python -m orchestra.calibration.extract_labels \\
-        --scenario iter-stuck-pos /path/to/iter-stuck-pos:iterate_until_acceptable \\
-        --scenario iter-ambig     /path/to/iter-ambig:iterate_until_acceptable \\
+        --scenario prji-stuck-pos /path/to/prji-stuck-pos:propose_review_judge_implement \\
+        --scenario prji-ambig     /path/to/prji-ambig:propose_review_judge_implement \\
         --output-dir /path/to/analysis_output
 
 Each ``--scenario`` argument is two arguments: scenario_id, then a
@@ -22,7 +22,7 @@ Per-judge-call labels (one row per judge invocation across all
 scenarios):
 
     scenario_id            string
-    workflow               iterate_until_acceptable | propose_review_judge_implement
+    workflow               propose_review_judge_implement (or other configured workflow name)
     expected_stuck         positive | negative | ambiguous
     judge_call_index       1-based ordinal of the judge invocation
     prior_decision         decision string from verdict_<n-1>.json; empty on cycle 1
@@ -276,7 +276,7 @@ def render_matrix(rows: list[dict[str, Any]], summaries: list[dict[str, Any]]) -
     for s in summaries:
         traj_list = s["decision_trajectory"]
         traj = ",".join(traj_list) if traj_list else "(none)"
-        wf_short = "iterate" if str(s["workflow"]).startswith("iterate") else "prji"
+        wf_short = "prji" if str(s["workflow"]).startswith("propose_review_judge") else "wf"
         lines.append(
             f"| {s['scenario_id']} "
             f"| {wf_short} "
@@ -348,8 +348,8 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Repeat per scenario. ID is a short label; "
             "DIR_AND_WORKFLOW is <scenario_dir>:<workflow_name>. "
-            "Example: --scenario iter-stuck-pos /tmp/.../iter-stuck-pos:"
-            "iterate_until_acceptable"
+            "Example: --scenario prji-stuck-pos /tmp/.../prji-stuck-pos:"
+            "propose_review_judge_implement"
         ),
     )
     parser.add_argument(

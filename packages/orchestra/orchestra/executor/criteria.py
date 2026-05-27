@@ -207,13 +207,10 @@ def check_decision_consistency(
     )
 
 
-# Workflow → mode mapping. iterate's stuck/iterate decisions both
-# imply a material issue persists, so STRICT_BIDIRECTIONAL is the
-# correct discipline. PRJI's non-accept routes (implement, rereview,
-# reframe) carry route-specific semantics that F2.5b will cover; for
-# F2.5a only the accept boundary is enforced.
+# Workflow → mode mapping. PRJI's non-accept routes (implement,
+# rereview, reframe) carry route-specific semantics that F2.5b will
+# cover; for F2.5a only the accept boundary is enforced.
 _DECISION_CONSISTENCY_MODE_BY_WORKFLOW: dict[str, DecisionConsistencyMode] = {
-    "iterate_until_acceptable": DecisionConsistencyMode.STRICT_BIDIRECTIONAL,
     "propose_review_judge_implement": DecisionConsistencyMode.ACCEPT_ONLY,
 }
 

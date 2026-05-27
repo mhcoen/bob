@@ -262,7 +262,7 @@ def test_scenario_rows_two_cycle_iterate(tmp_path: Path) -> None:
     spec = ScenarioSpec(
         scenario_id="iter-fake",
         scenario_dir=scenario,
-        workflow="iterate_until_acceptable",
+        workflow="propose_review_judge_implement",
     )
     rows, summary = scenario_rows(spec)
     assert summary["judge_calls"] == 2
@@ -295,7 +295,7 @@ def test_scenario_rows_skips_stale_higher_numbered_only_when_logs_pristine(
     (logs / "verdict_1.json").write_text(json.dumps({"decision": "iterate", "feedback": "f1"}))
     (logs / "verdict_2.json").write_text(json.dumps({"decision": "stuck", "feedback": "f2"}))
     spec = ScenarioSpec(
-        scenario_id="scn", scenario_dir=scenario, workflow="iterate_until_acceptable"
+        scenario_id="scn", scenario_dir=scenario, workflow="propose_review_judge_implement"
     )
     _, summary_before = scenario_rows(spec)
     assert summary_before["judge_calls"] == 2

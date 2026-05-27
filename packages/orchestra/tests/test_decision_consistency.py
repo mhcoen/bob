@@ -214,13 +214,6 @@ def test_non_accept_with_some_noncompliant_passes_in_strict_bidirectional() -> N
 # --------------------------------------------------------------------
 
 
-def test_mode_for_iterate() -> None:
-    assert (
-        mode_for_workflow("iterate_until_acceptable")
-        is DecisionConsistencyMode.STRICT_BIDIRECTIONAL
-    )
-
-
 def test_mode_for_prji() -> None:
     assert (
         mode_for_workflow("propose_review_judge_implement") is DecisionConsistencyMode.ACCEPT_ONLY
