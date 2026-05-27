@@ -57,6 +57,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -102,6 +104,7 @@ from orchestra.spine import (
     PreparedInvocation,
     PromptSource,
     RoleDecl,
+    StateDecl,
     Workflow,
 )
 from orchestra.store import ArtifactStore
@@ -1342,6 +1345,8 @@ def run_workflow(
 
     resolved_progress = _resolve_progress_callback(progress_callback, quiet)
     executor_progress = _wrap_progress_callback(resolved_progress, role_bindings)
+    transcript_path = run_dir / "transcript.jsonl"
+    transcript_writer = _IncrementalTranscriptWriter(transcript_path, run_dir, workflow)
     executor = Executor(
         workflow=workflow,
         registry=registry,
@@ -1354,6 +1359,7 @@ def run_workflow(
         progress_callback=executor_progress,
         criteria=cfg.criteria,
         decision_consistency_mode=mode_for_workflow(name),
+        on_state_exit=transcript_writer,
     )
 
     terminal: str = "stop"
@@ -1585,8 +1591,11 @@ def run_role(
     run_dir = result.log_path.parent
 
     transcript = _build_transcript(result.log_path, run_dir, workflow)
+    # transcript.jsonl is written incrementally by the executor's
+    # on_state_exit hook (see _IncrementalTranscriptWriter in
+    # run_workflow). The file is already on disk at this point;
+    # ``run_role`` just publishes its path.
     transcript_path = run_dir / "transcript.jsonl"
-    _write_transcript_jsonl(transcript_path, transcript)
 
     termination, error = _derive_termination(result.log_path)
     rounds_completed = _count_judge_rounds(transcript, workflow)
@@ -1732,6 +1741,80 @@ def _write_transcript_jsonl(path: Path, transcript: list[Turn]) -> None:
         for turn in transcript:
             fh.write(json.dumps(asdict(turn), sort_keys=True, ensure_ascii=False))
             fh.write("\n")
+
+
+class _IncrementalTranscriptWriter:
+    """Appends one ``Turn`` JSON line to ``transcript.jsonl`` per
+    state_exit, fsynced before returning to the executor.
+
+    The executor calls this from inside the same thread that wrote the
+    state_exit log record (the linear thread for sequential states,
+    the worker thread for fan-out children); a lock serializes the
+    append so concurrent fan-out completions cannot interleave bytes
+    inside a record. The file is truncated at construction time so a
+    resumed run does not concatenate to a prior run's transcript.
+
+    A crash mid-run leaves the file with every role completion that
+    landed before the crash, fsynced to disk; the post-run
+    ``_build_transcript`` view of the log remains the canonical
+    in-memory representation, but consumers reading ``transcript.jsonl``
+    after a crash see the same partial-but-coherent record sequence
+    that ``log.jsonl`` does.
+    """
+
+    def __init__(self, path: Path, run_dir: Path, workflow: Workflow) -> None:
+        self._path = path
+        self._run_dir = run_dir
+        self._role_by_state = {s.name: (s.role or "") for s in workflow.states}
+        self._lock = threading.Lock()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Truncate any pre-existing file so the run's transcript starts
+        # empty. The writer fsyncs each appended line individually.
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write("")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+    def __call__(
+        self,
+        state: StateDecl,
+        envelope: Envelope,
+        payload_ref: str | None,
+    ) -> None:
+        from orchestra.payloads import load_payload
+
+        output = ""
+        if isinstance(payload_ref, str) and payload_ref:
+            try:
+                payload = load_payload(self._run_dir, payload_ref)
+            except Exception:
+                payload = {}
+            raw_output = payload.get("output")
+            if isinstance(raw_output, str):
+                output = raw_output
+        artifacts_written: list[dict[str, str]] = []
+        for entry in envelope.artifacts_written:
+            if isinstance(entry, dict):
+                artifacts_written.append({str(k): str(v) for k, v in entry.items()})
+        turn = Turn(
+            role=self._role_by_state.get(state.name, state.role or ""),
+            state=state.name,
+            attempt=envelope.attempt,
+            started_at=envelope.started_at,
+            ended_at=envelope.ended_at,
+            duration_ms=envelope.duration_ms,
+            status=str(envelope.status),
+            outcome=str(envelope.outcome),
+            output=output,
+            artifacts_written=artifacts_written,
+        )
+        line = json.dumps(asdict(turn), sort_keys=True, ensure_ascii=False)
+        with self._lock:
+            with open(self._path, "a", encoding="utf-8") as fh:
+                fh.write(line)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
 
 
 def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:

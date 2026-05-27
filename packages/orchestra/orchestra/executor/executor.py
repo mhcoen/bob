@@ -335,6 +335,16 @@ class Executor:
         progress_watchdog_factory: ProgressWatchdogFactory | None = None,
         actor_progress_interval_seconds: float = ACTOR_PROGRESS_INTERVAL_SECONDS,
         fan_out_progress_interval_seconds: float = (FAN_OUT_PROGRESS_INTERVAL_SECONDS),
+        # Optional incremental-transcript hook. Fires after each
+        # state_exit log record has been durably written (and after
+        # the visibility index update). Receives ``(state, envelope,
+        # payload_ref)``; raises from the callback are swallowed so a
+        # misbehaving transcript writer cannot abort an in-flight run.
+        # The executor invokes this synchronously from the same thread
+        # that wrote ``state_exit``, which for fan-out children is a
+        # worker thread; callbacks that touch shared state must be
+        # thread-safe.
+        on_state_exit: Callable[[StateDecl, Envelope, str | None], None] | None = None,
     ) -> None:
         self._wf = workflow
         self._registry = registry
@@ -387,6 +397,9 @@ class Executor:
         )
         self._actor_progress_interval_seconds = actor_progress_interval_seconds
         self._fan_out_progress_interval_seconds = fan_out_progress_interval_seconds
+        self._on_state_exit_callback: Callable[[StateDecl, Envelope, str | None], None] | None = (
+            on_state_exit
+        )
         # F2.5a decision-consistency invariant configuration.
         self._criteria: tuple[CriterionDecl, ...] = criteria
         self._decision_consistency_mode: DecisionConsistencyMode = decision_consistency_mode
@@ -733,6 +746,7 @@ class Executor:
             self._visibility_index.mark_success(invocation_id)
         else:
             self._visibility_index.mark_error(invocation_id)
+        self._emit_state_exit_hook(state, envelope, payload_ref)
 
         # Step 9: transition selection.
         decl = self._select_transition_decl(state, envelope)
@@ -756,6 +770,29 @@ class Executor:
         )
 
     # ----- helpers ------------------------------------------------
+
+    def _emit_state_exit_hook(
+        self,
+        state: StateDecl,
+        envelope: Envelope,
+        payload_ref: str | None,
+    ) -> None:
+        """Notify the optional ``on_state_exit`` callback.
+
+        Called from inside the three state_exit-producing paths
+        (``_run_one_state``, ``_execute_state_body``,
+        ``_execute_transform_body``) AFTER the state_exit log record
+        has been durably written. Provides a hook for consumers that
+        want to maintain a curated incremental view of the run (e.g.
+        the api's transcript.jsonl). Exceptions are swallowed so a
+        misbehaving writer cannot abort an in-flight run.
+        """
+        if self._on_state_exit_callback is None:
+            return
+        try:
+            self._on_state_exit_callback(state, envelope, payload_ref)
+        except Exception:
+            pass
 
     def _emit_progress(
         self,
@@ -1828,6 +1865,7 @@ class Executor:
             self._visibility_index.mark_success(invocation_id)
         else:
             self._visibility_index.mark_error(invocation_id)
+        self._emit_state_exit_hook(state, envelope, None)
         return envelope
 
     # ----- fan-out execution -------------------------------------
@@ -2496,6 +2534,7 @@ class Executor:
             },
         )
         self._visibility_index.mark_error(invocation_id)
+        self._emit_state_exit_hook(self._wf.state(child_name), envelope, None)
         return envelope
 
     def _execute_state_body(
@@ -2807,6 +2846,7 @@ class Executor:
             self._visibility_index.mark_success(invocation_id)
         else:
             self._visibility_index.mark_error(invocation_id)
+        self._emit_state_exit_hook(state, envelope, payload_ref)
         return envelope
 
     # ----- timeout enforcement -----------------------------------

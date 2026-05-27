@@ -109,6 +109,46 @@
   the next person who copies the install pattern gets caught if they
   go back to raw assignment.
 
+- 2026-05-26 [2.8] [T-000013]: Verified (a) and (b) by inspection of
+  `packages/orchestra/orchestra/executor/executor.py`. (a) The schema
+  layer `_apply_schema_layer` converts invalid JSON
+  (`_JsonExtractError` from `_extract_last_json_object`) and schema
+  violations (`Invalid` from `spec.validate`) into
+  `ErrorRecord(kind="actor_failure")` routed via `outcome="error"`.
+  The executor's `decl.retry_max` mechanism (line ~745 linear,
+  fan-out worker loop ~2426) implements retry-once-then-fail when
+  the workflow declares `on error retry max 1 then stop`. (b)
+  `prepare()` and `invoke()` exceptions are caught at executor.py
+  ~527-577 and converted to error envelopes; `state_exit` is always
+  written (line ~717) BEFORE the transition is selected. `LogWriter`
+  fsyncs each record (`log.py:153`), and `api._derive_termination`
+  classifies a `stop`-bound transition as `ERROR` with an
+  ErrorRecord built from the last state_exit's error field.
+- 2026-05-26 [2.8] [T-000013]: Added (c). Introduced
+  `Executor.on_state_exit: Callable[[StateDecl, Envelope, str |
+  None], None] | None` (executor.py). The callback fires from inside
+  the three state_exit-producing paths (`_run_one_state`,
+  `_execute_state_body`, `_execute_transform_body`,
+  `_write_cancelled_state_exit`) AFTER the log record is fsynced and
+  the visibility index updated. Exceptions raised inside the
+  callback are swallowed so a misbehaving writer cannot abort an
+  in-flight run. `api.run_workflow` now installs an
+  `_IncrementalTranscriptWriter` that appends one `Turn` JSON line
+  per state_exit to `<run_dir>/transcript.jsonl`, fsynced per line,
+  guarded by a thread lock so concurrent fan-out completions cannot
+  interleave bytes. `run_role` no longer rewrites the file at
+  end-of-run — the file is already on disk. A crash mid-run leaves
+  every role completion durably recorded.
+- 2026-05-26 [2.8] [T-000013]: Pre-existing flake in
+  `packages/orchestra/tests/test_fan_out_executor.py::test_cancellation_race_preserves_concurrent_success`.
+  The test relies on `time.sleep(0.05)` between the controller's
+  `request_cancel_all` and the worker's check; under 16-worker
+  parallel pytest the timing can flip and the worker observes the
+  cancel before reaching the assertion's gate. Failed once,
+  immediately passed on rerun with no code change. The test
+  pre-dates this task and is purely timing-sensitive; my changes
+  are no-ops when `on_state_exit=None` (the default for that test).
+
 ## Hypotheses
 
 ## Eliminated
