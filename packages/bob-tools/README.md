@@ -156,6 +156,92 @@ The full public surface is enumerated in
 [`design/planfile.md`](../../design/planfile.md) at the workspace
 root.
 
+#### Per-file task namespaces and cross-file resolution
+
+Task IDs default to the bare `T-NNNNNN` form, which is unique within
+one `PLAN.md` but ambiguous across the workspace: `T-000007` in the
+root plan and `T-000007` in `packages/orchestra/PLAN.md` collide if
+anyone wants to refer to "task 7" without naming the file. The
+per-file namespace extension closes that gap.
+
+A plan opts in by declaring a two-letter namespace once in the
+preamble, before the first phase or `## Bugs` heading:
+
+```markdown
+<!-- bob-plan-format: 1 -->
+
+<!-- task_namespace: AB -->
+
+# My Plan
+```
+
+Once declared, canonical task IDs in that file take the
+`T-XX-NNNNNN` form (`T-AB-000001`, `T-AB-000002`, ...). The
+namespace travels through every API surface:
+
+- **Parser.** `parse_plan` reads the `task_namespace` comment from
+  the preamble and stores it on `Plan.task_namespace`. The
+  declaration is consumed, not retained as prose. Task IDs in either
+  `T-NNNNNN` or `T-XX-NNNNNN` form parse and are preserved verbatim
+  on `Task.task_id`.
+- **Renderer.** `render_plan` emits the `<!-- task_namespace: XX -->`
+  comment immediately after the magic line. The declaration
+  round-trips byte-for-byte.
+- **ID allocation.** `add_task`, `add_phase_task`, `add_bug_task`,
+  and `migrate` all consult `Plan.task_namespace` when minting new
+  IDs: in a namespaced plan the next ID is
+  `T-{namespace}-{N:06d}`, otherwise `T-{N:06d}`. The numeric
+  counter is global across the file, so namespaced and legacy IDs
+  share the same sequence space and never collide.
+- **Canonical validator.** `assert_mcloop_canonical` warns once
+  per file (via `warnings.warn`, not a raise) when a namespaced
+  plan still contains legacy unprefixed IDs. The warning is a
+  migration nudge — writes are not blocked. Files predating the
+  namespace scheme (no declaration) stay quiet.
+
+Grammar: `XX` is exactly two ASCII letters (`[A-Za-z]{2}`). Case
+is preserved on round-trip and is not normalized; pick a casing
+convention and stick to it. Two letters gives 676 namespace slots,
+which is overkill for the bob workspace and deliberately too short
+to encourage hierarchy — namespaces identify files, not topics.
+
+##### `resolve_global` — cross-file task lookup
+
+Once IDs are globally unambiguous, a workspace-level resolver
+becomes meaningful. `resolve_global` takes a fully-qualified
+`T-XX-NNNNNN` id and a workspace root, walks every `PLAN.md`
+recursively (sorted by path for determinism), and returns the
+`(file, task)` pair for the first plan that carries the id:
+
+```python
+from pathlib import Path
+from bob_tools.planfile import resolve_global, TaskNotFoundError
+
+try:
+    plan_path, task = resolve_global("T-OR-000007", Path("/path/to/workspace"))
+except TaskNotFoundError:
+    ...  # no PLAN.md under the root carries this id
+```
+
+The resolver is intentionally strict about its input form:
+
+- Only `T-XX-NNNNNN` is addressable. Passing a legacy `T-NNNNNN`
+  raises `ValueError` — these IDs are ambiguous across files by
+  construction, which is precisely the reason the namespace
+  prefix was added.
+- `TaskNotFoundError` is raised when no plan carries the id;
+  the exception carries `task_id` and `root` for diagnostics.
+- Parse errors from any walked `PLAN.md` propagate unchanged so
+  malformed files are visible to the caller rather than silently
+  skipped. A caller that wants tolerant scanning can catch
+  `PlanSyntaxError` around the call.
+
+The search descends every `PLAN.md` under the root, including
+nested per-package plans (`packages/<name>/PLAN.md`). Sorted-path
+iteration means the result is deterministic when the same id
+appears in more than one file (a duplicate which itself indicates
+a namespace-allocation bug worth flagging).
+
 ### `bob-plan` — the planfile CLI
 
 `pip install` adds a `bob-plan` script to your environment. Five
