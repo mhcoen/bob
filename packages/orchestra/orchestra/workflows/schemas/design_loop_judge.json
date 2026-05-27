@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["action", "artifact"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "const": "produce"
+        },
+        "artifact": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["action", "artifact"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "const": "revise"
+        },
+        "artifact": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["action", "rationale"],
+      "properties": {
+        "action": {
+          "type": "string",
+          "const": "done"
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    }
+  ]
+}
