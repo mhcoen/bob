@@ -1,70 +1,33 @@
 {
-  "permissions": {
-    "defaultMode": "plan",
-    "allow": [
-      "WebSearch",
-      "Bash(grep:*)",
-      "Bash(echo:*)",
-      "Bash(find:*)",
-      "Bash(wc:*)",
-      "Bash(git commit:*)",
-      "Bash(git status:*)",
-      "Bash(git add:*)",
-      "Bash(git push)",
-      "Bash(git checkout:*)",
-      "Bash(git reset:*)",
-      "Bash(git rm:*)",
-      "Bash(git merge:*)",
-      "Bash(python -m pytest:*)",
-      "Bash(pytest:*)",
-      "Bash(python3:*)",
-      "Bash(python -c:*)",
-      "Bash(pip index:*)",
-      "Bash(ruff:*)",
-      "Bash(npm:*)",
-      "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)",
-      "WebFetch(domain:api.github.com)",
-      "WebFetch(domain:docs.anthropic.com)",
-      "WebFetch(domain:pypi.org)"
-    ]
-  },
-  "sandbox": {
-    "enabled": true,
-    "autoAllowBashIfSandboxed": true,
-    "allowUnsandboxedCommands": false,
-    "network": {
-      "allowedDomains": [
-        "github.com",
-        "*.github.com",
-        "api.github.com",
-        "raw.githubusercontent.com",
-        "objects.githubusercontent.com",
-        "api.anthropic.com",
-        "localhost",
-        "127.0.0.1",
-        "pypi.org",
-        "*.pypi.org",
-        "files.pythonhosted.org",
-        "registry.npmjs.org",
-        "*.npmjs.org",
-        "api.telegram.org"
-      ],
-      "allowLocalBinding": true
-    }
-  },
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /path/to/mcloop/telegram-permission-hook.py",
-            "timeout": 600000
-          }
-        ]
+  "chain": [
+    {
+      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "opus"
+    },
+    {
+      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "enabled": true,
+      "cli": "codex",
+      "model": "gpt-5-codex"
+    },
+    {
+      "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "kimi-k2.6",
+      "executor": {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "use_slug_model": false,
+        "env_overrides": {
+          "ENABLE_TOOL_SEARCH": "false",
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
+          "DISABLE_INTERLEAVED_THINKING": "1",
+          "MAX_THINKING_TOKENS": "0"
+        }
       }
-    ]
-  }
+    }
+  ]
 }

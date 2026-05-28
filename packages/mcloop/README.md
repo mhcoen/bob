@@ -584,17 +584,16 @@ To undo the setup, run `mcloop uninstall` (or `mcloop uninstall
 `.mcloop/` directories, PLAN.md files, logs, `permissions.allow`
 entries, and the sandbox setting untouched.
 
-If you prefer to configure manually, copy `settings.example.json`
-from this repo to `~/.claude/settings.json` (or merge it with your
-existing settings), then update the hook path. Note that
-`settings.example.json` uses the `"matcher"` wrapper format with a
-timeout, while `mcloop install` writes a simpler flat format without
+If you prefer to configure hooks manually, merge a hook block like
+the following into `~/.claude/settings.json`, then update the hook
+path. This example uses the `"matcher"` wrapper format with a timeout,
+while `mcloop install` writes a simpler flat format without
 `"matcher"` or `"timeout"`. Both work. The `"matcher": "Bash"` form
 restricts the hook to Bash tool calls only, while the flat form runs
 on all tool calls. The flat form is what McLoop needs since the
 permission hook handles all tool types (including MCP blocking).
 
-Manual example using the `settings.example.json` format:
+Manual hook example:
 
 ```json
 {
@@ -620,8 +619,7 @@ chaining commands with `&&` or `;` so every operation is individually gated.
 
 Add any commands you always trust to `permissions.allow` so they pass through
 without a notification. Safe read-only commands like `ls`, `cat`, `head`,
-`tail`, `which`, and `stat` are good candidates. See `settings.example.json`
-for a recommended baseline.
+`tail`, `which`, and `stat` are good candidates.
 
 If you use [RTK](https://github.com/rtk-ai/rtk) to reduce token usage, the
 hook automatically unwraps `rtk proxy` commands before matching. So
@@ -1622,6 +1620,122 @@ but execution continues. Both short aliases (`opus`, `sonnet`,
 `haiku`, `opusplan`) and full model strings
 (`claude-opus-4-6`, `gpt-5.4`) are accepted.
 
+### Model fallover chain
+
+For unattended runs, configure a model fallover chain in
+`~/.mcloop/config.json`. McLoop starts each task on the first enabled
+tier. If that tier hits a 5-hour cap, a 7-day cap, a session limit, or
+another detected quota/rate limit, McLoop marks that CLI unavailable
+and advances to the next enabled tier without waiting for human input.
+It waits for reset only when every remaining tier is unavailable.
+
+Each `chain` entry is an object with these fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `comment` | string, optional | Parsed and ignored. Use it to document why the tier exists. |
+| `enabled` | bool, optional | Defaults to `true`. Set `false` to leave a tier in place but skip it. |
+| `cli` | `"claude"` or `"codex"` | CLI backend for the tier. |
+| `model` | string | Model name passed to that CLI. |
+| `executor` | object, optional | Per-tier executor routing config. Same shape as the executor config, plus `use_slug_model` and `env_overrides`. |
+
+Worked three-tier example:
+
+```json
+{
+  "chain": [
+    {
+      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "opus"
+    },
+    {
+      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "enabled": true,
+      "cli": "codex",
+      "model": "gpt-5-codex"
+    },
+    {
+      "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "kimi-k2.6",
+      "executor": {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "use_slug_model": false,
+        "env_overrides": {
+          "ENABLE_TOOL_SEARCH": "false",
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
+          "DISABLE_INTERLEAVED_THINKING": "1",
+          "MAX_THINKING_TOKENS": "0"
+        }
+      }
+    }
+  ]
+}
+```
+
+The same worked example lives at `packages/mcloop/settings.example.json`
+and can be copied to `~/.mcloop/config.json`.
+
+Use `enabled` as the normal way to force a narrower run. For example,
+to force Opus-only work while keeping the fallover config ready for
+later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
+
+```json
+{
+  "chain": [
+    {
+      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "opus"
+    },
+    {
+      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "enabled": false,
+      "cli": "codex",
+      "model": "gpt-5-codex"
+    },
+    {
+      "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
+      "enabled": false,
+      "cli": "claude",
+      "model": "kimi-k2.6",
+      "executor": {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "use_slug_model": false,
+        "env_overrides": {
+          "ENABLE_TOOL_SEARCH": "false",
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
+          "DISABLE_INTERLEAVED_THINKING": "1",
+          "MAX_THINKING_TOKENS": "0"
+        }
+      }
+    }
+  ]
+}
+```
+
+The optional `executor` block is applied only to that tier. Set
+`use_slug_model` to `false` for direct-provider endpoints, such as
+Moonshot, that expect the raw model name (`kimi-k2.6`) instead of an
+OpenRouter-style provider slug (`moonshotai/kimi-k2.6`). `env_overrides`
+is applied after McLoop's standard provider environment block, so it
+can override any generated key or inject provider-specific settings
+such as `CLAUDE_CONFIG_DIR`, `DISABLE_INTERLEAVED_THINKING`, and
+`MAX_THINKING_TOKENS`.
+
+Command-line flags still take precedence. `--model` collapses the
+configured chain to a one-off single-tier run using the selected CLI
+and model. With no `chain` key, existing `model` and `fallback_model`
+configs continue to work and are converted internally to a two-entry
+chain using the same CLI. With neither key present, McLoop defaults to
+one tier: `{"cli": "claude", "model": "opus"}`.
+
 ### Configuration reference
 
 All keys in `~/.mcloop/config.json`:
@@ -1664,6 +1778,14 @@ for review.
 |-----|--------|---------|-------------|
 | `cli` | `"claude"`, `"codex"` | `"claude"` | CLI backend. Override with `--cli`. |
 | `model` | Any model string | None (CLI default) | Default model. Override with `--model`. |
+| `fallback_model` | Any model string | None | Legacy second tier when `chain` is absent. |
+| `chain` | Array of objects | Legacy `model` / `fallback_model` chain | Ordered model fallover tiers for unattended quota/session-limit recovery. |
+| `chain[].comment` | string | `""` | Self-documenting note, parsed and ignored. |
+| `chain[].enabled` | `true`, `false` | `true` | Toggle a tier without deleting it. |
+| `chain[].cli` | `"claude"`, `"codex"` | Required | CLI backend for this tier. |
+| `chain[].model` | Any model string | Required | Model for this tier. |
+| `chain[].executor.use_slug_model` | `true`, `false` | `true` | When `false`, export the raw model string instead of prepending a provider prefix. |
+| `chain[].executor.env_overrides` | Object of string keys/values | `{}` | Environment overrides applied after standard provider routing variables. |
 | `billing` | `"subscription"`, `"api"`, `"openrouter"` | `"subscription"` | Billing mode. `"openrouter"` routes through OpenRouter. |
 | `batch` | `true`, `false` | `true` | Whether `[BATCH]` tags are honored. Set `false` to run all subtasks individually. |
 | `env_passthrough` | Array of strings | `[]` | Extra environment variable names to pass through to CLI sessions. |
