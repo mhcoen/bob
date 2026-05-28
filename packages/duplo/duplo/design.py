@@ -15,6 +15,7 @@ from typing import Any
 
 import orchestra
 from orchestra import ErrorRecord, IterativeDesignResult
+from orchestra.api import WorkflowApiError
 
 _LOGGER = logging.getLogger("duplo.design")
 
@@ -55,7 +56,16 @@ def run_iterative_design(seed_input: Any) -> str:
       orchestra ``ErrorRecord`` with the transcript path included for
       postmortem.
     """
-    result: IterativeDesignResult = orchestra.run_role("design", seed_input=seed_input)
+    try:
+        result: IterativeDesignResult = orchestra.run_role("design", seed_input=seed_input)
+    except WorkflowApiError as exc:
+        # No workflow run was attempted; transcript_path and run_id are empty
+        # because the role lookup failed before any turn executed.
+        raise IterativeDesignError(
+            error=ErrorRecord(kind="config_missing", message=str(exc)),
+            transcript_path=Path(""),
+            run_id="",
+        ) from exc
     final_artifact: str = result.final_artifact
     if result.termination == "CONVERGED":
         return final_artifact
