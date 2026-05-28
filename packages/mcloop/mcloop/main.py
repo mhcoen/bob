@@ -1777,6 +1777,53 @@ def run_loop(
                     result.exit_code,
                 ):
                     _checkpoint(project_dir)
+                    if len(chain) == 1:
+                        notify(
+                            "Session limit reached. Polling every 10m.",
+                            level="warning",
+                        )
+                        print(
+                            formatting.system_msg(
+                                "Session limit reached."
+                                f" Polling every {SESSION_LIMIT_POLL // 60}m."
+                                " Press Ctrl-C to exit."
+                            ),
+                            flush=True,
+                        )
+                        try:
+                            time.sleep(SESSION_LIMIT_POLL)
+                        except KeyboardInterrupt:
+                            total = time.monotonic() - run_start
+                            _print_summary(
+                                completed,
+                                None,
+                                "",
+                                parse(bugs_path)
+                                + (parse(plan_path) if plan_path.exists() else []),
+                                total,
+                                project_dir,
+                                notes_snapshot,
+                            )
+                            print("\nExiting.", flush=True)
+                            _build_and_write_summary(
+                                project_dir,
+                                run_start_iso,
+                                elapsed_seconds=total,
+                                mode=_run_mode,
+                                task_entries=task_entries,
+                                check_entries=check_entries,
+                                commit_hashes=commit_hashes,
+                                terminal_status="interrupted",
+                                failure_detail="User interrupted during session limit wait",
+                                stuck=[f"{format_task_id(task)}{task.text}"],
+                            )
+                            return RunStatus(
+                                "interrupted",
+                                stuck=[f"{format_task_id(task)}{task.text}"],
+                                detail="User interrupted during session limit wait",
+                            )
+                        attempt -= 1
+                        continue
                     rate_state.mark_limited(active_entry.cli, cooldown=SESSION_LIMIT_POLL)
                     notify(
                         f"Session limit reached on {active_entry.cli}. Trying next tier.",
