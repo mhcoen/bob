@@ -86,3 +86,22 @@ def test_error_without_error_record_still_raises():
             run_iterative_design("seed")
     assert exc_info.value.error.kind == "runner_failure"
     assert exc_info.value.run_id == "no-record"
+
+
+def test_run_iterative_design_translates_config_missing_to_iterative_design_error(monkeypatch):
+    """When orchestra.run_role raises WorkflowApiError (e.g. no 'design' role
+    configured), run_iterative_design must translate that to IterativeDesignError
+    so callers like extract_design that handle IterativeDesignError uniformly
+    see the same exception type for both runtime and config-time failures."""
+    from orchestra.api import WorkflowApiError
+
+    def fake_run_role(*args, **kwargs):
+        raise WorkflowApiError("unknown role 'design'. Configured role_bindings: []")
+
+    monkeypatch.setattr("duplo.design.orchestra.run_role", fake_run_role)
+
+    with pytest.raises(IterativeDesignError) as exc_info:
+        run_iterative_design("any seed")
+
+    assert exc_info.value.error.kind == "config_missing"
+    assert "unknown role" in exc_info.value.error.message
