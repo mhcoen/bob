@@ -493,7 +493,7 @@ def test_run_verb_uses_project_local_override(
     packaged copy when ``project_dir`` is passed. Stub run_workflow
     so the test does not require a model adapter; assert the path
     resolution picked the override."""
-    from orchestra import api as api_mod
+    from orchestra.api import dispatch as api_mod
     from orchestra.api import run_verb
     from orchestra.config import OrchestraConfig
 

@@ -1197,7 +1197,7 @@ def test_run_workflow_default_prints_progress_to_stderr(
     # Patch the registry's model adapter so the workflow actually
     # runs without any subprocesses. The recording adapter returns
     # canned text per state_id so every state can complete.
-    from orchestra import api as _api
+    from orchestra.api import dispatch as _api
 
     real_build = _api._build_registry
 
@@ -1235,7 +1235,7 @@ def test_run_workflow_quiet_true_silences_progress(
     """quiet=True suppresses every progress line. Stderr stays clean
     so library callers that want to capture output for their own
     purposes can do so."""
-    from orchestra import api as _api
+    from orchestra.api import dispatch as _api
     from orchestra.api import run_workflow
 
     real_build = _api._build_registry
@@ -1515,7 +1515,7 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     get the two-line ticker without the caller threading it in. T-000001
     regression check.
     """
-    import orchestra.api as api_module
+    from orchestra.api import bindings as api_module
 
     captured: dict[str, Any] = {}
 
