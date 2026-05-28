@@ -213,7 +213,6 @@ def invoke_code_edit(
             model=model,
             timeout=timeout,
             task_id=task_id,
-            executor_override=executor_override,
         )
     return _invoke_direct(
         instruction=instruction,
