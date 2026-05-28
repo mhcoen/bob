@@ -1727,7 +1727,9 @@ OpenRouter-style provider slug (`moonshotai/kimi-k2.6`). `env_overrides`
 is applied after McLoop's standard provider environment block, so it
 can override any generated key or inject provider-specific settings
 such as `CLAUDE_CONFIG_DIR`, `DISABLE_INTERLEAVED_THINKING`, and
-`MAX_THINKING_TOKENS`.
+`MAX_THINKING_TOKENS`. When both a per-tier `chain[].executor` block
+and a top-level `executor` block are present, the per-tier block wins
+for that tier's invocations.
 
 Command-line flags still take precedence. `--model` collapses the
 configured chain to a one-off single-tier run using the selected CLI
@@ -1784,8 +1786,10 @@ for review.
 | `chain[].enabled` | `true`, `false` | `true` | Toggle a tier without deleting it. |
 | `chain[].cli` | `"claude"`, `"codex"` | Required | CLI backend for this tier. |
 | `chain[].model` | Any model string | Required | Model for this tier. |
-| `chain[].executor.use_slug_model` | `true`, `false` | `true` | When `false`, export the raw model string instead of prepending a provider prefix. |
+| `chain[].executor.auth_token_env` | string | `"OPENROUTER_API_KEY"` | Environment variable to read the bearer token from. Set to `MOONSHOT_API_KEY`, `DEEPSEEK_API_KEY`, etc., when routing to a direct provider. |
+| `chain[].executor.base_url` | URL | OpenRouter default | Anthropic-compatible endpoint for this tier. Set to the direct-provider URL (e.g. `https://api.moonshot.ai/anthropic`) to bypass OpenRouter. |
 | `chain[].executor.env_overrides` | Object of string keys/values | `{}` | Environment overrides applied after standard provider routing variables. |
+| `chain[].executor.use_slug_model` | `true`, `false` | `true` | When `false`, export the raw model string instead of prepending a provider prefix. |
 | `billing` | `"subscription"`, `"api"`, `"openrouter"` | `"subscription"` | Billing mode. `"openrouter"` routes through OpenRouter. |
 | `batch` | `true`, `false` | `true` | Whether `[BATCH]` tags are honored. Set `false` to run all subtasks individually. |
 | `env_passthrough` | Array of strings | `[]` | Extra environment variable names to pass through to CLI sessions. |
@@ -1824,18 +1828,19 @@ deepseek() {
 }
 
 kimi_moonshot_fast() {
-  ANTHROPIC_BASE_URL="https://openrouter.ai/api" \
-  ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" \
-  ANTHROPIC_MODEL="moonshotai/kimi-k2.6" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="moonshotai/kimi-k2.6" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="moonshotai/kimi-k2.6" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="moonshotai/kimi-k2.6" \
-  CLAUDE_CODE_SUBAGENT_MODEL="moonshotai/kimi-k2.6" \
-  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC="1" \
-  ENABLE_TOOL_SEARCH="1" \
-  DISABLE_INTERLEAVED_THINKING="1" \
-  MAX_THINKING_TOKENS="0" \
-  zsh
+  CLAUDE_CONFIG_DIR="$HOME/.claude-kimi-fast" \
+  ANTHROPIC_BASE_URL="https://api.moonshot.ai/anthropic/" \
+  ANTHROPIC_AUTH_TOKEN="$MOONSHOT_API_KEY" \
+  ANTHROPIC_MODEL="kimi-k2.6" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="kimi-k2.6" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="kimi-k2.6" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="kimi-k2.6" \
+  CLAUDE_CODE_SUBAGENT_MODEL="kimi-k2.6" \
+  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+  ENABLE_TOOL_SEARCH=false \
+  DISABLE_INTERLEAVED_THINKING=1 \
+  MAX_THINKING_TOKENS=0 \
+  claude "$@"
 }
 ```
 
@@ -1849,7 +1854,10 @@ What each variable does:
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` / `_SONNET_MODEL` / `_HAIKU_MODEL` | Routes the `opus` / `sonnet` / `haiku` aliases to provider-specific model ids so existing prompts keep working. |
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Model used when Claude Code spawns sub-agents. |
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Suppresses telemetry calls back to Anthropic when you are not using their API. |
-| `ENABLE_TOOL_SEARCH` | Enables the deferred-tool-search feature so Claude Code can lazily load tool schemas, which most third-party endpoints support. |
+| `CLAUDE_CONFIG_DIR` | Points Claude Code at a separate config directory so the third-party provider's credentials and session state do not collide with the subscription-backed install. |
+| `DISABLE_INTERLEAVED_THINKING` | Set to `1` to disable interleaved thinking blocks. Required for direct-provider endpoints that do not support the Anthropic thinking schema. |
+| `MAX_THINKING_TOKENS` | Set to `0` alongside `DISABLE_INTERLEAVED_THINKING=1` to stop the client from reserving a thinking-token budget on third-party endpoints. |
+| `ENABLE_TOOL_SEARCH` | Enables the deferred-tool-search feature so Claude Code can lazily load tool schemas, which most third-party endpoints support. Set to `false` on endpoints that do not implement it (e.g. Moonshot's Anthropic-compatible API). |
 
 Inside that subshell, `mcloop` will pick up the variables. mcloop also
 applies these variables automatically when the executor model string
