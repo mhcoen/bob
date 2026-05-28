@@ -853,3 +853,60 @@ class TestInitWritesOrchestraConfig:
         )
         init_mod.run_init(ns)
         assert json.loads(cfg_path.read_text()) == existing
+
+
+class TestDuploProgressCallbackActorProgress:
+    """make_duplo_progress_callback handles ``actor_progress`` events with a
+    two-line ticker matching orchestra's stderr_reporter: a duplo-shaped
+    "still running" line plus an indented ``    running: <activity>`` line
+    pulled from the subprocess adapter's live-activity getter.
+    """
+
+    def _event(self, kind: str, **overrides: Any) -> Any:
+        defaults = dict(
+            kind=kind,
+            state_name="produce",
+            role="judge",
+            adapter="claude_code_text",
+            model="opus",
+            index=1,
+            total=4,
+            elapsed_seconds=30.0,
+            children=None,
+        )
+        defaults.update(overrides)
+        return type("E", (), defaults)
+
+    def test_actor_progress_emits_running_line_and_activity(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cb = council.make_duplo_progress_callback()
+        with patch(
+            "orchestra.adapters._subprocess.get_current_activity",
+            return_value="Read /test/file.py",
+        ):
+            cb(self._event("actor_progress"))
+        err = capsys.readouterr().err
+        assert "[duplo] state=produce model=opus elapsed=30.0s status=running" in err
+        assert "    running: Read /test/file.py" in err
+
+    def test_actor_progress_omits_activity_line_when_no_activity(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cb = council.make_duplo_progress_callback()
+        with patch(
+            "orchestra.adapters._subprocess.get_current_activity",
+            return_value="",
+        ):
+            cb(self._event("actor_progress", elapsed_seconds=12.5))
+        err = capsys.readouterr().err
+        assert "elapsed=12.5s status=running" in err
+        assert "running:" not in err.split("status=running")[1]
+
+    def test_state_enter_still_emits_legacy_duplo_line(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        cb = council.make_duplo_progress_callback()
+        cb(self._event("state_enter", elapsed_seconds=None))
+        err = capsys.readouterr().err
+        assert "[duplo] state=produce model=opus status=running" in err

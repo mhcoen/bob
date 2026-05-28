@@ -37,7 +37,10 @@ def test_converged_returns_artifact():
     with patch("orchestra.run_role", return_value=fake) as m:
         result = run_iterative_design("seed")
     assert result == "final text"
-    m.assert_called_once_with("design", seed_input="seed")
+    m.assert_called_once()
+    assert m.call_args.args == ("design",)
+    assert m.call_args.kwargs["seed_input"] == "seed"
+    assert callable(m.call_args.kwargs.get("progress_callback"))
 
 
 def test_capped_returns_artifact_and_logs_warning(caplog):

@@ -133,13 +133,26 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
     individual child enter/exit events still print as ordinary
     state transitions inside the block.
 
+    ``actor_progress`` events surface a two-line ticker matching
+    orchestra's ``stderr_reporter`` shape: a duplo-style "still running"
+    line and an indented ``    running: <activity>`` line pulled from
+    the subprocess adapter's live-activity getter. This is the duplo
+    half of the T-000001 (orchestra-side commit c38a5005) live-activity
+    surfacing pattern. Sessions with no live activity emit just the
+    "still running" line; no spurious empty activity lines.
+
     Lines go to stderr so stdout-only consumers (smoke harnesses,
     pipelines) are unaffected. The callback is thread-safe: orchestra
     fan-out workers may emit ``state_exit`` events from worker
     threads, and a module-level lock keeps line writes from
     interleaving.
     """
+    import shutil
     import threading
+
+    from orchestra.adapters import _subprocess as _subprocess_mod
+
+    _ACTIVITY_LINE_PREFIX = "    running: "
 
     lock = threading.Lock()
 
@@ -147,6 +160,22 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
         with lock:
             sys.stderr.write(line + "\n")
             sys.stderr.flush()
+
+    def _emit_activity_line() -> None:
+        try:
+            activity = _subprocess_mod.get_current_activity()
+        except Exception:
+            return
+        if not activity:
+            return
+        try:
+            columns = shutil.get_terminal_size((80, 24)).columns
+        except (OSError, ValueError):
+            columns = 80
+        line = _ACTIVITY_LINE_PREFIX + activity
+        if columns > 1 and len(line) > columns:
+            line = line[: max(columns - 1, len(_ACTIVITY_LINE_PREFIX))] + "…"
+        _emit(line)
 
     def callback(event: Any) -> None:
         kind = event.kind
@@ -157,6 +186,15 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
             return
         if kind == "fan_out_end":
             _emit("[duplo] fan_out end")
+            return
+        if kind == "actor_progress":
+            model = event.model or event.adapter or "transform"
+            elapsed = event.elapsed_seconds or 0.0
+            _emit(
+                f"[duplo] state={event.state_name} model={model} "
+                f"elapsed={elapsed:.1f}s status=running"
+            )
+            _emit_activity_line()
             return
         if kind not in ("state_enter", "state_exit"):
             return

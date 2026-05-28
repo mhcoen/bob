@@ -56,8 +56,14 @@ def run_iterative_design(seed_input: Any) -> str:
       orchestra ``ErrorRecord`` with the transcript path included for
       postmortem.
     """
+    from duplo.council import make_duplo_progress_callback
+
     try:
-        result: IterativeDesignResult = orchestra.run_role("design", seed_input=seed_input)
+        result: IterativeDesignResult = orchestra.run_role(
+            "design",
+            seed_input=seed_input,
+            progress_callback=make_duplo_progress_callback(),
+        )
     except WorkflowApiError as exc:
         # No workflow run was attempted; transcript_path and run_id are empty
         # because the role lookup failed before any turn executed.

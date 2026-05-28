@@ -126,7 +126,10 @@ def test_run_iterative_design_returns_artifact_and_writes_transcript_jsonl(
         result = run_iterative_design(seed_input)
 
     assert result == artifact_text
-    m.assert_called_once_with("design", seed_input=seed_input)
+    m.assert_called_once()
+    assert m.call_args.args == ("design",)
+    assert m.call_args.kwargs["seed_input"] == seed_input
+    assert callable(m.call_args.kwargs.get("progress_callback"))
     # Confirm the fixture text actually flowed through unchanged (a
     # silent string rewrite between caller and runtime would defeat the
     # purpose of the seed-input contract).
