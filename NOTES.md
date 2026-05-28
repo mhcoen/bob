@@ -268,6 +268,31 @@
 
 ## Hypotheses
 
+## Backlog
+
+- 2026-05-28: **Model-resumption logic on Opus quota recovery.** When the
+  Opus 5-hour cap (or 7-day rolling cap) hits, mcloop currently has two
+  fallback paths: switch to an alternate model adapter (GPT/Codex,
+  Kimi K2.6, eventually DeepSeek) for the duration of the lockout, OR
+  pause and wait for quota recovery. The third path that needs building:
+  use the alternate while Opus is locked, then *automatically resume on
+  Opus* the moment its quota window resets — especially relevant when
+  the alternate also has finite quota (GPT will eventually exhaust;
+  Kimi has its own ceilings). Resumption is non-trivial: mcloop needs
+  to (a) detect when the Opus window has reset (probe with a cheap
+  `claude -p` preflight on a schedule, OR parse the 5-hour-reset
+  timestamp from the original rate-limit error), (b) decide whether to
+  finish the current task on the fallback model (likely yes, since
+  task boundaries are the clean handoff points) or interrupt and
+  re-dispatch, (c) re-route subsequent task dispatch back to Opus
+  cleanly. The design has to handle the case where multiple models in
+  sequence run out — Opus → GPT → Kimi → DeepSeek → wait — and the
+  resumption preference order should respect both the cost hierarchy
+  AND the quality hierarchy (Opus first when available, even if GPT
+  is also available, because Opus is preferred for high-judgment tasks).
+  File this as a real PLAN.md task when the model-routing strategy
+  conversation produces a concrete spec.
+
 ## Eliminated
 
 c38a500: Added live activity tracking for agent-routed sessions. The subprocess adapter now parses tool_use events from the CLI's JSON stream and surfaces them as a second line under the elapsed-time progress ticker. This shows users what the agent is currently doing (e.g., "Read /path/to/file") without coupling the reporter to the subprocess module. The feature is wired by default in the API, CLI, and REPL.
