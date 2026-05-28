@@ -203,6 +203,43 @@ def _legacy_chain(
     return chain
 
 
+def _enabled_chain_clis(chain: list[ChainEntry] | tuple[ChainEntry, ...]) -> tuple[str, ...]:
+    return tuple(sorted({entry.cli for entry in chain}))
+
+
+def _select_chain_entry(
+    chain: list[ChainEntry] | tuple[ChainEntry, ...],
+    rate_state: RateLimitState,
+    exhausted_indices: set[int],
+) -> tuple[int, ChainEntry] | None:
+    enabled_clis = _enabled_chain_clis(chain)
+    available_cli = get_available_cli(
+        rate_state,
+        preferred=chain[0].cli,
+        enabled_clis=enabled_clis,
+    )
+    if available_cli is None:
+        return None
+    for idx, entry in enumerate(chain):
+        if idx in exhausted_indices:
+            continue
+        if entry.cli == available_cli and not rate_state.is_limited(entry.cli):
+            return idx, entry
+    for idx, entry in enumerate(chain):
+        if idx not in exhausted_indices and not rate_state.is_limited(entry.cli):
+            return idx, entry
+    return None
+
+
+def _unexhausted_chain_entries_limited(
+    chain: list[ChainEntry] | tuple[ChainEntry, ...],
+    rate_state: RateLimitState,
+    exhausted_indices: set[int],
+) -> bool:
+    pending = [entry for idx, entry in enumerate(chain) if idx not in exhausted_indices]
+    return bool(pending) and all(rate_state.is_limited(entry.cli) for entry in pending)
+
+
 def resolve_chain(config: dict, args: argparse.Namespace) -> list[ChainEntry]:
     """Resolve the configured model fallover chain for a bare loop run."""
     cli = args.cli or config.get("cli", "claude")
@@ -929,6 +966,7 @@ def run_loop(
         )
     else:
         chain = list(chain)
+    enabled_clis = _enabled_chain_clis(chain)
     primary_entry = chain[0]
     primary_model = primary_entry.model
 
@@ -1611,9 +1649,29 @@ def run_loop(
                 terminal_failure = f"Batch failed: {format_task_id(parent)}{parent.text}"
                 break
 
-        active_cli = get_available_cli(rate_state, enabled_clis=(cli,))
-        if active_cli is None:
-            active_cli = wait_for_reset(rate_state, notify, enabled_clis=(cli,))
+        exhausted_chain_indices: set[int] = set()
+        active_selection = _select_chain_entry(
+            chain,
+            rate_state,
+            exhausted_chain_indices,
+        )
+        while active_selection is None and _unexhausted_chain_entries_limited(
+            chain,
+            rate_state,
+            exhausted_chain_indices,
+        ):
+            released_cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+            rate_state.limited.pop(released_cli, None)
+            active_selection = _select_chain_entry(
+                chain,
+                rate_state,
+                exhausted_chain_indices,
+            )
+        if active_selection is None:
+            terminal_failure = "No available model tier in chain"
+            break
+        _active_chain_idx, active_entry = active_selection
+        active_cli = active_entry.cli
 
         has_subtasks = find_parent(tasks, task) is not None
         ctx.update_group(label, has_subtasks)
@@ -1663,17 +1721,38 @@ def run_loop(
         # only, so it must default to an empty list here.
         result: RunResult | None = None
         changed_files = []
-        models_to_try = [current_model]
-        if fallback_model and fallback_model != current_model:
-            models_to_try.append(fallback_model)
-        for model_idx, task_model in enumerate(models_to_try):
-            if model_idx > 0:
+        active_model_for_summary = active_entry.model
+        last_error = ""
+        while True:
+            active_selection = _select_chain_entry(
+                chain,
+                rate_state,
+                exhausted_chain_indices,
+            )
+            if active_selection is None:
+                if len(exhausted_chain_indices) == len(chain):
+                    break
+                if _unexhausted_chain_entries_limited(
+                    chain,
+                    rate_state,
+                    exhausted_chain_indices,
+                ):
+                    released_cli = wait_for_reset(rate_state, notify, enabled_clis=enabled_clis)
+                    rate_state.limited.pop(released_cli, None)
+                    continue
+                break
+            active_chain_idx, active_entry = active_selection
+            active_cli = active_entry.cli
+            task_model = active_entry.model
+            active_model_for_summary = task_model
+            if active_chain_idx > 0 or exhausted_chain_indices:
                 print(
                     formatting.system_msg(f"Primary model failed, retrying with {task_model}"),
                     flush=True,
                 )
             attempt = 0
             last_error = ""
+            limit_hit = False
             while attempt < max_retries:
                 attempt += 1
                 result = run_task(
@@ -1699,91 +1778,35 @@ def run_loop(
                     result.exit_code,
                 ):
                     _checkpoint(project_dir)
+                    rate_state.mark_limited(active_entry.cli, cooldown=SESSION_LIMIT_POLL)
                     notify(
-                        "Session limit reached. Polling every 10m.",
+                        f"Session limit reached on {active_entry.cli}. Trying next tier.",
                         level="warning",
                     )
                     print(
                         formatting.system_msg(
-                            "Session limit reached."
-                            f" Polling every {SESSION_LIMIT_POLL // 60}m."
-                            " Press Ctrl-C to exit."
+                            f"Session limit reached on {active_entry.cli}; "
+                            "advancing model tier."
                         ),
                         flush=True,
                     )
-                    try:
-                        time.sleep(SESSION_LIMIT_POLL)
-                    except KeyboardInterrupt:
-                        total = time.monotonic() - run_start
-                        _print_summary(
-                            completed,
-                            None,
-                            "",
-                            parse(bugs_path) + (parse(plan_path) if plan_path.exists() else []),
-                            total,
-                            project_dir,
-                            notes_snapshot,
-                        )
-                        print("\nExiting.", flush=True)
-                        _build_and_write_summary(
-                            project_dir,
-                            run_start_iso,
-                            elapsed_seconds=total,
-                            mode=_run_mode,
-                            task_entries=task_entries,
-                            check_entries=check_entries,
-                            commit_hashes=commit_hashes,
-                            terminal_status="interrupted",
-                            failure_detail="User interrupted during session limit wait",
-                            stuck=[f"{format_task_id(task)}{task.text}"],
-                        )
-                        return RunStatus(
-                            "interrupted",
-                            stuck=[f"{format_task_id(task)}{task.text}"],
-                            detail="User interrupted during session limit wait",
-                        )
-                    # Don't count as a real attempt
-                    attempt -= 1
-                    continue
+                    limit_hit = True
+                    break
 
                 if is_rate_limited(result.output, result.exit_code):
-                    rate_state.mark_limited(cli)
+                    rate_state.mark_limited(active_entry.cli)
                     notify(
-                        f"Rate-limited on {cli}.",
+                        f"Rate-limited on {active_entry.cli}. Trying next tier.",
                         level="warning",
                     )
-                    if fallback_model and current_model != fallback_model:
-                        current_model = fallback_model
-                        task_model = fallback_model
-                        print(
-                            formatting.system_msg(
-                                f"Switching to fallback model: {fallback_model}"
-                            ),
-                            flush=True,
-                        )
-                    active_cli = get_available_cli(
-                        rate_state,
-                        enabled_clis=(cli,),
+                    print(
+                        formatting.system_msg(
+                            f"Rate-limited on {active_entry.cli}; advancing model tier."
+                        ),
+                        flush=True,
                     )
-                    if active_cli is None:
-                        active_cli = wait_for_reset(
-                            rate_state,
-                            notify,
-                            enabled_clis=(cli,),
-                        )
-                        # Reset to primary model after cooldown
-                        if fallback_model and current_model == fallback_model:
-                            current_model = primary_model
-                            task_model = primary_model
-                            print(
-                                formatting.system_msg(
-                                    f"Rate limit cleared, back to model: {primary_model}"
-                                ),
-                                flush=True,
-                            )
-                    # Don't count rate-limit as a real attempt
-                    attempt -= 1
-                    continue
+                    limit_hit = True
+                    break
 
                 if not result.success:
                     last_error = _tail(result.output, 50)
@@ -2149,6 +2172,11 @@ def run_loop(
                 break
             if terminal_failure:
                 break
+            if limit_hit:
+                if active_chain_idx < len(chain) - 1:
+                    exhausted_chain_indices.add(active_chain_idx)
+                continue
+            exhausted_chain_indices.add(active_chain_idx)
 
         if terminal_failure:
             break
@@ -2165,7 +2193,7 @@ def run_loop(
                     text=task.text,
                     outcome="failed",
                     elapsed=round(time.monotonic() - task_start, 2),
-                    model=current_model or "",
+                    model=active_model_for_summary or "",
                     attempts=max_retries,
                     success=False,
                     exit_code=result.exit_code if result is not None else 0,

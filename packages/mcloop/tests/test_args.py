@@ -4520,6 +4520,146 @@ def test_chain_config_model_flag_collapses_chain():
     assert chain == [ChainEntry(cli="codex", model="gpt-5-codex-mini")]
 
 
+def test_chain_advances_on_rate_limit(tmp_path):
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
+    (tmp_path / ".git").mkdir()
+
+    marked_limited = []
+
+    class SpyRateLimitState:
+        def __init__(self):
+            self.limited = {}
+
+        def mark_limited(self, cli, cooldown=300):
+            marked_limited.append(cli)
+            self.limited[cli] = time.time() + cooldown
+
+        def is_limited(self, cli):
+            return cli in self.limited
+
+    calls = []
+
+    def fake_run_task(task_text, cli, project_dir, log_dir, description="", **kwargs):
+        calls.append((cli, kwargs.get("model")))
+        result = MagicMock()
+        if len(calls) == 1:
+            result.success = False
+            result.output = "rate limit exceeded"
+            result.exit_code = 1
+        else:
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.RateLimitState", SpyRateLimitState),
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main.ensure_conftest_guard", return_value=False),
+        patch("mcloop.main.ensure_pytest_optimizations", return_value=False),
+        patch("mcloop.main.validate_project_dependencies"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._commit"),
+    ):
+        result = run_loop(
+            plan,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="codex", model="gpt-5-codex"),
+            ],
+            no_audit=True,
+        )
+
+    assert result.ok
+    assert marked_limited == ["claude"]
+    assert calls[:2] == [("claude", "opus"), ("codex", "gpt-5-codex")]
+
+
+def test_chain_all_clis_limited_waits(tmp_path):
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
+    (tmp_path / ".git").mkdir()
+
+    class PreLimitedRateState:
+        def __init__(self):
+            self.limited = {
+                "claude": time.time() + 300,
+                "codex": time.time() + 300,
+            }
+
+        def mark_limited(self, cli, cooldown=300):
+            self.limited[cli] = time.time() + cooldown
+
+        def is_limited(self, cli):
+            return cli in self.limited
+
+    wait_calls = []
+
+    def fake_wait_for_reset(state, notify_fn=None, enabled_clis=("claude", "codex")):
+        wait_calls.append(enabled_clis)
+        state.limited.clear()
+        return "claude"
+
+    def fake_run_task(*args, **kwargs):
+        result = MagicMock()
+        result.success = True
+        result.output = ""
+        result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.RateLimitState", PreLimitedRateState),
+        patch("mcloop.main.wait_for_reset", side_effect=fake_wait_for_reset),
+        patch("mcloop.main.time.sleep"),
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main.ensure_conftest_guard", return_value=False),
+        patch("mcloop.main.ensure_pytest_optimizations", return_value=False),
+        patch("mcloop.main.validate_project_dependencies"),
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main.load_reviewer_config", return_value=None),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._commit"),
+    ):
+        result = run_loop(
+            plan,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="codex", model="gpt-5-codex"),
+            ],
+            no_audit=True,
+        )
+
+    assert result.ok
+    assert wait_calls == [("claude", "codex")]
+
+
 def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):
     """When rate-limited with fallback_model set, switches model."""
     plan = tmp_path / "PLAN.md"
