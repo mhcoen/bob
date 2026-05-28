@@ -9766,3 +9766,74 @@ class TestLocalMdWiring:
         assert "Local overrides" not in addendum
 
         assert mock_claude.call_args.kwargs["local_md_content"] == ""
+
+
+class TestFirstRunNoDuploJson:
+    """First-run regression: SPEC.md present, no .duplo/duplo.json yet.
+
+    main() routes to _subsequent_run on a fresh project (SPEC.md exists,
+    no duplo.json). Several json.loads reads of duplo.json there caught
+    only json.JSONDecodeError, so a missing file raised an unhandled
+    FileNotFoundError and crashed the first run. A fresh project must
+    treat the absent file as empty state and proceed into the State-3
+    generation path instead of crashing.
+    """
+
+    def test_no_duplo_json_no_sources_does_not_crash(self, capsys, tmp_path, monkeypatch):
+        """The clipbar repro: spec with no sources/refs, no duplo.json.
+
+        The unconditional duplo.json read near the end of _subsequent_run
+        (just before the State dispatch) previously crashed here. It must
+        now fall through to State 3.
+        """
+        (tmp_path / "SPEC.md").write_text(_STUB_SPEC, encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / _DUPLO_JSON).exists()
+
+        # Must not raise FileNotFoundError.
+        main()
+
+        out = capsys.readouterr().out
+        # No features were extracted (no sources/refs), so State 3 reports
+        # nothing to build -- proof the run passed the previously-crashing
+        # read and entered the State-3 path rather than dying on the
+        # missing file.
+        assert "Nothing to do" in out
+
+    def test_no_duplo_json_with_reextraction_does_not_crash(self, tmp_path, monkeypatch):
+        """Exercise the feature re-extraction reads (the documented crash
+        line) on a first run.
+
+        A ref/ text file makes combined_text non-empty so the re-extraction
+        block runs. That block reads duplo.json twice (old_data) before any
+        save_* has created the file; both reads previously caught only
+        json.JSONDecodeError. With a mocked extractor returning a feature,
+        the flow must reach roadmap generation without raising
+        FileNotFoundError.
+        """
+        (tmp_path / "SPEC.md").write_text(_STUB_SPEC, encoding="utf-8")
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir()
+        (ref_dir / "notes.txt").write_text("clipboard history notes", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / _DUPLO_JSON).exists()
+
+        analysis = UpdateSummary()
+        analysis.collected_text = "clipboard history notes"
+        feature = Feature(name="History", description="Recent clips.", category="core")
+
+        with (
+            patch("duplo.pipeline._analyze_new_files", return_value=analysis),
+            patch("duplo.pipeline.extract_features", return_value=[feature]),
+            patch("duplo.pipeline._load_preferences", return_value=[]),
+            patch("duplo.pipeline.generate_roadmap", return_value=[]) as mock_roadmap,
+        ):
+            # Re-extraction reads old_data twice with no duplo.json on disk;
+            # must not raise FileNotFoundError.
+            main()
+
+        # save_features (real) created duplo.json from the extracted feature
+        # and the run reached generate_roadmap -- proving every previously
+        # unguarded duplo.json read on the first-run path was passed.
+        assert mock_roadmap.called
+        assert (tmp_path / _DUPLO_JSON).exists()

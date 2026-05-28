@@ -1615,7 +1615,7 @@ def _subsequent_run() -> None:
         print("\nRe-extracting features \u2026")
         try:
             old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, OSError):
             old_data = {}
         existing_names = [f["name"] for f in old_data.get("features", [])]
         new_features = extract_features(
@@ -1632,6 +1632,10 @@ def _subsequent_run() -> None:
         if new_features:
             try:
                 old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                # First run: no duplo.json yet. Treat as empty state and
+                # proceed to save_features below (old_count == 0).
+                old_data = {}
             except json.JSONDecodeError:
                 print(f"Error: {_DUPLO_JSON} contains invalid JSON. Delete or fix it.")
                 return
@@ -1774,6 +1778,11 @@ def _subsequent_run() -> None:
     duplo_path = Path(_DUPLO_JSON)
     try:
         data = json.loads(duplo_path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        # First run: no duplo.json yet (e.g. a spec with no sources/refs
+        # never triggered a save_* above). Treat as empty so the State-3
+        # roadmap/plan-generation path below proceeds instead of crashing.
+        data = {}
     except json.JSONDecodeError:
         print(f"Error: {duplo_path} contains invalid JSON. Delete or fix it.")
         return
