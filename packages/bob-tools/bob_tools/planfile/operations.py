@@ -10,9 +10,7 @@ should import from the focused modules directly.
 
 from __future__ import annotations
 
-from bob_tools.planfile.parser import parse_plan  # noqa: F401
-from bob_tools.planfile.renderer import render_plan  # noqa: F401
-from bob_tools.planfile._shared import (  # noqa: F401
+from bob_tools.planfile._shared import (
     _ACTION_NAME_RE,
     _ANNOTATION_KEY_ONLY_RE,
     _ANNOTATION_KEY_RE,
@@ -31,21 +29,15 @@ from bob_tools.planfile._shared import (  # noqa: F401
     _task_path_label,
     _task_ref,
 )
-from bob_tools.planfile.iteration import (  # noqa: F401
-    _child_path_suffix,
-    _find_task_by_id,
-    _iter_phase_task_tree_with_label,
-    _iter_phase_tasks_with_phase,
-    _iter_plan_tasks,
-    _iter_plan_tasks_with_label,
-    _iter_plan_top_level_tasks_with_label,
-    _iter_task_tree_with_paths,
-    _iter_tasks,
-    _plan_phase_path,
-    _plan_subsection_path,
-    bug_count,
+from bob_tools.planfile.canonical import (
+    _count_todo_tasks,
+    _phase_id_for_task_context,
+    _resolve_positional_label,
+    _task_matches_label,
+    assert_mcloop_canonical,
+    resolve_task_context,
 )
-from bob_tools.planfile.construction import (  # noqa: F401
+from bob_tools.planfile.construction import (
     _apply_task_id_sentinels,
     _assert_task_field_stability,
     _compare_task_fields,
@@ -64,15 +56,40 @@ from bob_tools.planfile.construction import (  # noqa: F401
     _validate_task_for_construction,
     make_task,
 )
-from bob_tools.planfile.validation import (  # noqa: F401
-    _check_constructed_invariants,
-    _check_each_task_field_stability,
-    _check_leading_bracket_tag,
-    _check_non_task_scalar_field_stability,
-    _check_trailing_annotation,
-    validate_plan,
+from bob_tools.planfile.iteration import (
+    _child_path_suffix,
+    _find_task_by_id,
+    _iter_phase_task_tree_with_label,
+    _iter_phase_tasks_with_phase,
+    _iter_plan_tasks,
+    _iter_plan_tasks_with_label,
+    _iter_plan_top_level_tasks_with_label,
+    _iter_task_tree_with_paths,
+    _iter_tasks,
+    _plan_phase_path,
+    _plan_subsection_path,
+    bug_count,
 )
-from bob_tools.planfile.semantic_diff import (  # noqa: F401
+from bob_tools.planfile.migration import (
+    _assign_task_ids,
+    _max_phase_id_number,
+    _next_task_id_number,
+    migrate,
+    replace_phase,
+    replace_phase_validated,
+)
+from bob_tools.planfile.parser import parse_plan
+from bob_tools.planfile.renderer import render_plan
+from bob_tools.planfile.scheduling import (
+    _all_tasks_done,
+    _build_done_ids,
+    _deps_satisfied,
+    _get_batch_children,
+    _phase_complete,
+    _walk_actionable,
+    next_tasks,
+)
+from bob_tools.planfile.semantic_diff import (
     _collect_bugs_semantic_diff,
     _collect_phase_semantic_diff,
     _collect_plan_semantic_diff,
@@ -84,32 +101,15 @@ from bob_tools.planfile.semantic_diff import (  # noqa: F401
     _normalize_subsection_for_semantic_compare,
     _normalize_task_for_position,
 )
-from bob_tools.planfile.canonical import (  # noqa: F401
-    _count_todo_tasks,
-    _phase_id_for_task_context,
-    _resolve_positional_label,
-    _task_matches_label,
-    assert_mcloop_canonical,
-    resolve_task_context,
-)
-from bob_tools.planfile.scheduling import (  # noqa: F401
-    _all_tasks_done,
-    _build_done_ids,
-    _deps_satisfied,
-    _get_batch_children,
-    _phase_complete,
-    _walk_actionable,
-    next_tasks,
-)
-from bob_tools.planfile.status import (  # noqa: F401
+from bob_tools.planfile.status import (
     _EVENT_TYPE_TO_EXPECTED_STATUS,
-    _LedgerEvent,
     _apply_status_to_plan,
     _apply_to_phase,
     _clear_failed_in_tasks,
     _direct_completion_kind,
     _event_task_id,
     _flip_in_tree,
+    _LedgerEvent,
     _purge_done_tasks,
     _settlement_phase_id,
     check_consistency,
@@ -119,7 +119,7 @@ from bob_tools.planfile.status import (  # noqa: F401
     purge_done_bug_tasks,
     reset_task,
 )
-from bob_tools.planfile.task_addition import (  # noqa: F401
+from bob_tools.planfile.task_addition import (
     _bug_dedup_keys,
     _next_task_id,
     _normalize_bug_text,
@@ -128,13 +128,13 @@ from bob_tools.planfile.task_addition import (  # noqa: F401
     add_phase_task,
     add_task,
 )
-from bob_tools.planfile.migration import (  # noqa: F401
-    _assign_task_ids,
-    _max_phase_id_number,
-    _next_task_id_number,
-    replace_phase,
-    replace_phase_validated,
-    migrate,
+from bob_tools.planfile.validation import (
+    _check_constructed_invariants,
+    _check_each_task_field_stability,
+    _check_leading_bracket_tag,
+    _check_non_task_scalar_field_stability,
+    _check_trailing_annotation,
+    validate_plan,
 )
 
 __all__ = [
@@ -146,13 +146,13 @@ __all__ = [
     "_INCOMPLETE_CHECKBOX_RE",
     "_KNOWN_LEADING_FLAGS",
     "_LEADING_TAG_LIKE_RE",
-    "_LedgerEvent",
     "_PHASE_ID_RE",
     "_POSITIONAL_LABEL_RE",
     "_RESERVED_SIBLING_MARKERS",
     "_TASK_ID_NUMERIC_RE",
     "_TASK_REF_RE",
     "_TRAILING_BRACKET_RE",
+    "_LedgerEvent",
     "_all_tasks_done",
     "_apply_status_to_plan",
     "_apply_task_id_sentinels",

@@ -11,7 +11,7 @@ from bob_tools.planfile.model import (
     Subsection,
     Task,
 )
-from bob_tools.planfile._shared import _INCOMPLETE_CHECKBOX_RE
+
 
 def _normalize_plan_for_semantic_compare(plan: Plan) -> Plan:
     """Return ``plan`` with non-semantic position fields normalized.
@@ -37,6 +37,7 @@ def _normalize_plan_for_semantic_compare(plan: Plan) -> Plan:
         ),
     )
 
+
 def _normalize_phase_for_semantic_compare(phase: Phase) -> Phase:
     canonical_source = "explicit_comment" if phase.phase_id_source != "none" else "none"
     return dataclasses.replace(
@@ -49,6 +50,7 @@ def _normalize_phase_for_semantic_compare(phase: Phase) -> Phase:
         tasks=tuple(_normalize_task_for_position(t, depth=0) for t in phase.tasks),
     )
 
+
 def _normalize_subsection_for_semantic_compare(sub: Subsection) -> Subsection:
     return dataclasses.replace(
         sub,
@@ -56,12 +58,14 @@ def _normalize_subsection_for_semantic_compare(sub: Subsection) -> Subsection:
         tasks=tuple(_normalize_task_for_position(t, depth=0) for t in sub.tasks),
     )
 
+
 def _normalize_bugs_for_semantic_compare(bugs: BugsSection) -> BugsSection:
     return dataclasses.replace(
         bugs,
         line_number=0,
         tasks=tuple(_normalize_task_for_position(t, depth=0) for t in bugs.tasks),
     )
+
 
 def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
     """Clear position fields and ``trailing_lines`` on ``task`` and its tree.
@@ -86,6 +90,7 @@ def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
         ),
         ruled_out=tuple(dataclasses.replace(r, line_number=0) for r in task.ruled_out),
     )
+
 
 def _collect_plan_semantic_diff(
     intended: Plan, parsed: Plan, errors: list[str]
@@ -119,6 +124,7 @@ def _collect_plan_semantic_diff(
         )
     elif intended.bugs is not None and parsed.bugs is not None:
         _collect_bugs_semantic_diff(intended.bugs, parsed.bugs, errors)
+
 
 def _collect_phase_semantic_diff(
     intended: Phase, parsed: Phase, label: str, errors: list[str]
@@ -161,6 +167,7 @@ def _collect_phase_semantic_diff(
                 sa, sb, f"{label}.subsections[{index}]", errors
             )
 
+
 def _collect_subsection_semantic_diff(
     intended: Subsection, parsed: Subsection, label: str, errors: list[str]
 ) -> None:
@@ -183,6 +190,7 @@ def _collect_subsection_semantic_diff(
         ):
             _collect_task_semantic_diff(ta, tb, f"{label}.tasks[{index}]", errors)
 
+
 def _collect_bugs_semantic_diff(
     intended: BugsSection, parsed: BugsSection, errors: list[str]
 ) -> None:
@@ -194,6 +202,7 @@ def _collect_bugs_semantic_diff(
         return
     for index, (ta, tb) in enumerate(zip(intended.tasks, parsed.tasks, strict=True)):
         _collect_task_semantic_diff(ta, tb, f"bugs.tasks[{index}]", errors)
+
 
 def _collect_task_semantic_diff(
     intended: Task, parsed: Task, label: str, errors: list[str]

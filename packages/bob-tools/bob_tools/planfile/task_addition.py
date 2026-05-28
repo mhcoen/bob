@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import dataclasses
-import warnings
 
+from bob_tools.planfile._shared import _TASK_ID_NUMERIC_RE, _now_iso_utc
+from bob_tools.planfile.construction import (
+    _assert_task_field_stability,
+)
+from bob_tools.planfile.iteration import _iter_plan_tasks
 from bob_tools.planfile.model import (
     BugsSection,
     Phase,
@@ -14,14 +18,8 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
-from bob_tools.planfile._shared import _TASK_ID_NUMERIC_RE, _now_iso_utc
-from bob_tools.planfile.iteration import _iter_plan_tasks, _iter_tasks
-from bob_tools.planfile.construction import (
-    _assert_task_field_stability,
-    _explicit_task_ids,
-    make_task,
-)
 from bob_tools.planfile.validation import validate_plan
+
 
 def _next_task_id(plan: Plan) -> str:
     """Return the next sequential canonical task id not yet used in ``plan``.
@@ -48,6 +46,7 @@ def _next_task_id(plan: Plan) -> str:
     if plan.task_namespace is not None:
         return f"T-{plan.task_namespace}-{max_num + 1:06d}"
     return f"T-{max_num + 1:06d}"
+
 
 def _try_add_under_parent(
     tasks: tuple[Task, ...], parent_id: str, new_task: Task
@@ -80,6 +79,7 @@ def _try_add_under_parent(
                 continue
         new_list.append(task)
     return tuple(new_list), found
+
 
 def add_task(
     plan: Plan,
@@ -159,6 +159,7 @@ def add_task(
         raise ValueError(f"phase {phase_id!r} not found in plan")
 
     return dataclasses.replace(plan, phases=tuple(new_phases))
+
 
 def add_phase_task(
     plan: Plan,
@@ -288,6 +289,7 @@ def add_phase_task(
 
     return new_plan, assigned_id
 
+
 def _normalize_bug_text(text: str) -> str:
     """Return ``text`` normalized for bug-dedup comparison.
 
@@ -301,6 +303,7 @@ def _normalize_bug_text(text: str) -> str:
     not.
     """
     return " ".join(text.split())
+
 
 def _bug_dedup_keys(task: Task, *, explicit: tuple[str, ...] = ()) -> set[str]:
     """Return the dedup-key set for ``task`` per v4 Contract 2.
@@ -319,6 +322,7 @@ def _bug_dedup_keys(task: Task, *, explicit: tuple[str, ...] = ()) -> set[str]:
             keys.add(value)
     keys.add(_normalize_bug_text(task.text))
     return keys
+
 
 def add_bug_task(
     plan: Plan,

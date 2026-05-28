@@ -9,15 +9,14 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
-from orchestra.log import LogReader, LogWriter
-from orchestra.spine import Envelope, StateDecl, Workflow
-
 from orchestra.api._common import (
     ArtifactView,
     ErrorRecord,
-    IterativeDesignResult,
     Turn,
 )
+from orchestra.log import LogReader
+from orchestra.spine import Envelope, StateDecl, Workflow
+
 
 def _derive_termination(
     log_path: Path,
@@ -82,6 +81,7 @@ def _derive_termination(
         detail=err_detail,
     )
 
+
 def _build_transcript(
     log_path: Path,
     run_dir: Path,
@@ -137,6 +137,7 @@ def _build_transcript(
         )
     return turns
 
+
 def _write_transcript_jsonl(path: Path, transcript: list[Turn]) -> None:
     """Persist the transcript as JSONL alongside the orchestra log."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +145,7 @@ def _write_transcript_jsonl(path: Path, transcript: list[Turn]) -> None:
         for turn in transcript:
             fh.write(json.dumps(asdict(turn), sort_keys=True, ensure_ascii=False))
             fh.write("\n")
+
 
 class _IncrementalTranscriptWriter:
     """Appends one ``Turn`` JSON line to ``transcript.jsonl`` per
@@ -218,6 +220,7 @@ class _IncrementalTranscriptWriter:
                 fh.flush()
                 os.fsync(fh.fileno())
 
+
 def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:
     """Count successful judge-role completions in the transcript.
 
@@ -236,6 +239,7 @@ def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:
     if not judge_state_names:
         return sum(1 for t in transcript if t.status == "ok")
     return sum(1 for t in transcript if t.state in judge_state_names and t.status == "ok")
+
 
 def _select_final_artifact(
     workflow: Workflow,

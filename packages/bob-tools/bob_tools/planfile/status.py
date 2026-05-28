@@ -6,8 +6,11 @@ import dataclasses
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
+from bob_tools.planfile.canonical import (
+    resolve_task_context,
+)
+from bob_tools.planfile.iteration import _find_task_by_id, _iter_plan_tasks
 from bob_tools.planfile.model import (
-    BugsSection,
     Outcome,
     Phase,
     Plan,
@@ -17,9 +20,6 @@ from bob_tools.planfile.model import (
     Task,
     TaskStatus,
 )
-from bob_tools.planfile._shared import _now_iso_utc, _task_ref
-from bob_tools.planfile.iteration import _find_task_by_id, _iter_plan_tasks, _iter_tasks
-from bob_tools.planfile.canonical import _phase_id_for_task_context, resolve_task_context
 from bob_tools.planfile.scheduling import _all_tasks_done
 
 # Event-type → checkbox state implied when this is the most recent
@@ -35,6 +35,7 @@ _EVENT_TYPE_TO_EXPECTED_STATUS: dict[str, TaskStatus] = {
     "commit_landed": TaskStatus.DONE,
     "work_observed": TaskStatus.DONE,
 }
+
 
 def _flip_in_tree(
     tasks: tuple[Task, ...],
@@ -98,6 +99,7 @@ def _flip_in_tree(
 
     return tuple(new_list), ancestors, found
 
+
 def _apply_to_phase(
     phase: Phase,
     task_id: str,
@@ -134,6 +136,7 @@ def _apply_to_phase(
             True,
         )
     return phase, [], False
+
 
 def _apply_status_to_plan(
     plan: Plan,
@@ -185,6 +188,7 @@ def _apply_status_to_plan(
         ancestors,
     )
 
+
 def _clear_failed_in_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], bool]:
     """Return ``tasks`` with every FAILED task reset to TODO."""
     new_tasks: list[Task] = []
@@ -209,6 +213,7 @@ def _clear_failed_in_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], b
 
     return tuple(new_tasks), changed
 
+
 def _direct_completion_kind(task: Task) -> str:
     """Pick the Settlement kind for a directly-completed task.
 
@@ -225,6 +230,7 @@ def _direct_completion_kind(task: Task) -> str:
         return "work_observed"
     return "commit_landed"
 
+
 def _settlement_phase_id(plan: Plan, task_id: str | None) -> str | None:
     """Return the resolved phase_id for ``task_id`` in ``plan``, or None.
 
@@ -236,6 +242,7 @@ def _settlement_phase_id(plan: Plan, task_id: str | None) -> str | None:
     if task_id is None:
         return None
     return resolve_task_context(plan, task_id).phase_id
+
 
 def complete_task(
     plan: Plan, task_id: str, outcome: Outcome | None = None
@@ -291,6 +298,7 @@ def complete_task(
     )
     return new_plan, (direct, *derived)
 
+
 def fail_task(
     plan: Plan,
     task_id: str,
@@ -330,6 +338,7 @@ def fail_task(
     )
     return new_plan, (settlement,)
 
+
 def reset_task(plan: Plan, task_id: str) -> tuple[Plan, tuple[Settlement, ...]]:
     """Flip ``task_id`` back to TODO and return a ``none``-kind Settlement.
 
@@ -357,6 +366,7 @@ def reset_task(plan: Plan, task_id: str) -> tuple[Plan, tuple[Settlement, ...]]:
         ledger_event_required=False,
     )
     return new_plan, (settlement,)
+
 
 def clear_failed(plan: Plan) -> Plan:
     """Reset every FAILED task in ``plan`` to TODO and return a new plan.
@@ -399,6 +409,7 @@ def clear_failed(plan: Plan) -> Plan:
 
     return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
 
+
 def _purge_done_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], bool]:
     """Return ``tasks`` with DONE tasks removed."""
     new_tasks: list[Task] = []
@@ -423,6 +434,7 @@ def _purge_done_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], bool]:
 
     return tuple(new_tasks), changed
 
+
 def purge_done_bug_tasks(plan: Plan) -> Plan:
     """Remove DONE tasks from ``plan.bugs`` and return a new plan.
 
@@ -437,6 +449,7 @@ def purge_done_bug_tasks(plan: Plan) -> Plan:
             new_bugs = dataclasses.replace(plan.bugs, tasks=bug_tasks)
 
     return dataclasses.replace(plan, bugs=new_bugs)
+
 
 class _LedgerEvent(Protocol):
     """Structural type for events accepted by :func:`check_consistency`.
@@ -465,6 +478,7 @@ class _LedgerEvent(Protocol):
 
     @property
     def payload(self) -> Mapping[str, Any]: ...
+
 
 def _event_task_id(event_type: str, payload: Mapping[str, Any]) -> str | None:
     """Return the task_id referenced by ``event``, or ``None`` when absent.
@@ -497,6 +511,7 @@ def _event_task_id(event_type: str, payload: Mapping[str, Any]) -> str | None:
     else:
         return None
     return str(value) if value is not None else None
+
 
 def check_consistency(plan: Plan, events: Iterable[_LedgerEvent]) -> None:
     """Compare checkbox state against the most recent lifecycle event per task.

@@ -6,12 +6,14 @@ from collections.abc import Iterator
 
 from bob_tools.planfile.model import Phase, Plan, Task
 
+
 def _iter_task_tree_with_paths(
     task: Task, path: tuple[int, ...] = ()
 ) -> Iterator[tuple[tuple[int, ...], Task]]:
     yield path, task
     for index, child in enumerate(task.children):
         yield from _iter_task_tree_with_paths(child, (*path, index))
+
 
 def bug_count(plan: Plan) -> int:
     """Return the number of bug tasks in ``plan``.
@@ -28,11 +30,13 @@ def bug_count(plan: Plan) -> int:
         return 0
     return len(plan.bugs.tasks)
 
+
 def _iter_tasks(tasks: tuple[Task, ...]) -> Iterator[Task]:
     """Yield every task in ``tasks``, descending into ``children`` first."""
     for task in tasks:
         yield task
         yield from _iter_tasks(task.children)
+
 
 def _iter_plan_tasks(plan: Plan) -> Iterator[Task]:
     """Yield every Task in the plan: phase tasks, subsection tasks, bugs."""
@@ -42,6 +46,7 @@ def _iter_plan_tasks(plan: Plan) -> Iterator[Task]:
             yield from _iter_tasks(subsection.tasks)
     if plan.bugs is not None:
         yield from _iter_tasks(plan.bugs.tasks)
+
 
 def _find_task_by_id(plan: Plan, task_id: str) -> Task | None:
     """Return the task whose ``task_id`` equals ``task_id``, or ``None``.
@@ -60,11 +65,14 @@ def _find_task_by_id(plan: Plan, task_id: str) -> Task | None:
             return task
     return None
 
+
 def _plan_phase_path(phase_index: int) -> str:
     return f"phases[{phase_index}]"
 
+
 def _plan_subsection_path(phase_index: int, sub_index: int) -> str:
     return f"phases[{phase_index}].subsections[{sub_index}]"
+
 
 def _iter_plan_top_level_tasks_with_label(
     plan: Plan,
@@ -92,6 +100,7 @@ def _iter_plan_top_level_tasks_with_label(
         for task_index, task in enumerate(plan.bugs.tasks):
             yield f"bugs.tasks[{task_index}]", task
 
+
 def _iter_plan_tasks_with_label(
     plan: Plan,
 ) -> Iterator[tuple[str, Task]]:
@@ -106,8 +115,10 @@ def _iter_plan_tasks_with_label(
         for path, node in _iter_task_tree_with_paths(root_task):
             yield label + _child_path_suffix(path), node
 
+
 def _child_path_suffix(path: tuple[int, ...]) -> str:
     return "".join(f".children[{index}]" for index in path)
+
 
 def _iter_phase_tasks_with_phase(
     plan: Plan,
@@ -135,6 +146,7 @@ def _iter_phase_tasks_with_phase(
         for subsection in phase.subsections:
             for task in _iter_tasks(subsection.tasks):
                 yield task, phase, doc_index
+
 
 def _iter_phase_task_tree_with_label(
     phase: Phase,

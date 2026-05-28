@@ -5,8 +5,9 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Iterator
 
+from bob_tools.planfile.iteration import _iter_plan_tasks
 from bob_tools.planfile.model import Phase, Plan, Task, TaskStatus
-from bob_tools.planfile.iteration import _iter_plan_tasks, _iter_tasks
+
 
 def _build_done_ids(plan: Plan) -> set[str]:
     """Return the set of ``task_id`` values for every DONE task in ``plan``.
@@ -22,6 +23,7 @@ def _build_done_ids(plan: Plan) -> set[str]:
         if task.status == TaskStatus.DONE and task.task_id is not None
     }
 
+
 def _deps_satisfied(task: Task, done_ids: set[str]) -> bool:
     """Return ``True`` when every ``@deps`` reference resolves to a DONE task.
 
@@ -34,6 +36,7 @@ def _deps_satisfied(task: Task, done_ids: set[str]) -> bool:
     """
     return all(dep in done_ids for dep in task.deps)
 
+
 def _all_tasks_done(tasks: tuple[Task, ...]) -> bool:
     """Return ``True`` when every task in ``tasks`` (and descendants) is DONE."""
     for task in tasks:
@@ -42,6 +45,7 @@ def _all_tasks_done(tasks: tuple[Task, ...]) -> bool:
         if not _all_tasks_done(task.children):
             return False
     return True
+
 
 def _phase_complete(phase: Phase) -> bool:
     """Return ``True`` when every task in ``phase`` (root + subsections) is DONE.
@@ -53,6 +57,7 @@ def _phase_complete(phase: Phase) -> bool:
     if not _all_tasks_done(phase.tasks):
         return False
     return all(_all_tasks_done(sub.tasks) for sub in phase.subsections)
+
 
 def _get_batch_children(parent: Task) -> tuple[Task, ...]:
     """Collect consecutive batchable children under a ``[BATCH]`` parent.
@@ -80,6 +85,7 @@ def _get_batch_children(parent: Task) -> tuple[Task, ...]:
             break
         batch.append(child)
     return tuple(batch)
+
 
 def _walk_actionable(
     tasks: tuple[Task, ...],
@@ -157,6 +163,7 @@ def _walk_actionable(
                 return
             continue
         yield task
+
 
 def next_tasks(plan: Plan, *, limit: int = 1) -> list[Task]:
     """Return the next actionable tasks in ``plan``.

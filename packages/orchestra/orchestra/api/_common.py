@@ -14,8 +14,10 @@ from typing import Any
 from orchestra.errors import OrchestraError
 from orchestra.spine import Envelope
 
+
 class WorkflowApiError(OrchestraError):
     """Raised when ``run_workflow`` cannot wire up or run the workflow."""
+
 
 @dataclass(frozen=True)
 class ArtifactView:
@@ -25,6 +27,7 @@ class ArtifactView:
     type: str
     version_id: str
     value: Any
+
 
 @dataclass
 class WorkflowRunResult:
@@ -36,6 +39,7 @@ class WorkflowRunResult:
     artifacts: dict[str, ArtifactView]
     log_path: Path
     summary: dict[str, Any] = field(default_factory=dict)
+
 
 @dataclass(frozen=True)
 class Turn:
@@ -59,6 +63,7 @@ class Turn:
     output: str
     artifacts_written: list[dict[str, str]] = field(default_factory=list)
 
+
 @dataclass(frozen=True)
 class ErrorRecord:
     """A run_role-level error record.
@@ -74,6 +79,7 @@ class ErrorRecord:
     message: str
     state: str | None = None
     detail: dict[str, Any] | None = None
+
 
 @dataclass
 class IterativeDesignResult:
@@ -105,12 +111,13 @@ class IterativeDesignResult:
     - ``error``: populated iff ``termination == "ERROR"``.
     """
 
-    termination: Literal["CONVERGED", "CAPPED", "ERROR"]
+    termination: Literal[CONVERGED, CAPPED, ERROR]
     rounds_completed: int
     final_artifact: str
     transcript: list[Turn]
     transcript_path: Path
     run_id: str
     error: ErrorRecord | None = None
+
 
 FINAL_PROMPT_INPUT: str = "final_prompt"

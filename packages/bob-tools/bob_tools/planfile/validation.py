@@ -2,21 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
-
-from bob_tools.planfile.model import (
-    BugsSection,
-    Phase,
-    Plan,
-    PlanInconsistencyError,
-    PlanValidationError,
-    RuledOut,
-    Subsection,
-    Task,
-    TaskStatus,
-)
-from bob_tools.planfile.parser import parse_plan
-from bob_tools.planfile.renderer import render_plan
 from bob_tools.planfile._shared import (
     _ANNOTATION_KEY_RE,
     _ANNOTATION_OK_RE,
@@ -26,17 +11,7 @@ from bob_tools.planfile._shared import (
     _TASK_REF_RE,
     _TRAILING_BRACKET_RE,
     _contains_newline,
-    _task_path_label,
     _task_ref,
-)
-from bob_tools.planfile.iteration import (
-    _child_path_suffix,
-    _iter_plan_tasks,
-    _iter_plan_tasks_with_label,
-    _iter_plan_top_level_tasks_with_label,
-    _iter_task_tree_with_paths,
-    _plan_phase_path,
-    _plan_subsection_path,
 )
 from bob_tools.planfile.construction import (
     _assert_task_field_stability,
@@ -45,6 +20,20 @@ from bob_tools.planfile.construction import (
     _construction_sentinel_task,
     _round_trip_scalar,
 )
+from bob_tools.planfile.iteration import (
+    _iter_plan_tasks,
+    _iter_plan_tasks_with_label,
+    _iter_plan_top_level_tasks_with_label,
+    _plan_phase_path,
+    _plan_subsection_path,
+)
+from bob_tools.planfile.model import (
+    Plan,
+    PlanValidationError,
+    Subsection,
+    Task,
+)
+
 
 def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
     """Flag a leading bracket form that does not match a known tag.
@@ -80,6 +69,7 @@ def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
         return
     errors.append(f"task {_task_ref(task)} has unknown bracket tag [{content}]")
 
+
 def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
     """Flag a trailing bracket form that looks like a broken annotation.
 
@@ -107,6 +97,7 @@ def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
     if _ANNOTATION_OK_RE.match(content) is not None:
         return
     errors.append(f"task {_task_ref(task)} has malformed annotation [{content}]")
+
 
 def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
     """Validate structural and referential integrity of ``plan``.
@@ -185,6 +176,7 @@ def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
     if errors:
         raise PlanValidationError(errors)
 
+
 def _check_constructed_invariants(plan: Plan, errors: list[str]) -> None:
     """Add v4 Contract 4 ``constructed=True`` violations to ``errors``.
 
@@ -239,6 +231,7 @@ def _check_constructed_invariants(plan: Plan, errors: list[str]) -> None:
 
     _check_non_task_scalar_field_stability(plan, errors)
     _check_each_task_field_stability(plan, errors)
+
 
 def _check_non_task_scalar_field_stability(plan: Plan, errors: list[str]) -> None:
     """Run the v4 R3 oracles for each non-task scalar in ``plan``.
@@ -349,6 +342,7 @@ def _check_non_task_scalar_field_stability(plan: Plan, errors: list[str]) -> Non
                     sub_prose_field,
                     errors,
                 )
+
 
 def _check_each_task_field_stability(plan: Plan, errors: list[str]) -> None:
     """Run the Stage 10 per-task harness for every top-level task in ``plan``.

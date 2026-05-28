@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
-from orchestra.spine import RoleDecl, Workflow
-
 from orchestra.api._common import WorkflowApiError
 from orchestra.api.bindings import (
     _actor_identity,
@@ -14,6 +11,9 @@ from orchestra.api.bindings import (
     _resolve_workflow_role_bindings,
 )
 from orchestra.api.registry import _ADAPTER_TO_KIND
+from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
+from orchestra.spine import Workflow
+
 
 def _validate_role_bindings(
     workflow: Workflow,
@@ -75,6 +75,7 @@ def _validate_role_bindings(
     _apply_workflow_specific_rules(workflow, resolved, workflow_name)
     return resolved
 
+
 def _apply_workflow_specific_rules(
     workflow: Workflow,
     role_bindings: dict[str, RoleBinding],
@@ -84,6 +85,7 @@ def _apply_workflow_specific_rules(
     if rule is None:
         return
     rule(workflow, role_bindings, workflow_name)
+
 
 def _validate_prji(
     workflow: Workflow,
@@ -139,6 +141,7 @@ def _validate_prji(
                 "workspace mutation to the implementer; bind this "
                 "role to a text-only adapter (the *_text variants)."
             )
+
 
 def _validate_council_four(
     workflow: Workflow,
@@ -197,6 +200,7 @@ def _validate_council_four(
             )
         seen[identity] = role_name
 
+
 _WORKFLOW_RULES: dict[
     str,
     Callable[[Workflow, dict[str, RoleBinding], str], None],
@@ -210,6 +214,7 @@ _WORKFLOW_RULES: dict[
     "council_four_canonical": _validate_council_four,
     "council_four_reauthor": _validate_council_four,
 }
+
 
 def _validate_inputs(workflow: Workflow, inputs: dict[str, Any]) -> None:
     declared = {ext.name for ext in workflow.external_inputs}

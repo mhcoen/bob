@@ -248,6 +248,24 @@
   rather than checking `_derive_termination` so it remains green
   through the transition.
 
+- 2026-05-28 [3.3] [T-000019]: `duplo.design.run_iterative_design`
+  forwards its argument as `orchestra.run_role("design",
+  seed_input=...)`, but `design_loop.orc` declares external inputs
+  `query`, `history`, `max_rounds` and not `seed_input`. A real
+  end-to-end run would fail at `_validate_inputs` with `"unknown
+  inputs: ['seed_input']. Declared: ['history', 'max_rounds',
+  'query']"` before any model adapter is invoked. The previous
+  attempt at this task likely tripped on this and then hit a real LLM
+  call along the recovery path, surfacing as "socket connection was
+  closed unexpectedly" in the failure log quoted in the task body.
+  The integration test added in this task patches `orchestra.run_role`
+  so the mismatch is not exercised; closing it for real means either
+  having `run_iterative_design` map `seed_input` to `query` (with
+  `history=""`), or extending `design_loop.orc` to declare
+  `seed_input` as an alias for `query`. Leaving as a known integration
+  gap because the surrounding refactor is out of scope here, but it
+  blocks any real end-to-end design run today.
+
 ## Hypotheses
 
 ## Eliminated

@@ -6,15 +6,14 @@ import hashlib
 from pathlib import Path
 from typing import Any
 
-from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
 from orchestra.adapters.claude_code_agent import ClaudeCodeAgentAdapter
 from orchestra.adapters.claude_code_text import ClaudeCodeTextAdapter
 from orchestra.adapters.codex_agent import CodexAgentAdapter
 from orchestra.adapters.codex_text import CodexTextAdapter
-from orchestra.config import OrchestraConfig, RoleBinding
+from orchestra.api._common import WorkflowApiError
+from orchestra.config import RoleBinding
 from orchestra.executor.parsers import _identity_text_parse_fn
 from orchestra.registry.registry import (
-    BUILTIN_MODEL_IDENTIFIERS,
     ProfileRegistry,
     ResultParser,
     with_core,
@@ -25,13 +24,10 @@ from orchestra.spine import (
     PreparedInvocation,
     PromptSource,
     RoleDecl,
-    StateDecl,
     Workflow,
 )
 from orchestra.store import ArtifactStore
 from orchestra.transforms import anonymize_outputs, finish_panel
-
-from orchestra.api._common import WorkflowApiError
 
 # Maps a configured adapter name to the workflow actor kind it serves.
 # Slice 1 grammar limits the kind vocabulary to {model, agent, shell,
@@ -154,6 +150,7 @@ class _PerRoleDispatcher:
             "roles": sorted(self._adapters.keys()),
         }
 
+
 # --------------------------------------------------------------------
 # Adapter and registry construction
 # --------------------------------------------------------------------
@@ -174,6 +171,7 @@ _PARALLEL_THINKING_FINISH_PANEL_INPUT_SCHEMA: dict[str, Any] = {
     "panelist_4_output": str,
     "panelist_5_output": str,
 }
+
 
 def _register_builtin_transforms(reg: ProfileRegistry) -> None:
     """Register Slice B builtins with their canonical Slice C schemas.
@@ -202,6 +200,7 @@ def _register_builtin_transforms(reg: ProfileRegistry) -> None:
             input_schema=dict(_PARALLEL_THINKING_FINISH_PANEL_INPUT_SCHEMA),
             output_schema={"finish_marker": str},
         )
+
 
 def _pre_load_registry() -> ProfileRegistry:
     """Return a registry the loader can validate any workflow against.
@@ -232,6 +231,7 @@ def _pre_load_registry() -> ProfileRegistry:
         )
     _register_builtin_transforms(reg)
     return reg
+
 
 def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
     """Instantiate the adapter for ``binding`` and return ``(adapter, kind)``.
@@ -268,6 +268,7 @@ def _build_role_adapter(binding: RoleBinding) -> tuple[Any, str]:
         params.setdefault("provider_config", _PROVIDER_CONFIGS[adapter_name])
         params.setdefault("retry_on_throttle", True)
     return cls(**params), kind
+
 
 def _build_registry(
     role_bindings: dict[str, RoleBinding],
@@ -319,6 +320,7 @@ def _build_registry(
         )
 
     return reg
+
 
 # --------------------------------------------------------------------
 # Instruction template override
@@ -372,6 +374,7 @@ def _apply_instruction_templates(
     workflow.roles = tuple(new_roles)
     return workflow
 
+
 def _resolve_template(
     value: str,
     *,
@@ -400,6 +403,7 @@ def _resolve_template(
     if not side_path.exists():
         side_path.write_text(value, encoding="utf-8")
     return side_path
+
 
 # --------------------------------------------------------------------
 # Run setup

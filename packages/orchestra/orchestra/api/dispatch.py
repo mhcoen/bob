@@ -3,51 +3,19 @@
 from __future__ import annotations
 
 import hashlib
-import json
-import os
-import threading
-import warnings
-from collections.abc import Callable
-from dataclasses import asdict
 from pathlib import Path
-from typing import Any, Literal
-
-from orchestra.config import (
-    ConfigError,
-    OrchestraConfig,
-    RoleBinding,
-    WorkflowConfig,
-    load_config,
-)
-from orchestra.errors import OrchestraError
-from orchestra.executor.criteria import mode_for_workflow
-from orchestra.executor.executor import Executor, new_run_id
-from orchestra.loader import load_workflow
-from orchestra.loader.lookup import resolve_workflow_path
-from orchestra.log import LogReader, LogWriter
-from orchestra.progress import (
-    ProgressCallback,
-    silent_reporter,
-    stderr_reporter,
-)
-from orchestra.prompts import build_code_edit_prompt
-from orchestra.registry.registry import BUILTIN_MODEL_IDENTIFIERS
-from orchestra.spine import (
-    NO_INITIAL,
-    Envelope,
-    PromptSource,
-    Workflow,
-)
-from orchestra.store import ArtifactStore
+from typing import Any
 
 from orchestra.api._common import (
-    ArtifactView,
-    ErrorRecord,
     FINAL_PROMPT_INPUT,
+    ArtifactView,
     IterativeDesignResult,
-    Turn,
     WorkflowApiError,
     WorkflowRunResult,
+)
+from orchestra.api.bindings import (
+    _resolve_progress_callback,
+    _wrap_progress_callback,
 )
 from orchestra.api.registry import (
     _apply_instruction_templates,
@@ -55,30 +23,43 @@ from orchestra.api.registry import (
     _initialize_store,
     _pre_load_registry,
 )
-from orchestra.api.bindings import (
-    _actor_identity,
-    _adapter_workspace_mutation,
-    _resolve_progress_callback,
-    _resolve_role_binding,
-    _resolve_workflow_role_bindings,
-    _wrap_progress_callback,
+from orchestra.api.transcript import (
+    _build_transcript,
+    _count_judge_rounds,
+    _derive_termination,
+    _IncrementalTranscriptWriter,
+    _select_final_artifact,
 )
 from orchestra.api.validators import (
     _validate_inputs,
     _validate_role_bindings,
 )
-from orchestra.api.transcript import (
-    _IncrementalTranscriptWriter,
-    _build_transcript,
-    _count_judge_rounds,
-    _derive_termination,
-    _select_final_artifact,
-    _write_transcript_jsonl,
+from orchestra.config import (
+    OrchestraConfig,
+    RoleBinding,
+    WorkflowConfig,
+    load_config,
 )
+from orchestra.executor.criteria import mode_for_workflow
+from orchestra.executor.executor import Executor, new_run_id
+from orchestra.loader import load_workflow
+from orchestra.loader.lookup import resolve_workflow_path
+from orchestra.log import LogWriter
+from orchestra.progress import (
+    ProgressCallback,
+)
+from orchestra.prompts import build_code_edit_prompt
+from orchestra.registry.registry import BUILTIN_MODEL_IDENTIFIERS
+from orchestra.spine import (
+    Envelope,
+    Workflow,
+)
+from orchestra.store import ArtifactStore
 
 _CODE_EDIT_WORKFLOW_NAMES: frozenset[str] = frozenset(
     {"single", "draft_then_adjudicate", "propose_critique_synthesize"}
 )
+
 
 def _gather_artifacts(workflow: Workflow, store: ArtifactStore) -> dict[str, ArtifactView]:
     out: dict[str, ArtifactView] = {}
@@ -93,6 +74,7 @@ def _gather_artifacts(workflow: Workflow, store: ArtifactStore) -> dict[str, Art
             value=latest.value,
         )
     return out
+
 
 def _build_summary(
     *,
@@ -131,6 +113,7 @@ def _build_summary(
         }
     return summary
 
+
 def _maybe_inject_final_prompt(
     workflow: Workflow,
     inputs: dict[str, Any],
@@ -149,6 +132,7 @@ def _maybe_inject_final_prompt(
         return inputs
     final_prompt = build_code_edit_prompt(inputs)
     return {**inputs, FINAL_PROMPT_INPUT: final_prompt}
+
 
 # --------------------------------------------------------------------
 # Public entry point
@@ -328,6 +312,7 @@ def run_workflow(
         summary=summary,
     )
 
+
 def _safe_options(opts: dict[str, Any]) -> dict[str, Any]:
     """Return a JSON-friendly view of ``opts`` for the run_start log."""
     out: dict[str, Any] = {}
@@ -337,6 +322,7 @@ def _safe_options(opts: dict[str, Any]) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
 
 def run_verb(
     verb_name: str,
@@ -407,6 +393,7 @@ def run_verb(
         )
     return output
 
+
 # --------------------------------------------------------------------
 # run_role: user-facing role-to-workflow entry point
 # --------------------------------------------------------------------
@@ -418,6 +405,7 @@ def run_verb(
 # ERROR; the executor uses the same names for adapter failures and
 # the loader-side stuck condition.
 _ERROR_OUTCOMES: frozenset[str] = frozenset({"stuck", "error", "timeout", "cancelled"})
+
 
 def _resolve_compound_model_identifiers(
     role_name: str,
@@ -468,6 +456,7 @@ def _resolve_compound_model_identifiers(
         )
     return resolved
 
+
 def _validate_design_distinct_actors(
     role_name: str,
     bindings: dict[str, RoleBinding],
@@ -503,6 +492,7 @@ def _validate_design_distinct_actors(
             "actor so the critique is independent of the judge's "
             "training data and blind spots."
         )
+
 
 def run_role(
     role_name: str,

@@ -2,74 +2,26 @@
 
 from __future__ import annotations
 
-import json
-import threading
-import time
-import uuid
-from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal
 
 from orchestra.adapters.base import Adapter
-from orchestra.config import CriterionDecl
 from orchestra.errors import ExecutorError
-from orchestra.executor import guards
-from orchestra.executor.criteria import (
-    DecisionConsistencyMode,
-    DecisionConsistencyResult,
-    check_decision_consistency,
-)
-from orchestra.executor.guards import GuardContext
-from orchestra.log import LogWriter
-from orchestra.payloads import payload_name_from_invocation, write_payload
-from orchestra.payloads import strip_internal as _strip_internal
-from orchestra.registry import ProfileRegistry
-from orchestra.schema import Invalid, SchemaSpec, Valid, load_schema
-from orchestra.spine import (
-    ArtifactDecl,
-    Envelope,
-    ErrorRecord,
-    InvocationRequest,
-    PreparedInvocation,
-    PromptSource,
-    StateDecl,
-    Workflow,
-)
-from orchestra.store import ArtifactStore
-from orchestra.transforms import (
-    TransformContext,
-    runtime_check,
-    type_label,
-)
-from orchestra.visibility import VisibilityIndex, make_invocation_id
-
 from orchestra.executor._executor_common import (
-    ACTOR_PROGRESS_INTERVAL_SECONDS,
-    FAN_OUT_PROGRESS_INTERVAL_SECONDS,
     FanOutSnapshot,
-    ProgressWatchdogFactory,
     _CancellationRegistry,
-    _ChildEntry,
-    _DefaultMissing,
-    _JsonExtractError,
-    _TERMINAL_TARGETS,
-    _TimeoutSignal,
-    _adapter_manages_own_timeout,
-    _balanced_json_spans,
-    _coerce_to_text,
-    _default_progress_watchdog_factory,
     _envelope_to_view,
     _error_to_dict,
-    _extract_last_json_object,
-    _format,
     _now_iso,
-    _payload_summary,
-    _scan_balanced_object,
-    new_run_id,
 )
+from orchestra.spine import (
+    Envelope,
+    ErrorRecord,
+    PreparedInvocation,
+    StateDecl,
+)
+from orchestra.visibility import make_invocation_id
+
 
 class _FanOutMixin:
     """Mixin: Fan-out parent/child execution, cancellation, resume."""
@@ -430,8 +382,8 @@ class _FanOutMixin:
             target=target,
         )
 
-            # Loop: the next iteration's ``_execute_state_body``
-            # will increment ``_attempts[child_name]`` again.
+        # Loop: the next iteration's ``_execute_state_body``
+        # will increment ``_attempts[child_name]`` again.
 
     def _write_cancelled_state_exit(self, child_name: str) -> Envelope:
         """Emit a state_enter/state_exit pair for a cancelled child

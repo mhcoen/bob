@@ -79,8 +79,10 @@ _INCOMPLETE_CHECKBOX_RE = re.compile(r"^\s*- \[ \] .+$", re.MULTILINE)
 
 _PHASE_ID_RE = re.compile(r"^phase_(\d+)$")
 
+
 def _contains_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
+
 
 def _now_iso_utc() -> str:
     """Return the current UTC instant as an ISO 8601 string.
@@ -94,10 +96,12 @@ def _now_iso_utc() -> str:
     """
     return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+
 def _task_path_label(path: tuple[int, ...]) -> str:
     if not path:
         return "task"
     return "task.children" + "".join(f"[{index}]" for index in path)
+
 
 def _task_ref(task: Task) -> str:
     """Return a short reference for ``task`` for use in validator messages.

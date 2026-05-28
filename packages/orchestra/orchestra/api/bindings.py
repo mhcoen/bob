@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
 
 from orchestra.adapters._subprocess import get_current_activity
 from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
+from orchestra.api.registry import _ADAPTER_CLASSES
 from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
 from orchestra.progress import (
     ChildBinding,
@@ -15,10 +15,8 @@ from orchestra.progress import (
     silent_reporter,
     stderr_reporter,
 )
-from orchestra.spine import RoleDecl, Workflow
+from orchestra.spine import Workflow
 
-from orchestra.api._common import WorkflowApiError
-from orchestra.api.registry import _ADAPTER_CLASSES, _ADAPTER_TO_KIND
 
 def _wrap_progress_callback(
     user_callback: ProgressCallback | None,
@@ -102,6 +100,7 @@ def _wrap_progress_callback(
 
     return _inner
 
+
 def _resolve_progress_callback(
     user_callback: ProgressCallback | None,
     quiet: bool,
@@ -127,6 +126,7 @@ def _resolve_progress_callback(
     if user_callback is not None:
         return user_callback
     return stderr_reporter(activity_getter=get_current_activity)
+
 
 def _resolve_role_binding(
     workflow_name: str,
@@ -165,6 +165,7 @@ def _resolve_role_binding(
         f"Configured top-level roles: {sorted(config.roles)}"
     )
 
+
 def _resolve_workflow_role_bindings(
     workflow: Workflow,
     workflow_name: str,
@@ -201,6 +202,7 @@ def _resolve_workflow_role_bindings(
         )
     return resolved
 
+
 # --------------------------------------------------------------------
 # Workflow-specific config validation rules
 #
@@ -225,6 +227,7 @@ def _actor_identity(binding: RoleBinding) -> tuple[str, str | None]:
     actor.
     """
     return (binding.adapter, binding.model)
+
 
 def _adapter_workspace_mutation(binding: RoleBinding) -> str:
     """Read the ``WORKSPACE_MUTATION`` class-level metadata off the

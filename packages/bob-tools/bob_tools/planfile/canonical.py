@@ -5,10 +5,18 @@ from __future__ import annotations
 import warnings
 from pathlib import Path
 
+from bob_tools.planfile._shared import (
+    _INCOMPLETE_CHECKBOX_RE,
+    _POSITIONAL_LABEL_RE,
+)
+from bob_tools.planfile.iteration import (
+    _iter_phase_tasks_with_phase,
+    _iter_plan_tasks,
+    _iter_tasks,
+)
 from bob_tools.planfile.model import (
     Phase,
     Plan,
-    PlanInconsistencyError,
     PlanValidationError,
     Task,
     TaskContext,
@@ -16,27 +24,15 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import render_plan
-from bob_tools.planfile._shared import (
-    _INCOMPLETE_CHECKBOX_RE,
-    _POSITIONAL_LABEL_RE,
-    _TASK_ID_NUMERIC_RE,
-    _TASK_REF_RE,
-)
-from bob_tools.planfile.iteration import (
-    _iter_phase_tasks_with_phase,
-    _iter_plan_tasks,
-    _iter_plan_tasks_with_label,
-    _iter_plan_top_level_tasks_with_label,
-    _iter_tasks,
-    bug_count,
-)
 from bob_tools.planfile.semantic_diff import (
     _collect_plan_semantic_diff,
     _normalize_plan_for_semantic_compare,
 )
 
+
 def _count_todo_tasks(plan: Plan) -> int:
     return sum(1 for task in _iter_plan_tasks(plan) if task.status is TaskStatus.TODO)
+
 
 def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> str:
     """Validate ``plan`` to mcloop's canonical-input contract; return rendered text.
@@ -133,6 +129,7 @@ def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> s
 
     return rendered
 
+
 def _task_matches_label(task: Task, ref: str) -> bool:
     """Return ``True`` when ``ref`` resolves to ``task``.
 
@@ -162,6 +159,7 @@ def _task_matches_label(task: Task, ref: str) -> bool:
     if task.text == ref:
         return True
     return any(task.text.startswith(ref + sep) for sep in (":", ")", " ", "\t"))
+
 
 def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, int, Task] | None:
     """Resolve a positional label like ``1.3.2`` to ``(phase, doc_index, task)``.
@@ -227,6 +225,7 @@ def _resolve_positional_label(plan: Plan, label: str) -> tuple[Phase, int, Task]
         return None
     return matched_phase, matched_doc_index, matched_task
 
+
 def _phase_id_for_task_context(phase: Phase, doc_index: int) -> tuple[str | None, str]:
     """Return the ``(phase_id, phase_id_source)`` pair for a TaskContext.
 
@@ -245,6 +244,7 @@ def _phase_id_for_task_context(phase: Phase, doc_index: int) -> tuple[str | None
     if phase.phase_id_source == "none":
         return f"phase_{doc_index:03d}", "ordinal"
     return phase.phase_id, phase.phase_id_source
+
 
 def resolve_task_context(plan: Plan, task_label_or_id: str) -> TaskContext:
     """Resolve a task reference to its containing phase context.

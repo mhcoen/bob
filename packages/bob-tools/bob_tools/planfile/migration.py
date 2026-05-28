@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import dataclasses
 
+from bob_tools.planfile._shared import _PHASE_ID_RE, _TASK_ID_NUMERIC_RE
+from bob_tools.planfile.iteration import (
+    _iter_phase_task_tree_with_label,
+    _iter_plan_tasks,
+)
 from bob_tools.planfile.model import (
-    BugsSection,
     Phase,
     Plan,
     PlanValidationError,
-    Subsection,
     Task,
 )
-from bob_tools.planfile._shared import _PHASE_ID_RE, _TASK_ID_NUMERIC_RE, _task_ref
-from bob_tools.planfile.iteration import _iter_phase_task_tree_with_label, _iter_plan_tasks
-from bob_tools.planfile.construction import _minimal_canonical_plan
 from bob_tools.planfile.validation import validate_plan
+
 
 def replace_phase(plan: Plan, phase_id: str, new_phase: Phase) -> Plan:
     """Substitute the phase whose ``phase_id`` == ``phase_id`` with ``new_phase``.
@@ -42,6 +43,7 @@ def replace_phase(plan: Plan, phase_id: str, new_phase: Phase) -> Plan:
     if not found:
         raise ValueError(f"phase {phase_id!r} not found in plan")
     return dataclasses.replace(plan, phases=tuple(new_phases))
+
 
 def replace_phase_validated(
     plan: Plan,
@@ -167,6 +169,7 @@ def replace_phase_validated(
 
     return new_plan
 
+
 def _max_phase_id_number(plan: Plan) -> int:
     """Return the maximum numeric suffix used in any ``phase_NNN`` id.
 
@@ -187,6 +190,7 @@ def _max_phase_id_number(plan: Plan) -> int:
         if num > max_num:
             max_num = num
     return max_num
+
 
 def _assign_task_ids(
     tasks: tuple[Task, ...],
@@ -218,6 +222,7 @@ def _assign_task_ids(
         else:
             new_tasks.append(dataclasses.replace(task, children=new_children))
     return tuple(new_tasks)
+
 
 def migrate(plan: Plan) -> Plan:
     """Return ``plan`` with stable identifiers assigned to every task and phase.
@@ -281,6 +286,7 @@ def migrate(plan: Plan) -> Plan:
         )
 
     return dataclasses.replace(plan, phases=tuple(new_phases), bugs=new_bugs)
+
 
 def _next_task_id_number(plan: Plan) -> int:
     """Return the integer suffix to use for the next assigned task id.

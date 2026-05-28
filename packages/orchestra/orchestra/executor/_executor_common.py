@@ -7,47 +7,20 @@ from __future__ import annotations
 
 import json
 import threading
-import time
 import uuid
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, Literal
 
 from orchestra.adapters.base import Adapter
-from orchestra.config import CriterionDecl
-from orchestra.errors import ExecutorError
-from orchestra.executor import guards
-from orchestra.executor.criteria import (
-    DecisionConsistencyMode,
-    DecisionConsistencyResult,
-    check_decision_consistency,
-)
-from orchestra.executor.guards import GuardContext
-from orchestra.log import LogWriter
-from orchestra.payloads import payload_name_from_invocation, write_payload
-from orchestra.payloads import strip_internal as _strip_internal
-from orchestra.registry import ProfileRegistry
-from orchestra.schema import Invalid, SchemaSpec, Valid, load_schema
 from orchestra.spine import (
-    ArtifactDecl,
     Envelope,
     ErrorRecord,
-    InvocationRequest,
     PreparedInvocation,
-    PromptSource,
     StateDecl,
-    Workflow,
 )
-from orchestra.store import ArtifactStore
-from orchestra.transforms import (
-    TransformContext,
-    runtime_check,
-    type_label,
-)
-from orchestra.visibility import VisibilityIndex, make_invocation_id
 
 _TERMINAL_TARGETS = {"done", "stop"}
 
@@ -56,6 +29,7 @@ ACTOR_PROGRESS_INTERVAL_SECONDS = 30.0
 FAN_OUT_PROGRESS_INTERVAL_SECONDS = 30.0
 
 ProgressWatchdogFactory = Callable[[float, Callable[[], None]], Callable[[], None]]
+
 
 def _default_progress_watchdog_factory(
     interval_seconds: float,
@@ -77,6 +51,7 @@ def _default_progress_watchdog_factory(
     thread.start()
     return stop.set
 
+
 def _coerce_to_text(value: Any) -> str:
     """Convert a schema-extracted scalar value to its canonical text
     form for writing into a text artifact.
@@ -94,9 +69,11 @@ def _coerce_to_text(value: Any) -> str:
         return str(value)
     return json.dumps(value)
 
+
 class _JsonExtractError(Exception):
     """Raised by ``_extract_last_json_object`` when no balanced JSON
     object span in the model output parses cleanly."""
+
 
 def _extract_last_json_object(text: str) -> Any:
     """Tolerant JSON-object extraction for schema-backed model output.
@@ -137,6 +114,7 @@ def _extract_last_json_object(text: str) -> Any:
         raise _JsonExtractError(f"no balanced JSON object parsed cleanly: {last_parse_error}")
     raise _JsonExtractError("no balanced JSON object parsed cleanly")
 
+
 def _balanced_json_spans(text: str) -> list[tuple[int, int]]:
     """Return half-open ``(start, end)`` indices of every balanced
     top-level ``{...}`` span in ``text``.
@@ -165,6 +143,7 @@ def _balanced_json_spans(text: str) -> list[tuple[int, int]]:
                 continue
         i += 1
     return spans
+
 
 def _scan_balanced_object(text: str, start: int) -> int | None:
     """Given ``text[start] == '{'``, return the index of the matching
@@ -203,11 +182,14 @@ def _scan_balanced_object(text: str, start: int) -> int | None:
         i += 1
     return None
 
+
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
+
 class _TimeoutSignal(Exception):
     pass
+
 
 def _adapter_manages_own_timeout(adapter: Adapter, prepared: PreparedInvocation) -> bool:
     """Return whether the actually-selected adapter manages its own
@@ -226,6 +208,7 @@ def _adapter_manages_own_timeout(adapter: Adapter, prepared: PreparedInvocation)
         if selected is not None:
             return bool(getattr(selected, "manages_own_timeout", False))
     return bool(getattr(adapter, "manages_own_timeout", False))
+
 
 # --------------------------------------------------------------------
 # helpers
@@ -252,9 +235,11 @@ def _format(template: str, substitutions: dict[str, Any]) -> str:
             flat[k] = v
     return template.format_map(_DefaultMissing(flat))
 
+
 class _DefaultMissing(dict[str, Any]):
     def __missing__(self, key: str) -> str:
         return "{" + key + "}"
+
 
 def _payload_summary(state: StateDecl, payload: dict[str, Any]) -> dict[str, Any]:
     """Compact, log-friendly summary of a payload."""
@@ -276,13 +261,16 @@ def _payload_summary(state: StateDecl, payload: dict[str, Any]) -> dict[str, Any
         return {"chosen": payload.get("chosen")}
     return {}
 
+
 def _error_to_dict(err: ErrorRecord | None) -> dict[str, Any] | None:
     if err is None:
         return None
     return {"kind": err.kind, "message": err.message, "detail": err.detail}
 
+
 def new_run_id() -> str:
     return uuid.uuid4().hex[:12]
+
 
 # --------------------------------------------------------------------
 # Slice A helpers: cancellation registry and snapshot view
@@ -313,6 +301,7 @@ class FanOutSnapshot:
     attempts: dict[str, int]
     retries: dict[str, int]
 
+
 @dataclass
 class _ChildEntry:
     cancel_requested: bool = False
@@ -320,6 +309,7 @@ class _ChildEntry:
     invocation_id: str | None = None
     invocation_handle: PreparedInvocation | None = None
     adapter: Adapter | None = None
+
 
 class _CancellationRegistry:
     """Per-fan-out-group cancellation state, shared by the controller
@@ -430,6 +420,7 @@ class _CancellationRegistry:
                 # An adapter raising from cancel must not stall the
                 # controller. The worker still drains to state_exit.
                 pass
+
 
 def _envelope_to_view(env: Envelope) -> dict[str, Any]:
     """Render an Envelope as a snapshot dict for fan-out workers.

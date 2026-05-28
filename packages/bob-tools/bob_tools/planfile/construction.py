@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
 
+from bob_tools.planfile._shared import (
+    _ACTION_NAME_RE,
+    _ANNOTATION_KEY_ONLY_RE,
+    _KNOWN_LEADING_FLAGS,
+    _TASK_REF_RE,
+    _contains_newline,
+    _task_path_label,
+)
+from bob_tools.planfile.iteration import _iter_task_tree_with_paths
 from bob_tools.planfile.model import (
-    BugsSection,
     Phase,
     Plan,
     PlanValidationError,
@@ -18,21 +25,12 @@ from bob_tools.planfile.model import (
 )
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import render_plan
-from bob_tools.planfile._shared import (
-    _ACTION_NAME_RE,
-    _ANNOTATION_KEY_ONLY_RE,
-    _KNOWN_LEADING_FLAGS,
-    _TASK_ID_NUMERIC_RE,
-    _TASK_REF_RE,
-    _contains_newline,
-    _now_iso_utc,
-    _task_path_label,
-)
-from bob_tools.planfile.iteration import _iter_task_tree_with_paths
+
 
 def _validate_scalar(value: str, field: str, errors: list[str]) -> None:
     if _contains_newline(value):
         errors.append(f"{field} contains an embedded newline")
+
 
 def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
     for path, node in _iter_task_tree_with_paths(task):
@@ -87,12 +85,14 @@ def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
         if node.trailing_lines:
             errors.append(f"{prefix}.trailing_lines must be empty on constructed tasks")
 
+
 def _explicit_task_ids(task: Task) -> set[str]:
     return {
         node.task_id
         for _, node in _iter_task_tree_with_paths(task)
         if node.task_id is not None
     }
+
 
 def _next_sentinel(used: set[str], next_number: int) -> tuple[str, int]:
     candidate_number = next_number
@@ -102,6 +102,7 @@ def _next_sentinel(used: set[str], next_number: int) -> tuple[str, int]:
         if candidate not in used:
             used.add(candidate)
             return candidate, candidate_number
+
 
 def _apply_task_id_sentinels(
     task: Task,
@@ -132,6 +133,7 @@ def _apply_task_id_sentinels(
         task, task_id=task_id, children=tuple(children)
     ), current_number
 
+
 def _restore_sentinel_none_ids(
     task: Task,
     *,
@@ -149,6 +151,7 @@ def _restore_sentinel_none_ids(
     )
     return dataclasses.replace(task, task_id=task_id, children=children)
 
+
 def _reject_trailing_lines(task: Task) -> None:
     errors = [
         f"{_task_path_label(path)}.trailing_lines must be empty on constructed tasks"
@@ -157,6 +160,7 @@ def _reject_trailing_lines(task: Task) -> None:
     ]
     if errors:
         raise PlanValidationError(errors)
+
 
 def _normalize_task_for_semantic_compare(task: Task, *, depth: int = 0) -> Task:
     _reject_trailing_lines(task)
@@ -172,6 +176,7 @@ def _normalize_task_for_semantic_compare(task: Task, *, depth: int = 0) -> Task:
             dataclasses.replace(ruled, line_number=0) for ruled in task.ruled_out
         ),
     )
+
 
 def _minimal_canonical_plan(task: Task) -> Plan:
     return Plan(
@@ -195,10 +200,12 @@ def _minimal_canonical_plan(task: Task) -> Plan:
         source_path=None,
     )
 
+
 def _field_value(task: Task, field: str) -> object:
     if field == "ruled_out":
         return tuple(ruled.text for ruled in task.ruled_out)
     return getattr(task, field)
+
 
 def _compare_task_fields(
     intended: Task, parsed: Task, path: tuple[int, ...]
@@ -237,6 +244,7 @@ def _compare_task_fields(
         )
     return errors
 
+
 def _assert_task_field_stability(task: Task) -> None:
     errors: list[str] = []
     _validate_task_for_construction(task, errors)
@@ -261,6 +269,7 @@ def _assert_task_field_stability(task: Task) -> None:
     errors = _compare_task_fields(intended_normalized, parsed_normalized, ())
     if errors:
         raise PlanValidationError(errors)
+
 
 def make_task(
     text: str,
@@ -302,6 +311,7 @@ def make_task(
     _assert_task_field_stability(task)
     return task
 
+
 def _construction_sentinel_task() -> Task:
     return Task(
         task_id="T-000001",
@@ -317,6 +327,7 @@ def _construction_sentinel_task() -> Task:
         line_number=0,
         trailing_lines=(),
     )
+
 
 def _construction_sentinel_phase(
     *,
@@ -338,6 +349,7 @@ def _construction_sentinel_phase(
         line_number=0,
     )
 
+
 def _construction_sentinel_plan(
     *,
     project_title: str = "Project",
@@ -352,6 +364,7 @@ def _construction_sentinel_plan(
         bugs=None,
         source_path=None,
     )
+
 
 def _round_trip_scalar(
     plan: Plan,
