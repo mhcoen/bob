@@ -6,7 +6,7 @@
 # sites like ``monkeypatch.setattr("mcloop.runner.<x>", ...)`` race
 # against worker import state and intermittently raise AttributeError.
 # __main__ is intentionally excluded — it is a script entry point.
-from . import (
+from . import (  # noqa: F401
     _planfile_compat,
     _planfile_precondition,
     app_interact,

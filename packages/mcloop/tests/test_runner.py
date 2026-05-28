@@ -2015,8 +2015,8 @@ def test_arg_model_overrides_config(tmp_path):
     mock_warn.assert_called_once_with("claude", "opus")
 
 
-def test_no_warning_when_no_model(tmp_path):
-    """No warning when model is None (no model configured)."""
+def test_default_chain_checks_default_model(tmp_path):
+    """No configured model defaults to the explicit claude/opus tier."""
     from mcloop.main import run_loop
 
     plan = tmp_path / "PLAN.md"
@@ -2035,7 +2035,7 @@ def test_no_warning_when_no_model(tmp_path):
         patch("mcloop.main.warn_unknown_model") as mock_warn,
     ):
         run_loop(plan, model=None)
-    mock_warn.assert_not_called()
+    mock_warn.assert_called_once_with("claude", "opus")
 
 
 # --- PID file writing ---
