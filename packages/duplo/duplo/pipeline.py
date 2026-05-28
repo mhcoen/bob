@@ -58,6 +58,7 @@ from duplo.planner import (
     parse_completed_tasks,
     save_plan,
 )
+from duplo.git_ops import commit_artifact as _git_commit_artifact
 from duplo.build_prefs import (
     architecture_hash,
     parse_build_preferences,
@@ -1466,6 +1467,7 @@ def _run_phase_generation_loop(
                         extra_tasks.extend(spec_tasks)
                         print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
             saved_plan_path = save_plan(content, extra_tasks=extra_tasks)
+            _git_commit_artifact(saved_plan_path, "save_plan")
             prior_phases_files.extend(_extract_created_files_from_plan(content))
         except ClaudeCliError as exc:
             record_failure(
@@ -1983,6 +1985,7 @@ def _subsequent_run() -> None:
             _primary_prefs(preferences),
         )
         save_plan(header_content)
+        _git_commit_artifact(Path("PLAN.md"), "save_plan_header")
 
     saved_this_call, total_phases = _run_phase_generation_loop(
         roadmap=roadmap,
@@ -2089,6 +2092,7 @@ def _complete_phase(
 
     append_phase_to_history(phase_section)
     advance_phase()
+    _git_commit_artifact(Path(".duplo/duplo.json"), f"complete_{phase_label}")
     print(f"{phase_label} complete. Recorded in duplo.json.")
 
     # Prompt for known issues before advancing.
