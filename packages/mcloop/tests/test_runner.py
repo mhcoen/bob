@@ -826,6 +826,32 @@ def test_run_task_passes_allowed_tools(tmp_path):
     assert captured_kwargs["allowed_tools"] == INVESTIGATION_TOOLS
 
 
+def test_run_task_passes_executor_override(tmp_path):
+    log_dir = tmp_path / "logs"
+    captured_kwargs = {}
+    executor_override = {"use_slug_model": False}
+
+    def fake_build_command(cli, prompt, **kwargs):
+        captured_kwargs.update(kwargs)
+        return ["echo", "done"]
+
+    with (
+        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._run_session", return_value=("", 0)),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+    ):
+        run_task(
+            task_text="Fix the bug",
+            cli="claude",
+            project_dir=tmp_path,
+            log_dir=log_dir,
+            allowed_tools=INVESTIGATION_TOOLS,
+            executor_override=executor_override,
+        )
+
+    assert captured_kwargs["executor_override"] == executor_override
+
+
 def test_run_task_default_tools_not_passed(tmp_path):
     """run_task does not pass allowed_tools when not specified.
 
@@ -1811,6 +1837,41 @@ def test_build_session_env_openrouter_billing_codex(monkeypatch):
     assert env["ANTHROPIC_API_KEY"] == ""
     # codex-specific key should NOT be set (openrouter doesn't use it)
     assert "OPENAI_API_KEY" not in env
+
+
+def test_chain_kimi_executor_env(monkeypatch):
+    """Chain executor overrides can force raw Kimi model ids and env overrides."""
+    monkeypatch.setenv("MOONSHOT_API_KEY", "sk-moonshot")
+    env = {"PATH": "/usr/bin"}
+    executor = {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "use_slug_model": False,
+        "env_overrides": {
+            "ENABLE_TOOL_SEARCH": "false",
+            "CLAUDE_CONFIG_DIR": "/Users/example/.mcloop/kimi-claude",
+            "DISABLE_INTERLEAVED_THINKING": "1",
+            "MAX_THINKING_TOKENS": "0",
+        },
+    }
+
+    _build_command(
+        "claude",
+        "test prompt",
+        model="kimi-k2.6",
+        env=env,
+        executor_override=executor,
+    )
+
+    assert env["ANTHROPIC_MODEL"] == "kimi-k2.6"
+    assert env["ANTHROPIC_DEFAULT_OPUS_MODEL"] == "kimi-k2.6"
+    assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == "kimi-k2.6"
+    assert env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "kimi-k2.6"
+    assert env["CLAUDE_CODE_SUBAGENT_MODEL"] == "kimi-k2.6"
+    assert env["ENABLE_TOOL_SEARCH"] == "false"
+    assert env["CLAUDE_CONFIG_DIR"] == "/Users/example/.mcloop/kimi-claude"
+    assert env["DISABLE_INTERLEAVED_THINKING"] == "1"
+    assert env["MAX_THINKING_TOKENS"] == "0"
 
 
 # --- _build_command codex ---

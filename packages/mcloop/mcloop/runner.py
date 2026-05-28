@@ -23,6 +23,7 @@ from mcloop.prompts import (
     build_sync_prompt,
 )
 
+
 def _decode_subprocess_output(value: bytes | str | None) -> str:
     """Normalize subprocess output to str.
 
@@ -201,13 +202,19 @@ def _apply_provider_env(
     ``OPENROUTER_API_KEY``) and sets ``ANTHROPIC_API_KEY`` to empty
     so the underlying CLI does not bill against the wrong account.
     """
-    if _provider_for_model(model) is None:
-        return
     config = executor or {}
+    env_overrides = config.get("env_overrides") or {}
+    if not isinstance(env_overrides, dict):
+        env_overrides = {}
+    if _provider_for_model(model) is None:
+        for key, value in env_overrides.items():
+            env[str(key)] = str(value)
+        return
     base_url = config.get("base_url") or _DEFAULT_PROVIDER_BASE_URL
     auth_token_env = config.get("auth_token_env", "OPENROUTER_API_KEY")
     auth_token = os.environ.get(auth_token_env, "")
-    slug = _provider_model_slug(model)
+    use_slug_model = config.get("use_slug_model", True)
+    slug = _provider_model_slug(model) if use_slug_model else model
     env["ANTHROPIC_BASE_URL"] = base_url
     if auth_token:
         env["ANTHROPIC_AUTH_TOKEN"] = auth_token
@@ -219,6 +226,8 @@ def _apply_provider_env(
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["ENABLE_TOOL_SEARCH"] = "1"
+    for key, value in env_overrides.items():
+        env[str(key)] = str(value)
 
 
 def _build_session_env(
@@ -698,6 +707,7 @@ def run_task(
     timeout: int = DEFAULT_TASK_TIMEOUT,
     is_bug_task: bool = False,
     task_id: str = "",
+    executor_override: dict | None = None,
 ) -> RunResult:
     """Launch a CLI session to perform a task. Returns RunResult.
 
@@ -740,6 +750,7 @@ def run_task(
             model=model,
             timeout=timeout,
             task_id=task_id,
+            executor_override=executor_override,
         )
         return RunResult(
             success=ce.success,
@@ -786,6 +797,8 @@ def run_task(
             task_id=task_id,
         )
     build_kwargs: dict = {"model": model}
+    if executor_override is not None:
+        build_kwargs["executor_override"] = executor_override
     if allowed_tools:
         build_kwargs["allowed_tools"] = allowed_tools
     session_env = _build_session_env(task_label=task_label, cli=cli)
@@ -825,11 +838,14 @@ def _build_command(
     model: str | None = None,
     allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
     env: dict[str, str] | None = None,
+    executor_override: dict | None = None,
 ) -> list[str]:
     if env is not None and cli == "claude" and model:
         from mcloop.config import load_role_config
 
-        executor_cfg = load_role_config("executor")
+        executor_cfg = (
+            executor_override if executor_override is not None else load_role_config("executor")
+        )
         _apply_provider_env(env, model, executor_cfg)
     if cli == "claude":
         cmd = ["claude", "-p"]

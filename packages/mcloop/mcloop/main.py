@@ -269,9 +269,7 @@ def resolve_chain(config: dict, args: argparse.Namespace) -> list[ChainEntry]:
             raise ValueError(f"mcloop: chain entry {idx} enabled must be a bool")
         entry_cli = raw_entry.get("cli")
         if entry_cli not in {"claude", "codex"}:
-            raise ValueError(
-                f"mcloop: chain entry {idx} cli must be one of 'claude' or 'codex'"
-            )
+            raise ValueError(f"mcloop: chain entry {idx} cli must be one of 'claude' or 'codex'")
         entry_model = raw_entry.get("model")
         if not isinstance(entry_model, str) or not entry_model:
             raise ValueError(f"mcloop: chain entry {idx} model must be a non-empty string")
@@ -1771,6 +1769,7 @@ def run_loop(
                     timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
                     is_bug_task=(active_file == bugs_path),
                     task_id=task.task_id or "",
+                    executor_override=active_entry.executor,
                 )
 
                 if is_session_limited(
@@ -1785,8 +1784,7 @@ def run_loop(
                     )
                     print(
                         formatting.system_msg(
-                            f"Session limit reached on {active_entry.cli}; "
-                            "advancing model tier."
+                            f"Session limit reached on {active_entry.cli}; advancing model tier."
                         ),
                         flush=True,
                     )

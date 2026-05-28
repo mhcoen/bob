@@ -183,6 +183,7 @@ def invoke_code_edit(
     model: str | None,
     timeout: int = DEFAULT_TASK_TIMEOUT,
     task_id: str = "",
+    executor_override: dict | None = None,
 ) -> CodeEditResult:
     """Perform one code-edit attempt and return a structured result.
 
@@ -212,6 +213,7 @@ def invoke_code_edit(
             model=model,
             timeout=timeout,
             task_id=task_id,
+            executor_override=executor_override,
         )
     return _invoke_direct(
         instruction=instruction,
@@ -227,6 +229,7 @@ def invoke_code_edit(
         model=model,
         timeout=timeout,
         task_id=task_id,
+        executor_override=executor_override,
     )
 
 
@@ -291,6 +294,7 @@ def _invoke_direct(
     model: str | None,
     timeout: int,
     task_id: str = "",
+    executor_override: dict | None = None,
 ) -> CodeEditResult:
     if prior_errors:
         prompt = _runner._build_bug_prompt(
@@ -324,7 +328,13 @@ def _invoke_direct(
             task_id=task_id,
         )
     session_env = _runner._build_session_env(task_label=task_label, cli="claude")
-    cmd = _runner._build_command("claude", prompt, env=session_env, model=model)
+    cmd = _runner._build_command(
+        "claude",
+        prompt,
+        env=session_env,
+        model=model,
+        executor_override=executor_override,
+    )
     _runner.ensure_subscription_preflight(
         cli="claude",
         model=model,

@@ -4541,7 +4541,7 @@ def test_chain_advances_on_rate_limit(tmp_path):
     calls = []
 
     def fake_run_task(task_text, cli, project_dir, log_dir, description="", **kwargs):
-        calls.append((cli, kwargs.get("model")))
+        calls.append((cli, kwargs.get("model"), kwargs.get("executor_override")))
         result = MagicMock()
         if len(calls) == 1:
             result.success = False
@@ -4580,14 +4580,21 @@ def test_chain_advances_on_rate_limit(tmp_path):
             plan,
             chain=[
                 ChainEntry(cli="claude", model="opus"),
-                ChainEntry(cli="codex", model="gpt-5-codex"),
+                ChainEntry(
+                    cli="codex",
+                    model="gpt-5-codex",
+                    executor={"env_overrides": {"ENABLE_TOOL_SEARCH": "false"}},
+                ),
             ],
             no_audit=True,
         )
 
     assert result.ok
     assert marked_limited == ["claude"]
-    assert calls[:2] == [("claude", "opus"), ("codex", "gpt-5-codex")]
+    assert calls[:2] == [
+        ("claude", "opus", None),
+        ("codex", "gpt-5-codex", {"env_overrides": {"ENABLE_TOOL_SEARCH": "false"}}),
+    ]
 
 
 def test_chain_all_clis_limited_waits(tmp_path):
