@@ -1,5 +1,6 @@
 """Unit tests for CLI argument parsing and main helpers."""
 
+import argparse
 import dataclasses
 import json
 import time
@@ -55,6 +56,7 @@ from mcloop.investigate_cmd import (
 from mcloop.investigator import _find_recent_crash_report, gather_bug_context
 from mcloop.main import (
     BuildResult,
+    ChainEntry,
     RunStatus,
     _all_tasks,
     _check_interrupted,
@@ -68,6 +70,7 @@ from mcloop.main import (
     _save_interrupt_state,
     _write_eliminated_json,
     _write_ruledout_to_plan,
+    resolve_chain,
     run_loop,
 )
 from mcloop.review_integration import (
@@ -84,6 +87,15 @@ from mcloop.session_context import SessionContext
 def _parse(*argv):
     with patch("sys.argv", ["mcloop", *argv]):
         return _parse_args()
+
+
+def _chain_args(
+    *,
+    cli: str | None = None,
+    model: str | None = None,
+    fallback_model: str | None = None,
+) -> object:
+    return argparse.Namespace(cli=cli, model=model, fallback_model=fallback_model)
 
 
 def test_defaults():
@@ -4429,6 +4441,83 @@ def test_fallback_model_with_model():
     args = _parse("--model", "opus", "--fallback-model", "sonnet")
     assert args.model == "opus"
     assert args.fallback_model == "sonnet"
+
+
+def test_chain_config_resolution():
+    config = {
+        "chain": [
+            {
+                "comment": "primary",
+                "enabled": True,
+                "cli": "claude",
+                "model": "opus",
+            },
+            {
+                "comment": "disabled middle",
+                "enabled": False,
+                "cli": "codex",
+                "model": "gpt-5-codex",
+            },
+            {
+                "comment": "direct provider",
+                "cli": "claude",
+                "model": "kimi-k2.6",
+                "executor": {"use_slug_model": False},
+            },
+        ]
+    }
+
+    chain = resolve_chain(config, _chain_args())
+
+    assert chain == [
+        ChainEntry(cli="claude", model="opus", comment="primary"),
+        ChainEntry(
+            cli="claude",
+            model="kimi-k2.6",
+            executor={"use_slug_model": False},
+            comment="direct provider",
+        ),
+    ]
+
+
+def test_chain_config_resolution_all_disabled_raises():
+    config = {
+        "chain": [
+            {"enabled": False, "cli": "claude", "model": "opus"},
+            {"enabled": False, "cli": "codex", "model": "gpt-5-codex"},
+        ]
+    }
+
+    with pytest.raises(ValueError, match="chain has no enabled tiers"):
+        resolve_chain(config, _chain_args())
+
+
+def test_chain_config_absent_uses_legacy_model_fallback():
+    chain = resolve_chain(
+        {"cli": "codex", "model": "gpt-5-codex", "fallback_model": "gpt-5-codex-mini"},
+        _chain_args(),
+    )
+
+    assert chain == [
+        ChainEntry(cli="codex", model="gpt-5-codex"),
+        ChainEntry(cli="codex", model="gpt-5-codex-mini"),
+    ]
+
+
+def test_chain_config_model_flag_collapses_chain():
+    config = {
+        "chain": [
+            {"cli": "claude", "model": "opus"},
+            {"cli": "codex", "model": "gpt-5-codex"},
+        ]
+    }
+
+    chain = resolve_chain(
+        config,
+        _chain_args(cli="codex", model="gpt-5-codex-mini", fallback_model="opus"),
+    )
+
+    assert chain == [ChainEntry(cli="codex", model="gpt-5-codex-mini")]
 
 
 def test_run_loop_switches_to_fallback_on_rate_limit(tmp_path):

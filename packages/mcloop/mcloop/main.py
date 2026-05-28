@@ -179,6 +179,90 @@ class RunStatus:
         return self.status == "success"
 
 
+@dataclasses.dataclass(frozen=True)
+class ChainEntry:
+    """One enabled model tier in the executor fallover chain."""
+
+    cli: str
+    model: str | None
+    executor: dict | None = None
+    enabled: bool = True
+    comment: str = ""
+
+
+def _legacy_chain(
+    *,
+    cli: str,
+    model: str | None,
+    fallback_model: str | None,
+) -> list[ChainEntry]:
+    primary_model = model or "opus"
+    chain = [ChainEntry(cli=cli, model=primary_model)]
+    if fallback_model and fallback_model != primary_model:
+        chain.append(ChainEntry(cli=cli, model=fallback_model))
+    return chain
+
+
+def resolve_chain(config: dict, args: argparse.Namespace) -> list[ChainEntry]:
+    """Resolve the configured model fallover chain for a bare loop run."""
+    cli = args.cli or config.get("cli", "claude")
+    if cli not in {"claude", "codex"}:
+        raise ValueError(f"mcloop: unknown cli in config: {cli!r}")
+
+    if args.model:
+        return [ChainEntry(cli=cli, model=args.model)]
+
+    if "chain" not in config:
+        return _legacy_chain(
+            cli=cli,
+            model=config.get("model"),
+            fallback_model=args.fallback_model or config.get("fallback_model"),
+        )
+
+    raw_chain = config["chain"]
+    if not isinstance(raw_chain, list):
+        raise ValueError("mcloop: chain must be an array of objects")
+
+    chain: list[ChainEntry] = []
+    for idx, raw_entry in enumerate(raw_chain, 1):
+        if not isinstance(raw_entry, dict):
+            raise ValueError(f"mcloop: chain entry {idx} must be an object")
+        enabled = raw_entry.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise ValueError(f"mcloop: chain entry {idx} enabled must be a bool")
+        entry_cli = raw_entry.get("cli")
+        if entry_cli not in {"claude", "codex"}:
+            raise ValueError(
+                f"mcloop: chain entry {idx} cli must be one of 'claude' or 'codex'"
+            )
+        entry_model = raw_entry.get("model")
+        if not isinstance(entry_model, str) or not entry_model:
+            raise ValueError(f"mcloop: chain entry {idx} model must be a non-empty string")
+        entry_executor = raw_entry.get("executor")
+        if entry_executor is not None and not isinstance(entry_executor, dict):
+            raise ValueError(f"mcloop: chain entry {idx} executor must be an object")
+        comment = raw_entry.get("comment", "")
+        if comment is not None and not isinstance(comment, str):
+            raise ValueError(f"mcloop: chain entry {idx} comment must be a string")
+        if enabled:
+            chain.append(
+                ChainEntry(
+                    cli=entry_cli,
+                    model=entry_model,
+                    executor=dict(entry_executor) if entry_executor is not None else None,
+                    enabled=enabled,
+                    comment=comment or "",
+                )
+            )
+
+    if not chain:
+        raise ValueError(
+            "mcloop: chain has no enabled tiers; enable at least one or remove "
+            "the chain key to use the legacy model/fallback_model defaults"
+        )
+    return chain
+
+
 # Phrases the synthesizer commonly uses to author tasks that are
 # read-only by design (capture a baseline, verify a property, record
 # state without changing files). Such tasks legitimately produce no
@@ -490,15 +574,18 @@ def _main() -> None:
         _dry_run(parse(checklist_path))
         return
 
-    # Resolve CLI: command line overrides config, default is claude
-    cli = args.cli or _load_mcloop_config().get("cli", "claude")
+    config = _load_mcloop_config()
+    try:
+        chain = resolve_chain(config, args)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(1)
 
     result = run_loop(
         checklist_path,
         max_retries=args.max_retries,
-        cli=cli,
-        model=args.model,
-        fallback_model=args.fallback_model,
+        cli=chain[0].cli,
+        chain=chain,
         no_audit=args.no_audit,
         allowed_tools=INVESTIGATION_TOOLS if args.allow_web_tools else None,
         enable_reviewer=args.reviewer,
@@ -815,6 +902,7 @@ def run_loop(
     cli: str = "claude",
     model: str | None = None,
     fallback_model: str | None = None,
+    chain: list[ChainEntry] | tuple[ChainEntry, ...] | None = None,
     no_audit: bool = False,
     allowed_tools: str | None = None,
     enable_reviewer: bool = False,
@@ -832,6 +920,17 @@ def run_loop(
 
     run_start_iso = _iso_now()
     run_start_mono = time.monotonic()
+    if chain is None:
+        config = _load_mcloop_config()
+        chain = _legacy_chain(
+            cli=cli,
+            model=model or config.get("model"),
+            fallback_model=fallback_model or config.get("fallback_model"),
+        )
+    else:
+        chain = list(chain)
+    primary_entry = chain[0]
+    primary_model = primary_entry.model
 
     project_dir = checklist_path.parent
     _lifecycle._project_dir = project_dir
@@ -888,7 +987,6 @@ def run_loop(
 
     reconcile_pending(project_dir)
 
-    # Codex fallover disabled until remote approval is sorted out
     rate_state = RateLimitState()
 
     project_checks = get_check_commands(project_dir)
@@ -915,7 +1013,7 @@ def run_loop(
     _ensure_bugs_file(bugs_path)
 
     # Check for crash errors from previous runs
-    if not _check_errors_json(project_dir, model=model):
+    if not _check_errors_json(project_dir, model=primary_model):
         _build_and_write_summary(
             project_dir,
             run_start_iso,
@@ -1114,11 +1212,11 @@ def run_loop(
     completed_stage: str = ""  # Set by phase transition when a phase completes
     batch_exhausted: set[str] = set()
     acceptance_evidence_phases: set[str] = set()
-    current_model = model or _load_mcloop_config().get("model")
-    primary_model = current_model
+    current_model = primary_model
 
-    if current_model:
-        warn_unknown_model(cli, current_model)
+    for entry in chain:
+        if entry.model:
+            warn_unknown_model(entry.cli, entry.model)
 
     # Parse bugs and PLAN.md now so bug-only work can gate the early exit.
     _early_bug_tasks = parse(bugs_path) if bugs_path.exists() else []
