@@ -175,7 +175,9 @@ class _SessionResultLike(Protocol):
     exit_code: int
 
 
-def classify_session_result(output: str, exit_code: int, success: bool) -> Literal["ok", "limited", "failed"]:
+def classify_session_result(
+    output: str, exit_code: int, success: bool
+) -> Literal["ok", "limited", "failed"]:
     """Classify a finished sub-session.
 
     ``ok`` -> the session succeeded. ``limited`` -> it failed AND the output
@@ -208,7 +210,7 @@ def run_session_with_fallover(
     preferred_cli: str = "claude",
     enabled_clis: tuple[str, ...] = ("claude",),
     max_attempts: int = LIMIT_MAX_ATTEMPTS,
-    sleep_fn: Callable[[float], None] = time.sleep,
+    sleep_fn: Callable[[float], None] | None = None,
 ) -> SessionOutcome:
     """Run ``run_fn(cli)`` with the task loop's rate-limit handling.
 
@@ -223,8 +225,11 @@ def run_session_with_fallover(
     run. A genuine non-limit failure returns ``failed`` immediately, matching
     prior behavior.
 
-    ``sleep_fn`` is injectable so tests do not actually sleep.
+    ``sleep_fn`` is injectable so tests do not actually sleep; when omitted it
+    resolves ``time.sleep`` at call time (so it stays patchable via
+    ``mcloop.ratelimit.time.sleep``).
     """
+    _sleep = sleep_fn if sleep_fn is not None else time.sleep
 
     def _surface(message: str, level: str = "warning") -> None:
         line = f"[mcloop] {message}"
@@ -235,7 +240,10 @@ def run_session_with_fallover(
         if notify_fn is not None:
             notify_fn(message, level=level)
 
-    cli = get_available_cli(state, preferred=preferred_cli, enabled_clis=enabled_clis) or preferred_cli
+    cli = (
+        get_available_cli(state, preferred=preferred_cli, enabled_clis=enabled_clis)
+        or preferred_cli
+    )
     attempt = 0
     while True:
         attempt += 1
@@ -261,8 +269,11 @@ def run_session_with_fallover(
         if nxt is None:
             secs = state.seconds_until_reset() or 0
             _surface(f"{context}: all CLIs limited; waiting ~{int(secs)}s for reset.")
-            sleep_fn(secs if secs > 0 else 1)
-            nxt = get_available_cli(state, preferred=preferred_cli, enabled_clis=enabled_clis) or preferred_cli
+            _sleep(secs if secs > 0 else 1)
+            nxt = (
+                get_available_cli(state, preferred=preferred_cli, enabled_clis=enabled_clis)
+                or preferred_cli
+            )
         elif nxt != cli:
             _surface(f"{context}: falling over to {nxt}.", level="info")
         cli = nxt

@@ -2166,7 +2166,7 @@ def test_audit_cycle_runs_two_rounds_when_first_fixes(tmp_path):
     """When the first round fixes bugs, a second round runs."""
     call_count = 0
 
-    def fake_round(project_dir, log_dir, model=None):
+    def fake_round(project_dir, log_dir, model=None, rate_state=None):
         nonlocal call_count
         call_count += 1
         # First round finds and fixes bugs, second round finds nothing
@@ -2414,7 +2414,7 @@ def test_audit_cycle_round2_banner_mentions_round_2(tmp_path, capsys):
     """When round 1 finds bugs and round 2 runs, output should mention round 2."""
     call_count = 0
 
-    def fake_round(project_dir, log_dir, model=None):
+    def fake_round(project_dir, log_dir, model=None, rate_state=None):
         nonlocal call_count
         call_count += 1
         if call_count == 1:

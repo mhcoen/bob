@@ -202,9 +202,10 @@ _SUBSESSION_PATHS = {
 def test_subsession_limit_is_detected_and_deferred(name, tmp_path):
     run_path = _SUBSESSION_PATHS[name]
 
-    with patch(
-        "mcloop.runner._run_session", return_value=(LIMIT_OUTPUT, 1)
-    ), patch("mcloop.ratelimit.time.sleep", lambda _s: None):
+    with (
+        patch("mcloop.runner._run_session", return_value=(LIMIT_OUTPUT, 1)),
+        patch("mcloop.ratelimit.time.sleep", lambda _s: None),
+    ):
         out = run_session_with_fallover(
             lambda _cli: run_path(tmp_path, tmp_path),
             state=RateLimitState(),
@@ -235,11 +236,10 @@ def test_subsession_genuine_failure_still_fails(name, tmp_path):
 
 
 def test_audit_cycle_defers_on_limit(tmp_path):
-    limit = RunResult(
-        success=False, output=LIMIT_OUTPUT, exit_code=1, log_path=tmp_path / "a.log"
-    )
-    with patch("mcloop.audit.run_audit", return_value=limit), patch(
-        "mcloop.ratelimit.time.sleep", lambda _s: None
+    limit = RunResult(success=False, output=LIMIT_OUTPUT, exit_code=1, log_path=tmp_path / "a.log")
+    with (
+        patch("mcloop.audit.run_audit", return_value=limit),
+        patch("mcloop.ratelimit.time.sleep", lambda _s: None),
     ):
         result = _run_audit_fix_cycle(tmp_path, tmp_path)
     assert result == AuditResult.deferred
@@ -286,14 +286,13 @@ def test_run_batch_detects_limit_and_marks_state(tmp_path):
     checklist.write_text("- [ ] parent\n  - [ ] step one\n  - [ ] step two\n")
 
     state = RateLimitState()
-    limit = RunResult(
-        success=False, output=LIMIT_OUTPUT, exit_code=1, log_path=tmp_path / "b.log"
-    )
+    limit = RunResult(success=False, output=LIMIT_OUTPUT, exit_code=1, log_path=tmp_path / "b.log")
 
-    with patch.object(_main, "run_task", return_value=limit), patch.object(
-        _main, "_checkpoint", lambda *a, **k: None
-    ), patch.object(_main, "_snapshot_worktree", lambda *a, **k: ([], [])), patch.object(
-        _main, "get_eliminated", lambda *a, **k: []
+    with (
+        patch.object(_main, "run_task", return_value=limit),
+        patch.object(_main, "_checkpoint", lambda *a, **k: None),
+        patch.object(_main, "_snapshot_worktree", lambda *a, **k: ([], [])),
+        patch.object(_main, "get_eliminated", lambda *a, **k: []),
     ):
         status, _detail = _main._run_batch(
             children,
