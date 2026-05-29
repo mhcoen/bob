@@ -170,15 +170,10 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
     }
     if reason:
         resp["hookSpecificOutput"]["permissionDecisionReason"] = reason
-    # RTK DISABLED 2026-04-15 for mcloop sessions: rtk's pytest_cmd.rs
-    # parser only matches summary lines starting with "===", but pytest
-    # in duplo emits "2474 passed in 340.94s" with no === framing, so
-    # rtk returns "Pytest: No tests collected" on a clean pass and the
-    # inner Claude chases a non-existent failure.
-    #
-    # We override any updatedInput from the upstream rtk hook by
-    # writing the ORIGINAL tool_input.command back. Claude Code merges
-    # hook responses; whichever hook last sets updatedInput wins.
+    # RTK re-enabled 2026-05-29 (rtk pytest -q bare-summary parse fixed in
+    # ecc34d7; path-prefix #1053 fixed in mhcoen's patch). This single hook
+    # does both rewrite and permission, so there is no multi-hook updatedInput
+    # race: on an allowed Bash command, emit rtk's rewrite as updatedInput.
     if (
         decision == "allow"
         and tool_name == "Bash"
@@ -188,7 +183,7 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
         if cmd:
             resp["hookSpecificOutput"]["updatedInput"] = {
                 **tool_input,
-                "command": cmd,
+                "command": _rtk_rewrite(cmd) or cmd,
             }
     json.dump(resp, sys.stdout)
 
