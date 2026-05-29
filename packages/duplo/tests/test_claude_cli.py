@@ -23,6 +23,55 @@ def _completed(stdout: str = "", returncode: int = 0, stderr: str = ""):
     )()
 
 
+def _stream_json(
+    *,
+    text: str,
+    input_tokens: int = 0,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+    output_tokens: int = 0,
+    with_result: bool = True,
+) -> str:
+    """Build one turn of ``claude --output-format stream-json`` stdout."""
+    lines = [
+        {"type": "system", "subtype": "init"},
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "message_start",
+                "message": {
+                    "usage": {
+                        "input_tokens": input_tokens,
+                        "cache_creation_input_tokens": cache_creation_input_tokens,
+                        "cache_read_input_tokens": cache_read_input_tokens,
+                        "output_tokens": 1,
+                    }
+                },
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": text},
+            },
+        },
+        {
+            "type": "stream_event",
+            "event": {
+                "type": "message_delta",
+                "delta": {"stop_reason": "end_turn"},
+                "usage": {"output_tokens": output_tokens},
+            },
+        },
+        {"type": "stream_event", "event": {"type": "message_stop"}},
+    ]
+    if with_result:
+        lines.append({"type": "result", "subtype": "success", "result": text})
+    return "\n".join(json.dumps(line) for line in lines) + "\n"
+
+
 class _FakePopen:
     """Mimics just enough of subprocess.Popen for query() to work.
 
@@ -373,3 +422,103 @@ class TestQueryCallLogging:
         assert rec["attempt"] == 1
         assert rec["response"] == "done"
         assert rec["extra"]["image_paths"] == ["/tmp/a.png"]
+
+
+class TestStreamJsonUsage:
+    """query() emits stream-json and records extracted token usage."""
+
+    def test_uses_stream_json_output_format(self, monkeypatch):
+        factory = _popen_factory(
+            stdout_text=_stream_json(text="hi", input_tokens=1, output_tokens=1),
+            poll_results=[0],
+        )
+        monkeypatch.setattr("duplo.claude_cli.subprocess.Popen", factory)
+        query("prompt")
+        cmd = factory.last_instance.cmd
+        idx = cmd.index("--output-format")
+        assert cmd[idx + 1] == "stream-json"
+        assert "--verbose" in cmd
+        assert "--include-partial-messages" in cmd
+
+    def test_reconstructs_response_from_stream(self, monkeypatch):
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stdout_text=_stream_json(text="the answer"), poll_results=[0]),
+        )
+        assert query("prompt") == "the answer"
+
+    def test_records_token_usage(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(
+                stdout_text=_stream_json(
+                    text="ok",
+                    input_tokens=10,
+                    cache_creation_input_tokens=20,
+                    cache_read_input_tokens=30,
+                    output_tokens=42,
+                ),
+                poll_results=[0],
+            ),
+        )
+        query("prompt", call_site="cs")
+        usage = _records(tmp_path)[0]["usage"]
+        assert usage == {
+            "input_tokens": 10,
+            "cache_creation_input_tokens": 20,
+            "cache_read_input_tokens": 30,
+            "output_tokens": 42,
+        }
+
+    def test_sums_usage_across_turns(self, tmp_path, monkeypatch):
+        turn1 = _stream_json(
+            text="part1 ",
+            input_tokens=10,
+            cache_creation_input_tokens=5,
+            cache_read_input_tokens=100,
+            output_tokens=7,
+            with_result=False,
+        )
+        turn2 = _stream_json(
+            text="part2",
+            input_tokens=3,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=120,
+            output_tokens=11,
+        )
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stdout_text=turn1 + turn2, poll_results=[0]),
+        )
+        query("prompt")
+        usage = _records(tmp_path)[0]["usage"]
+        assert usage == {
+            "input_tokens": 13,
+            "cache_creation_input_tokens": 5,
+            "cache_read_input_tokens": 220,
+            "output_tokens": 18,
+        }
+
+    def test_falls_back_to_raw_text_without_usage(self, tmp_path, monkeypatch):
+        """Non-stream-json output records the call with no token counts."""
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stdout_text="  plain text reply  ", poll_results=[0]),
+        )
+        assert query("prompt") == "plain text reply"
+        rec = _records(tmp_path)[0]
+        assert rec["response"] == "plain text reply"
+        assert "usage" not in rec
+
+    def test_query_with_images_records_usage(self, tmp_path):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        stdout = _stream_json(text="done", input_tokens=4, output_tokens=9)
+        with patch("duplo.claude_cli.subprocess.run", return_value=_completed(stdout)):
+            query_with_images("analyze", [Path("/tmp/a.png")])
+        rec = _records(tmp_path)[0]
+        assert rec["response"] == "done"
+        assert rec["usage"]["input_tokens"] == 4
+        assert rec["usage"]["output_tokens"] == 9

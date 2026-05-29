@@ -56,6 +56,7 @@ class CallLog:
         outcome: str | None = None,
         attempt: int | None = None,
         duration_seconds: float | None = None,
+        usage: dict[str, Any] | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Append a single LLM-call record to ``calls.jsonl``.
@@ -65,8 +66,11 @@ class CallLog:
         ``call_site`` is a caller-supplied label identifying which
         phase/feature/step invoked the call; ``outcome`` is one of
         ``"ok"``/``"timeout"``/``"error"``; ``attempt`` is the attempt
-        number the record describes. Prompts and responses are stored at
-        full fidelity (never truncated).
+        number the record describes. ``usage`` carries per-call token
+        counts (``input_tokens``, ``cache_creation_input_tokens``,
+        ``cache_read_input_tokens``, ``output_tokens``) when they could be
+        extracted, and is omitted otherwise. Prompts and responses are
+        stored at full fidelity (never truncated).
         """
         record: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -87,6 +91,8 @@ class CallLog:
             record["error"] = error
         if duration_seconds is not None:
             record["duration_seconds"] = round(duration_seconds, 3)
+        if usage:
+            record["usage"] = usage
         if extra:
             record["extra"] = extra
 

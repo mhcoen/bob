@@ -81,6 +81,41 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [4.3] [T-000022] claude_cli now emits stream-json and records token usage — 2026-05-28
+
+Both `claude -p` invocations in `duplo/claude_cli.py` (`_query_once` and
+`_query_with_images_once`) now pass `--output-format stream-json --verbose
+--include-partial-messages` (collected in `_STREAM_JSON_FLAGS`). Stdout is
+JSONL and is run through the new `_parse_stream_json(stdout)` helper, which
+returns `(response_text, usage)`:
+
+  - `usage` sums the four token fields across turns: `input_tokens` /
+    `cache_creation_input_tokens` / `cache_read_input_tokens` come from
+    `message_start` events' `message.usage`; `output_tokens` comes from
+    `message_delta` events' `usage`. `message_start.output_tokens` (the
+    initial =1/=2 partial) is deliberately ignored to avoid double-count.
+  - Response text is taken from the terminal `result` event's `result`
+    field when present, otherwise reconstructed from streamed `text_delta`
+    chunks.
+
+`--include-partial-messages` is what surfaces `message_start`/`message_delta`
+at all; without it the CLI emits only aggregated `assistant`/`result` typed
+messages. This matches the flag set mcloop's runner uses (see
+`packages/mcloop/mcloop/runner.py:857`).
+
+Graceful fallback: if no line parses as a JSON object, `_parse_stream_json`
+returns the raw stdout stripped with `usage=None`, so a format surprise
+records the call without token counts rather than failing it. `usage` is
+also `None` when JSON parsed but carried no token counts; `call_log.log_call`
+omits the `usage` key entirely in that case (`if usage:`). The existing
+plain-text test fixtures exercise this fallback path, which is why they kept
+passing unchanged.
+
+Decision worth revisiting: usage is summed across ALL turns in the stream,
+giving total consumption for an agentic call (matters for `query_with_images`
+which runs the Read tool, possibly multiple turns). If per-turn breakdown is
+ever needed, the parser would have to return a list instead of a single sum.
+
 ### [BUGS.md#5] claude_cli.py retry logic already in place — 2026-04-19
 
 BUGS.md entry 5 claimed `query()` / `query_with_images()` in

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -9,7 +10,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 from duplo import call_log
 
@@ -19,9 +20,95 @@ _TIMEOUT_SECONDS = 600
 _MAX_ATTEMPTS = 3
 _RETRY_SLEEP_SECONDS = 5.0
 
+# Flags that switch ``claude -p`` to a parseable, usage-bearing stream.
+# ``--include-partial-messages`` surfaces the raw ``message_start`` /
+# ``message_delta`` events that carry per-turn token counts.
+_STREAM_JSON_FLAGS = [
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--include-partial-messages",
+]
+
+# The four token-usage fields duplo records for quota analysis.
+_USAGE_KEYS = (
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+)
+
+
+_T = TypeVar("_T")
+
 
 class ClaudeCliError(Exception):
     """Raised when the claude CLI returns a non-zero exit code."""
+
+
+def _parse_stream_json(stdout: str) -> tuple[str, dict[str, int] | None]:
+    """Parse ``claude --output-format stream-json`` output.
+
+    Returns ``(response_text, usage)``. ``usage`` maps the four
+    :data:`_USAGE_KEYS` token counts, summed across turns:
+    ``input_tokens`` / ``cache_*_input_tokens`` come from ``message_start``
+    events and ``output_tokens`` from ``message_delta`` events. The
+    response text is taken from the terminal ``result`` event when present,
+    otherwise reconstructed from streamed ``text_delta`` chunks.
+
+    If the output is not parseable stream-json at all (no JSON object on any
+    line), the raw text is returned with ``usage`` of ``None`` so the call
+    still succeeds rather than failing on a format surprise. ``usage`` is
+    also ``None`` when JSON parsed but carried no token counts.
+    """
+    usage = {key: 0 for key in _USAGE_KEYS}
+    saw_usage = False
+    text_parts: list[str] = []
+    result_text: str | None = None
+    parsed_any = False
+
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if not isinstance(obj, dict):
+            continue
+        parsed_any = True
+
+        event = obj.get("event") if obj.get("type") == "stream_event" else obj
+        if not isinstance(event, dict):
+            event = obj
+        etype = event.get("type")
+
+        if etype == "message_start":
+            msg = event.get("message")
+            u = msg.get("usage", {}) if isinstance(msg, dict) else {}
+            for key in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"):
+                value = u.get(key)
+                if isinstance(value, int):
+                    usage[key] += value
+                    saw_usage = True
+        elif etype == "message_delta":
+            value = event.get("usage", {}).get("output_tokens")
+            if isinstance(value, int):
+                usage["output_tokens"] += value
+                saw_usage = True
+        elif etype == "content_block_delta":
+            delta = event.get("delta", {})
+            if isinstance(delta, dict) and delta.get("type") == "text_delta":
+                text_parts.append(delta.get("text", ""))
+
+        if obj.get("type") == "result" and isinstance(obj.get("result"), str):
+            result_text = obj["result"]
+
+    if not parsed_any:
+        return stdout.strip(), None
+    response = result_text if result_text is not None else "".join(text_parts)
+    return response.strip(), (usage if saw_usage else None)
 
 
 def _drain_stream(stream, sink: list[str]) -> None:
@@ -38,7 +125,7 @@ def _drain_stream(stream, sink: list[str]) -> None:
         pass
 
 
-def _with_retry(func: Callable[..., str], *args: Any, **kwargs: Any) -> tuple[str, int]:
+def _with_retry(func: Callable[..., _T], *args: Any, **kwargs: Any) -> tuple[_T, int]:
     """Call ``func`` with up to ``_MAX_ATTEMPTS`` attempts on ClaudeCliError.
 
     Sleeps ``_RETRY_SLEEP_SECONDS`` between attempts and prints a progress
@@ -92,7 +179,7 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: st
     """
     start = time.perf_counter()
     try:
-        response, attempt = _with_retry(_query_once, prompt, system=system, model=model)
+        (response, usage), attempt = _with_retry(_query_once, prompt, system=system, model=model)
     except ClaudeCliError as err:
         call_log.log_call(
             provider="claude_cli",
@@ -116,12 +203,13 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: st
         outcome="ok",
         attempt=attempt,
         duration_seconds=time.perf_counter() - start,
+        usage=usage,
     )
     return response
 
 
-def _query_once(prompt: str, *, system: str, model: str) -> str:
-    cmd = ["claude", "-p", "--model", model]
+def _query_once(prompt: str, *, system: str, model: str) -> tuple[str, dict[str, int] | None]:
+    cmd = ["claude", "-p", "--model", model, *_STREAM_JSON_FLAGS]
     if system:
         cmd.extend(["--system-prompt", system])
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -178,7 +266,7 @@ def _query_once(prompt: str, *, system: str, model: str) -> str:
         raise ClaudeCliError(
             f"claude exited with code {process.returncode}: {''.join(stderr_parts)}"
         )
-    return "".join(stdout_parts).strip()
+    return _parse_stream_json("".join(stdout_parts))
 
 
 def query_with_images(
@@ -213,7 +301,7 @@ def query_with_images(
     """
     start = time.perf_counter()
     try:
-        response, attempt = _with_retry(
+        (response, usage), attempt = _with_retry(
             _query_with_images_once, prompt, image_paths, system=system, model=model
         )
     except ClaudeCliError as err:
@@ -240,6 +328,7 @@ def query_with_images(
         outcome="ok",
         attempt=attempt,
         duration_seconds=time.perf_counter() - start,
+        usage=usage,
         extra={"image_paths": [str(p) for p in image_paths]},
     )
     return response
@@ -251,14 +340,14 @@ def _query_with_images_once(
     *,
     system: str,
     model: str,
-) -> str:
+) -> tuple[str, dict[str, int] | None]:
     image_lines = [f"- {Path(path).resolve()}" for path in image_paths]
     full_prompt = (
         "Read the following image files using the Read tool, "
         "then analyze them as instructed.\n\n"
         "Image files:\n" + "\n".join(image_lines) + "\n\n" + prompt
     )
-    cmd = ["claude", "-p", "--model", model, "--tools", "Read"]
+    cmd = ["claude", "-p", "--model", model, "--tools", "Read", *_STREAM_JSON_FLAGS]
     if system:
         cmd.extend(["--system-prompt", system])
     env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
@@ -277,4 +366,4 @@ def _query_with_images_once(
         raise ClaudeCliError(f"claude CLI timed out after {_TIMEOUT_SECONDS} seconds")
     if result.returncode != 0:
         raise ClaudeCliError(f"claude exited with code {result.returncode}: {result.stderr}")
-    return result.stdout.strip()
+    return _parse_stream_json(result.stdout)
