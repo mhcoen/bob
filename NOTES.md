@@ -2,6 +2,35 @@
 
 ## Observations
 
+- 2026-05-28 [4.2] [T-000021]: Instrumented `claude_cli.query` /
+  `query_with_images` to emit one full-fidelity `call_log` record per
+  call. This evolved the `call_log` record schema established in
+  T-000020: the `duration_s` field was renamed to `duration_seconds`
+  and the boolean `ok` field was dropped in favor of `outcome`
+  (`"ok"`/`"timeout"`/`"error"`). No downstream reader of the records
+  exists yet (T-000020 created only the writer), so the rename is safe;
+  `test_call_log.py` was updated to match. New fields: `call_site`
+  (caller label, defaults to `""`), `attempt` (the attempt number the
+  record describes — the successful attempt on success, `_MAX_ATTEMPTS`
+  on exhausted failure), and `outcome`.
+- 2026-05-28 [4.2] [T-000021]: `outcome` distinguishes `"timeout"` from
+  `"error"` via substring match on the ClaudeCliError message
+  (`"timed out" in str(err)`). Both timeout raise-sites produce
+  "...timed out after N seconds", so this is reliable today, but a
+  future message reword would silently reclassify timeouts as errors.
+  A dedicated `ClaudeCliTimeout(ClaudeCliError)` subclass would be more
+  robust; left as-is to keep the change localized and avoid touching
+  the two raise-sites and `pipeline.py`'s `_TIMEOUT_SECONDS` import.
+- 2026-05-28 [4.2] [T-000021]: The mandatory `pytest` check run
+  finished 6253 passed / 124 skipped / 1 failed. The sole failure was
+  `packages/orchestra/tests/test_fan_out_executor.py::test_cancellation_race_preserves_concurrent_success`,
+  a threading-race test that synchronizes via `threading.Event` +
+  `time.sleep(0.05)` and asserts `b_proceed.is_set()`. It is unrelated
+  to this duplo-only change and flakes under the 16-worker randomized
+  run (the concurrent child's invoke did not drain within the 5s event
+  wait). Not re-run, since the check rules forbid re-running without an
+  intervening code change and there was no legitimate fix to make here.
+
 - 2026-05-26 [1.2] [T-000002]: After backfilling `created_at` across the
   four workspace PLAN.md files, `pytest` passes deterministically with
   `-p no:randomly` (6137 passed, 118 skipped). Run with the default

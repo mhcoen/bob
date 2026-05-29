@@ -57,33 +57,47 @@ def test_log_call_writes_one_record(tmp_path):
     call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
     call_log.log_call(
         provider="claude_cli",
+        call_site="phase_001:feature_x",
         model="sonnet",
         prompt="prompt text",
         system="be helpful",
         response="response text",
-        duration_s=1.2345,
+        outcome="ok",
+        attempt=1,
+        duration_seconds=1.2345,
     )
     records = _read_records(call_log.current_run().calls_path)
     assert len(records) == 1
     rec = records[0]
     assert rec["run_id"] == "20260101T000000Z-abc123"
+    assert rec["call_site"] == "phase_001:feature_x"
     assert rec["provider"] == "claude_cli"
     assert rec["model"] == "sonnet"
-    assert rec["ok"] is True
+    assert rec["outcome"] == "ok"
+    assert rec["attempt"] == 1
     assert rec["prompt"] == "prompt text"
     assert rec["system"] == "be helpful"
     assert rec["response"] == "response text"
-    assert rec["duration_s"] == 1.234
+    assert rec["duration_seconds"] == 1.234
     assert "error" not in rec
 
 
 def test_log_call_records_error(tmp_path):
     logger = call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
-    logger.log_call(provider="claude_cli", model="sonnet", prompt="p", error="boom")
+    logger.log_call(
+        provider="claude_cli", model="sonnet", prompt="p", error="boom", outcome="error"
+    )
     rec = _read_records(logger.calls_path)[0]
-    assert rec["ok"] is False
+    assert rec["outcome"] == "error"
     assert rec["error"] == "boom"
     assert "response" not in rec
+
+
+def test_log_call_defaults_call_site_to_empty_string(tmp_path):
+    logger = call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
+    logger.log_call(provider="claude_cli", model="sonnet", prompt="p")
+    rec = _read_records(logger.calls_path)[0]
+    assert rec["call_site"] == ""
 
 
 def test_log_call_appends_one_record_per_call(tmp_path):

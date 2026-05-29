@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from duplo import call_log
 from duplo.claude_cli import ClaudeCliError, query, query_with_images
 
 
@@ -272,3 +274,102 @@ class TestQueryWithImages:
             with pytest.raises(ClaudeCliError, match="timed out"):
                 query_with_images("go", [Path("/x.png")])
         assert m.call_count == 3
+
+
+def _records(tmp_path):
+    path = tmp_path / call_log.LOGS_ROOT / "run-test" / call_log.CALLS_FILENAME
+    with open(path) as fh:
+        return [json.loads(line) for line in fh if line.strip()]
+
+
+class TestQueryCallLogging:
+    """query()/query_with_images() emit one full-fidelity call_log record per call."""
+
+    def test_success_records_full_fidelity_fields(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stdout_text="  the answer  ", poll_results=[0]),
+        )
+        query(
+            "a very long prompt " * 100,
+            system="be precise " * 50,
+            model="opus",
+            call_site="phase_003:gap_detect",
+        )
+        rec = _records(tmp_path)[0]
+        assert rec["call_site"] == "phase_003:gap_detect"
+        assert rec["model"] == "opus"
+        assert rec["outcome"] == "ok"
+        assert rec["attempt"] == 1
+        assert rec["prompt"] == "a very long prompt " * 100  # not truncated
+        assert rec["system"] == "be precise " * 50  # not truncated
+        assert rec["response"] == "the answer"
+        assert isinstance(rec["duration_seconds"], (int, float))
+        assert "error" not in rec
+
+    def test_call_site_defaults_to_empty(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stdout_text="ok", poll_results=[0]),
+        )
+        query("p")
+        assert _records(tmp_path)[0]["call_site"] == ""
+
+    def test_records_successful_attempt_number_after_retries(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        calls = {"n": 0}
+        fail_class = _popen_factory(stderr_text="boom", poll_results=[1], final_returncode=1)
+        success_class = _popen_factory(stdout_text="ok", poll_results=[0])
+
+        def dispatch(cmd, **kwargs):
+            calls["n"] += 1
+            cls = fail_class if calls["n"] <= 1 else success_class
+            return cls(cmd, **kwargs)
+
+        monkeypatch.setattr("duplo.claude_cli.subprocess.Popen", dispatch)
+        query("p", call_site="cs")
+        rec = _records(tmp_path)[0]
+        assert rec["outcome"] == "ok"
+        assert rec["attempt"] == 2
+
+    def test_nonzero_exit_records_error_outcome(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(stderr_text="kaboom", poll_results=[1], final_returncode=1),
+        )
+        with pytest.raises(ClaudeCliError):
+            query("p", call_site="cs")
+        rec = _records(tmp_path)[0]
+        assert rec["call_site"] == "cs"
+        assert rec["outcome"] == "error"
+        assert "kaboom" in rec["error"]
+        assert rec["attempt"] == 3
+        assert "response" not in rec
+
+    def test_timeout_records_timeout_outcome(self, tmp_path, monkeypatch):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        monkeypatch.setattr(
+            "duplo.claude_cli.subprocess.Popen",
+            _popen_factory(poll_results=[None, None, None, None]),
+        )
+        times = iter([0.0, 100.0, 601.0] * 3)
+        monkeypatch.setattr("duplo.claude_cli.time.monotonic", lambda: next(times))
+        with pytest.raises(ClaudeCliError):
+            query("p")
+        rec = _records(tmp_path)[0]
+        assert rec["outcome"] == "timeout"
+        assert "timed out" in rec["error"]
+
+    def test_query_with_images_records_outcome_and_call_site(self, tmp_path):
+        call_log.start_run(target_dir=tmp_path, run_id="run-test")
+        with patch("duplo.claude_cli.subprocess.run", return_value=_completed("done")):
+            query_with_images("analyze", [Path("/tmp/a.png")], call_site="phase_002:frames")
+        rec = _records(tmp_path)[0]
+        assert rec["call_site"] == "phase_002:frames"
+        assert rec["outcome"] == "ok"
+        assert rec["attempt"] == 1
+        assert rec["response"] == "done"
+        assert rec["extra"]["image_paths"] == ["/tmp/a.png"]

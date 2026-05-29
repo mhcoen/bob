@@ -38,17 +38,18 @@ def _drain_stream(stream, sink: list[str]) -> None:
         pass
 
 
-def _with_retry(func: Callable[..., str], *args: Any, **kwargs: Any) -> str:
+def _with_retry(func: Callable[..., str], *args: Any, **kwargs: Any) -> tuple[str, int]:
     """Call ``func`` with up to ``_MAX_ATTEMPTS`` attempts on ClaudeCliError.
 
     Sleeps ``_RETRY_SLEEP_SECONDS`` between attempts and prints a progress
-    message to stderr before each retry. Re-raises the last ClaudeCliError
-    if every attempt fails.
+    message to stderr before each retry. Returns ``(result, attempt)`` where
+    ``attempt`` is the 1-based number of the attempt that succeeded.
+    Re-raises the last ClaudeCliError if every attempt fails.
     """
     last_err: ClaudeCliError | None = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            return func(*args, **kwargs)
+            return func(*args, **kwargs), attempt
         except ClaudeCliError as err:
             last_err = err
             if attempt < _MAX_ATTEMPTS:
@@ -61,19 +62,27 @@ def _with_retry(func: Callable[..., str], *args: Any, **kwargs: Any) -> str:
     raise last_err
 
 
-def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
+def _classify_error(err: ClaudeCliError) -> str:
+    """Map a ClaudeCliError to a ``call_log`` outcome: ``"timeout"`` or ``"error"``."""
+    return "timeout" if "timed out" in str(err) else "error"
+
+
+def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: str = "") -> str:
     """Send a text prompt to ``claude -p`` and return the response text.
 
     Runs the CLI via ``subprocess.Popen`` and prints a dot to stderr every
     ``_DOT_INTERVAL_SECONDS`` while the call is in flight so the user sees
     progress during long-running generations. A trailing newline is printed
     once the call completes. On failure (timeout or non-zero exit) the call
-    is retried up to ``_MAX_ATTEMPTS`` times.
+    is retried up to ``_MAX_ATTEMPTS`` times. Every call appends one
+    ``call_log`` record, on success and on failure alike.
 
     Args:
         prompt: The user prompt to send.
         system: Optional system prompt.
         model: Model alias or full name (default ``"sonnet"``).
+        call_site: Label identifying the phase/feature/step that invoked
+            this call; recorded in the ``call_log`` record.
 
     Returns:
         The response text stripped of leading/trailing whitespace.
@@ -83,24 +92,30 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     """
     start = time.perf_counter()
     try:
-        response = _with_retry(_query_once, prompt, system=system, model=model)
+        response, attempt = _with_retry(_query_once, prompt, system=system, model=model)
     except ClaudeCliError as err:
         call_log.log_call(
             provider="claude_cli",
+            call_site=call_site,
             model=model,
             prompt=prompt,
             system=system,
             error=str(err),
-            duration_s=time.perf_counter() - start,
+            outcome=_classify_error(err),
+            attempt=_MAX_ATTEMPTS,
+            duration_seconds=time.perf_counter() - start,
         )
         raise
     call_log.log_call(
         provider="claude_cli",
+        call_site=call_site,
         model=model,
         prompt=prompt,
         system=system,
         response=response,
-        duration_s=time.perf_counter() - start,
+        outcome="ok",
+        attempt=attempt,
+        duration_seconds=time.perf_counter() - start,
     )
     return response
 
@@ -172,18 +187,23 @@ def query_with_images(
     *,
     system: str = "",
     model: str = "sonnet",
+    call_site: str = "",
 ) -> str:
     """Send a prompt with image file references to ``claude -p``.
 
     Instructs Claude to read each image file using the Read tool,
     then respond based on the system prompt. On failure (timeout or
     non-zero exit) the call is retried up to ``_MAX_ATTEMPTS`` times.
+    Every call appends one ``call_log`` record, on success and on
+    failure alike.
 
     Args:
         prompt: The analysis instructions.
         image_paths: Paths to image files for Claude to read.
         system: Optional system prompt.
         model: Model alias or full name (default ``"sonnet"").
+        call_site: Label identifying the phase/feature/step that invoked
+            this call; recorded in the ``call_log`` record.
 
     Returns:
         The response text stripped of leading/trailing whitespace.
@@ -193,27 +213,33 @@ def query_with_images(
     """
     start = time.perf_counter()
     try:
-        response = _with_retry(
+        response, attempt = _with_retry(
             _query_with_images_once, prompt, image_paths, system=system, model=model
         )
     except ClaudeCliError as err:
         call_log.log_call(
             provider="claude_cli",
+            call_site=call_site,
             model=model,
             prompt=prompt,
             system=system,
             error=str(err),
-            duration_s=time.perf_counter() - start,
+            outcome=_classify_error(err),
+            attempt=_MAX_ATTEMPTS,
+            duration_seconds=time.perf_counter() - start,
             extra={"image_paths": [str(p) for p in image_paths]},
         )
         raise
     call_log.log_call(
         provider="claude_cli",
+        call_site=call_site,
         model=model,
         prompt=prompt,
         system=system,
         response=response,
-        duration_s=time.perf_counter() - start,
+        outcome="ok",
+        attempt=attempt,
+        duration_seconds=time.perf_counter() - start,
         extra={"image_paths": [str(p) for p in image_paths]},
     )
     return response

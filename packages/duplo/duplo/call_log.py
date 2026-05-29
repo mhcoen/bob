@@ -50,31 +50,43 @@ class CallLog:
         model: str,
         prompt: str,
         system: str = "",
+        call_site: str = "",
         response: str | None = None,
         error: str | None = None,
-        duration_s: float | None = None,
+        outcome: str | None = None,
+        attempt: int | None = None,
+        duration_seconds: float | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Append a single LLM-call record to ``calls.jsonl``.
 
         Creates the run directory on first use. ``response`` is set on
         success and ``error`` on failure; exactly one is normally present.
+        ``call_site`` is a caller-supplied label identifying which
+        phase/feature/step invoked the call; ``outcome`` is one of
+        ``"ok"``/``"timeout"``/``"error"``; ``attempt`` is the attempt
+        number the record describes. Prompts and responses are stored at
+        full fidelity (never truncated).
         """
         record: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "run_id": self.run_id,
+            "call_site": call_site,
             "provider": provider,
             "model": model,
-            "ok": error is None,
             "prompt": prompt,
             "system": system,
         }
+        if outcome is not None:
+            record["outcome"] = outcome
+        if attempt is not None:
+            record["attempt"] = attempt
         if response is not None:
             record["response"] = response
         if error is not None:
             record["error"] = error
-        if duration_s is not None:
-            record["duration_s"] = round(duration_s, 3)
+        if duration_seconds is not None:
+            record["duration_seconds"] = round(duration_seconds, 3)
         if extra:
             record["extra"] = extra
 
