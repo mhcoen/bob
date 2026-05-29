@@ -11,6 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from duplo import call_log
+
 _DOT_INTERVAL_SECONDS = 5.0
 _POLL_INTERVAL_SECONDS = 0.5
 _TIMEOUT_SECONDS = 600
@@ -79,7 +81,28 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet") -> str:
     Raises:
         ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
-    return _with_retry(_query_once, prompt, system=system, model=model)
+    start = time.perf_counter()
+    try:
+        response = _with_retry(_query_once, prompt, system=system, model=model)
+    except ClaudeCliError as err:
+        call_log.log_call(
+            provider="claude_cli",
+            model=model,
+            prompt=prompt,
+            system=system,
+            error=str(err),
+            duration_s=time.perf_counter() - start,
+        )
+        raise
+    call_log.log_call(
+        provider="claude_cli",
+        model=model,
+        prompt=prompt,
+        system=system,
+        response=response,
+        duration_s=time.perf_counter() - start,
+    )
+    return response
 
 
 def _query_once(prompt: str, *, system: str, model: str) -> str:
@@ -168,7 +191,32 @@ def query_with_images(
     Raises:
         ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
-    return _with_retry(_query_with_images_once, prompt, image_paths, system=system, model=model)
+    start = time.perf_counter()
+    try:
+        response = _with_retry(
+            _query_with_images_once, prompt, image_paths, system=system, model=model
+        )
+    except ClaudeCliError as err:
+        call_log.log_call(
+            provider="claude_cli",
+            model=model,
+            prompt=prompt,
+            system=system,
+            error=str(err),
+            duration_s=time.perf_counter() - start,
+            extra={"image_paths": [str(p) for p in image_paths]},
+        )
+        raise
+    call_log.log_call(
+        provider="claude_cli",
+        model=model,
+        prompt=prompt,
+        system=system,
+        response=response,
+        duration_s=time.perf_counter() - start,
+        extra={"image_paths": [str(p) for p in image_paths]},
+    )
+    return response
 
 
 def _query_with_images_once(

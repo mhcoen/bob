@@ -265,6 +265,25 @@
   `seed_input` as an alias for `query`. Leaving as a known integration
   gap because the surrounding refactor is out of scope here, but it
   blocks any real end-to-end design run today.
+- 2026-05-28 [4.1] [T-000020]: Added `duplo/call_log.py` (per-run LLM
+  call log at `.duplo/logs/<run_id>/calls.jsonl`). The logger is
+  activated only by `call_log.start_run()`, called once at the top of
+  `duplo.main.main()`; until then `log_call` is a no-op, so importing
+  duplo or exercising `claude_cli` wrappers in tests writes nothing.
+  All LLM traffic funnels through `claude_cli.query` /
+  `query_with_images` (verified: no direct `anthropic`/`subprocess`
+  LLM calls elsewhere), so wrapping those two is one record per call.
+  Two design choices worth revisiting: (1) records store the full
+  `prompt`/`system`/`response` text, which is ideal for debugging but
+  will grow large and may capture sensitive content — a size cap or
+  redaction toggle may be wanted later; (2) the run directory is
+  created lazily on first append, so an activated run that makes no LLM
+  calls leaves no directory. Subcommands (`fix`, `reauthor`, `init`,
+  default) all dispatch through `main()`, so they inherit the active
+  run; any future entry point that bypasses `main()` would need its own
+  `start_run()` call. Duration is measured with `time.perf_counter()`
+  (not `time.monotonic`, which several `claude_cli` tests monkeypatch
+  with finite iterators).
 
 ## Hypotheses
 

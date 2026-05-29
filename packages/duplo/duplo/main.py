@@ -203,6 +203,7 @@ import signal
 import sys
 from pathlib import Path
 
+from duplo import call_log
 from duplo import pipeline as _pipeline
 from duplo.diagnostics import print_summary as diagnostics_print_summary
 from duplo.migration import _check_migration
@@ -222,6 +223,10 @@ def main() -> None:
 
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
+    # Establish the per-run log directory (.duplo/logs/<run_id>/) at process
+    # start so every LLM call this process makes is recorded.
+    call_log.start_run()
+
     # Check for subcommands before parsing, since the default
     # mode uses a positional 'url' arg that would eat 'fix'/'investigate'/'init'.
     if len(sys.argv) > 1 and sys.argv[1] == "init":

@@ -61,3 +61,18 @@ def _no_real_llm_calls():
     """
     with patch("subprocess.run", side_effect=_fake_subprocess_run):
         yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_call_log():
+    """Deactivate the per-run LLM call logger before each test.
+
+    Keeps an activated run (e.g. from a test that drives ``main()``) from
+    leaking into later tests, where the autouse subprocess stub would
+    otherwise write ``.duplo/logs/`` records into an unexpected directory.
+    """
+    from duplo import call_log
+
+    call_log._active = None
+    yield
+    call_log._active = None
