@@ -84,7 +84,7 @@ def extract_verification_cases(
         "frame descriptions:\n\n"
         f"{descriptions_text}"
     )
-    raw = query(prompt, system=_SYSTEM)
+    raw = query(prompt, system=_SYSTEM, call_site="verification_cases")
     return _parse_cases(raw)
 
 

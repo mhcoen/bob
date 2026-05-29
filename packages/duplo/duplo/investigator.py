@@ -179,7 +179,7 @@ def investigate(
     if not image_paths:
         # No images — fall back to text-only query.
         try:
-            raw = query(prompt, system=_SYSTEM, model=model)
+            raw = query(prompt, system=_SYSTEM, model=model, call_site="investigate")
         except ClaudeCliError as exc:
             record_failure(
                 "investigator:investigate",
@@ -193,7 +193,9 @@ def investigate(
             )
     else:
         try:
-            raw = query_with_images(prompt, image_paths, system=_SYSTEM, model=model)
+            raw = query_with_images(
+                prompt, image_paths, system=_SYSTEM, model=model, call_site="investigate"
+            )
         except ClaudeCliError as exc:
             record_failure(
                 "investigator:investigate",

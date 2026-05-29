@@ -81,6 +81,29 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [4.4] [T-000023] call_site labels threaded into query/query_with_images — 2026-05-28
+
+Threaded `call_site` into every duplo generation site that calls the legacy
+`query`/`query_with_images` path: `extract_features` -> `"extract_features"`,
+`generate_roadmap` -> `"generate_roadmap"`, `generate_phase_plan` ->
+`f"phase_plan:{required_phase_id}"` (the deterministic runtime phase id, e.g.
+`phase_plan:phase_001`), `extract_verification_cases` -> `"verification_cases"`,
+and `investigator.investigate` -> `"investigate"` (both the text-only `query`
+and the `query_with_images` branch).
+
+Design extraction (`design_extractor.extract_design`) is the one site in the
+task list that does NOT reach `query`: it routes through
+`duplo.design.run_iterative_design` -> `orchestra.run_role("design", ...)`,
+which is a separate LLM call path that does not write `call_log` records and
+takes no `call_site`. There is therefore no `query` call to label for
+`"extract_design"`; threading a label there would have no effect on the
+call_log. If design-loop calls ever need to appear in the call_log, orchestra
+itself would have to emit records — out of scope for this task.
+
+Note also a second `query` site in `planner.py` (`generate_next_phase_plan`,
+the feedback-driven next-phase generator) that the task did not enumerate; it
+was left unlabeled (`call_site=""`) since only `generate_phase_plan` was named.
+
 ### [4.3] [T-000022] claude_cli now emits stream-json and records token usage — 2026-05-28
 
 Both `claude -p` invocations in `duplo/claude_cli.py` (`_query_once` and

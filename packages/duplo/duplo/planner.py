@@ -614,7 +614,7 @@ Generate the phase body now.
     if council.is_enabled():
         return council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
 
-    raw = _strip_fences(query(prompt, system=system))
+    raw = _strip_fences(query(prompt, system=system, call_site=f"phase_plan:{required_phase_id}"))
     return council.typed_plan_from_synthesizer_text(raw, required_phase_id=required_phase_id)
 
 

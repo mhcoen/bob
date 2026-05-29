@@ -108,7 +108,7 @@ Features to include:
 Generate the roadmap now.
 """
 
-    raw = query(prompt, system=_SYSTEM)
+    raw = query(prompt, system=_SYSTEM, call_site="generate_roadmap")
     return _parse_roadmap(raw)
 
 

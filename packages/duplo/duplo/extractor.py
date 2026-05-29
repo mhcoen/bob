@@ -122,7 +122,7 @@ def extract_features(
         )
     prompt = f"Extract features from this product content:\n\n{content}"
     try:
-        raw = query(prompt, system=system)
+        raw = query(prompt, system=system, call_site="extract_features")
     except ClaudeCliError:
         return []
     features = _parse_features(raw)
