@@ -346,6 +346,43 @@ class TestGeneratePhasePlan:
         assert "Phase 2:" in prompt
 
 
+class TestGeneratePhasePlanCallSite:
+    """The legacy ``query()`` call must carry a ``call_site`` label that
+    identifies the phase the call belongs to, so a reader of the call_log
+    can reconstruct which PLAN.md phase each LLM call produced. The label
+    is ``phase_plan:<required_phase_id>``, where ``required_phase_id`` is
+    the deterministic id computed from the PLAN.md in ``target_dir``.
+    """
+
+    def test_threads_call_site_for_first_phase(self, tmp_path):
+        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                target_dir=tmp_path,
+            )
+        assert mock_query.call_args.kwargs["call_site"] == "phase_plan:phase_001"
+
+    def test_call_site_reflects_computed_phase_id(self, tmp_path):
+        # An existing PLAN.md with phase_001 and phase_002 means the next
+        # phase Duplo demands is phase_003; the call_site label tracks it.
+        (tmp_path / _PLAN_FILENAME).write_text(
+            "## Phase phase_001: One\n\n- [ ] a\n\n## Phase phase_002: Two\n\n- [ ] b\n"
+        )
+        with patch(
+            "duplo.planner.query",
+            return_value=_canonical_body("phase_003", "Third"),
+        ) as mock_query:
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                target_dir=tmp_path,
+            )
+        assert mock_query.call_args.kwargs["call_site"] == "phase_plan:phase_003"
+
+
 class TestGeneratePhasePlanH1Heading:
     """Verify generate_phase_plan() returns a typed Plan whose first
     phase carries the runtime-computed ``phase_NNN`` id.

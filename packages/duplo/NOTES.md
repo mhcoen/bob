@@ -81,6 +81,29 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [4.7] [T-000026] call_log test coverage already broad; only call_site thread-through was missing — 2026-05-28
+
+Auditing the requested assertions against existing tests, nearly all
+were already covered: run_id shape + lazy run-dir creation
+(`tests/test_call_log.py`), `query`/`query_with_images` full-fidelity
+records on success/error/timeout (`TestQueryCallLogging` in
+`tests/test_claude_cli.py`), stream-json token parsing
+(`TestStreamJsonUsage`), and `duplo logs` aggregation
+(`tests/test_logs.py`). The only gap was asserting the `call_site`
+label threads from `generate_phase_plan` into `query`; added
+`TestGeneratePhasePlanCallSite` in `tests/test_planner.py` (label is
+`phase_plan:<required_phase_id>`, where the id comes from
+`council.compute_required_phase_id` over the target_dir PLAN.md, so it
+is `phase_plan:phase_001` against an empty dir and tracks `highest+1`
+when prior phase headers exist).
+
+Pre-existing/unrelated failure observed in the same full run:
+`packages/orchestra/tests/test_fan_out_executor.py::test_resume_open_fan_out_relaunches_only_incomplete_children`
+(advise_c minted attempt_seq 2 instead of 1 on first entry). It is in
+orchestra's fan-out resume path, untouched by this duplo-only change,
+and appears order/seed-sensitive under pytest-randomly — a sibling of
+the orchestra failure noted in the [4.2] session.
+
 ### [4.6] [T-000025] `duplo logs` run-log summary helper — 2026-05-28
 
 New read-only module `duplo/logs.py` plus a `duplo logs [RUN_ID]`
