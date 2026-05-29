@@ -51,6 +51,7 @@ class CallLog:
         prompt: str,
         system: str = "",
         call_site: str = "",
+        path: str = "legacy",
         response: str | None = None,
         error: str | None = None,
         outcome: str | None = None,
@@ -64,18 +65,22 @@ class CallLog:
         Creates the run directory on first use. ``response`` is set on
         success and ``error`` on failure; exactly one is normally present.
         ``call_site`` is a caller-supplied label identifying which
-        phase/feature/step invoked the call; ``outcome`` is one of
-        ``"ok"``/``"timeout"``/``"error"``; ``attempt`` is the attempt
-        number the record describes. ``usage`` carries per-call token
-        counts (``input_tokens``, ``cache_creation_input_tokens``,
-        ``cache_read_input_tokens``, ``output_tokens``) when they could be
-        extracted, and is omitted otherwise. Prompts and responses are
-        stored at full fidelity (never truncated).
+        phase/feature/step invoked the call; ``path`` is the generation
+        path the call belongs to (``"legacy"`` for the single-actor
+        ``query()`` route, ``"council"`` for the orchestra council route);
+        ``outcome`` is one of ``"ok"``/``"timeout"``/``"error"``;
+        ``attempt`` is the attempt number the record describes. ``usage``
+        carries per-call token counts (``input_tokens``,
+        ``cache_creation_input_tokens``, ``cache_read_input_tokens``,
+        ``output_tokens``) when they could be extracted, and is omitted
+        otherwise. Prompts and responses are stored at full fidelity
+        (never truncated).
         """
         record: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "run_id": self.run_id,
             "call_site": call_site,
+            "path": path,
             "provider": provider,
             "model": model,
             "prompt": prompt,
@@ -96,6 +101,48 @@ class CallLog:
         if extra:
             record["extra"] = extra
 
+        self._append(record)
+
+    def log_council_phase(
+        self,
+        *,
+        call_site: str,
+        orchestra_run_id: str,
+        transcript_path: Path | str | None = None,
+        extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a council-path reference record to ``calls.jsonl``.
+
+        The council route fans a phase out to several actors through
+        Orchestra, which already captures each per-actor LLM call at full
+        fidelity inside its own run directory. Rather than duplicate that
+        transcript, this records a *pointer*: one record per
+        council-authored phase carrying the ``call_site`` (the same label
+        the legacy ``query()`` route would use for the phase),
+        ``path="council"``, the orchestra ``run_id``, and the
+        ``transcript_path`` of the orchestra run log. A reader walking the
+        duplo run directory thus has a complete index of every LLM call
+        regardless of path: legacy calls inline, council phases by
+        reference.
+
+        Creates the run directory on first use, like :meth:`log_call`.
+        """
+        record: dict[str, Any] = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": self.run_id,
+            "call_site": call_site,
+            "path": "council",
+            "orchestra_run_id": orchestra_run_id,
+        }
+        if transcript_path is not None:
+            record["transcript_path"] = str(transcript_path)
+        if extra:
+            record["extra"] = extra
+
+        self._append(record)
+
+    def _append(self, record: dict[str, Any]) -> None:
+        """Create the run directory if needed and append one JSON line."""
         self.run_dir.mkdir(parents=True, exist_ok=True)
         with open(self.calls_path, "a") as fh:
             fh.write(json.dumps(record) + "\n")
@@ -128,3 +175,13 @@ def log_call(**kwargs: Any) -> None:
     """
     if _active is not None:
         _active.log_call(**kwargs)
+
+
+def log_council_phase(**kwargs: Any) -> None:
+    """Append one council-path reference record to the active run, if any.
+
+    No-op when no run is active so library and test usage of the council
+    path never writes to disk.
+    """
+    if _active is not None:
+        _active.log_council_phase(**kwargs)

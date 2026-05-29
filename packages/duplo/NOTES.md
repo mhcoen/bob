@@ -81,6 +81,39 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [4.5] [T-000024] council phases indexed in the duplo run log by reference — 2026-05-28
+
+`council.author_phase_plan` now appends one `call_log` record per
+council-authored phase via `call_log.log_council_phase`, so a single
+`.duplo/logs/<run_id>/calls.jsonl` is the complete index of every LLM
+call regardless of path. The record is a pointer, not a captured
+round-trip: `call_site` (`f"phase_plan:{required_phase_id}"`, the same
+label the legacy `query` path uses for a phase), `path="council"`,
+`orchestra_run_id` (`result.run_id`), `transcript_path`
+(`result.log_path`), and `extra.audit_dir` (the `.duplo/audits/council/<run_id>`
+dir holding the human-readable proposals/brief/plan).
+
+Two asymmetries worth carrying forward:
+
+  - Fidelity is captured differently per path by design. Legacy
+    `query` calls are recorded inline at full fidelity (prompt,
+    system, response, usage). The council route's per-actor calls
+    (framer + 4 proposers + synthesizer, ~6 calls) are captured by
+    orchestra inside its own run dir; duplo records a single pointer
+    rather than duplicating that transcript. So one council phase = one
+    duplo record but six underlying orchestra calls. A reader must
+    follow `transcript_path` to enumerate the per-actor calls.
+
+  - The council pointer uses orchestra's `WorkflowRunResult.log_path`
+    as `transcript_path`. That is the JSONL workflow log, not the
+    `IterativeDesignResult.transcript_path` field (which only exists on
+    the `run_role`/design path, not the `run_workflow`/council path).
+    Token usage is not surfaced on the duplo-side council record; it
+    lives in the orchestra log if at all.
+
+Legacy `log_call` records now also carry an explicit `path="legacy"`
+field so the index is uniform across both routes.
+
 ### [4.4] [T-000023] call_site labels threaded into query/query_with_images — 2026-05-28
 
 Threaded `call_site` into every duplo generation site that calls the legacy

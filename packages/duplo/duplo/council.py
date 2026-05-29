@@ -86,6 +86,7 @@ from bob_tools.planfile import (
     validate_plan,
 )
 
+from duplo import call_log
 from duplo.canonical_consistency import (
     validate_spec_pyproject_runsh_consistency,
 )
@@ -582,6 +583,18 @@ def author_phase_plan(
         result=result,
         question=question,
         elapsed_s=elapsed_s,
+    )
+
+    # Index this council-authored phase in the duplo run directory so a
+    # single run dir is the complete record of every LLM call regardless
+    # of path. The orchestra council route captures each per-actor call
+    # inside its own run dir; here we write a pointer to it keyed by the
+    # same ``call_site`` the legacy ``query()`` route uses for a phase.
+    call_log.log_council_phase(
+        call_site=f"phase_plan:{required_phase_id}",
+        orchestra_run_id=result.run_id,
+        transcript_path=result.log_path,
+        extra={"audit_dir": str(audits_root / result.run_id)},
     )
 
     # Canonical validation has moved into bob_tools.planfile. The plan

@@ -265,6 +265,39 @@ class TestAuthorPhasePlan:
         assert "council mode" in captured.err
         assert "6 LLM calls" in captured.err
 
+    def test_writes_council_reference_to_active_run_log(self, tmp_path, monkeypatch):
+        """A council-authored phase is indexed in the active duplo run
+        directory as a pointer to the orchestra transcript, so a single
+        run dir records every LLM call regardless of path.
+        """
+        from duplo import call_log
+
+        monkeypatch.setattr(call_log, "_active", None)
+        call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-duplo1")
+        result = _StubResult(run_id="orc-run-9")
+        with _patch_run_workflow(result):
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
+
+        calls_path = call_log.current_run().calls_path
+        records = [
+            json.loads(line) for line in calls_path.read_text().splitlines() if line.strip()
+        ]
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["path"] == "council"
+        assert rec["call_site"] == "phase_plan:phase_001"
+        assert rec["orchestra_run_id"] == "orc-run-9"
+        assert rec["transcript_path"] == str(result.log_path)
+        assert rec["extra"]["audit_dir"].endswith("/.duplo/audits/council/orc-run-9")
+
+    def test_no_council_reference_when_run_inactive(self, tmp_path, monkeypatch):
+        from duplo import call_log
+
+        monkeypatch.setattr(call_log, "_active", None)
+        with _patch_run_workflow(_StubResult()):
+            council.author_phase_plan(prompt="p", system="s", phase_num=1, project_dir=tmp_path)
+        assert not (tmp_path / call_log.LOGS_ROOT).exists()
+
 
 # --------------------------------------------------------------------
 # author_phase_plan: unhappy paths

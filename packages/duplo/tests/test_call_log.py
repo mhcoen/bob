@@ -106,3 +106,47 @@ def test_log_call_appends_one_record_per_call(tmp_path):
         call_log.log_call(provider="claude_cli", model="sonnet", prompt=f"p{i}")
     records = _read_records(call_log.current_run().calls_path)
     assert [r["prompt"] for r in records] == ["p0", "p1", "p2"]
+
+
+def test_log_call_defaults_path_to_legacy(tmp_path):
+    logger = call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
+    logger.log_call(provider="claude_cli", model="sonnet", prompt="p")
+    rec = _read_records(logger.calls_path)[0]
+    assert rec["path"] == "legacy"
+
+
+def test_log_council_phase_writes_pointer_record(tmp_path):
+    logger = call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
+    call_log.log_council_phase(
+        call_site="phase_plan:phase_002",
+        orchestra_run_id="orc-run-xyz",
+        transcript_path="/runs/orc-run-xyz/log.jsonl",
+        extra={"audit_dir": "/proj/.duplo/audits/council/orc-run-xyz"},
+    )
+    records = _read_records(logger.calls_path)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["run_id"] == "20260101T000000Z-abc123"
+    assert rec["call_site"] == "phase_plan:phase_002"
+    assert rec["path"] == "council"
+    assert rec["orchestra_run_id"] == "orc-run-xyz"
+    assert rec["transcript_path"] == "/runs/orc-run-xyz/log.jsonl"
+    assert rec["extra"]["audit_dir"] == "/proj/.duplo/audits/council/orc-run-xyz"
+    # A council pointer is not a captured round-trip; it carries no
+    # prompt/response/model fields.
+    assert "prompt" not in rec
+    assert "model" not in rec
+
+
+def test_log_council_phase_omits_absent_transcript_path(tmp_path):
+    logger = call_log.start_run(target_dir=tmp_path, run_id="20260101T000000Z-abc123")
+    logger.log_council_phase(call_site="phase_plan:phase_001", orchestra_run_id="orc-1")
+    rec = _read_records(logger.calls_path)[0]
+    assert "transcript_path" not in rec
+    assert rec["path"] == "council"
+
+
+def test_log_council_phase_is_noop_when_inactive(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    call_log.log_council_phase(call_site="phase_plan:phase_001", orchestra_run_id="orc-1")
+    assert not (tmp_path / call_log.LOGS_ROOT).exists()
