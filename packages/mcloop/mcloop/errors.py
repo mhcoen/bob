@@ -7,7 +7,9 @@ import subprocess
 from pathlib import Path
 
 from mcloop import formatting
+from mcloop.notify import notify
 from mcloop.prompts import parse_diagnostic_output
+from mcloop.ratelimit import RateLimitState, run_session_with_fallover
 from mcloop.runner import run_diagnostic
 
 _MAX_FIX_ATTEMPTS = 3
@@ -141,6 +143,8 @@ def _check_errors_json(
     # Run diagnostic sessions per resolvable error
     log_dir = project_dir / "logs"
     task_lines: list[str] = []
+    # One RateLimitState across all per-error diagnostics in this pass.
+    rate_state = RateLimitState()
     for i, entry in enumerate(resolvable, 1):
         exc_type = entry.get("exception_type", "Unknown")
         desc = entry.get("description", "") or ""
@@ -163,17 +167,25 @@ def _check_errors_json(
             flush=True,
         )
 
-        result = run_diagnostic(
-            project_dir,
-            log_dir,
-            entry,
-            source_content=source_content,
-            git_log=git_log,
-            model=model,
+        _diag_outcome = run_session_with_fallover(
+            lambda _cli, _entry=entry, _src=source_content: run_diagnostic(
+                project_dir,
+                log_dir,
+                _entry,
+                source_content=_src,
+                git_log=git_log,
+                model=model,
+            ),
+            state=rate_state,
+            context=f"diagnostic {exc_type}",
+            notify_fn=notify,
         )
+        result = _diag_outcome.result
 
+        # A rate-limited diagnostic is inconclusive, not a crash: fall back to
+        # the generic crash description (handled below by the empty fix_desc).
         fix_desc = ""
-        if result.success:
+        if _diag_outcome.status == "ok" and result.success:
             fix_desc = parse_diagnostic_output(result.output)
 
         if fix_desc:

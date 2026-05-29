@@ -19,6 +19,7 @@ from mcloop.git_ops import (
 )
 from mcloop.notify import notify
 from mcloop.output import _print_error_tail, _tail
+from mcloop.ratelimit import RateLimitState, run_session_with_fallover
 from mcloop.prompts import (
     bugs_md_has_bugs,
     parse_bugs_md,
@@ -38,6 +39,19 @@ class AuditResult(enum.Enum):
     fixed = "fixed"  # Audit ran, bugs found and fixed
     failed = "failed"  # Audit session crashed, timed out, or BUGS.md not produced
     skipped = "skipped"  # Audit skipped (no changes since last audit)
+    deferred = "deferred"  # Audit hit a rate/session limit; inconclusive, NOT a failure
+
+
+class _AuditDeferred(Exception):
+    """Raised inside an audit round when a sub-session was rate-limited past
+    the bounded retry budget. A rate limit is transient and orthogonal to
+    whether the code passed audit, so it must defer the audit (inconclusive)
+    rather than become a terminal "Audit failed" that blocks completion.
+    """
+
+    def __init__(self, context: str) -> None:
+        super().__init__(context)
+        self.context = context
 
 
 def _should_skip_audit(project_dir: Path) -> bool:
@@ -87,6 +101,9 @@ def _run_audit_fix_cycle(
 
     any_fixed = False
     max_rounds = 2
+    # One RateLimitState spans the whole audit/fix cycle so a limit hit in an
+    # early sub-session is remembered across the later ones in this cycle.
+    rate_state = RateLimitState()
     for round_num in range(1, max_rounds + 1):
         label = (
             f"Audit round {round_num} of {max_rounds}"
@@ -94,11 +111,27 @@ def _run_audit_fix_cycle(
             else f"Audit round {round_num}"
         )
         print(formatting.system_msg(label), flush=True)
-        round_result = _run_single_audit_round(
-            project_dir,
-            log_dir,
-            model=model,
-        )
+        try:
+            round_result = _run_single_audit_round(
+                project_dir,
+                log_dir,
+                model=model,
+                rate_state=rate_state,
+            )
+        except _AuditDeferred as deferred:
+            print(
+                formatting.system_msg(
+                    f"Audit deferred: rate/session limit during {deferred.context}."
+                    " Audit inconclusive (not failed); completion not blocked."
+                ),
+                flush=True,
+            )
+            notify(
+                f"Audit deferred: rate/session limit during {deferred.context}."
+                " Audit inconclusive, completion not blocked.",
+                level="warning",
+            )
+            return AuditResult.deferred
         if round_result is None:
             # Session crashed or BUGS.md not produced
             notify("Audit failed: session crashed or timed out.")
@@ -127,12 +160,19 @@ def _run_single_audit_round(
     project_dir: Path,
     log_dir: Path,
     model: str | None = None,
+    rate_state: RateLimitState | None = None,
 ) -> bool | None:
     """Run one audit/verify/fix cycle.
 
     Returns True if bugs were fixed, False if no bugs found, or None if the
     audit session failed (crashed, timed out, or BUGS.md not produced).
+
+    Raises ``_AuditDeferred`` if a sub-session is rate/session-limited past
+    the bounded retry budget; a limit is transient and must defer the audit
+    rather than fail it.
     """
+    if rate_state is None:
+        rate_state = RateLimitState()
     bugs_path = project_dir / AUDIT_REPORT_FILE
     bugs_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -154,12 +194,20 @@ def _run_single_audit_round(
     else:
         print(formatting.system_msg("Running bug audit..."), flush=True)
         _audit_start = time.monotonic()
-        audit_result = run_audit(
-            project_dir,
-            log_dir,
-            model=model,
-            existing_bugs="",
+        _audit_outcome = run_session_with_fallover(
+            lambda _cli: run_audit(
+                project_dir,
+                log_dir,
+                model=model,
+                existing_bugs="",
+            ),
+            state=rate_state,
+            context="audit",
+            notify_fn=notify,
         )
+        if _audit_outcome.status == "deferred":
+            raise _AuditDeferred("audit")
+        audit_result = _audit_outcome.result
         _audit_el = _format_elapsed(time.monotonic() - _audit_start)
         if not audit_result.success:
             print(
@@ -190,12 +238,20 @@ def _run_single_audit_round(
             flush=True,
         )
         _verify_start = time.monotonic()
-        verify_result = run_bug_verify(
-            project_dir,
-            log_dir,
-            bugs_content,
-            model=model,
+        _verify_outcome = run_session_with_fallover(
+            lambda _cli: run_bug_verify(
+                project_dir,
+                log_dir,
+                bugs_content,
+                model=model,
+            ),
+            state=rate_state,
+            context="bug-verify",
+            notify_fn=notify,
         )
+        if _verify_outcome.status == "deferred":
+            raise _AuditDeferred("bug-verify")
+        verify_result = _verify_outcome.result
         _verify_el = _format_elapsed(time.monotonic() - _verify_start)
         if verify_result.success:
             verdicts = parse_verification_output(
@@ -243,11 +299,19 @@ def _run_single_audit_round(
             flush=True,
         )
         _fix_start = time.monotonic()
-        fix_result = run_bug_fix(
-            project_dir,
-            log_dir,
-            model=model,
+        _fix_outcome = run_session_with_fallover(
+            lambda _cli: run_bug_fix(
+                project_dir,
+                log_dir,
+                model=model,
+            ),
+            state=rate_state,
+            context="bug-fix",
+            notify_fn=notify,
         )
+        if _fix_outcome.status == "deferred":
+            raise _AuditDeferred("bug-fix")
+        fix_result = _fix_outcome.result
         _fix_el = _format_elapsed(time.monotonic() - _fix_start)
 
         if not fix_result.success:
@@ -287,13 +351,21 @@ def _run_single_audit_round(
                     flush=True,
                 )
                 _review_start = time.monotonic()
-                review_result = run_post_fix_review(
-                    project_dir,
-                    log_dir,
-                    bugs_content,
-                    diff,
-                    model=model,
+                _review_outcome = run_session_with_fallover(
+                    lambda _cli, _bugs=bugs_content, _diff=diff: run_post_fix_review(
+                        project_dir,
+                        log_dir,
+                        _bugs,
+                        _diff,
+                        model=model,
+                    ),
+                    state=rate_state,
+                    context="post-fix-review",
+                    notify_fn=notify,
                 )
+                if _review_outcome.status == "deferred":
+                    raise _AuditDeferred("post-fix-review")
+                review_result = _review_outcome.result
                 _review_el = _format_elapsed(time.monotonic() - _review_start)
                 if review_result.success:
                     found, desc = review_found_problems(

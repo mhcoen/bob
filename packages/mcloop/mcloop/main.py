@@ -746,6 +746,19 @@ def _run_batch(
         timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
     )
 
+    # A rate/session limit mid-batch must not read as an ordinary failure.
+    # Mark the CLI limited and surface the event; returning "failed" lets the
+    # batch retry loop re-enter _run_batch, whose top-of-function
+    # get_available_cli / wait_for_reset waits out the limit before retrying.
+    if is_session_limited(result.output, result.exit_code) or is_rate_limited(
+        result.output, result.exit_code
+    ):
+        rate_state.mark_limited(active_cli, cooldown=SESSION_LIMIT_POLL)
+        limit_msg = f"Batch: {active_cli} rate/session-limited; waiting for reset before retry."
+        print(formatting.system_msg(limit_msg), flush=True)
+        notify(limit_msg, level="warning")
+        return "failed", _tail(result.output, 50)
+
     if not result.success:
         elapsed = _format_elapsed(time.monotonic() - task_start)
         print(
@@ -2485,6 +2498,17 @@ def run_loop(
                         level="error",
                     )
                     terminal_failure = "Audit failed: session crashed or audit report not produced"
+                elif audit_result == AuditResult.deferred:
+                    # A rate/session limit is transient and orthogonal to
+                    # whether the code passed audit. Deferred is inconclusive,
+                    # NOT a failure: do not set terminal_failure, so phase
+                    # completion is not blocked by a quota event.
+                    print(
+                        formatting.system_msg(
+                            f"Audit deferred (rate-limited, inconclusive) [{_audit_elapsed}]"
+                        ),
+                        flush=True,
+                    )
                 else:
                     print(
                         formatting.system_msg(f"Audit completed [{_audit_elapsed}]"),
