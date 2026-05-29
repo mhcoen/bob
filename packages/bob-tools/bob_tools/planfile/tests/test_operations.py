@@ -2884,6 +2884,170 @@ class TestCreatedAt:
         assert appended.created_at == "2024-01-01T00:00:00Z"
 
 
+class TestCompletedAt:
+    """``Task.completed_at`` round-trips and is stamped at checkoff.
+
+    The field is serialized on the task line as an HTML-comment
+    annotation (``<!-- completed_at: ... -->``) after ``created_at``.
+    ``complete_task`` stamps it with the current UTC instant on the
+    TODO/FAILED -> DONE transition (including derived parent completion);
+    ``fail_task`` and ``reset_task`` clear it. Re-completing an already
+    DONE task preserves the original checkoff time.
+    """
+
+    _ISO_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+    _FIXED = "2026-05-29T08:00:00Z"
+
+    @pytest.fixture
+    def _frozen_clock(self, monkeypatch: pytest.MonkeyPatch) -> str:
+        # complete_task looks up _now_iso_utc in the status module
+        # namespace; patch it there so the stamped value is deterministic.
+        monkeypatch.setattr(
+            "bob_tools.planfile.status._now_iso_utc", lambda: self._FIXED
+        )
+        return self._FIXED
+
+    def test_parser_extracts_completed_at_html_comment(self) -> None:
+        source = (
+            "# Project\n\n"
+            "## Stage 1: Core\n"
+            "<!-- phase_id: phase_001 -->\n\n"
+            "- [x] T-000001: hello "
+            "<!-- created_at: 2026-05-26T12:34:56Z --> "
+            "<!-- completed_at: 2026-05-28T09:00:00Z -->\n"
+        )
+        from bob_tools.planfile.parser import parse_plan
+
+        plan = parse_plan(source)
+        task = plan.phases[0].tasks[0]
+        assert task.created_at == "2026-05-26T12:34:56Z"
+        assert task.completed_at == "2026-05-28T09:00:00Z"
+        assert task.text == "hello"
+
+    def test_round_trip_preserves_both_timestamps_and_order(self) -> None:
+        task = make_task(
+            "ship it",
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            created_at="2026-05-26T12:34:56Z",
+            completed_at="2026-05-28T09:00:00Z",
+        )
+        plan = Plan(
+            magic_version=1,
+            project_title="Project",
+            preamble="",
+            phases=(_phase_with_tasks(tasks=(task,)),),
+            bugs=None,
+            source_path=None,
+        )
+        rendered = render_plan(plan)
+        line = next(ln for ln in rendered.splitlines() if "ship it" in ln)
+        assert "<!-- created_at: 2026-05-26T12:34:56Z -->" in line
+        assert "<!-- completed_at: 2026-05-28T09:00:00Z -->" in line
+        # completed_at renders after created_at so canonical form is stable.
+        assert line.index("<!-- created_at:") < line.index("<!-- completed_at:")
+        from bob_tools.planfile.parser import parse_plan
+
+        reparsed = parse_plan(rendered)
+        rt = reparsed.phases[0].tasks[0]
+        assert rt.created_at == "2026-05-26T12:34:56Z"
+        assert rt.completed_at == "2026-05-28T09:00:00Z"
+
+    def test_completed_at_alone_round_trips(self) -> None:
+        # A DONE task with completed_at but no created_at (the
+        # completed_at comment is then the trailing-most) must still
+        # parse cleanly.
+        task = make_task(
+            "loose", status=TaskStatus.DONE, completed_at="2026-05-28T09:00:00Z"
+        )
+        assert task.completed_at == "2026-05-28T09:00:00Z"
+        assert task.created_at is None
+
+    def test_complete_task_stamps_completed_at(self, _frozen_clock: str) -> None:
+        import re as _re
+
+        task = _task(task_id="T-000001")
+        plan = _plan(phases=(_phase_with_tasks(tasks=(task,)),))
+        new_plan, _ = complete_task(plan, "T-000001")
+        done = new_plan.phases[0].tasks[0]
+        assert done.status == TaskStatus.DONE
+        assert done.completed_at == _frozen_clock
+        assert _re.fullmatch(self._ISO_RE, done.completed_at) is not None
+
+    def test_parent_auto_completion_stamps_completed_at(
+        self, _frozen_clock: str
+    ) -> None:
+        done_child = _task(
+            task_id="T-000010",
+            status=TaskStatus.DONE,
+            indent_level=2,
+            line_number=2,
+            # An already-DONE child predating the field stays null until
+            # touched; completing its sibling must not retro-stamp it.
+        )
+        live_child = _task(task_id="T-000011", indent_level=2, line_number=3)
+        parent = _task(task_id="T-000001", children=(done_child, live_child))
+        plan = _plan(phases=(_phase_with_tasks(tasks=(parent,)),))
+        new_plan, settlements = complete_task(plan, "T-000011")
+        assert len(settlements) == 2
+        new_parent = new_plan.phases[0].tasks[0]
+        assert new_parent.status == TaskStatus.DONE
+        # The parent auto-completed, so it carries the checkoff stamp.
+        assert new_parent.completed_at == _frozen_clock
+        # The directly-completed child is stamped too.
+        completed_child = new_parent.children[1]
+        assert completed_child.task_id == "T-000011"
+        assert completed_child.completed_at == _frozen_clock
+
+    def test_recompletion_preserves_original_completed_at(self) -> None:
+        original = make_task(
+            "already done",
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            completed_at="2020-01-01T00:00:00Z",
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(original,)),))
+        new_plan, _ = complete_task(plan, "T-000001")
+        # Idempotent: the original checkoff instant is not overwritten.
+        assert new_plan.phases[0].tasks[0].completed_at == "2020-01-01T00:00:00Z"
+
+    def test_backfill_on_touch_stamps_done_task_missing_completed_at(
+        self, _frozen_clock: str
+    ) -> None:
+        # A DONE task with no completed_at gets stamped when re-completed.
+        done = _task(task_id="T-000001", status=TaskStatus.DONE)
+        assert done.completed_at is None
+        plan = _plan(phases=(_phase_with_tasks(tasks=(done,)),))
+        new_plan, _ = complete_task(plan, "T-000001")
+        assert new_plan.phases[0].tasks[0].completed_at == _frozen_clock
+
+    def test_fail_task_clears_completed_at(self) -> None:
+        done = make_task(
+            "regressed",
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            completed_at="2026-05-28T09:00:00Z",
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(done,)),))
+        new_plan, _ = fail_task(plan, "T-000001", reason="broke")
+        failed = new_plan.phases[0].tasks[0]
+        assert failed.status == TaskStatus.FAILED
+        assert failed.completed_at is None
+
+    def test_reset_task_clears_completed_at(self) -> None:
+        done = make_task(
+            "redo",
+            task_id="T-000001",
+            status=TaskStatus.DONE,
+            completed_at="2026-05-28T09:00:00Z",
+        )
+        plan = _plan(phases=(_phase_with_tasks(tasks=(done,)),))
+        new_plan, _ = reset_task(plan, "T-000001")
+        reset = new_plan.phases[0].tasks[0]
+        assert reset.status == TaskStatus.TODO
+        assert reset.completed_at is None
+
+
 class TestReplacePhase:
     """``replace_phase`` substitutes a whole Phase object by id."""
 

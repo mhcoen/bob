@@ -13,8 +13,17 @@ _BUGS_HEADER_RE = re.compile(r"^##\s+Bugs\s*$", re.MULTILINE | re.IGNORECASE)
 
 
 def assert_canonical_checkbox(content: str, marker: str, text: str) -> None:
-    """Assert ``content`` has a canonical checkbox line for exact task text."""
-    pattern = rf"(?m)^\s*- \[{re.escape(marker)}\] T-\d{{6}}: {re.escape(text)}$"
+    """Assert ``content`` has a canonical checkbox line for exact task text.
+
+    Tolerates trailing ``<!-- key: value -->`` HTML-comment annotations
+    (e.g. ``created_at`` / ``completed_at``) that the renderer appends
+    after the task text, so a checked-off task carrying its checkoff
+    timestamp still matches.
+    """
+    pattern = (
+        rf"(?m)^\s*- \[{re.escape(marker)}\] T-\d{{6}}: "
+        rf"{re.escape(text)}(?: <!--[^\n]*-->)*$"
+    )
     assert re.search(pattern, content), (
         f"missing canonical checkbox {marker!r} {text!r} in:\n{content}"
     )

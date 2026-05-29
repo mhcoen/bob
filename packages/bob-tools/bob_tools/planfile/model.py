@@ -84,6 +84,13 @@ class Task:
     # ``<!-- created_at: ... -->`` after annotations. ``None`` for tasks
     # parsed from plans that do not carry the comment.
     created_at: str | None = None
+    # ISO 8601 UTC timestamp recording when the task was checked off
+    # (flipped to DONE) by ``complete_task``. Serialized on the task line
+    # as ``<!-- completed_at: ... -->`` after ``created_at``. ``None`` for
+    # tasks that are not DONE and for DONE tasks parsed from plans that
+    # predate the comment (until backfilled). Cleared when the task is
+    # later failed or reset to TODO.
+    completed_at: str | None = None
 
 
 @dataclass(frozen=True)

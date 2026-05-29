@@ -216,6 +216,7 @@ def _collect_task_semantic_diff(
         "annotations",
         "deps",
         "created_at",
+        "completed_at",
     ):
         intended_value = getattr(intended, field)
         parsed_value = getattr(parsed, field)

@@ -40,6 +40,8 @@ def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
         _validate_scalar(node.text, f"{prefix}.text", errors)
         if node.created_at is not None:
             _validate_scalar(node.created_at, f"{prefix}.created_at", errors)
+        if node.completed_at is not None:
+            _validate_scalar(node.completed_at, f"{prefix}.completed_at", errors)
         if not isinstance(node.status, TaskStatus):
             errors.append(f"{prefix}.status is not a TaskStatus")
         for flag_index, tag in enumerate(node.flag_tags):
@@ -222,6 +224,7 @@ def _compare_task_fields(
         "deps",
         "ruled_out",
         "created_at",
+        "completed_at",
     ):
         intended_value = _field_value(intended, field)
         parsed_value = _field_value(parsed, field)
@@ -283,6 +286,7 @@ def make_task(
     ruled_out: tuple[RuledOut, ...] = (),
     task_id: str | None = None,
     created_at: str | None = None,
+    completed_at: str | None = None,
 ) -> Task:
     """Construct a semantically field-stable PLAN.md task.
 
@@ -307,6 +311,7 @@ def make_task(
         line_number=0,
         trailing_lines=(),
         created_at=created_at,
+        completed_at=completed_at,
     )
     _assert_task_field_stability(task)
     return task

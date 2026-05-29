@@ -102,6 +102,13 @@ _TASK_ID_RE = re.compile(r"^(T-(?:[A-Za-z]{2}-)?\d+):\s+(.*)$")
 # truncated value.
 _TRAILING_CREATED_AT_RE = re.compile(r"<!--\s*created_at\s*:\s*([^<>]+?)\s*-->\s*$")
 
+# Trailing ``<!-- completed_at: ... -->`` HTML-comment annotation on a
+# task line. Serialized after ``created_at`` (so it is the trailing-most
+# comment when both are present); the parser therefore extracts it
+# before ``created_at``. Same non-angle-bracket content rule as
+# ``created_at``.
+_TRAILING_COMPLETED_AT_RE = re.compile(r"<!--\s*completed_at\s*:\s*([^<>]+?)\s*-->\s*$")
+
 
 # Magic format-version line: anchored to a full line per design doc
 # section 4.1 grammar ``Magic ← "<!--" WS? "bob-plan-format:" WS? Int
@@ -721,6 +728,9 @@ def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
     text is the task description.
     """
     task_id, remaining = _extract_task_id(raw.text)
+    # ``completed_at`` is serialized after ``created_at`` so it sits at
+    # the trailing end; strip it first, then ``created_at`` is trailing.
+    completed_at, remaining = _extract_trailing_completed_at(remaining)
     created_at, remaining = _extract_trailing_created_at(remaining)
     annotations, remaining = _extract_annotations(remaining)
     flag_tags, remaining = _extract_flag_tags(remaining)
@@ -733,6 +743,7 @@ def _build_task(raw: _RawTaskLine) -> _TaskBuilder:
         action_tag=action_tag,
         annotations=annotations,
         created_at=created_at,
+        completed_at=completed_at,
         indent_level=len(raw.indent),
         line_number=raw.line_number,
     )
@@ -754,6 +765,25 @@ def _extract_trailing_created_at(text: str) -> tuple[str | None, str]:
     """
     rstripped = text.rstrip()
     m = _TRAILING_CREATED_AT_RE.search(rstripped)
+    if m is None:
+        return None, text
+    start = m.start()
+    if start > 0 and not rstripped[start - 1].isspace():
+        return None, text
+    return m.group(1), rstripped[:start].rstrip()
+
+
+def _extract_trailing_completed_at(text: str) -> tuple[str | None, str]:
+    """Strip a trailing ``<!-- completed_at: ... -->`` HTML comment.
+
+    Returns ``(value, remainder)`` with the same separation rule as
+    :func:`_extract_trailing_created_at`. Called before that function so
+    a line carrying both comments (``created_at`` then ``completed_at``)
+    has its trailing-most ``completed_at`` removed first, leaving
+    ``created_at`` at the end for the next extractor.
+    """
+    rstripped = text.rstrip()
+    m = _TRAILING_COMPLETED_AT_RE.search(rstripped)
     if m is None:
         return None, text
     start = m.start()
@@ -1033,6 +1063,7 @@ class _TaskBuilder:
     indent_level: int
     line_number: int
     created_at: str | None = None
+    completed_at: str | None = None
     deps: list[str] = field(default_factory=list)
     children: list[_TaskBuilder] = field(default_factory=list)
     ruled_out: list[RuledOut] = field(default_factory=list)
@@ -1053,6 +1084,7 @@ class _TaskBuilder:
             line_number=self.line_number,
             trailing_lines=tuple(self.trailing_lines),
             created_at=self.created_at,
+            completed_at=self.completed_at,
         )
 
 

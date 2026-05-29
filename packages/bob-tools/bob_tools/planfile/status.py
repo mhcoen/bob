@@ -6,6 +6,7 @@ import dataclasses
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
+from bob_tools.planfile._shared import _now_iso_utc
 from bob_tools.planfile.canonical import (
     resolve_task_context,
 )
@@ -37,12 +38,30 @@ _EVENT_TYPE_TO_EXPECTED_STATUS: dict[str, TaskStatus] = {
 }
 
 
+def _completed_at_after_flip(
+    task: Task, new_status: TaskStatus, now: str | None
+) -> str | None:
+    """Return the ``completed_at`` a task should carry after a status flip.
+
+    Flipping to DONE stamps the checkoff time: an existing ``completed_at``
+    is preserved (idempotent re-completion keeps the original instant),
+    otherwise ``now`` is recorded — which also backfills a DONE task that
+    was touched without a timestamp. Flipping to any non-DONE status
+    (TODO/FAILED) clears it: a task that is no longer done has no
+    completion time.
+    """
+    if new_status == TaskStatus.DONE:
+        return task.completed_at or now
+    return None
+
+
 def _flip_in_tree(
     tasks: tuple[Task, ...],
     task_id: str,
     new_status: TaskStatus,
     *,
     cascade: bool,
+    now: str | None,
 ) -> tuple[tuple[Task, ...], list[Task], bool]:
     """Apply ``new_status`` to ``task_id`` inside ``tasks``; return new tree.
 
@@ -71,12 +90,18 @@ def _flip_in_tree(
             new_list.append(task)
             continue
         if task.task_id is not None and task.task_id == task_id:
-            new_list.append(dataclasses.replace(task, status=new_status))
+            new_list.append(
+                dataclasses.replace(
+                    task,
+                    status=new_status,
+                    completed_at=_completed_at_after_flip(task, new_status, now),
+                )
+            )
             found = True
             continue
         if task.children:
             new_children, child_ancestors, child_found = _flip_in_tree(
-                task.children, task_id, new_status, cascade=cascade
+                task.children, task_id, new_status, cascade=cascade, now=now
             )
             if child_found:
                 found = True
@@ -88,7 +113,10 @@ def _flip_in_tree(
                     and _all_tasks_done(new_children)
                 ):
                     new_parent = dataclasses.replace(
-                        task, children=new_children, status=TaskStatus.DONE
+                        task,
+                        children=new_children,
+                        status=TaskStatus.DONE,
+                        completed_at=task.completed_at or now,
                     )
                     new_list.append(new_parent)
                     ancestors.append(new_parent)
@@ -106,10 +134,11 @@ def _apply_to_phase(
     new_status: TaskStatus,
     *,
     cascade: bool,
+    now: str | None,
 ) -> tuple[Phase, list[Task], bool]:
     """Walk ``phase``'s root tasks then subsection tasks. Returns rebuilt phase."""
     new_tasks, ancestors, found = _flip_in_tree(
-        phase.tasks, task_id, new_status, cascade=cascade
+        phase.tasks, task_id, new_status, cascade=cascade, now=now
     )
     if found:
         return dataclasses.replace(phase, tasks=new_tasks), ancestors, True
@@ -120,7 +149,7 @@ def _apply_to_phase(
             new_subs.append(sub)
             continue
         sub_tasks, sub_ancestors, sub_found = _flip_in_tree(
-            sub.tasks, task_id, new_status, cascade=cascade
+            sub.tasks, task_id, new_status, cascade=cascade, now=now
         )
         if sub_found:
             found = True
@@ -144,6 +173,7 @@ def _apply_status_to_plan(
     new_status: TaskStatus,
     *,
     cascade: bool,
+    now: str | None = None,
 ) -> tuple[Plan, list[Task]]:
     """Return ``(new_plan, newly_completed_ancestors)`` after the flip.
 
@@ -161,7 +191,7 @@ def _apply_status_to_plan(
             new_phases.append(phase)
             continue
         new_phase, phase_ancestors, phase_found = _apply_to_phase(
-            phase, task_id, new_status, cascade=cascade
+            phase, task_id, new_status, cascade=cascade, now=now
         )
         if phase_found:
             found = True
@@ -173,7 +203,7 @@ def _apply_status_to_plan(
     new_bugs = plan.bugs
     if not found and plan.bugs is not None:
         bug_tasks, bug_ancestors, bug_found = _flip_in_tree(
-            plan.bugs.tasks, task_id, new_status, cascade=cascade
+            plan.bugs.tasks, task_id, new_status, cascade=cascade, now=now
         )
         if bug_found:
             found = True
@@ -204,8 +234,18 @@ def _clear_failed_in_tasks(tasks: tuple[Task, ...]) -> tuple[tuple[Task, ...], b
             TaskStatus.TODO if task.status == TaskStatus.FAILED else task.status
         )
         if new_status != task.status or new_children != task.children:
+            # A FAILED task carries no completion time; clearing it to
+            # TODO must not leave a stale completed_at behind.
+            cleared_completed_at = (
+                None if new_status == TaskStatus.TODO else task.completed_at
+            )
             new_tasks.append(
-                dataclasses.replace(task, status=new_status, children=new_children)
+                dataclasses.replace(
+                    task,
+                    status=new_status,
+                    children=new_children,
+                    completed_at=cleared_completed_at,
+                )
             )
             changed = True
         else:
@@ -274,7 +314,7 @@ def complete_task(
     _ = outcome  # Accepted for API symmetry; not currently consumed.
 
     new_plan, ancestors = _apply_status_to_plan(
-        plan, task_id, TaskStatus.DONE, cascade=True
+        plan, task_id, TaskStatus.DONE, cascade=True, now=_now_iso_utc()
     )
 
     direct = Settlement(
