@@ -5,12 +5,24 @@
 from __future__ import annotations
 
 import io
+import os
 import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+
+# Hard-disable duplo's GitHub remote automation for the entire test
+# session BEFORE any test imports duplo.git_ops. duplo.git_ops honors
+# DUPLO_NO_GITHUB; setting it here (process env, inherited by any
+# subprocess a test spawns) guarantees commit_artifact still commits
+# locally but never runs `gh repo create` — which is what was creating
+# private repos named after pytest tmp dirs on real GitHub. Real `duplo`
+# runs do not set this var, so their commit + push + repo-create behavior
+# is fully intact. (test_git_ops.py overrides it to "0" per-test to
+# exercise the remote path against a mocked gh.)
+os.environ["DUPLO_NO_GITHUB"] = "1"
 
 # Add this directory to sys.path so intra-tests imports resolve regardless
 # of where pytest is invoked from. The accompanying removal of

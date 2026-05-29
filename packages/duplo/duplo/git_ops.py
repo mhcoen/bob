@@ -49,26 +49,20 @@ _LOGGED_REMOTE_DISABLED = False
 def _remote_disabled() -> bool:
     """True when remote work (GitHub repo create / push) must be skipped.
 
-    A hard safety switch, independent of any test subprocess mocking, so a
-    duplo run can NEVER create a GitHub repo when it should not — including
-    in-process tests, tests that spawn duplo as a child process, and any
-    caller that forgot to mock ``subprocess``:
+    Honors a single explicit operational switch, ``DUPLO_NO_GITHUB``:
+    truthy ("1"/"true"/"yes") skips all remote work and commits locally
+    only. Unset or falsy (the real-run default) leaves duplo's full
+    behavior intact: local commit, then create/wire the GitHub repo and
+    push.
 
-    - ``DUPLO_NO_GITHUB`` explicitly set wins both ways: a truthy value
-      ("1"/"true"/...) forces remote off (a user can export it to stop
-      duplo's auto repo-creation entirely); a falsy value ("0"/"false"/
-      "no") forces it on (used by the git_ops unit tests that exercise the
-      remote path against a mocked ``gh``).
-    - Otherwise, when a pytest run is in progress (``PYTEST_CURRENT_TEST``
-      is set per-test and inherited by child processes), remote work is
-      suppressed by default — repos named after tmp dirs were the original
-      leak, and this blocks it even for an unmocked or subprocess-spawned
-      test path.
+    This is deliberately NOT a pytest check — production code does not
+    sniff the test environment. The test harness is responsible for
+    exporting ``DUPLO_NO_GITHUB=1`` (duplo's tests/conftest.py does, for
+    the whole session, so it is inherited by any subprocess too), which is
+    what keeps tmp-dir-named repos off real GitHub during tests.
     """
-    flag = os.environ.get("DUPLO_NO_GITHUB")
-    if flag is not None and flag.strip() != "":
-        return flag.strip().lower() not in ("0", "false", "no")
-    return "PYTEST_CURRENT_TEST" in os.environ
+    flag = os.environ.get("DUPLO_NO_GITHUB", "").strip().lower()
+    return flag in ("1", "true", "yes", "on")
 
 
 def _resolve_cwd(path: Path) -> Path:

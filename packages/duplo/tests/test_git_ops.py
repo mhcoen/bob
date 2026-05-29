@@ -326,34 +326,30 @@ def test_commit_hook_rejection_surfaces_commit_error_and_returns_false(
 
 
 class TestRemoteKillSwitch:
-    """``_remote_disabled`` is the hard guard against creating real GitHub
-    repos. Under pytest it defaults to ON; ``DUPLO_NO_GITHUB`` overrides
-    explicitly either way."""
+    """``_remote_disabled`` honors only the explicit ``DUPLO_NO_GITHUB``
+    operational switch — production code does not sniff pytest. The test
+    harness (tests/conftest.py) exports it to keep tmp-dir repos off real
+    GitHub; real ``duplo`` runs never set it, so their remote behavior is
+    intact."""
 
-    def test_disabled_under_pytest_by_default(
+    def test_truthy_disables_remote(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for value in ("1", "true", "yes", "on"):
+            monkeypatch.setenv("DUPLO_NO_GITHUB", value)
+            assert git_ops._remote_disabled() is True
+
+    def test_falsy_or_unset_enables_remote(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        for value in ("0", "false", "no", ""):
+            monkeypatch.setenv("DUPLO_NO_GITHUB", value)
+            assert git_ops._remote_disabled() is False
         monkeypatch.delenv("DUPLO_NO_GITHUB", raising=False)
-        # pytest sets PYTEST_CURRENT_TEST for the duration of this test.
-        assert git_ops._remote_disabled() is True
-
-    def test_explicit_truthy_forces_off(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("DUPLO_NO_GITHUB", "1")
-        assert git_ops._remote_disabled() is True
-
-    def test_explicit_falsy_forces_on(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        monkeypatch.setenv("DUPLO_NO_GITHUB", "0")
         assert git_ops._remote_disabled() is False
 
     def test_commit_never_calls_gh_when_disabled(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        # Default pytest state (no explicit override) -> remote disabled.
-        monkeypatch.delenv("DUPLO_NO_GITHUB", raising=False)
+        monkeypatch.setenv("DUPLO_NO_GITHUB", "1")
         calls: list[list[str]] = []
 
         def _record(cmd, *args, **kwargs):  # noqa: ANN001
@@ -371,4 +367,7 @@ class TestRemoteKillSwitch:
         ok = commit_artifact(artifact, "save_plan", push=True)
 
         assert ok is True
+        # The local commit landed...
+        assert _last_subject(tmp_path) == "duplo save_plan: PLAN.md"
+        # ...and gh was never invoked.
         assert not any(c and c[0] == "gh" for c in calls)
