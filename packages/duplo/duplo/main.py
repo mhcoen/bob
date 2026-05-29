@@ -282,6 +282,39 @@ def main() -> None:
         diagnostics_print_summary()
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "logs":
+        from duplo.logs import LogsError, print_run_report
+
+        logs_parser = argparse.ArgumentParser(
+            prog="duplo logs",
+            description=(
+                "Summarize a duplo run's LLM-call log: each call_site in "
+                "order with model, path, duration, and token counts, plus "
+                "a run total. Read-only over .duplo/logs/<run_id>/."
+            ),
+        )
+        logs_parser.add_argument(
+            "run_id",
+            nargs="?",
+            default=None,
+            metavar="RUN_ID",
+            help="Run id to summarize (default: the most recent run).",
+        )
+        logs_parser.add_argument(
+            "--dir",
+            dest="target_dir",
+            default=".",
+            metavar="PATH",
+            help="Project directory holding .duplo/logs (default: cwd).",
+        )
+        logs_args = logs_parser.parse_args(sys.argv[2:])
+        try:
+            print_run_report(target_dir=logs_args.target_dir, run_id=logs_args.run_id)
+        except LogsError as exc:
+            print(f"duplo logs: {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "reauthor":
         from duplo.reauthor import (
             LineageValidationError,
@@ -424,6 +457,9 @@ def main() -> None:
                 "                        EVENT_ID is the threshold_crossed event id.\n"
                 "                        Flags: --plan PATH, --ledger-dir PATH,\n"
                 "                        --out PATH, --council-config PATH.\n"
+                "  logs [RUN_ID]         Summarize a run's LLM-call log (per call_site:\n"
+                "                        model, path, duration, tokens; with a total).\n"
+                "                        Flags: --dir PATH.\n"
                 "\n"
                 "Run `duplo <subcommand> --help` for full per-subcommand help."
             ),

@@ -81,6 +81,36 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [4.6] [T-000025] `duplo logs` run-log summary helper — 2026-05-28
+
+New read-only module `duplo/logs.py` plus a `duplo logs [RUN_ID]`
+subcommand (wired in `main.py` before the `reauthor` block) reads
+`.duplo/logs/<run_id>/calls.jsonl` and prints a per-call table —
+`call_site` in record order, model, path, duration, and token counts —
+closed by a `TOTAL` line. With no `RUN_ID` it summarizes the latest run
+(run ids are timestamp-prefixed, so the lexical max is newest); `--dir`
+points at a project other than cwd.
+
+Design decisions worth carrying forward:
+
+  - The `cache` column **combines** `cache_creation_input_tokens` +
+    `cache_read_input_tokens` into one bucket, matching the
+    input/cache/output framing of the task. If a future quota analysis
+    needs creation vs. read split, the underlying record still carries
+    both fields — only the report collapses them.
+  - Council pointer rows have no `model`/`duration`/`usage` (the real
+    calls live in the referenced orchestra run, per [4.5]'s deliberate
+    fidelity asymmetry), so they render as `-` and contribute zero to
+    the totals. The orchestra `run_id` is appended to the `call_site`
+    cell (`phase_plan:phase_002 -> orc-run-xyz`) so a reader can pivot
+    to the orchestra transcript for the underlying per-actor calls.
+    Consequence: token totals reflect only the legacy path; a
+    council-heavy run will under-report true consumption from this view
+    alone.
+  - `load_records` skips blank and malformed JSON lines rather than
+    aborting, so a partially written log (e.g. a crashed run) still
+    summarizes.
+
 ### [4.5] [T-000024] council phases indexed in the duplo run log by reference — 2026-05-28
 
 `council.author_phase_plan` now appends one `call_log` record per
