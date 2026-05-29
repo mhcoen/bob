@@ -150,7 +150,10 @@ def _rtk_rewrite(cmd):
             text=True,
             timeout=5,
         )
-        if result.returncode == 0 and result.stdout.strip():
+        # exit 0 = allow, 3 = ask — both print a valid rewrite to stdout.
+        # exit 1 = no rtk equivalent, 2 = deny — no rewrite. mcloop makes its
+        # own permission decision, so rtk's verdict (0 vs 3) is irrelevant here.
+        if result.returncode in (0, 3) and result.stdout.strip():
             return result.stdout.strip()
     except Exception:
         pass
