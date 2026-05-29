@@ -1,6 +1,6 @@
 ## Bugs
 
-- [x] T-000001: Ruff UP047 fails on two generic helper functions in `bob_tools/planfile/parser.py`; update the type syntax only, with no behavior change. Current `.venv/bin/ruff check .` output:
+- [x] T-000001: Ruff UP047 fails on two generic helper functions in `bob_tools/planfile/parser.py`; update the type syntax only, with no behavior change. Current `.venv/bin/ruff check .` output: <!-- completed_at: 2026-05-19T09:45:01Z -->
 
 ```text
 UP047 Generic function `_attach_ruledout` should use type parameters
