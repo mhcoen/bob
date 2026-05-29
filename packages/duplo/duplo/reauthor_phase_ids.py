@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")
+_PHASE_ID_COMMENT_RE = re.compile(r"^<!--\s*phase_id:\s*(?P<phase_id>[A-Za-z0-9_]+)\s*-->\s*$")
 
 _VALID_ACTIONS = frozenset(["preserve", "supersede", "split", "merge", "new"])
 _NO_FROM_ACTIONS = frozenset(["preserve", "new"])
@@ -67,15 +68,28 @@ def parse_plan_phases(plan_text: str) -> list[ParsedHeader]:
     format are ignored. Pre-Slice C plans whose headers do not
     follow this format produce an empty list, which the consumer
     treats as a fresh-id labeling pass on a pre-Slice C plan.
+
+    The canonical renderer emits headers in *ordinal* form
+    (``## Phase 1: title``) and writes the real phase id on the
+    following ``<!-- phase_id: phase_001 -->`` comment line. When
+    that comment is present it is the authoritative id; otherwise the
+    token after ``Phase`` is used (the legacy inline ``phase_NNN``
+    form).
     """
     headers: list[ParsedHeader] = []
-    for i, line in enumerate(plan_text.splitlines()):
+    lines = plan_text.splitlines()
+    for i, line in enumerate(lines):
         match = _HEADER_RE.match(line)
         if match is None:
             continue
+        phase_id = match.group("id")
+        if i + 1 < len(lines):
+            id_match = _PHASE_ID_COMMENT_RE.match(lines[i + 1])
+            if id_match is not None:
+                phase_id = id_match.group("phase_id")
         headers.append(
             ParsedHeader(
-                id=match.group("id"),
+                id=phase_id,
                 title=match.group("title"),
                 header_line_index=i,
             )

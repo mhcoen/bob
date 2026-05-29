@@ -39,7 +39,6 @@ from pathlib import Path
 
 # Per-process warn-once caches keyed by resolved repo root, so a warning
 # about an unavailable remote is not repeated for every phase in a run.
-_LOGGED_NOT_GIT_REPO: set[Path] = set()
 _LOGGED_GH_UNAVAILABLE: set[Path] = set()
 
 
@@ -261,5 +260,4 @@ def reset_logged_not_git_repo() -> None:
     repeatedly call this in their fixtures so warn-once behavior does not
     bleed across tests.
     """
-    _LOGGED_NOT_GIT_REPO.clear()
     _LOGGED_GH_UNAVAILABLE.clear()

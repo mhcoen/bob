@@ -213,9 +213,6 @@ def _parse_shell(code: str, source_url: str, lang: str) -> CodeExample | None:
     for line in lines:
         stripped = line.lstrip()
         if stripped.startswith("$ ") or stripped.startswith("% "):
-            if in_output and input_lines:
-                # New command after output — keep accumulating.
-                in_output = False
             input_lines.append(stripped[2:])
             in_output = False
         elif input_lines and not in_output:

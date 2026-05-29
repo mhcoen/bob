@@ -24,7 +24,6 @@ private; tests exercise them through the public entry point.
 
 from __future__ import annotations
 
-import hashlib
 import os
 import re
 import subprocess
@@ -1778,11 +1777,6 @@ def _new_run_id() -> str:
 def default_ledger_dir(project_dir: Path | str) -> Path:
     """Default ledger directory location for a duplo project."""
     return Path(project_dir) / _LEDGER_DIR_DEFAULT_NAME
-
-
-def _plan_sha256(text: str) -> str:
-    """Available for future use if the schema gains a plan-hash field."""
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 __all__ = [

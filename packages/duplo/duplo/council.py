@@ -355,7 +355,7 @@ def _rebuild_phase_constructed(phase: Phase, *, ordinal: int) -> Phase:
         )
         for sub in phase.subsections
     )
-    phase_id_source = phase.phase_id_source if phase.phase_id_source != "none" else "none"
+    phase_id_source = phase.phase_id_source
     # Normalize `explicit_header` to `explicit_comment` so the renderer
     # emits a `<!-- phase_id: ... -->` line that survives round-trip
     # under constructed-mode field-stability checks.

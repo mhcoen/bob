@@ -34,7 +34,7 @@ set -euo pipefail
 
 PRODUCT_NAME="{project_name}"
 BUILD_CONFIG="debug"
-if [[ "${{1:-}}" == "--release" ]]; then
+if [[ "${1:-}" == "--release" ]]; then
     BUILD_CONFIG="release"
 fi
 
