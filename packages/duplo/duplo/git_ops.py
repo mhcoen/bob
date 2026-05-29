@@ -33,6 +33,7 @@ co-authored-by. Use neutral descriptions only.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +41,34 @@ from pathlib import Path
 # Per-process warn-once caches keyed by resolved repo root, so a warning
 # about an unavailable remote is not repeated for every phase in a run.
 _LOGGED_GH_UNAVAILABLE: set[Path] = set()
+
+# Warn-once guard so the "remote disabled" notice prints at most once per run.
+_LOGGED_REMOTE_DISABLED = False
+
+
+def _remote_disabled() -> bool:
+    """True when remote work (GitHub repo create / push) must be skipped.
+
+    A hard safety switch, independent of any test subprocess mocking, so a
+    duplo run can NEVER create a GitHub repo when it should not — including
+    in-process tests, tests that spawn duplo as a child process, and any
+    caller that forgot to mock ``subprocess``:
+
+    - ``DUPLO_NO_GITHUB`` explicitly set wins both ways: a truthy value
+      ("1"/"true"/...) forces remote off (a user can export it to stop
+      duplo's auto repo-creation entirely); a falsy value ("0"/"false"/
+      "no") forces it on (used by the git_ops unit tests that exercise the
+      remote path against a mocked ``gh``).
+    - Otherwise, when a pytest run is in progress (``PYTEST_CURRENT_TEST``
+      is set per-test and inherited by child processes), remote work is
+      suppressed by default — repos named after tmp dirs were the original
+      leak, and this blocks it even for an unmocked or subprocess-spawned
+      test path.
+    """
+    flag = os.environ.get("DUPLO_NO_GITHUB")
+    if flag is not None and flag.strip() != "":
+        return flag.strip().lower() not in ("0", "false", "no")
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 def _resolve_cwd(path: Path) -> Path:
@@ -155,6 +184,13 @@ def _ensure_remote_and_push(repo_root: Path) -> None:
     printed and control returns to the caller — the local commit already
     landed, so the phase proceeds either way.
     """
+    if _remote_disabled():
+        global _LOGGED_REMOTE_DISABLED
+        if not _LOGGED_REMOTE_DISABLED:
+            _warn("remote disabled (test env or DUPLO_NO_GITHUB); committed locally only.")
+            _LOGGED_REMOTE_DISABLED = True
+        return
+
     name = repo_root.name
 
     if _has_origin(repo_root):

@@ -33,6 +33,21 @@ def _real_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _force_enable_remote(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force git_ops' remote path on for this module's remote-path tests.
+
+    ``git_ops._remote_disabled`` defaults to suppressing all remote work
+    under pytest (the hard safety switch that stopped tmp-dir-named repos
+    from being created on real GitHub). These tests deliberately exercise
+    that remote path with ``gh``/``git push`` intercepted by ``_FakeGit``,
+    so they explicitly force it on via ``DUPLO_NO_GITHUB=0``. No real
+    GitHub call can escape because the fake intercepts every ``gh`` and
+    every ``git push``.
+    """
+    monkeypatch.setenv("DUPLO_NO_GITHUB", "0")
+
+
+@pytest.fixture(autouse=True)
 def _reset_logged() -> None:
     reset_logged_not_git_repo()
 
@@ -308,3 +323,52 @@ def test_commit_hook_rejection_surfaces_commit_error_and_returns_false(
     assert "git commit failed" in err
     assert "PLAN.md" in err
     assert artifact.read_text() == "# plan\n"
+
+
+class TestRemoteKillSwitch:
+    """``_remote_disabled`` is the hard guard against creating real GitHub
+    repos. Under pytest it defaults to ON; ``DUPLO_NO_GITHUB`` overrides
+    explicitly either way."""
+
+    def test_disabled_under_pytest_by_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DUPLO_NO_GITHUB", raising=False)
+        # pytest sets PYTEST_CURRENT_TEST for the duration of this test.
+        assert git_ops._remote_disabled() is True
+
+    def test_explicit_truthy_forces_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DUPLO_NO_GITHUB", "1")
+        assert git_ops._remote_disabled() is True
+
+    def test_explicit_falsy_forces_on(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("DUPLO_NO_GITHUB", "0")
+        assert git_ops._remote_disabled() is False
+
+    def test_commit_never_calls_gh_when_disabled(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Default pytest state (no explicit override) -> remote disabled.
+        monkeypatch.delenv("DUPLO_NO_GITHUB", raising=False)
+        calls: list[list[str]] = []
+
+        def _record(cmd, *args, **kwargs):  # noqa: ANN001
+            calls.append(list(cmd))
+            if cmd[0] == "gh":
+                raise AssertionError("gh must never run when remote is disabled")
+            return _REAL_RUN(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(git_ops.subprocess, "run", _record)
+
+        artifact = tmp_path / "PLAN.md"
+        artifact.write_text("# plan\n")
+        # push=True (the production default) must still commit locally and
+        # must NOT reach gh repo create.
+        ok = commit_artifact(artifact, "save_plan", push=True)
+
+        assert ok is True
+        assert not any(c and c[0] == "gh" for c in calls)
