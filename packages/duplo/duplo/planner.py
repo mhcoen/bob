@@ -576,6 +576,19 @@ def generate_phase_plan(
             f"{prior_files_list}\n"
         )
 
+    # The canonical phase_id is computed deterministically by the runtime
+    # (1-indexed: the first phase is phase_001), independent of the
+    # human-facing 0-indexed roadmap "Phase N" label. Compute it BEFORE
+    # building the prompt and instruct the synthesizer to emit it verbatim
+    # so its header matches what typed_plan_from_synthesizer_text demands.
+    plan_path = Path(target_dir) / _PLAN_FILENAME
+    required_phase_id = council.compute_required_phase_id(plan_path)
+    phase_id_block = (
+        "\nPhase header: use this exact id verbatim and do NOT renumber it.\n"
+        "The runtime assigns the phase_id; the validator rejects any other.\n"
+        f"The first line of the phase body must be:\n## Phase {required_phase_id}: {phase_title}\n"
+    )
+
     prompt = f"""\
 Project: {project_name or source_url}
 Source: {source_url}
@@ -593,7 +606,7 @@ Preferences:
 
 Features for this phase:
 {features_text}
-{issues_block}{spec_block}{prior_files_block}
+{issues_block}{spec_block}{prior_files_block}{phase_id_block}
 Generate the phase body now.
 """
 
@@ -602,8 +615,6 @@ Generate the phase body now.
         return council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
 
     raw = _strip_fences(query(prompt, system=system))
-    plan_path = Path(target_dir) / _PLAN_FILENAME
-    required_phase_id = council.compute_required_phase_id(plan_path)
     return council.typed_plan_from_synthesizer_text(raw, required_phase_id=required_phase_id)
 
 

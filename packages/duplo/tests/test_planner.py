@@ -2191,3 +2191,73 @@ class TestStripFences:
             result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
         assert not result.startswith("```")
         assert result.startswith("# Phase 2")
+
+
+class TestPhaseIdAgreementFirstPhase:
+    """Regression: roadmap Phase 0 (0-indexed) must map to canonical
+    phase_id phase_001 (1-indexed), and the synthesizer must be told that
+    id verbatim so its header matches what the validator demands.
+
+    The bug: on a fresh project the loop passes phase_number=0, the prompt
+    framed it as "Phase 0", the synthesizer emitted phase_000, but
+    compute_required_phase_id (canonically correct) demanded phase_001 ->
+    PlanValidationError. The fix computes required_phase_id BEFORE the
+    prompt and instructs the synthesizer to emit it verbatim.
+    """
+
+    _PHASE0 = {
+        "phase": 0,
+        "title": "Scaffold",
+        "goal": "Project skeleton",
+        "features": [],
+        "test": "builds",
+    }
+
+    def test_first_phase_prompt_carries_phase_001_and_body_accepted(self, tmp_path, monkeypatch):
+        # Fresh project: no PLAN.md -> compute_required_phase_id == phase_001.
+        monkeypatch.chdir(tmp_path)
+        assert not (tmp_path / "PLAN.md").exists()
+
+        body = _canonical_body(phase_id="phase_001", title="Scaffold")
+        with patch("duplo.planner.query", return_value=body) as mock_query:
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase=self._PHASE0,
+                project_name="clipbar",
+                phase_number=0,  # roadmap Phase 0, phases_completed == 0
+                target_dir=tmp_path,
+            )
+
+        # 1. The synthesizer was instructed to use phase_001 verbatim,
+        #    even though the human-facing label is "Phase 0".
+        prompt = mock_query.call_args.args[0]
+        assert "## Phase phase_001: Scaffold" in prompt
+        assert "do NOT renumber" in prompt
+
+        # 2. A synthesizer body emitting phase_001 is accepted (no raise),
+        #    and the typed plan carries phase_001 — runtime and synthesizer
+        #    phase_ids agree for the first phase.
+        assert isinstance(result, Plan)
+        assert [p.phase_id for p in result.phases] == ["phase_001"]
+
+    def test_phase_000_body_is_rejected_proving_the_contract(self, tmp_path, monkeypatch):
+        """If the synthesizer ignored the instruction and emitted phase_000
+        (the old behavior), the runtime still rejects it — confirming the
+        validator pins phase_001 for the first phase."""
+        from duplo.council import PlanValidationError
+
+        monkeypatch.chdir(tmp_path)
+        bad_body = _canonical_body(phase_id="phase_000", title="Scaffold")
+        with patch("duplo.planner.query", return_value=bad_body):
+            with pytest.raises(PlanValidationError):
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    phase=self._PHASE0,
+                    project_name="clipbar",
+                    phase_number=0,
+                    target_dir=tmp_path,
+                )
