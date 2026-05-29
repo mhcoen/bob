@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import io
 import subprocess
 import sys
 from pathlib import Path
@@ -22,6 +23,17 @@ if _TESTS_DIR not in sys.path:
 
 
 _original_subprocess_run = subprocess.run
+_original_subprocess_popen = subprocess.Popen
+
+
+def _is_claude_cmd(cmd) -> bool:
+    """True if ``cmd`` is a claude/codex invocation (real LLM call)."""
+    if isinstance(cmd, (list, tuple)) and cmd:
+        head = cmd[0]
+        if isinstance(head, str):
+            base = head.rsplit("/", 1)[-1]
+            return base in ("claude", "codex")
+    return False
 
 
 def _fake_subprocess_run(*args, **kwargs):
@@ -36,11 +48,74 @@ def _fake_subprocess_run(*args, **kwargs):
     cmd = args[0] if args else kwargs.get("args", [])
     if isinstance(cmd, (list, tuple)) and cmd:
         head = cmd[0]
-        if head == "claude":
+        base = head.rsplit("/", 1)[-1] if isinstance(head, str) else ""
+        if base in ("claude", "codex"):
             return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="[]", stderr="")
-        if isinstance(head, str) and head.rsplit("/", 1)[-1] == "appshot":
+        if base == "appshot":
             return subprocess.CompletedProcess(args=cmd, returncode=-1, stdout="", stderr="")
+        # Neutralize the per-artifact git/GitHub automation
+        # (duplo.git_ops.commit_artifact). It shells out to ``git`` and
+        # ``gh`` via subprocess.run; left unfaked, a test that drives
+        # main() to a phase commit runs a REAL ``git init``/``commit`` and
+        # a REAL ``gh repo create`` — a network side effect that fails
+        # under GitHub's repo-creation rate limit and is never a thing a
+        # unit test should do. Return success with empty output so
+        # commit_artifact believes the local commit landed and the remote
+        # was wired/pushed, with zero real effect. Tests that assert on
+        # real git behavior do not exist in this suite (hashing tests use
+        # duplo.hasher, not git subprocesses).
+        if base in ("git", "gh"):
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
     return _original_subprocess_run(*args, **kwargs)
+
+
+class _FakePopen:
+    """Minimal Popen stand-in for a claude/codex spawn.
+
+    duplo's ``claude_cli.query`` (the main text path) spawns the CLI via
+    ``subprocess.Popen`` — NOT ``subprocess.run`` — and consumes it by
+    draining ``stdout``/``stderr`` in threads, writing the prompt to
+    ``stdin``, polling ``poll()`` until non-None, then reading
+    ``returncode``. A fake that only covered ``subprocess.run`` left this
+    path spawning a REAL ``claude -p`` on every test that exercised
+    ``query()`` (feature dedup/grouping, task matching, pipeline
+    integration) — real token spend and 4-54s per test. This fake closes
+    that hole: it satisfies exactly the interface ``_query_once`` touches
+    and yields one valid stream-json ``result`` event so
+    ``_parse_stream_json`` returns a benign empty response.
+    """
+
+    def __init__(self, cmd, *args, **kwargs):
+        self.args = cmd
+        self.returncode = 0
+        text_mode = kwargs.get("text") or kwargs.get("universal_newlines")
+        payload = '{"type": "result", "result": "[]"}\n'
+        self.stdout = io.StringIO(payload) if text_mode else io.BytesIO(payload.encode())
+        self.stderr = io.StringIO("") if text_mode else io.BytesIO(b"")
+        self.stdin = io.StringIO() if text_mode else io.BytesIO()
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    def kill(self):
+        return None
+
+    def terminate(self):
+        return None
+
+    def communicate(self, input=None, timeout=None):
+        return self.stdout.read(), self.stderr.read()
+
+
+def _fake_subprocess_popen(*args, **kwargs):
+    """Intercept claude/codex Popen spawns; pass everything else through."""
+    cmd = args[0] if args else kwargs.get("args", [])
+    if _is_claude_cmd(cmd):
+        return _FakePopen(cmd, *args, **kwargs)
+    return _original_subprocess_popen(*args, **kwargs)
 
 
 @pytest.fixture(autouse=True)
@@ -55,11 +130,17 @@ def _no_real_llm_calls():
     don't explicitly mock the LLM path continue to pass without needing
     per-test updates.
 
-    Patches ``subprocess.run`` to intercept ``claude`` commands and
-    return ``"[]"``. Non-claude subprocesses (ffmpeg, etc.) are passed
-    through to the real ``subprocess.run``.
+    Patches both ``subprocess.run`` AND ``subprocess.Popen`` to intercept
+    ``claude``/``codex`` commands. ``query_with_images`` uses ``run``;
+    ``query`` (the main text path) uses ``Popen`` — both must be guarded
+    or the ``Popen`` path leaks a real ``claude -p`` call (real tokens,
+    4-54s per test). Non-LLM subprocesses (ffmpeg, etc.) pass through to
+    the real implementations.
     """
-    with patch("subprocess.run", side_effect=_fake_subprocess_run):
+    with (
+        patch("subprocess.run", side_effect=_fake_subprocess_run),
+        patch("subprocess.Popen", side_effect=_fake_subprocess_popen),
+    ):
         yield
 
 

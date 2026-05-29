@@ -8989,6 +8989,10 @@ class TestProductJsonBackwardCompat:
         monkeypatch.setattr(m, "format_roadmap", lambda r: "roadmap")
         monkeypatch.setattr(m, "get_current_phase", lambda: (1, None))
         monkeypatch.setattr(m, "_print_feature_status", lambda d: None)
+        # Stop main() before the real phase-plan synthesizer runs; this
+        # test only asserts the source_url handed to generate_roadmap.
+        monkeypatch.setattr(m, "generate_phase_plan", lambda *a, **kw: "# Phase 1\n")
+        monkeypatch.setattr(m, "save_plan", lambda *a, **kw: tmp_path / "PLAN.md")
 
         main()
 
@@ -9028,6 +9032,10 @@ class TestProductJsonBackwardCompat:
         monkeypatch.setattr(m, "format_roadmap", lambda r: "roadmap")
         monkeypatch.setattr(m, "get_current_phase", lambda: (1, None))
         monkeypatch.setattr(m, "_print_feature_status", lambda d: None)
+        # Stop main() before the real phase-plan synthesizer runs; this
+        # test only asserts the source_url handed to generate_roadmap.
+        monkeypatch.setattr(m, "generate_phase_plan", lambda *a, **kw: "# Phase 1\n")
+        monkeypatch.setattr(m, "save_plan", lambda *a, **kw: tmp_path / "PLAN.md")
 
         main()
 

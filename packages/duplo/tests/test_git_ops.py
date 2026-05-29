@@ -18,6 +18,21 @@ _REAL_RUN = subprocess.run
 
 
 @pytest.fixture(autouse=True)
+def _real_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Undo the shared conftest's global ``git``/``gh`` subprocess stub.
+
+    The duplo conftest fakes every ``git``/``gh`` call so pipeline tests
+    can't touch real GitHub. These tests, by contrast, run local git for
+    real against a tmp repo and intercept ``gh``/``git push`` themselves
+    (via ``_FakeGit`` or ``push=False``). This fixture is module-local and
+    autouse, so it is set up after the conftest patch and restores the
+    real ``subprocess.run`` for the duration of each test here; tests that
+    call ``_install`` then layer ``_FakeGit`` on top as before.
+    """
+    monkeypatch.setattr(subprocess, "run", _REAL_RUN)
+
+
+@pytest.fixture(autouse=True)
 def _reset_logged() -> None:
     reset_logged_not_git_repo()
 
