@@ -396,12 +396,28 @@ def _dbg(msg):
 
 
 def main():
-    # Interactive sessions (no MCLOOP_TASK_LABEL) skip Telegram.
-    # RTK rewrite for interactive sessions is handled by the
-    # standalone RTK hook in settings.json (no parallel conflict
-    # since this hook returns {} and does not participate).
+    # Interactive sessions (no MCLOOP_TASK_LABEL): no Telegram permission flow,
+    # but rtk stays active everywhere in Claude Code. Delegate to `rtk hook
+    # claude`, which rewrites the command AND sets the permission decision per
+    # the user's allow/ask/deny rules (so allow-listed commands don't start
+    # prompting). Done inside this single registered hook so there is no second
+    # PreToolUse hook racing on updatedInput. Any failure -> "{}" (no opinion).
     if not os.environ.get("MCLOOP_TASK_LABEL"):
-        json.dump({}, sys.stdout)
+        raw = sys.stdin.read()
+        out = "{}"
+        try:
+            r = subprocess.run(
+                ["rtk", "hook", "claude"],
+                input=raw,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if r.stdout.strip():
+                out = r.stdout
+        except Exception:
+            pass
+        sys.stdout.write(out)
         return
 
     _dbg(
