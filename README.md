@@ -275,19 +275,15 @@ multi-hook `updatedInput` race, and RTK rewriting is skipped automatically
 when `rtk` is not on `PATH`, so the hook is safe to install with or
 without RTK present.
 
-To install, copy it into your Claude hooks directory:
+Install it with:
 
 ```bash
-cp packages/mcloop/telegram-permission-hook.py ~/.claude/hooks/
+bob install
 ```
 
-then register it as a `PreToolUse` hook in `~/.claude/settings.json`:
-
-```json
-{ "hooks": { "PreToolUse": [ { "matcher": "Bash", "hooks": [
-  { "type": "command",
-    "command": "python3 ~/.claude/hooks/telegram-permission-hook.py" } ] } ] } }
-```
+which copies the hook into `~/.claude/hooks/` and registers it as a
+`PreToolUse` hook in `~/.claude/settings.json` (idempotent; backs up
+settings first).
 
 ## License
 

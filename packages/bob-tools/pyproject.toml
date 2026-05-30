@@ -22,6 +22,7 @@ dev = [
 
 [project.scripts]
 bob-plan = "bob_tools.planfile.cli:main"
+bob = "bob_tools.bob_cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
