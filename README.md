@@ -268,8 +268,8 @@ good enough to build the framework.
 [RTK](https://github.com/rtk-ai/rtk) is a CLI proxy that compresses
 command output before it reaches the agent's context, cutting token use by
 60-90%. Both RTK and McLoop's Telegram approval want to be a Claude Code
-`PreToolUse` hook, and Claude Code does not compose two of them cleanly
-(whichever runs last wins the command rewrite). So
+`PreToolUse` hook, and Claude Code does not compose two of them cleanly,
+a known bug that Anthropic refuses to fix. So
 `packages/mcloop/telegram-permission-hook.py` is a single hook that does
 both: Telegram approve/deny of tool calls in McLoop sessions, and RTK
 command rewriting (`pytest` to `rtk pytest`, `.venv/bin/pytest` to
