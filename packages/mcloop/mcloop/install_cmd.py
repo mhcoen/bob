@@ -519,6 +519,41 @@ def _merge_settings(
     changed = False
     results: list[tuple[str, str]] = []
 
+    # Dedupe the combined Telegram+RTK hook: drop any PreToolUse entry that
+    # references telegram-permission-hook.py at some OTHER location (e.g. a prior
+    # `bob install` at ~/.claude/hooks/) so a user who runs both installers never
+    # ends up with two hooks and double Telegram prompts. mcloop's own canonical
+    # entry is preserved and handled idempotently by the merge loop below.
+    _canonical_tg = "python3 ~/.mcloop/hooks/telegram-permission-hook.py"
+
+    def _stale_tg(el: object) -> bool:
+        if not isinstance(el, dict):
+            return False
+        cmds = []
+        if isinstance(el.get("command"), str):
+            cmds.append(el["command"])
+        for h in el.get("hooks", []) or []:
+            if isinstance(h, dict) and isinstance(h.get("command"), str):
+                cmds.append(h["command"])
+        refs = any("telegram-permission-hook.py" in c for c in cmds)
+        return refs and cmds != [_canonical_tg]
+
+    pre_existing = hooks.get("PreToolUse")
+    if isinstance(pre_existing, list):
+        stale = [el for el in pre_existing if _stale_tg(el)]
+        if stale:
+            hooks["PreToolUse"] = [el for el in pre_existing if not _stale_tg(el)]
+            changed = True
+            for el in stale:
+                desc = el.get("command") or "; ".join(
+                    h.get("command", "")
+                    for h in el.get("hooks", [])
+                    if isinstance(h, dict)
+                )
+                verb = "would remove" if dry_run else "removed"
+                print(f"  {verb} stale telegram hook: {desc}")
+                results.append(("Settings (PreToolUse)", "deduped"))
+
     for event_name, entries in _HOOK_ENTRIES["hooks"].items():
         existing = hooks.setdefault(event_name, [])
         existing_commands = {e.get("command") for e in existing if isinstance(e, dict)}

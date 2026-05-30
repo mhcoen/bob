@@ -588,6 +588,46 @@ def test_merge_settings_keeps_other_hooks(tmp_path):
     assert len(data["hooks"]["PreToolUse"]) == 2
 
 
+def test_merge_settings_dedupes_other_path_telegram_hook(tmp_path, capsys):
+    """Removes a telegram hook registered at another path (e.g. prior bob install)."""
+    home = tmp_path / "home"
+    settings_path = home / ".claude" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    existing = {
+        "hooks": {
+            "PreToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": "python3 /Users/x/.claude/hooks/telegram-permission-hook.py",
+                        }
+                    ],
+                },
+                {"type": "command", "command": "other-hook.sh"},
+            ],
+        },
+    }
+    settings_path.write_text(json.dumps(existing))
+
+    with patch.object(Path, "home", return_value=home):
+        _merge_settings(dry_run=False)
+
+    data = json.loads(settings_path.read_text())
+    pre = data["hooks"]["PreToolUse"]
+    tg = [
+        c
+        for e in pre
+        for c in ([e.get("command")] + [h.get("command") for h in e.get("hooks", [])])
+        if c and "telegram-permission-hook.py" in c
+    ]
+    assert tg == ["python3 ~/.mcloop/hooks/telegram-permission-hook.py"]  # only mcloop's
+    flat = [e.get("command") for e in pre]
+    assert "other-hook.sh" in flat  # unrelated hook preserved
+    assert "removed stale telegram hook:" in capsys.readouterr().out
+
+
 def test_merge_settings_dry_run(tmp_path, capsys):
     """Dry run prints what would be added with diff but doesn't write."""
     home = tmp_path / "home"
