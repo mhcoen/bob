@@ -103,3 +103,16 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
             lambda **kwargs: None,
         )
         monkeypatch.setattr(_mcloop_runner, "_SUBSCRIPTION_PREFLIGHT_OK", True)
+
+    # Unit tests construct project directories under pytest's temporary
+    # root. In local runs that root can live inside a real checkout,
+    # causing run_loop's git preflight/checkpoint/commit operations to
+    # act on the developer's ancestor repository instead of the
+    # synthetic project. Production git behavior is covered outside
+    # this generic test harness guard; tests that need to assert calls
+    # can still patch these symbols.
+    import mcloop.main as _mcloop_main  # noqa: PLC0415
+
+    monkeypatch.setattr(_mcloop_main, "_push_or_die", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_mcloop_main, "_checkpoint", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(_mcloop_main, "_commit", lambda *_args, **_kwargs: "")
