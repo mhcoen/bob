@@ -59,6 +59,21 @@ def _refuse_nested_init(project_dir: Path) -> None:
     cross-package git operations, so the guard prints a structured
     error naming the workspace root, notifies, and exits 1.
     """
+    ancestor = _find_uv_workspace_ancestor(project_dir)
+    if ancestor is not None:
+        msg = (
+            "CRITICAL: refusing to run `git init` because mcloop is "
+            f"running inside the uv workspace rooted at {ancestor}. "
+            f"Re-run mcloop from the workspace root ({ancestor}) "
+            "instead of a package subdirectory."
+        )
+        print(formatting.error_msg(msg), flush=True)
+        notify(msg, level="error")
+        sys.exit(1)
+
+
+def _find_uv_workspace_ancestor(project_dir: Path) -> Path | None:
+    """Return the nearest ancestor declaring a uv workspace, if any."""
     for ancestor in Path(project_dir).resolve().parents:
         pyproject = ancestor / "pyproject.toml"
         if not pyproject.is_file():
@@ -68,15 +83,16 @@ def _refuse_nested_init(project_dir: Path) -> None:
         except OSError:
             continue
         if "[tool.uv.workspace]" in content:
-            msg = (
-                "CRITICAL: refusing to run `git init` because mcloop is "
-                f"running inside the uv workspace rooted at {ancestor}. "
-                f"Re-run mcloop from the workspace root ({ancestor}) "
-                "instead of a package subdirectory."
-            )
-            print(formatting.error_msg(msg), flush=True)
-            notify(msg, level="error")
-            sys.exit(1)
+            return ancestor
+    return None
+
+
+def _find_ancestor_git(project_dir: Path) -> Path | None:
+    """Return the nearest ancestor containing a Git marker, if any."""
+    for ancestor in Path(project_dir).resolve().parents:
+        if (ancestor / ".git").exists():
+            return ancestor
+    return None
 
 
 def _ensure_git(project_dir: Path) -> None:
@@ -106,9 +122,8 @@ def _ensure_git(project_dir: Path) -> None:
     git_dir = project_dir / ".git"
     if git_dir.exists():
         return
-    for ancestor in Path(project_dir).resolve().parents:
-        if (ancestor / ".git").exists():
-            return
+    if _find_ancestor_git(project_dir) is not None:
+        return
     _refuse_nested_init(project_dir)
     print(
         formatting.error_msg("No git repository found. Initializing one now..."),
@@ -170,10 +185,7 @@ def _has_git_repo(project_dir: Path) -> bool:
     """
     if (project_dir / ".git").exists():
         return True
-    for ancestor in Path(project_dir).resolve().parents:
-        if (ancestor / ".git").exists():
-            return True
-    return False
+    return _find_ancestor_git(project_dir) is not None
 
 
 def _sanitize_commit_msg(text: str, max_len: int = 200) -> str:

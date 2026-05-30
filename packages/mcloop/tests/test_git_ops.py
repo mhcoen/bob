@@ -54,6 +54,8 @@ def test_ensure_git_standalone_no_pyproject_creates_repo(tmp_path):
     project.mkdir()
 
     with (
+        patch("mcloop.git_ops._find_ancestor_git", return_value=None),
+        patch("mcloop.git_ops._find_uv_workspace_ancestor", return_value=None),
         patch("mcloop.git_ops.subprocess.run") as mock_run,
         patch("mcloop.git_ops.notify"),
     ):
@@ -148,6 +150,8 @@ def test_ensure_git_blocks_inside_uv_workspace_package(tmp_path):
     package.mkdir(parents=True)
 
     with (
+        patch("mcloop.git_ops._find_ancestor_git", return_value=None),
+        patch("mcloop.git_ops._find_uv_workspace_ancestor", return_value=workspace.resolve()),
         patch("mcloop.git_ops.subprocess.run") as mock_run,
         patch("mcloop.git_ops.notify") as mock_notify,
     ):
@@ -172,6 +176,8 @@ def test_ensure_git_packages_dir_without_workspace_pyproject_does_not_block(tmp_
     project.mkdir(parents=True)
 
     with (
+        patch("mcloop.git_ops._find_ancestor_git", return_value=None),
+        patch("mcloop.git_ops._find_uv_workspace_ancestor", return_value=None),
         patch("mcloop.git_ops.subprocess.run") as mock_run,
         patch("mcloop.git_ops.notify"),
     ):
@@ -196,6 +202,8 @@ def test_ensure_git_ancestor_pyproject_without_workspace_table_does_not_block(tm
     project.mkdir()
 
     with (
+        patch("mcloop.git_ops._find_ancestor_git", return_value=None),
+        patch("mcloop.git_ops._find_uv_workspace_ancestor", return_value=None),
         patch("mcloop.git_ops.subprocess.run") as mock_run,
         patch("mcloop.git_ops.notify"),
     ):
