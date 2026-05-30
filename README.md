@@ -232,10 +232,15 @@ cd bob
 uv sync
 ```
 
-This installs every package — Duplo, McLoop, Orchestra, bob-tools —
-in editable mode, with internal cross-package dependencies resolved
-locally. The CLIs (`duplo`, `mcloop`, `orchestra`, `bob-plan`) land
-on `PATH`.
+This installs every package (Duplo, McLoop, Orchestra, bob-tools) in
+editable mode, with internal cross-package dependencies resolved locally.
+The CLIs (`duplo`, `mcloop`, `orchestra`, `bob`, `bob-plan`) land on
+`PATH`.
+
+To add Bob's optional Claude Code hook for token-saving command
+compression and remote approval of tool calls, run `bob install` after
+syncing. See [Combined Telegram and RTK hook](#combined-telegram-and-rtk-hook)
+below.
 
 ## Subscribe
 
@@ -263,29 +268,26 @@ Duplo → McLoop → Orchestra path is the most direct evidence available
 that a deterministic framework around stochastic actors produces code
 good enough to build the framework.
 
-## Combined Telegram + RTK hook
+## Combined Telegram and RTK hook
 
-[RTK](https://github.com/rtk-ai/rtk) is a CLI proxy that compresses
-command output before it reaches the agent's context, cutting token use by
-60-90%. Both RTK and McLoop's Telegram approval want to be a Claude Code
-`PreToolUse` hook, and Claude Code does not compose two of them cleanly,
-a known bug that Anthropic refuses to fix. So
-`packages/mcloop/telegram-permission-hook.py` is a single hook that does
-both: Telegram approve/deny of tool calls in McLoop sessions, and RTK
-command rewriting (`pytest` to `rtk pytest`, `.venv/bin/pytest` to
-`RTK_BIN=... rtk pytest`) in every session. RTK rewriting is skipped
-automatically when `rtk` is not on `PATH`, so the hook works with or
-without RTK installed.
+McLoop installs one Claude Code `PreToolUse` hook that does two jobs.
 
-Install it with:
+**Approval.** In a McLoop session, any tool call you have not whitelisted
+is sent to Telegram so you can approve or deny it from your phone.
 
-```bash
-bob install
-```
+**Compression.** It rewrites shell commands to run through
+[RTK](https://github.com/rtk-ai/rtk), a CLI proxy that compresses command
+output before it reaches the agent and cuts token use by 60-90%.
 
-which copies the hook into `~/.claude/hooks/` and registers it as a
-`PreToolUse` hook in `~/.claude/settings.json` (idempotent; backs up
-settings first).
+It is one hook by design. Both jobs have to run as a `PreToolUse` hook, and
+Claude Code does not run two of them together correctly, a known bug
+Anthropic refuses to fix. Folding both into one hook sidesteps it. RTK is
+optional: when `rtk` is not on `PATH`, compression is skipped and the
+Telegram approval still works.
+
+Install the hook with `bob install`. It copies the hook into
+`~/.claude/hooks/`, registers it in `~/.claude/settings.json`, backs up your
+existing settings, and is safe to run more than once.
 
 ## License
 
