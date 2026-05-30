@@ -2014,10 +2014,11 @@ def test_load_mcloop_config_valid(tmp_path):
 # --- _run_audit_fix_cycle ---
 
 
-def _make_result(success=True, exit_code=0):
+def _make_result(success=True, exit_code=0, output=""):
     r = MagicMock()
     r.success = success
     r.exit_code = exit_code
+    r.output = output
     return r
 
 
@@ -2155,6 +2156,12 @@ def test_single_audit_round_commits_when_checks_pass(tmp_path):
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()),
         patch("mcloop.audit._has_meaningful_changes", return_value=True),
         patch("mcloop.audit.run_checks", return_value=check_result),
+        patch(
+            "mcloop.audit.run_post_fix_review",
+            return_value=_make_result(
+                output="--- REVIEW RESULT ---\nNO_PROBLEMS\n--- END REVIEW ---\n"
+            ),
+        ),
         patch("mcloop.audit._commit") as mock_commit,
     ):
         _run_single_audit_round(tmp_path, tmp_path / "logs")
