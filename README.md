@@ -263,6 +263,18 @@ Duplo → McLoop → Orchestra path is the most direct evidence available
 that a deterministic framework around stochastic actors produces code
 good enough to build the framework.
 
+## Combined Telegram + RTK hook
+
+For anyone who wants one Claude Code `PreToolUse` hook instead of two
+competing ones, `packages/mcloop/telegram-permission-hook.py` does both:
+Telegram approve/deny of tool calls in McLoop sessions, and automatic
+[RTK](https://github.com/rtk-ai/rtk) command rewriting (`pytest` →
+`rtk pytest`, `.venv/bin/pytest` → `RTK_BIN=… rtk pytest`, etc.) for
+token savings in every session. A single hook avoids Claude Code's
+multi-hook `updatedInput` race. `mcloop install` copies it to
+`~/.mcloop/hooks/` and registers it; RTK rewriting is skipped
+automatically when `rtk` is not on `PATH`.
+
 ## License
 
 Each package carries its own license. The narrative and coordination
