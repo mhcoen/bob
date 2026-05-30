@@ -2259,6 +2259,12 @@ def test_single_audit_round_returns_true_on_fix(tmp_path):
         patch("mcloop.audit.run_bug_fix", return_value=_make_result()),
         patch("mcloop.audit._has_meaningful_changes", return_value=True),
         patch("mcloop.audit.run_checks", return_value=check_result),
+        patch(
+            "mcloop.audit.run_post_fix_review",
+            return_value=_make_result(
+                output="--- REVIEW RESULT ---\nNO_PROBLEMS\n--- END REVIEW ---\n"
+            ),
+        ),
         patch("mcloop.audit._commit"),
     ):
         result = _run_single_audit_round(tmp_path, tmp_path / "logs")
