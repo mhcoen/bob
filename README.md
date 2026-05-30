@@ -265,15 +265,17 @@ good enough to build the framework.
 
 ## Combined Telegram + RTK hook
 
-For anyone who wants one Claude Code `PreToolUse` hook instead of two
-competing ones, `packages/mcloop/telegram-permission-hook.py` does both:
-Telegram approve/deny of tool calls in McLoop sessions, and automatic
-[RTK](https://github.com/rtk-ai/rtk) command rewriting (`pytest` to
-`rtk pytest`, `.venv/bin/pytest` to `RTK_BIN=... rtk pytest`, etc.) for
-token savings in every session. A single hook avoids Claude Code's
-multi-hook `updatedInput` race, and RTK rewriting is skipped automatically
-when `rtk` is not on `PATH`, so the hook is safe to install with or
-without RTK present.
+[RTK](https://github.com/rtk-ai/rtk) is a CLI proxy that compresses
+command output before it reaches the agent's context, cutting token use by
+60-90%. Both RTK and McLoop's Telegram approval want to be a Claude Code
+`PreToolUse` hook, and Claude Code does not compose two of them cleanly
+(whichever runs last wins the command rewrite). So
+`packages/mcloop/telegram-permission-hook.py` is a single hook that does
+both: Telegram approve/deny of tool calls in McLoop sessions, and RTK
+command rewriting (`pytest` to `rtk pytest`, `.venv/bin/pytest` to
+`RTK_BIN=... rtk pytest`) in every session. RTK rewriting is skipped
+automatically when `rtk` is not on `PATH`, so the hook works with or
+without RTK installed.
 
 Install it with:
 
