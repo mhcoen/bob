@@ -47,6 +47,11 @@ CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID") or _env.get("TELEGRAM_CHAT_ID", "")
 
 RULE_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)(?:\((.+)\))?$")
 
+# rtk is optional. Detect it once at startup so the hook never spawns a
+# failing `rtk` subprocess per command when rtk is not installed. When rtk is
+# absent, commands pass through unrewritten and only the Telegram gate applies.
+RTK_AVAILABLE = shutil.which("rtk") is not None
+
 
 # --- Session memory ---
 
@@ -143,6 +148,8 @@ def remember_session(tool_name, tool_input):
 
 def _rtk_rewrite(cmd):
     """Call rtk rewrite and return the rewritten command, or None."""
+    if not RTK_AVAILABLE:
+        return None
     try:
         result = subprocess.run(
             ["rtk", "rewrite", cmd],
@@ -403,6 +410,9 @@ def main():
     # prompting). Done inside this single registered hook so there is no second
     # PreToolUse hook racing on updatedInput. Any failure -> "{}" (no opinion).
     if not os.environ.get("MCLOOP_TASK_LABEL"):
+        if not RTK_AVAILABLE:
+            json.dump({}, sys.stdout)
+            return
         raw = sys.stdin.read()
         out = "{}"
         try:

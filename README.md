@@ -271,9 +271,10 @@ Telegram approve/deny of tool calls in McLoop sessions, and automatic
 [RTK](https://github.com/rtk-ai/rtk) command rewriting (`pytest` →
 `rtk pytest`, `.venv/bin/pytest` → `RTK_BIN=… rtk pytest`, etc.) for
 token savings in every session. A single hook avoids Claude Code's
-multi-hook `updatedInput` race. `mcloop install` copies it to
-`~/.mcloop/hooks/` and registers it; RTK rewriting is skipped
-automatically when `rtk` is not on `PATH`.
+multi-hook `updatedInput` race. Install it into `~/.claude/hooks/` and
+register it as a Claude Code `PreToolUse` hook; RTK rewriting is skipped
+automatically when `rtk` is not on `PATH`, so the hook is safe to install
+with or without RTK present.
 
 ## License
 
