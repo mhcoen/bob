@@ -1,5 +1,6 @@
 """Integration tests. Exercise the full loop with mocked subprocesses."""
 
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
@@ -9,6 +10,14 @@ from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
 from mcloop.main import _checkpoint, _commit, run_loop
 from mcloop.runner import RunResult
+
+
+def _isolated_git_state():
+    stack = ExitStack()
+    stack.enter_context(patch("mcloop.main._changed_files", return_value=[]))
+    stack.enter_context(patch("mcloop.main._has_uncommitted_changes", return_value=False))
+    stack.enter_context(patch("mcloop.main._worktree_status", return_value=""))
+    return stack
 
 
 def _make_project(tmp_path, checklist_text):
@@ -70,7 +79,8 @@ def test_full_cycle_two_tasks(
     md = _make_project(tmp_path, "- [ ] Task one\n- [ ] Task two\n")
     mock_run.return_value = _ok_run_result()
 
-    result = run_loop(md, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -102,7 +112,8 @@ def test_nested_subtasks(
     )
     mock_run.return_value = _ok_run_result()
 
-    result = run_loop(md, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -128,7 +139,8 @@ def test_retry_then_succeed(
     md = _make_project(tmp_path, "- [ ] Flaky task\n")
     mock_run.side_effect = [_fail_run_result(), _ok_run_result()]
 
-    result = run_loop(md, max_retries=3, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, max_retries=3, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -159,7 +171,8 @@ def test_checks_fail_then_pass(
         CheckResult(passed=True, output="ok", command="ruff check ."),  # end-of-run full suite
     ]
 
-    result = run_loop(md, max_retries=3, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, max_retries=3, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -216,7 +229,8 @@ def test_rate_limit_notifies(
     ]
 
     with patch("mcloop.main.wait_for_reset", return_value="claude"):
-        result = run_loop(md, max_retries=3, no_audit=True)
+        with _isolated_git_state():
+            result = run_loop(md, max_retries=3, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -253,7 +267,8 @@ def test_session_limit_polls_then_retries(
         _ok_run_result(),
     ]
 
-    result = run_loop(md, max_retries=3, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, max_retries=3, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 2
@@ -279,7 +294,8 @@ def test_skips_already_checked_no_extra_notifications(
     md = _make_project(tmp_path, "- [x] Done already\n- [ ] Still todo\n")
     mock_run.return_value = _ok_run_result()
 
-    result = run_loop(md, no_audit=True)
+    with _isolated_git_state():
+        result = run_loop(md, no_audit=True)
 
     assert result.ok
     assert mock_run.call_count == 1

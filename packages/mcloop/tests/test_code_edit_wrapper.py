@@ -114,6 +114,7 @@ def test_direct_backend_returns_code_edit_result(tmp_path: Path) -> None:
         patch("mcloop.runner.ensure_subscription_preflight") as preflight,
         patch("mcloop.runner._run_session", return_value=("ok\n", 0)),
         patch("mcloop.runner._write_log", return_value=log_path),
+        patch("mcloop.code_edit._detect_changed_files", return_value=[]),
     ):
         result = invoke_code_edit(**inputs)
 
