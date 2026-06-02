@@ -161,3 +161,162 @@ class TestToolPattern:
     def test_other_tool_uses_name_only(self):
         pattern = _hook._tool_pattern("Grep", {"pattern": "foo"})
         assert pattern == "Grep"
+
+
+# --- _looks_like_test_command tests ---
+
+
+class TestLooksLikeTestCommand:
+    """Tests for the recognized free-form test-invocation shapes."""
+
+    DENIED = [
+        "pytest",
+        "pytest -x tests/",
+        "py.test tests/",
+        "python -m pytest",
+        "python3 -m pytest tests/test_foo.py",
+        "uv run pytest",
+        "uv run python -m pytest",
+        'python -c "import pytest; pytest.main([])"',
+        "tox",
+        "nox -s tests",
+        "hatch test",
+        "hatch run pytest",
+        "make test",
+        "make test-fast",
+        "coverage run -m pytest",
+        "poetry run pytest",
+        'bash -c "pytest tests/"',
+        'sh -c "python -m pytest"',
+        "cd subdir && pytest",
+        "ruff check . && pytest -x",
+        "echo hi; pytest",
+        "PYTHONPATH=. pytest",
+        "env FOO=1 pytest",
+        "/usr/local/bin/pytest",
+    ]
+
+    ALLOWED = [
+        "mcloop verify",
+        "python -m mcloop verify",
+        "ls -la",
+        "git status",
+        "ruff check .",
+        "ruff format --check .",
+        "make build",
+        "python -m mcloop",
+        "echo testing",
+        "cat tests/test_foo.py",
+        "grep pytest tests/test_foo.py",
+        "",
+    ]
+
+    def test_denied_shapes(self):
+        for cmd in self.DENIED:
+            assert _hook._looks_like_test_command(cmd), cmd
+
+    def test_allowed_shapes(self):
+        for cmd in self.ALLOWED:
+            assert not _hook._looks_like_test_command(cmd), cmd
+
+
+# --- test-routing deny policy in main() ---
+
+
+def _run_main_env(stdin_data, env, is_allowed=False, is_session_allowed=False):
+    """Run main() with a given environment and allowlist/session state."""
+    with (
+        patch.dict(os.environ, env, clear=False),
+        patch.object(_hook, "is_allowed", lambda *a: is_allowed),
+        patch.object(_hook, "is_session_allowed", lambda *a: is_session_allowed),
+    ):
+        if "MCLOOP_TASK_LABEL" not in env:
+            os.environ.pop("MCLOOP_TASK_LABEL", None)
+        return _run_main(stdin_data)
+
+
+def _is_deny(result):
+    out = result.get("hookSpecificOutput", {})
+    return out.get("permissionDecision") == "deny"
+
+
+class TestTestRoutingDeny:
+    """Deny free-form test commands in mcloop sessions, before cred/allowlist."""
+
+    BYPASS_FORMS = [
+        "pytest",
+        "python -m pytest",
+        "uv run pytest",
+        'python -c "import pytest; pytest.main()"',
+        "tox",
+        "nox",
+        "hatch test",
+        "make test",
+        'bash -c "pytest"',
+    ]
+
+    def test_denied_with_no_credentials(self):
+        """Each bypass form is denied even with no Telegram credentials."""
+        with patch.object(_hook, "BOT_TOKEN", ""), patch.object(_hook, "CHAT_ID", ""):
+            for cmd in self.BYPASS_FORMS:
+                result = _run_main_env(
+                    {"tool_name": "Bash", "tool_input": {"command": cmd}},
+                    {"MCLOOP_TASK_LABEL": "t"},
+                )
+                assert _is_deny(result), cmd
+
+    def test_denied_even_if_allowlisted_or_session_approved(self):
+        """Deny runs before the allowlist/session path, so approval cannot bypass."""
+        with (
+            patch.object(_hook, "BOT_TOKEN", "tok"),
+            patch.object(_hook, "CHAT_ID", "chat"),
+        ):
+            for cmd in self.BYPASS_FORMS:
+                result = _run_main_env(
+                    {"tool_name": "Bash", "tool_input": {"command": cmd}},
+                    {"MCLOOP_TASK_LABEL": "t"},
+                    is_allowed=True,
+                    is_session_allowed=True,
+                )
+                assert _is_deny(result), cmd
+
+    def test_sanctioned_entry_point_reaches_normal_flow(self):
+        """`mcloop verify` is not denied; with no creds it falls through to {}."""
+        with patch.object(_hook, "BOT_TOKEN", ""), patch.object(_hook, "CHAT_ID", ""):
+            result = _run_main_env(
+                {"tool_name": "Bash", "tool_input": {"command": "mcloop verify"}},
+                {"MCLOOP_TASK_LABEL": "t"},
+            )
+        assert result == {}
+
+    def test_benign_command_reaches_normal_flow(self):
+        """A benign non-test command is not denied by the policy."""
+        with patch.object(_hook, "BOT_TOKEN", ""), patch.object(_hook, "CHAT_ID", ""):
+            result = _run_main_env(
+                {"tool_name": "Bash", "tool_input": {"command": "git status"}},
+                {"MCLOOP_TASK_LABEL": "t"},
+            )
+        assert result == {}
+
+    def test_sanctioned_entry_point_allowed_through_allowlist(self):
+        """`mcloop verify` reaches and passes the allowlist path (allow)."""
+        with (
+            patch.object(_hook, "BOT_TOKEN", "tok"),
+            patch.object(_hook, "CHAT_ID", "chat"),
+            patch.object(_hook, "_rtk_rewrite", lambda c: None),
+        ):
+            result = _run_main_env(
+                {"tool_name": "Bash", "tool_input": {"command": "mcloop verify"}},
+                {"MCLOOP_TASK_LABEL": "t"},
+                is_allowed=True,
+            )
+        assert result["hookSpecificOutput"]["permissionDecision"] == "allow"
+
+    def test_absent_task_label_disables_deny(self):
+        """Without MCLOOP_TASK_LABEL the interactive path runs; pytest not denied."""
+        with patch.object(_hook, "RTK_AVAILABLE", False):
+            result = _run_main_env(
+                {"tool_name": "Bash", "tool_input": {"command": "pytest"}},
+                {},
+            )
+        assert result == {}

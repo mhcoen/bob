@@ -11,6 +11,7 @@ import fnmatch
 import json
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -77,6 +78,156 @@ def _bash_prefix(cmd):
     if len(parts) >= 2 and parts[1] and not parts[1].startswith("-"):
         return f"{parts[0]} {parts[1]}"
     return parts[0]
+
+
+# --- McLoop test-routing policy ---
+#
+# In a McLoop task session (MCLOOP_TASK_LABEL set) the inner agent must not
+# run tests freely. A raw `pytest` run lets the agent self-interpret a
+# vacuous green (nothing collected, all skipped, an unparseable summary) as
+# success. All in-session verification must route through the sanctioned
+# `mcloop verify` adapter, which applies the loop's scoped signal predicate
+# and exits non-zero on no-signal. This policy denies every *recognized*
+# free-form test shape and directs the agent to that entry point. It does
+# not claim to catch every opaque alias or helper script from a raw shell
+# string -- only that no recognized alternate test shape is waved through.
+
+_TEST_DENY_REASON = (
+    "Direct test execution is blocked in McLoop task sessions. Do not run "
+    "pytest/tox/nox/make test or any other free-form test command and do "
+    "not self-interpret raw pytest output. Run the sanctioned scoped "
+    "verdict instead: `mcloop verify` (or `python -m mcloop verify`), which "
+    "routes through the loop's signal predicate and exits non-zero on "
+    "no-signal."
+)
+
+_PYTEST_NAMES = {"pytest", "py.test"}
+_TEST_RUNNERS = {"tox", "nox"}
+_PYTHON_NAMES = {"python", "python2", "python3"}
+_RUN_WRAPPERS = {"uv", "poetry", "pdm", "pipenv", "rye"}
+_PASSTHROUGH_WRAPPERS = {"xargs", "time", "nice", "nohup", "stdbuf", "command"}
+_SHELL_NAMES = {"bash", "sh", "zsh", "dash", "ksh"}
+_ENV_ASSIGN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _basename(token):
+    """Last path component of a token, e.g. '/usr/bin/python3' -> 'python3'."""
+    return token.rsplit("/", 1)[-1]
+
+
+def _strip_env_prefix(tokens):
+    """Drop a leading `env` and any VAR=value assignments."""
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "env" or _ENV_ASSIGN_RE.match(t):
+            i += 1
+            continue
+        break
+    return tokens[i:]
+
+
+def _segment_is_test(tokens):
+    """Is one shell segment (already tokenized) a recognized test invocation?"""
+    tokens = _strip_env_prefix(tokens)
+    if not tokens:
+        return False
+    head = _basename(tokens[0])
+    rest = tokens[1:]
+
+    if head in _PYTEST_NAMES or head in _TEST_RUNNERS:
+        return True
+
+    if head in _PYTHON_NAMES or head.startswith("python3."):
+        # python -m pytest (or -m coverage ... but coverage handled below)
+        if "-m" in rest:
+            mi = rest.index("-m")
+            if mi + 1 < len(rest) and _basename(rest[mi + 1]) in _PYTEST_NAMES:
+                return True
+        # python -c "import pytest; pytest.main(...)"
+        if "-c" in rest:
+            ci = rest.index("-c")
+            if ci + 1 < len(rest) and "pytest" in rest[ci + 1]:
+                return True
+        return False
+
+    if head == "coverage":
+        # coverage run -m pytest
+        if "-m" in rest:
+            mi = rest.index("-m")
+            if mi + 1 < len(rest) and _basename(rest[mi + 1]) in _PYTEST_NAMES:
+                return True
+        return False
+
+    if head in _RUN_WRAPPERS:
+        # uv run pytest, poetry run pytest, uv run python -m pytest, ...
+        if rest[:1] == ["run"]:
+            return _segment_is_test(rest[1:])
+        return False
+
+    if head == "hatch":
+        if rest[:1] == ["test"]:
+            return True
+        if rest[:1] == ["run"]:
+            return any("pytest" in _basename(t) for t in rest[1:])
+        return False
+
+    if head == "make":
+        # make test, make test-fast, make check-tests, ...
+        return any("test" in t for t in rest if not t.startswith("-"))
+
+    if head in _SHELL_NAMES:
+        # bash -c "pytest ...": recurse into the -c payload
+        if "-c" in rest:
+            ci = rest.index("-c")
+            if ci + 1 < len(rest):
+                return _looks_like_test_command(rest[ci + 1])
+        return False
+
+    if head == "eval":
+        return _looks_like_test_command(" ".join(rest))
+
+    if head in _PASSTHROUGH_WRAPPERS:
+        return _segment_is_test(rest)
+
+    return False
+
+
+_SEPARATORS = {"&&", "||", ";", "|", "&", "(", ")", "\n"}
+
+
+def _looks_like_test_command(cmd):
+    """True if any sub-command of a raw shell string is a recognized test run.
+
+    Tokenizes with shlex (``punctuation_chars`` so shell operators become
+    their own tokens while quoting is respected -- a ``;`` inside a quoted
+    ``python -c`` payload stays put), then splits the flat token list into
+    segments on top-level separators and inspects each. Biases toward
+    detection: an unbalanced-quote string falls back to a permissive
+    whitespace split so shell-indirection forms still trip the deny.
+    """
+    if not cmd or not cmd.strip():
+        return False
+    try:
+        lex = shlex.shlex(cmd, posix=True, punctuation_chars=True)
+        lex.whitespace_split = True
+        tokens = list(lex)
+    except ValueError:
+        for seg in re.split(r"&&|\|\||;|\||\n", cmd):
+            seg = seg.strip()
+            if seg and _segment_is_test(seg.split()):
+                return True
+        return False
+
+    segment = []
+    for tok in tokens:
+        if tok in _SEPARATORS:
+            if segment and _segment_is_test(segment):
+                return True
+            segment = []
+        else:
+            segment.append(tok)
+    return bool(segment) and _segment_is_test(segment)
 
 
 def _tool_pattern(tool_name, tool_input):
@@ -181,11 +332,7 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
     # ecc34d7; path-prefix #1053 fixed in mhcoen's patch). This single hook
     # does both rewrite and permission, so there is no multi-hook updatedInput
     # race: on an allowed Bash command, emit rtk's rewrite as updatedInput.
-    if (
-        decision == "allow"
-        and tool_name == "Bash"
-        and tool_input is not None
-    ):
+    if decision == "allow" and tool_name == "Bash" and tool_input is not None:
         cmd = tool_input.get("command", "").strip()
         if cmd:
             resp["hookSpecificOutput"]["updatedInput"] = {
@@ -193,6 +340,7 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
                 "command": _rtk_rewrite(cmd) or cmd,
             }
     json.dump(resp, sys.stdout)
+
 
 def load_allow_rules():
     """Read permissions.allow from ~/.claude/settings.json."""
@@ -435,11 +583,6 @@ def main():
         f" TMPDIR={os.environ.get('TMPDIR')}, SESSION={SESSION_FILE}"
     )
 
-    if not BOT_TOKEN or not CHAT_ID:
-        _dbg("EXIT: no credentials, no opinion")
-        json.dump({}, sys.stdout)
-        return
-
     hook_input = json.load(sys.stdin)
     tool_name = hook_input.get("tool_name", "unknown")
     tool_input = hook_input.get("tool_input", {})
@@ -450,6 +593,24 @@ def main():
     session_label = f"{user}/{project}"
     task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
     _dbg(f"tool={tool_name} input={json.dumps(tool_input)[:100]}")
+
+    # Test-routing policy (mcloop task sessions only). Deny recognized
+    # free-form test invocations and direct the agent to the sanctioned
+    # `mcloop verify` entry point. This runs BEFORE the no-credentials
+    # fallback and BEFORE the allowlist / session-approval path so that
+    # missing Telegram credentials or a prior approval cannot bypass test
+    # routing. Interactive sessions (no MCLOOP_TASK_LABEL) never reach here.
+    if task_label and tool_name == "Bash":
+        cmd = tool_input.get("command", "")
+        if _looks_like_test_command(cmd):
+            _dbg(f"EXIT: denied free-form test invocation: {cmd[:80]}")
+            _respond("deny", _TEST_DENY_REASON)
+            return
+
+    if not BOT_TOKEN or not CHAT_ID:
+        _dbg("EXIT: no credentials, no opinion")
+        json.dump({}, sys.stdout)
+        return
 
     # Block MCP tools in McLoop sessions
     if task_label and tool_name.startswith("mcp__"):
@@ -467,7 +628,12 @@ def main():
     if is_session_allowed(tool_name, tool_input):
         pattern = _tool_pattern(tool_name, tool_input)
         _dbg(f"EXIT: allowed by session memory ({pattern})")
-        _respond("allow", f"Session-approved: {pattern}", tool_name=tool_name, tool_input=tool_input)
+        _respond(
+            "allow",
+            f"Session-approved: {pattern}",
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
         return
 
     # Not whitelisted. Send Telegram with buttons and wait.
@@ -520,7 +686,12 @@ def main():
         )
         update_message(message_id, msg)
         _dbg(f"EXIT: session-approved via Telegram ({pattern})")
-        _respond("allow", f"Session-approved via Telegram: {pattern}", tool_name=tool_name, tool_input=tool_input)
+        _respond(
+            "allow",
+            f"Session-approved via Telegram: {pattern}",
+            tool_name=tool_name,
+            tool_input=tool_input,
+        )
     elif decision == "deny":
         update_message(message_id, f"{label_prefix}Denied: *{tool_name}*\n{desc}")
         _dbg("EXIT: denied via Telegram")
