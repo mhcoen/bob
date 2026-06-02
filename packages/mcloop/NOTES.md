@@ -2,6 +2,20 @@
 
 ## Observations
 
+### [14.3] [T-000386] verify adapter treats an empty changed-set as fail-closed (2026-06-01)
+`mcloop/verify_cmd.run_verify` distinguishes three outcomes from
+`git_ops._changed_files_since`: `None` (cannot resolve — empty baseline,
+no repo, or git error), `[]` (baseline resolves but nothing changed), and
+a non-empty list. Both `None` and `[]` exit non-zero (`EXIT_FAIL_CLOSED`)
+and never reach `run_checks`. The `[]` case is a deliberate design choice:
+calling `run_checks(project_dir, changed_files=[])` would skip the test and
+lint commands (no targeted tests, no changed .py) and return a vacuous
+`passed=True`, which the task explicitly forbids ("fail closed rather than
+... an empty pass"). So an in-session adapter run with no detectable edits
+is reported as a failure, not a silent green. If a legitimate
+zero-change verification is ever needed, that branch is the single place to
+relax.
+
 ### [14.2] [T-000385] Signal predicate counts only passed+failed (2026-06-01)
 `pytest_signal_verdict` in `mcloop/pytest_signal.py` defines valid signal as
 `passed + failed >= 1`, matching the task's literal wording ("at least one

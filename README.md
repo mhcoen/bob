@@ -222,6 +222,13 @@ tool is a package under `packages/`:
 Each package carries its own README with the full surface and its own
 honest status.
 
+Each package also carries its own `PLAN.md` — the canonical,
+machine-owned build document that package is developed against. Plans
+are per-package, not one global plan: McLoop advances each package's
+own `PLAN.md` independently. (Orchestra is the exception: it has no
+root `PLAN.md`; its design material lives under
+`packages/orchestra/design/`.)
+
 ## Installation
 
 Bob is a uv workspace. Clone the repo and run `uv sync`:

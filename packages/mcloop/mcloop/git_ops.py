@@ -623,6 +623,92 @@ def _committed_files_since(project_dir: Path, base_sha: str) -> list[str]:
     return files
 
 
+_TASK_BASELINE_REL = ".mcloop/task-baseline"
+
+
+def _write_task_baseline(project_dir: Path, base_sha: str) -> None:
+    """Persist the task's pre-edit baseline SHA for the in-session adapter.
+
+    The run loop captures ``task_start_sha`` immediately after the
+    pre-task checkpoint (see ``main.py``). Writing it to
+    ``.mcloop/task-baseline`` lets the sanctioned in-session test adapter
+    (``mcloop verify``) diff the agent's edits against the exact pre-edit
+    tree, so its scoped verdict matches the loop's scoped gate. Empty
+    SHAs are ignored. Best-effort: a write failure leaves no baseline,
+    which the adapter treats as fail-closed.
+    """
+    if not base_sha:
+        return
+    path = project_dir / _TASK_BASELINE_REL
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(base_sha.strip() + "\n")
+    except OSError:
+        pass
+
+
+def _read_task_baseline(project_dir: Path) -> str:
+    """Return the recorded task baseline SHA, or "" if none/unreadable."""
+    path = project_dir / _TASK_BASELINE_REL
+    try:
+        return path.read_text().strip()
+    except OSError:
+        return ""
+
+
+def _changed_files_since(project_dir: Path, base_sha: str) -> list[str] | None:
+    """Return meaningful files changed since *base_sha*, working tree included.
+
+    Unlike :func:`_committed_files_since` (committed range only), this
+    diffs *base_sha* directly against the working tree so an in-session
+    adapter sees edits the agent has not yet committed. Untracked files
+    are added via ``git ls-files``. The same metadata paths as the
+    sibling helpers (``logs/``, ``.mcloop/``, ``PLAN.md``) are filtered.
+
+    Returns ``None`` -- the fail-closed signal for the adapter -- when
+    *base_sha* is empty, the repo is missing, or the diff command errors.
+    Returns ``[]`` when the baseline resolves but genuinely nothing
+    changed, so the caller can distinguish "cannot resolve" from "no
+    changes".
+    """
+    if not base_sha:
+        return None
+    if not _has_git_repo(project_dir):
+        return None
+    diff_result = _git(
+        ["git", "diff", "--name-only", "--relative", base_sha],
+        cwd=project_dir,
+        label="changed files since baseline",
+        silent=True,
+    )
+    if diff_result.returncode != 0:
+        return None
+    files: list[str] = []
+    seen: set[str] = set()
+
+    def _add(name: str) -> None:
+        name = name.strip()
+        if not name or name in seen:
+            return
+        if name.startswith("logs/") or name.startswith(".mcloop/") or name == "PLAN.md":
+            return
+        seen.add(name)
+        files.append(name)
+
+    for line in diff_result.stdout.splitlines():
+        _add(line)
+    untracked_result = _git(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=project_dir,
+        label="changed files since baseline (untracked)",
+        silent=True,
+    )
+    if untracked_result.returncode == 0:
+        for line in untracked_result.stdout.splitlines():
+            _add(line)
+    return files
+
+
 def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
     """Return the diff introduced by *commit_sha*.
 

@@ -20,13 +20,16 @@ import pytest
 from mcloop.checks import run_checks
 from mcloop.git_ops import (
     _changed_files,
+    _changed_files_since,
     _committed_files,
     _committed_files_since,
     _ensure_git,
     _get_committed_diff,
     _get_git_hash,
+    _read_task_baseline,
     _snapshot_worktree,
     _worktree_status,
+    _write_task_baseline,
 )
 
 
@@ -511,6 +514,53 @@ def test_committed_files_since_skips_plan_md_and_mcloop(tmp_path):
     )
 
     assert _committed_files_since(tmp_path, base) == []
+
+
+def test_changed_files_since_empty_base_returns_none(tmp_path):
+    """An empty base SHA cannot resolve a set -> None (fail-closed signal)."""
+    _init_repo(tmp_path)
+    assert _changed_files_since(tmp_path, "") is None
+
+
+def test_changed_files_since_no_repo_returns_none(tmp_path):
+    """No git repo -> None, the fail-closed signal for the adapter."""
+    assert _changed_files_since(tmp_path, "abc123") is None
+
+
+def test_changed_files_since_clean_tree_returns_empty_list(tmp_path):
+    """Baseline resolves but nothing changed -> [] (distinct from None)."""
+    _init_repo(tmp_path)
+    head = _get_git_hash(tmp_path)
+    assert _changed_files_since(tmp_path, head) == []
+
+
+def test_changed_files_since_includes_uncommitted_working_tree(tmp_path):
+    """Edits the agent has not committed yet are captured, metadata filtered."""
+    _init_repo(tmp_path)
+    base = _get_git_hash(tmp_path)
+    # Uncommitted modification to a tracked file.
+    (tmp_path / "src.py").write_text("x = 1\n")
+    # Untracked new file.
+    (tmp_path / "new.py").write_text("y = 2\n")
+    # Metadata noise that must be filtered.
+    (tmp_path / "PLAN.md").write_text("- [ ] task\n")
+    (tmp_path / ".mcloop").mkdir()
+    (tmp_path / ".mcloop" / "state.json").write_text("{}\n")
+
+    files = _changed_files_since(tmp_path, base)
+
+    assert files is not None
+    assert sorted(files) == ["new.py", "src.py"]
+
+
+def test_task_baseline_round_trips(tmp_path):
+    """A written baseline reads back stripped; absent file reads as empty."""
+    assert _read_task_baseline(tmp_path) == ""
+    _write_task_baseline(tmp_path, "deadbeef")
+    assert _read_task_baseline(tmp_path) == "deadbeef"
+    # Empty SHA is a no-op (does not clobber an existing baseline).
+    _write_task_baseline(tmp_path, "")
+    assert _read_task_baseline(tmp_path) == "deadbeef"
 
 
 def test_committed_files_since_consolidated_layout_is_package_relative(tmp_path):

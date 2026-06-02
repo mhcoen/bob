@@ -78,6 +78,7 @@ from mcloop.git_ops import (
     _snapshot_worktree,
     _stage_safe,
     _worktree_status,
+    _write_task_baseline,
 )
 from mcloop.idea_cmd import _cmd_idea
 from mcloop.install_cmd import (
@@ -578,6 +579,10 @@ def _main() -> None:
 
     if args.command == "ack-orchestra-override":
         _cmd_ack_orchestra_override(checklist_path.parent)
+        return
+
+    if args.command == "verify":
+        _cmd_verify(checklist_path.parent)
         return
 
     if args.command == "maintain":
@@ -1724,6 +1729,11 @@ def run_loop(
         # before being session-limited; that's the cumulative work
         # the no-op verdict must consider (see T-000001 in BUGS.md).
         task_start_sha = _get_git_hash(project_dir)
+        # Persist the pre-edit baseline so the in-session test adapter
+        # (`mcloop verify`) can diff the agent's edits against the exact
+        # tree the loop scopes against, producing an identical scoped
+        # verdict. Best-effort; the adapter fails closed if it's missing.
+        _write_task_baseline(project_dir, task_start_sha)
         success = False
         # Reset per-task parity-field locals so the no-success summary
         # entry does not leak the previous task's result or
@@ -2727,6 +2737,13 @@ def _parse_args() -> argparse.Namespace:
         help="Run exactly one maintain task then exit",
     )
     subparsers.add_parser(
+        "verify",
+        help=(
+            "Run the sanctioned scoped test verdict against the current "
+            "task's edits (in-session adapter; exits non-zero on no-signal)"
+        ),
+    )
+    subparsers.add_parser(
         "ack-orchestra-override",
         help=(
             "Acknowledge the project-local .orchestra/config.json so the "
@@ -2833,6 +2850,22 @@ def _cmd_ack_orchestra_override(project_dir: Path) -> None:
     print(
         f"Acknowledged {config_path}. Banner silenced until the file changes. Ack file: {written}"
     )
+
+
+def _cmd_verify(project_dir: Path) -> None:
+    """Run the sanctioned in-session scoped test verdict.
+
+    Thin dispatch to ``verify_cmd.run_verify``: prints the message and
+    exits with its status code so the inner agent cannot reinterpret raw
+    pytest output. Exits 0 only on a valid passing scoped run; non-zero
+    on any failure, no-signal, or fail-closed condition.
+    """
+    from mcloop.verify_cmd import run_verify
+
+    exit_code, message = run_verify(project_dir)
+    stream = sys.stdout if exit_code == 0 else sys.stderr
+    print(message, file=stream, flush=True)
+    sys.exit(exit_code)
 
 
 def _cmd_wrap(project_dir: Path) -> None:
