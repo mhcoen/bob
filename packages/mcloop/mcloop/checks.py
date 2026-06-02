@@ -357,7 +357,9 @@ def run_checks(
     if changed_files is not None:
         accounts = account_changed_inputs(changed_files, project_dir)
         test_files = sorted({f for acc in accounts for f in acc.test_files})
-        py_changed = [f for f in changed_files if f.endswith(".py")]
+        py_changed = [
+            f for f in changed_files if f.endswith(".py") and (project_dir / f).is_file()
+        ]
 
         # Close the mixed-batch fallback hole: an unmapped input that we
         # cannot prove is non-behavioral must FAIL the gate, not merely

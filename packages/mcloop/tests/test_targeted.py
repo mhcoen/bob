@@ -255,6 +255,8 @@ def test_run_checks_with_targeted(tmp_path):
     (tmp_path / "pyproject.toml").write_text(
         "[tool.ruff]\n[tool.pytest.ini_options]\n",
     )
+    (tmp_path / "mcloop").mkdir()
+    (tmp_path / "mcloop" / "checks.py").write_text("")
     (tmp_path / "tests").mkdir()
     (tmp_path / "tests" / "test_checks.py").write_text("")
 
