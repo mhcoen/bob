@@ -2,6 +2,24 @@
 
 ## Observations
 
+### [14.7] [T-000390] targeted_pytest_command now emits an explicit, PATH/cwd-independent command (2026-06-01)
+`targeted_pytest_command(test_files, project_dir)` no longer returns a bare
+`pytest <relative paths>` string. It now emits a resolved executable prefix
+(`<project>/.venv/bin/pytest` when present, else `<sys.executable> -m pytest`)
+plus fully-qualified (absolute) node paths anchored to `project_dir.resolve()`.
+This keeps targeted selection from collapsing to zero collection or invoking
+the wrong pytest when ambient cwd/PATH differ from the project. `is_test_command`
+was widened to recognize the resolved forms (basename `pytest`, or a
+`python*`-basename interpreter with `-m pytest`) and now uses `shlex.split` so
+the signal-verdict path in `run_checks` still fires on the explicit command.
+
+Assumption: the fallback `<sys.executable> -m pytest` presumes pytest is
+importable in the interpreter running mcloop when the target project has no
+`.venv/bin/pytest`. This mirrors the prior reliance on a PATH `pytest`, but
+pins it to mcloop's own interpreter rather than the shell PATH. If a target
+project uses a non-`.venv` layout (e.g. `venv/`, poetry cache, conda), the
+prefix falls back to mcloop's interpreter; revisit if such layouts appear.
+
 ### [14.6] [T-000389] run_checks now FAILS the gate on unaccounted behavioral changes (replaces full-suite fallback) (2026-06-01)
 The 14.5 design fell back to the full configured test suite whenever any
 changed input was unmapped. That fallback has a hole: the full suite can

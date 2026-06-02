@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -250,21 +252,72 @@ def map_to_tests(
     return sorted(test_files)
 
 
+def _pytest_prefix_parts(project_dir: Path) -> list[str]:
+    """Return an explicit, PATH-independent pytest invocation prefix.
+
+    Prefers the project's own virtualenv pytest
+    (``<project>/.venv/bin/pytest``) when it exists; otherwise falls
+    back to invoking pytest through the interpreter currently running
+    mcloop (``<sys.executable> -m pytest``). Both forms name an absolute
+    executable, so the caller's ambient ``PATH`` cannot redirect the run
+    to a different (or missing) pytest.
+    """
+    venv_pytest = project_dir / ".venv" / "bin" / "pytest"
+    if venv_pytest.exists():
+        return [str(venv_pytest)]
+    return [sys.executable, "-m", "pytest"]
+
+
+def _absolute_node(project_dir: Path, node: str) -> str:
+    """Fully qualify a test node path against *project_dir*.
+
+    Relative test paths are anchored to the (resolved) project root so
+    that selection does not depend on the subprocess's ambient cwd; an
+    already-absolute node is returned unchanged.
+    """
+    p = Path(node)
+    if p.is_absolute():
+        return str(p)
+    return str(project_dir / node)
+
+
 def targeted_pytest_command(
     test_files: list[str],
+    project_dir: str | Path,
 ) -> str:
-    """Build a pytest command targeting specific test files."""
-    return "pytest " + " ".join(test_files)
+    """Build a self-contained pytest command for *test_files*.
+
+    Emits an explicit, resolved pytest executable prefix followed by
+    fully-qualified (absolute) test node paths, rather than a bare
+    ``pytest <relative paths>`` string. Because both the executable and
+    every node are pinned to absolute locations, neither the caller's
+    ambient cwd nor ``PATH`` can redirect the invocation to the wrong
+    pytest or collapse the targeted selection into zero collection.
+    """
+    base = Path(project_dir).resolve()
+    parts = _pytest_prefix_parts(base)
+    parts += [_absolute_node(base, t) for t in test_files]
+    return shlex.join(parts)
 
 
 def is_test_command(cmd: str) -> bool:
-    """Return True if cmd is a test-runner command (not a linter)."""
-    parts = cmd.split()
+    """Return True if cmd is a test-runner command (not a linter).
+
+    Recognizes both the bare forms (``pytest ...``, ``python -m
+    pytest ...``) and the explicit resolved forms emitted by
+    :func:`targeted_pytest_command` (an absolute ``.../pytest`` path, or
+    an absolute interpreter path with ``-m pytest``).
+    """
+    try:
+        parts = shlex.split(cmd)
+    except ValueError:
+        return False
     if not parts:
         return False
-    if parts[0] == "pytest":
+    exe = Path(parts[0]).name
+    if exe == "pytest":
         return True
-    if parts[0] == "python" and len(parts) >= 3 and parts[1] == "-m" and parts[2] == "pytest":
+    if exe.startswith("python") and len(parts) >= 3 and parts[1] == "-m" and parts[2] == "pytest":
         return True
     return False
 

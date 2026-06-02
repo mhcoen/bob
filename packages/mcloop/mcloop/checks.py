@@ -340,7 +340,7 @@ def run_checks(
         for cmd in commands:
             if is_test_command(cmd):
                 if test_files:
-                    narrowed.append(targeted_pytest_command(test_files))
+                    narrowed.append(targeted_pytest_command(test_files, project_dir))
                 # else: no mapped tests and nothing unaccounted, safe to skip
             elif is_scoped_python_linter(cmd):
                 # Scope the linter to the Python files this batch/task

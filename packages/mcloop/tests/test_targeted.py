@@ -1,6 +1,9 @@
 """Tests for mcloop.targeted — source-to-test file mapping."""
 
+import shlex
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from mcloop.targeted import (
@@ -174,16 +177,62 @@ def test_account_test_support_file_under_tests(tmp_path):
     assert accounts[0].test_files == ("tests/fixtures/test_uses_data.py",)
 
 
-def test_targeted_pytest_command():
-    cmd = targeted_pytest_command(["tests/test_checks.py"])
-    assert cmd == "pytest tests/test_checks.py"
+def test_targeted_pytest_command_explicit_prefix_and_nodes(tmp_path):
+    """No project venv: command falls back to the running interpreter's
+    ``-m pytest`` and carries fully-qualified node paths."""
+    cmd = targeted_pytest_command(["tests/test_checks.py"], tmp_path)
+    parts = shlex.split(cmd)
+    base = Path(tmp_path).resolve()
+    assert parts == [sys.executable, "-m", "pytest", str(base / "tests/test_checks.py")]
+    # The emitted command is still recognized as a test command.
+    assert is_test_command(cmd)
 
 
-def test_targeted_pytest_command_multiple():
+def test_targeted_pytest_command_prefers_project_venv(tmp_path):
+    """When the project has its own venv pytest, that resolved
+    executable is used as the explicit prefix."""
+    venv_bin = tmp_path / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    venv_pytest = venv_bin / "pytest"
+    venv_pytest.write_text("#!/bin/sh\n")
+
+    cmd = targeted_pytest_command(["tests/test_checks.py"], tmp_path)
+    parts = shlex.split(cmd)
+    base = Path(tmp_path).resolve()
+    assert parts == [str(base / ".venv/bin/pytest"), str(base / "tests/test_checks.py")]
+    assert is_test_command(cmd)
+
+
+def test_targeted_pytest_command_multiple(tmp_path):
     cmd = targeted_pytest_command(
         ["tests/test_checks.py", "tests/test_runner.py"],
+        tmp_path,
     )
-    assert cmd == "pytest tests/test_checks.py tests/test_runner.py"
+    base = Path(tmp_path).resolve()
+    nodes = shlex.split(cmd)[-2:]
+    assert nodes == [
+        str(base / "tests/test_checks.py"),
+        str(base / "tests/test_runner.py"),
+    ]
+
+
+def test_targeted_pytest_command_resolves_regardless_of_cwd(tmp_path, monkeypatch):
+    """The emitted command is independent of the caller's ambient cwd:
+    every node is absolute and the prefix is a resolved executable, so
+    the same project_dir yields the same command from any cwd."""
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+
+    monkeypatch.chdir(tmp_path)
+    from_a = targeted_pytest_command(["tests/test_checks.py"], tmp_path)
+    monkeypatch.chdir(other)
+    from_b = targeted_pytest_command(["tests/test_checks.py"], tmp_path)
+
+    assert from_a == from_b
+    # Node is absolute, not relative to whatever cwd was active.
+    node = shlex.split(from_a)[-1]
+    assert Path(node).is_absolute()
+    assert node == str(Path(tmp_path).resolve() / "tests/test_checks.py")
 
 
 def test_is_test_command():
@@ -192,6 +241,11 @@ def test_is_test_command():
     assert not is_test_command("ruff check .")
     assert not is_test_command("npm test")
     assert not is_test_command("make check")
+    # Resolved/explicit forms emitted by targeted_pytest_command.
+    assert is_test_command("/proj/.venv/bin/pytest /proj/tests/test_foo.py")
+    assert is_test_command(f"{sys.executable} -m pytest /proj/tests/test_foo.py")
+    assert is_test_command("/usr/bin/python3.11 -m pytest /proj/tests/test_foo.py")
+    assert not is_test_command("/proj/.venv/bin/ruff check /proj/foo.py")
 
 
 def test_run_checks_with_targeted(tmp_path):
@@ -221,7 +275,15 @@ def test_run_checks_with_targeted(tmp_path):
         calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
         assert ("ruff", "check", "mcloop/checks.py") in calls
         assert ("ruff", "format", "--check", "mcloop/checks.py") in calls
-        assert ("pytest", "tests/test_checks.py") in calls
+        # pytest is scoped via the explicit resolved form: a resolved
+        # executable prefix plus a fully-qualified node path.
+        base = Path(tmp_path).resolve()
+        expected_node = str(base / "tests/test_checks.py")
+        pytest_calls = [c for c in calls if expected_node in c]
+        assert len(pytest_calls) == 1
+        pytest_call = pytest_calls[0]
+        assert pytest_call[-1] == expected_node
+        assert Path(pytest_call[0]).name in ("pytest", Path(sys.executable).name)
 
 
 def test_run_checks_targeted_only_test_files_changed(tmp_path):
@@ -251,7 +313,12 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
         calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
         assert ("ruff", "check", "tests/test_foo.py") in calls
         assert ("ruff", "format", "--check", "tests/test_foo.py") in calls
-        assert ("pytest", "tests/test_foo.py") in calls
+        base = Path(tmp_path).resolve()
+        expected_node = str(base / "tests/test_foo.py")
+        pytest_calls = [c for c in calls if expected_node in c]
+        assert len(pytest_calls) == 1
+        assert pytest_calls[0][-1] == expected_node
+        assert Path(pytest_calls[0][0]).name in ("pytest", Path(sys.executable).name)
 
 
 def test_run_checks_unmapped_behavioral_change_fails_gate(tmp_path):
