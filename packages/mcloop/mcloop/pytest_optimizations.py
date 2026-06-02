@@ -122,6 +122,22 @@ def _extend_addopts(content: str, extra: str) -> str:
                 replaced += "\n"
             lines[idx] = replaced
             return "".join(lines)
+        arr = re.match(r"(\s*addopts\s*=\s*\[)(.*?)(\].*)", line)
+        if arr:
+            prefix, value, suffix = arr.groups()
+            extra_items = ", ".join(f'"{tok}"' for tok in extra.split())
+            inner = value.strip()
+            if inner and not inner.endswith(","):
+                new_value = f"{inner}, {extra_items}"
+            elif inner:
+                new_value = f"{inner} {extra_items}"
+            else:
+                new_value = extra_items
+            replaced = f"{prefix}{new_value}{suffix}"
+            if not replaced.endswith("\n"):
+                replaced += "\n"
+            lines[idx] = replaced
+            return "".join(lines)
     return content
 
 

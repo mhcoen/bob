@@ -199,7 +199,7 @@ def _find_recent_crash_report(
     if not reports_dir.is_dir():
         return ""
     now = time.time()
-    candidates: list[Path] = []
+    candidates: list[tuple[float, Path]] = []
     for entry in reports_dir.iterdir():
         try:
             mtime = entry.stat().st_mtime
@@ -209,10 +209,10 @@ def _find_recent_crash_report(
             continue
         if process_name and not entry.name.startswith(process_name):
             continue
-        candidates.append(entry)
+        candidates.append((mtime, entry))
     if not candidates:
         return ""
-    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    newest = max(candidates, key=lambda c: c[0])[1]
     try:
         return newest.read_text()
     except OSError:
