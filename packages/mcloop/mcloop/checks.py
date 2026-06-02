@@ -259,9 +259,9 @@ def run_checks(
     """
     from mcloop.pytest_signal import pytest_signal_verdict
     from mcloop.targeted import (
+        account_changed_inputs,
         is_scoped_python_linter,
         is_test_command,
-        map_to_tests,
         targeted_linter_command,
         targeted_pytest_command,
     )
@@ -270,21 +270,25 @@ def run_checks(
     commands = get_check_commands(project_dir)
 
     if changed_files is not None:
-        test_files = map_to_tests(changed_files, project_dir)
-        # If Python source files changed but no targeted tests were
-        # found (e.g. new module with no test file yet), fall back to
-        # the full configured test command rather than skipping tests
-        # entirely.  Otherwise untested code could commit.
+        accounts = account_changed_inputs(changed_files, project_dir)
+        test_files = sorted({f for acc in accounts for f in acc.test_files})
+        # Any behavior-relevant input we could not map to a test must NOT
+        # be shipped under a green targeted gate. If anything is unmapped
+        # (a new module with no test yet, a changed pyproject.toml, a
+        # mixed batch where one file maps and another does not), fall back
+        # to the full configured test command rather than silently
+        # omitting the unmapped input.  Otherwise untested code could
+        # commit.
         py_changed = [f for f in changed_files if f.endswith(".py")]
-        fallback_to_full = bool(py_changed) and not test_files
+        fallback_to_full = any(acc.unmapped for acc in accounts)
         narrowed: list[str] = []
         for cmd in commands:
             if is_test_command(cmd):
-                if test_files:
-                    narrowed.append(targeted_pytest_command(test_files))
-                elif fallback_to_full:
+                if fallback_to_full:
                     narrowed.append(cmd)
-                # else: no Python changes at all, safe to skip tests
+                elif test_files:
+                    narrowed.append(targeted_pytest_command(test_files))
+                # else: no behavior-relevant changes, safe to skip tests
             elif is_scoped_python_linter(cmd):
                 # Scope the linter to the Python files this batch/task
                 # actually touched. Prevents pre-existing unrelated

@@ -4,6 +4,7 @@ import subprocess
 from unittest.mock import patch
 
 from mcloop.targeted import (
+    account_changed_inputs,
     is_test_command,
     map_to_tests,
     targeted_pytest_command,
@@ -81,6 +82,96 @@ def test_map_no_tests_dir(tmp_path):
     """Missing tests/ directory returns empty."""
     result = map_to_tests(["mcloop/checks.py"], tmp_path)
     assert result == []
+
+
+def test_map_finds_subdir_test(tmp_path):
+    """A test living in a tests/ subdirectory is found, not just the flat
+    tests/test_<name>.py convention."""
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_widget.py").write_text("")
+    result = map_to_tests(["mcloop/widget.py"], tmp_path)
+    assert result == ["tests/unit/test_widget.py"]
+
+
+def test_account_mixed_batch_reports_unmapped(tmp_path):
+    """A mixed batch (one file with a test, one without) reports the
+    unmapped file rather than dropping it."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+    accounts = account_changed_inputs(
+        ["mcloop/checks.py", "mcloop/orphan.py"],
+        tmp_path,
+    )
+    by_source = {a.source: a for a in accounts}
+    assert set(by_source) == {"mcloop/checks.py", "mcloop/orphan.py"}
+
+    mapped = by_source["mcloop/checks.py"]
+    assert mapped.mapped
+    assert mapped.test_files == ("tests/test_checks.py",)
+
+    unmapped = by_source["mcloop/orphan.py"]
+    assert unmapped.unmapped
+    assert not unmapped.mapped
+    assert unmapped.test_files == ()
+    assert "orphan" in unmapped.reason
+
+
+def test_account_finds_subdir_test(tmp_path):
+    """Accounting locates a test in a tests/ subdirectory."""
+    (tmp_path / "tests" / "unit").mkdir(parents=True)
+    (tmp_path / "tests" / "unit" / "test_widget.py").write_text("")
+    accounts = account_changed_inputs(["mcloop/widget.py"], tmp_path)
+    assert len(accounts) == 1
+    assert accounts[0].mapped
+    assert accounts[0].test_files == ("tests/unit/test_widget.py",)
+
+
+def test_account_non_python_behavior_input(tmp_path):
+    """A non-.py behavior input (pyproject.toml) is accounted for, not
+    silently dropped, even though it has no name-based test mapping."""
+    (tmp_path / "tests").mkdir()
+    accounts = account_changed_inputs(["pyproject.toml"], tmp_path)
+    assert len(accounts) == 1
+    acc = accounts[0]
+    assert acc.source == "pyproject.toml"
+    assert acc.unmapped
+    assert acc.test_files == ()
+    assert acc.reason
+
+
+def test_account_omits_pure_docs(tmp_path):
+    """Pure documentation changes are not accounted (cannot affect
+    behavior) so they do not force a fallback test run."""
+    (tmp_path / "tests").mkdir()
+    accounts = account_changed_inputs(["README.md", "docs/guide.rst"], tmp_path)
+    assert accounts == []
+
+
+def test_account_module_name_k_matching(tmp_path):
+    """When no test_<name>.py exists, a test that references the module
+    name as a word is matched (pytest -k style)."""
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_behaviors.py").write_text(
+        "from mcloop import widget\n\n\ndef test_widget_runs():\n    assert widget\n",
+    )
+    accounts = account_changed_inputs(["mcloop/widget.py"], tmp_path)
+    assert len(accounts) == 1
+    acc = accounts[0]
+    assert acc.mapped
+    assert acc.test_files == ("tests/test_behaviors.py",)
+    assert acc.k_module == "widget"
+
+
+def test_account_test_support_file_under_tests(tmp_path):
+    """A non-.py fixture/data file under tests/ maps to the test files in
+    its directory rather than being dropped."""
+    (tmp_path / "tests" / "fixtures").mkdir(parents=True)
+    (tmp_path / "tests" / "fixtures" / "test_uses_data.py").write_text("")
+    (tmp_path / "tests" / "fixtures" / "sample.json").write_text("{}")
+    accounts = account_changed_inputs(["tests/fixtures/sample.json"], tmp_path)
+    assert len(accounts) == 1
+    assert accounts[0].mapped
+    assert accounts[0].test_files == ("tests/fixtures/test_uses_data.py",)
 
 
 def test_targeted_pytest_command():
@@ -195,6 +286,37 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
         assert ("ruff", "check", "mcloop/main.py") in calls
         assert ("ruff", "format", "--check", "mcloop/main.py") in calls
         assert ("pytest",) in calls
+
+
+def test_run_checks_mixed_batch_falls_back_to_full(tmp_path):
+    """A batch where one file maps to a test and another does not falls
+    back to the full pytest run, so the unmapped file is not shipped
+    untested under a green targeted gate."""
+    from mcloop.checks import run_checks
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_checks.py").write_text("")
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.return_value = subprocess.CompletedProcess(
+            args="",
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+        )
+        run_checks(
+            tmp_path,
+            changed_files=["mcloop/checks.py", "mcloop/orphan.py"],
+        )
+        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+        # orphan.py has no mapped test: full pytest, not the targeted form.
+        assert ("pytest",) in calls
+        assert ("pytest", "tests/test_checks.py") not in calls
+        # Ruff is still scoped to the changed Python files.
+        assert ("ruff", "check", "mcloop/checks.py", "mcloop/orphan.py") in calls
 
 
 def test_run_checks_targeted_no_python_changes(tmp_path):

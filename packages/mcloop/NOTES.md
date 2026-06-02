@@ -2,6 +2,47 @@
 
 ## Observations
 
+### [14.5] [T-000388] map_to_tests now accounts unmapped inputs; checks.py falls back on any unmapped (2026-06-01)
+`mcloop/targeted.account_changed_inputs` replaces the silent-drop in
+`map_to_tests`: every behavior-relevant changed input yields an
+`InputAccount` that is either mapped (`test_files`) or explicitly
+`unmapped` with a `reason`. `map_to_tests` is now a flat projection of
+that accounting (mapped files only), so its public output is unchanged.
+`checks.py::run_checks` was rewired: `fallback_to_full` now fires when
+**any** account is unmapped (previously only when the targeted set was
+globally empty), and the fallback branch is checked **before** the
+targeted branch. This fixes the mixed-batch bug (PLAN ~540): a batch with
+one mapped file and one unmapped file previously ran only the mapped
+file's tests and shipped the unmapped file untested; it now runs the full
+suite.
+
+Behavior changes worth noting:
+- A changed `__init__.py`/dunder is behavior-relevant but never maps by
+  name, so it is now `unmapped` → full-suite fallback (same as the old
+  `py_changed and not test_files` path). `map_to_tests` still returns `[]`
+  for it.
+- Non-Python behavior inputs (pyproject.toml, *.json/*.yaml data,
+  templates, entry-point declarations) are now accounted and trigger
+  fallback. Editing e.g. pyproject.toml now runs the full suite where it
+  previously left tests scoped/skipped. This is the conservative
+  direction (fail toward running more tests).
+- Pure docs (`.md`, `.rst`) are intentionally excluded from accounting so
+  a README/docs-only batch still skips tests entirely.
+
+## Hypotheses
+
+### [14.5] [T-000388] module-name `-k` matching is content-scan based and could over-broaden (2026-06-01)
+When no `test_<stem>.py` exists, `_k_referencing_tests` reads every
+`tests/**/test_*.py` and selects those whose text contains the module
+stem as a whole word (`\b<stem>\b`). For a common stem (e.g. `config`)
+this may select many test files in a real run, widening a "targeted" run
+toward the full suite. It only runs when the conventional file lookup
+finds nothing, so it errs toward more coverage, but if targeted-run speed
+regresses this scan is the likely cause. The match is filename-agnostic
+text containment, not a true pytest `-k` node — `k_module` is recorded on
+the account for callers that may later want to emit an actual `-k` flag.
+
+
 ### [14.3] [T-000386] verify adapter treats an empty changed-set as fail-closed (2026-06-01)
 `mcloop/verify_cmd.run_verify` distinguishes three outcomes from
 `git_ops._changed_files_since`: `None` (cannot resolve — empty baseline,
