@@ -251,7 +251,7 @@ def test_run_checks_resolves_bare_config_command_to_project_venv(tmp_path, monke
     venv_bin = tmp_path / ".venv" / "bin"
     venv_bin.mkdir(parents=True)
     pytest_path = venv_bin / "pytest"
-    pytest_path.write_text("#!/bin/sh\nprintf 'venv pytest\\n'\n")
+    pytest_path.write_text("#!/bin/sh\nprintf 'venv pytest\\n1 passed in 0.01s\\n'\n")
     pytest_path.chmod(0o755)
     (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["pytest -q"]}))
     monkeypatch.setenv("PATH", "/nonexistent")
@@ -371,6 +371,71 @@ def test_run_checks_runs_commands_in_order_until_failure(tmp_path):
     assert result.command == "cmd-two"
     assert order == ["cmd-one", "cmd-two"]
     assert "cmd-three" not in order
+
+
+# --- pytest signal predicate wired into run_checks ---
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_checks_fails_exit0_all_skipped_pytest(mock_run, tmp_path):
+    """An exit-0 pytest run where every test was skipped is no signal."""
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["pytest"]}))
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="pytest",
+        returncode=0,
+        stdout="collected 3 items\n\n=== 3 skipped in 0.12s ===\n",
+        stderr="",
+    )
+    result = run_checks(tmp_path)
+    assert not result.passed
+    assert "all skipped" in result.output
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_checks_fails_closed_on_unparseable_pytest(mock_run, tmp_path):
+    """An exit-0 pytest run with an unparseable summary fails closed."""
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["pytest"]}))
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="pytest",
+        returncode=0,
+        stdout="some unrelated output with no parseable summary\n",
+        stderr="",
+    )
+    result = run_checks(tmp_path)
+    assert not result.passed
+    assert "pytest summary unparseable" in result.output
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_checks_passes_normal_pytest(mock_run, tmp_path):
+    """A normal pytest run with real passes is valid signal and passes."""
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["pytest"]}))
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="pytest",
+        returncode=0,
+        stdout="collected 5 items\n\n=== 5 passed in 1.23s ===\n",
+        stderr="",
+    )
+    result = run_checks(tmp_path)
+    assert result.passed
+
+
+@patch("mcloop.checks.subprocess.run")
+def test_run_checks_non_pytest_command_unaffected_by_predicate(mock_run, tmp_path):
+    """The signal predicate only applies to pytest commands.
+
+    A non-test command (here ``echo``) that exits 0 but prints no
+    pytest summary must still pass -- it is judged by exit code alone.
+    """
+    (tmp_path / "mcloop.json").write_text(json.dumps({"checks": ["echo hi"]}))
+    mock_run.return_value = subprocess.CompletedProcess(
+        args="echo hi",
+        returncode=0,
+        stdout="hi\n",
+        stderr="",
+    )
+    result = run_checks(tmp_path)
+    assert result.passed
 
 
 @patch("mcloop.checks.subprocess.run")

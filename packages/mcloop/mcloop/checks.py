@@ -257,6 +257,7 @@ def run_checks(
     When *changed_files* is None (phase boundary, no-op check), every
     command runs against the full repo as configured.
     """
+    from mcloop.pytest_signal import pytest_signal_verdict
     from mcloop.targeted import (
         is_scoped_python_linter,
         is_test_command,
@@ -328,7 +329,17 @@ def run_checks(
             )
         except subprocess.TimeoutExpired:
             return False, f"TIMEOUT after {check_timeout}s"
-        return result.returncode == 0, f"{result.stdout}{result.stderr}"
+        output = f"{result.stdout}{result.stderr}"
+        # Pytest can exit 0 while producing no real signal (nothing
+        # collected, everything skipped/deselected, or a summary we
+        # cannot parse). Treat such a run as a failure so untested code
+        # never commits on a vacuous green. Fail closed on the parser
+        # sentinel. Non-pytest commands stay judged by exit code alone.
+        if is_test_command(cmd):
+            valid, reason = pytest_signal_verdict(result.stdout, result.stderr, result.returncode)
+            if not valid:
+                return False, f"{output}\n[no valid test signal: {reason}]"
+        return result.returncode == 0, output
 
     # Checks must short-circuit: the contract (and
     # test_run_checks_stops_at_first_failure) requires that once a

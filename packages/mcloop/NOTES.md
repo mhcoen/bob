@@ -2,6 +2,17 @@
 
 ## Observations
 
+### [14.2] [T-000385] Signal predicate counts only passed+failed (2026-06-01)
+`pytest_signal_verdict` in `mcloop/pytest_signal.py` defines valid signal as
+`passed + failed >= 1`, matching the task's literal wording ("at least one
+test executed to a pass or fail outcome"). This means a run that produced
+*only* xfailed/xpassed outcomes (tests genuinely ran, just as
+expected-fail / unexpected-pass) is currently judged as no-signal and would
+fail `run_checks`. Such pure xfail/xpass runs are rare in practice and were
+not among the four required invalid cases, so the simpler literal predicate
+was chosen. If this ever bites, fold xfailed/xpassed into the "executed"
+count — the structured counts are already parsed and available.
+
 ### [76.2] Codex CLI flag change (2026-03-14)
 Codex CLI no longer accepts `--ask-for-approval never --sandbox workspace-write`.
 The replacement is `--full-auto` (convenience alias for `-a on-request, --sandbox workspace-write`).

@@ -102,6 +102,46 @@ def parse_pytest_signal(
     )
 
 
+def pytest_signal_verdict(
+    stdout: str,
+    stderr: str = "",
+    exit_code: int = 0,
+) -> tuple[bool, str | None]:
+    """Decide whether a pytest run produced valid signal.
+
+    A pytest run produces *valid signal* iff at least one test executed
+    to a pass or fail outcome. Zero-collection, all-skipped,
+    all-deselected, and a run whose summary cannot be parsed are NOT
+    valid signal.
+
+    Returns ``(valid, reason)``. ``reason`` is ``None`` when the run is
+    valid, and otherwise a short human-readable string distinguishing
+    the cause: ``"no tests collected"``, ``"all skipped"``,
+    ``"all deselected"``, or ``"pytest summary unparseable"``.
+
+    Fails closed on the parser sentinel: a missing parseable summary is
+    never treated as valid signal.
+    """
+    signal = parse_pytest_signal(stdout, stderr, exit_code)
+    if signal is None:
+        return False, "pytest summary unparseable"
+    if signal.passed + signal.failed >= 1:
+        return True, None
+    if signal.collected == 0:
+        return False, "no tests collected"
+    # Nothing passed or failed but something was collected. Attribute the
+    # silence to the dominant non-running outcome. Deselection filters
+    # items out before they run, so an all-deselected run is reported as
+    # such; otherwise the items were collected and skipped.
+    if signal.deselected > 0 and signal.skipped == 0:
+        return False, "all deselected"
+    if signal.skipped > 0 and signal.deselected == 0:
+        return False, "all skipped"
+    if signal.deselected >= signal.skipped:
+        return False, "all deselected"
+    return False, "all skipped"
+
+
 def _find_summary_line(text: str) -> str | None:
     """Return the last pytest summary line, stripped of ``=`` framing.
 
