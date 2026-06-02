@@ -546,9 +546,7 @@ def _merge_settings(
             changed = True
             for el in stale:
                 desc = el.get("command") or "; ".join(
-                    h.get("command", "")
-                    for h in el.get("hooks", [])
-                    if isinstance(h, dict)
+                    h.get("command", "") for h in el.get("hooks", []) if isinstance(h, dict)
                 )
                 verb = "would remove" if dry_run else "removed"
                 print(f"  {verb} stale telegram hook: {desc}")

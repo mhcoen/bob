@@ -601,7 +601,9 @@ def test_merge_settings_dedupes_other_path_telegram_hook(tmp_path, capsys):
                     "hooks": [
                         {
                             "type": "command",
-                            "command": "python3 /Users/x/.claude/hooks/telegram-permission-hook.py",
+                            "command": (
+                                "python3 /Users/x/.claude/hooks/telegram-permission-hook.py"
+                            ),
                         }
                     ],
                 },
