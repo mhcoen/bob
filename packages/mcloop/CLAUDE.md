@@ -41,6 +41,10 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/config.py** - Reviewer configuration loading from `.mcloop/config.json`.
 
+**mcloop/coverage_verify.py** - Coverage-proven verification: the primary fallback when an unmapped behavioral Python change has no namesake test. Discovers a scoped dependent-test candidate set via a transitive first-party import walk, runs pytest with `pytest-cov` over only that set (never the full suite), and asserts the change's diff-hunk lines (vs the task's pre-edit baseline) were executed. Non-Python inputs cannot pass this path.
+
+**mcloop/waivers.py** - Append-only test-verification waiver records in `.mcloop/test-verification-waivers.jsonl` (task label, changed input, pre-edit baseline SHA, reason, UTC timestamp). `record_waiver`/`has_waiver`/`load_waivers`; waivers are written only via the explicit `mcloop waive` subcommand and consulted by the `run_checks` gate, never written silently.
+
 **mcloop/conftest_guard.py** - Inject an autouse pytest fixture into the target project's `tests/conftest.py` that blocks unmocked `claude -p` / `codex exec` subprocess calls.
 
 **mcloop/errors.py** - Error/crash handling: inspect errors.json, diagnose failures, append fix tasks to BUGS.md.
@@ -73,7 +77,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/prompts.py** - Prompt builders and output parsers for AI CLI sessions. Audit prompts reference `.mcloop/audit-report.md`.
 
-**mcloop/pytest_optimizations.py** - Ensure the target project's `pyproject.toml` has `[tool.pytest.ini_options]` addopts with `-n auto`, a `timeout`, and `pytest-xdist` / `pytest-timeout` dev deps. Idempotent; called once at `run_loop()` startup after `ensure_conftest_guard()`.
+**mcloop/pytest_optimizations.py** - Ensure the target project's `pyproject.toml` has `[tool.pytest.ini_options]` addopts with `-n auto`, a `timeout`, and `pytest-xdist` / `pytest-timeout` / `pytest-cov` dev deps (pytest-cov backs the coverage-proven verification fallback and works under `-n auto` with no extra config). Idempotent; called once at `run_loop()` startup after `ensure_conftest_guard()`.
 
 **mcloop/ratelimit.py** - Rate limit detection and CLI fallover.
 
@@ -114,6 +118,10 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 **tests/test_claude_md_sync.py** - Tests for `handle_sync` and `reconcile_pending`: pending-queue persistence, cap-of-one behavior, and halt notification.
 
 **tests/test_config.py** - Tests for reviewer configuration loading.
+
+**tests/test_coverage_verify.py** - Tests for `mcloop.coverage_verify`: diff-hunk new-line parsing, coverage-JSON parsing, `changed_new_lines` against a real git baseline, transitive dependent-test discovery, scoped `_run_coverage` (mocked subprocess writing a coverage JSON), and the `verify_change_covered` orchestrator (exercised passes, not-exercised fails, no-candidate fails, non-Python cannot pass, missing baseline fails closed).
+
+**tests/test_waivers.py** - Tests for `mcloop.waivers`: required-field completeness of recorded waivers, append-only behavior, input+baseline matching, empty-baseline never matches, and corrupt-line skipping.
 
 **tests/test_formatting.py** - Tests for terminal output formatting.
 

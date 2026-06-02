@@ -275,6 +275,52 @@ def _unaccounted_behavioral_changes(
     return flagged
 
 
+def _resolve_flagged(
+    project_dir: Path,
+    flagged: list[str],
+    accounts: list[Any],
+) -> list[str]:
+    """Decide which flagged changes still block the gate.
+
+    A flagged (unmapped, not-provably-inert) change is cleared when:
+
+      * an explicit waiver exists for it at the task's pre-edit baseline
+        (the auditable bypass recorded in
+        ``.mcloop/test-verification-waivers.jsonl``), or
+      * it is a Python change whose diff-hunk lines are *proven executed*
+        by a scoped candidate test via coverage-proven verification.
+
+    Coverage verification is the primary fallback: for an unmapped Python
+    change it runs coverage over a scoped affected-test set (mapped nodes
+    plus transitive dependent tests) and never expands to the full suite.
+    Non-Python behavior inputs have no executable coverage lines, so they
+    can only be cleared by a named-test mapping (handled upstream) or a
+    waiver -- otherwise they remain blocking.
+
+    Returns the sub-list of *flagged* sources that remain unresolved and
+    must fail the gate.
+    """
+    from mcloop.coverage_verify import verify_change_covered
+    from mcloop.git_ops import _read_task_baseline
+    from mcloop.waivers import has_waiver
+
+    baseline = _read_task_baseline(project_dir)
+    by_source = {getattr(a, "source", None): a for a in accounts}
+
+    unresolved: list[str] = []
+    for src in flagged:
+        if has_waiver(project_dir, src, baseline):
+            continue
+        if src.endswith(".py") and baseline:
+            acc = by_source.get(src)
+            mapped = list(getattr(acc, "test_files", ()) or ())
+            verdict = verify_change_covered(project_dir, baseline, src, mapped)
+            if verdict.proven:
+                continue
+        unresolved.append(src)
+    return unresolved
+
+
 def run_checks(
     project_dir: str | Path,
     changed_files: list[str] | None = None,
@@ -321,17 +367,27 @@ def run_checks(
         # test, a rename in an untested module, a changed pyproject.toml)
         # would ship green. Provably non-behavioral unmapped edits
         # (comment/docstring/format-only, import reorder) are allowed
-        # through and simply contribute no targeted tests. A future waiver
-        # path (T-000391) will exempt specific reviewed cases.
+        # through and simply contribute no targeted tests.
+        #
+        # Before failing, give each flagged change the coverage-proven
+        # verification fallback (T-000391): an unmapped Python change with
+        # no namesake test still passes if a scoped dependent test proves
+        # its changed lines execute. Non-Python inputs (no coverage lines)
+        # and changes nothing exercises remain blocking unless an explicit,
+        # logged waiver exists. Coverage is scoped to a dependent-test
+        # candidate set -- the full suite is never run as the fallback.
         flagged = _unaccounted_behavioral_changes(project_dir, accounts)
+        if flagged:
+            flagged = _resolve_flagged(project_dir, flagged, accounts)
         if flagged:
             listed = ", ".join(sorted(flagged))
             return CheckResult(
                 passed=False,
                 output=(
                     "Gate failed: unaccounted behavioral change(s) with no "
-                    f"mapped test: {listed}. Add a test that exercises the "
-                    "change so the targeted gate can verify it."
+                    f"mapped test and no coverage-proven exercise: {listed}. "
+                    "Add a test that exercises the change, or record an "
+                    "explicit waiver (`mcloop waive`) so the bypass is logged."
                 ),
                 command="(gate: unaccounted behavioral change)",
             )

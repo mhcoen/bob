@@ -585,6 +585,14 @@ def _main() -> None:
         _cmd_verify(checklist_path.parent)
         return
 
+    if args.command == "waive":
+        _cmd_waive(
+            checklist_path.parent,
+            changed_input=args.waive_input,
+            reason=args.waive_reason,
+        )
+        return
+
     if args.command == "maintain":
         _cmd_maintain(
             checklist_path.parent,
@@ -2750,6 +2758,26 @@ def _parse_args() -> argparse.Namespace:
             "override banner is silenced until the file changes"
         ),
     )
+    waive_parser = subparsers.add_parser(
+        "waive",
+        help=(
+            "Record an explicit, logged test-verification waiver for a "
+            "changed input that cannot be coverage-proven (appends to "
+            ".mcloop/test-verification-waivers.jsonl)"
+        ),
+    )
+    waive_parser.add_argument(
+        "--input",
+        required=True,
+        dest="waive_input",
+        help="The changed input (file path) being waived",
+    )
+    waive_parser.add_argument(
+        "--reason",
+        required=True,
+        dest="waive_reason",
+        help="Why the change cannot be verified by a test / coverage",
+    )
     moved = _prescan_maintain_parent_flags(sys.argv[1:])
     if moved is not None:
         parser.error(
@@ -2866,6 +2894,39 @@ def _cmd_verify(project_dir: Path) -> None:
     stream = sys.stdout if exit_code == 0 else sys.stderr
     print(message, file=stream, flush=True)
     sys.exit(exit_code)
+
+
+def _cmd_waive(project_dir: Path, *, changed_input: str, reason: str) -> None:
+    """Record an explicit test-verification waiver and report it.
+
+    Resolves the task label from ``MCLOOP_TASK_LABEL`` (set by the loop
+    when a task session runs) and the pre-edit baseline SHA from
+    ``.mcloop/task-baseline``. The waiver is keyed on the input plus that
+    baseline so it applies only to the snapshot it was granted for. The
+    record is appended to ``.mcloop/test-verification-waivers.jsonl`` so
+    every gate bypass leaves an auditable trail.
+    """
+    import os
+
+    from mcloop.git_ops import _read_task_baseline
+    from mcloop.waivers import record_waiver
+
+    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
+    baseline = _read_task_baseline(project_dir)
+    record = record_waiver(
+        project_dir,
+        task_label=task_label,
+        changed_input=changed_input,
+        baseline_sha=baseline,
+        reason=reason,
+    )
+    print(
+        formatting.system_msg(
+            "Recorded test-verification waiver for "
+            f"{record['changed_input']} (baseline {record['baseline_sha'][:12] or 'none'})"
+        ),
+        flush=True,
+    )
 
 
 def _cmd_wrap(project_dir: Path) -> None:

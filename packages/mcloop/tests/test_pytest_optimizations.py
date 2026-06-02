@@ -80,6 +80,7 @@ def test_fully_configured_is_noop(tmp_path: Path) -> None:
         '    "pytest>=8.0",\n'
         '    "pytest-xdist>=3.5",\n'
         '    "pytest-timeout>=2.3",\n'
+        '    "pytest-cov>=4.1",\n'
         "]\n"
         "\n"
         "[tool.pytest.ini_options]\n"
@@ -176,6 +177,80 @@ def test_deps_added_to_existing_main_dependencies_when_no_dev_group(
     names = [d.split(">")[0].split("=")[0].strip() for d in dev]
     assert "pytest-xdist" in names
     assert "pytest-timeout" in names
+
+
+def test_pytest_cov_provisioned_into_dev_deps(tmp_path: Path) -> None:
+    """pytest-cov backs the coverage-proven verification fallback and must
+    be injected into the target project's dev deps."""
+    pp = tmp_path / "pyproject.toml"
+    pp.write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
+
+    assert ensure_pytest_optimizations(tmp_path) is True
+
+    data = _parse(pp)
+    dev = data["project"]["optional-dependencies"]["dev"]
+    names = [d.split(">")[0].split("=")[0].strip() for d in dev]
+    assert "pytest-cov" in names
+
+
+def test_pytest_cov_provisioning_is_idempotent(tmp_path: Path) -> None:
+    """A second call after pytest-cov is present is a no-op."""
+    pp = tmp_path / "pyproject.toml"
+    pp.write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
+
+    first = ensure_pytest_optimizations(tmp_path)
+    after_first = pp.read_text()
+    second = ensure_pytest_optimizations(tmp_path)
+
+    assert first is True
+    assert second is False
+    assert pp.read_text() == after_first
+    # pytest-cov appears exactly once.
+    assert after_first.count('"pytest-cov') == 1
+
+
+def test_pytest_cov_missing_install_fails_preflight(tmp_path: Path) -> None:
+    """After provisioning declares pytest-cov, the startup dependency
+    validator fails fast when it is not installed in the target venv."""
+    import textwrap
+
+    from mcloop.dep_validator import (
+        MissingDependenciesError,
+        validate_project_dependencies,
+    )
+
+    pp = tmp_path / "pyproject.toml"
+    pp.write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
+    ensure_pytest_optimizations(tmp_path)
+
+    # Fake venv whose python reports only pytest installed (no pytest-cov).
+    bin_dir = tmp_path / ".venv" / "bin"
+    bin_dir.mkdir(parents=True)
+    py = bin_dir / "python"
+    py.write_text(
+        textwrap.dedent(
+            """\
+            #!/bin/sh
+            if [ "$1" = "-c" ]; then
+                name=$(printf '%s' "$2" | sed -n "s/.*'\\([^']*\\)'.*/\\1/p")
+                for pkg in pytest pytest-xdist pytest-timeout; do
+                    if [ "$pkg" = "$name" ]; then
+                        exit 0
+                    fi
+                done
+                exit 1
+            fi
+            exit 2
+            """
+        )
+    )
+    py.chmod(0o755)
+
+    import pytest as _pytest
+
+    with _pytest.raises(MissingDependenciesError) as ei:
+        validate_project_dependencies(tmp_path)
+    assert "pytest-cov" in str(ei.value)
 
 
 def test_malformed_toml_is_noop(tmp_path: Path) -> None:

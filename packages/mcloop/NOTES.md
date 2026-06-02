@@ -2,6 +2,43 @@
 
 ## Observations
 
+### [14.8] [T-000391] Coverage-proven verification fallback for unmapped behavioral Python changes (2026-06-01)
+`run_checks` no longer hard-fails the moment an unmapped behavioral change is
+flagged. `_resolve_flagged` now gives each flagged source a second chance:
+- an explicit waiver in `.mcloop/test-verification-waivers.jsonl` (keyed on
+  changed input + the task's pre-edit baseline SHA) clears it, or
+- a Python change is cleared when `coverage_verify.verify_change_covered`
+  proves its changed diff-hunk lines were executed by a scoped candidate test.
+Non-Python behavior inputs have no executable coverage lines and can only be
+cleared by a named-test mapping (upstream) or a waiver.
+
+Key design choices worth revisiting:
+- **"Proven" = at least one changed line executed.** `verify_change_covered`
+  passes when `changed_lines ∩ executed_lines` is non-empty, not when every
+  changed line is covered. Requiring full coverage would reject changes whose
+  defensive/error branches never run under the dependent test. If the gate
+  needs to be stricter, tighten this intersection rule.
+- **Coverage scope target is the dotted module** (`pkg/widget.py` →
+  `--cov=pkg.widget`). This assumes the changed file is an importable project
+  module; top-level non-package scripts (e.g. a hyphenated filename) would not
+  resolve as a module and the JSON would carry no entry for them, yielding an
+  empty executed set (treated as not-proven → fail/waiver). Acceptable
+  fail-closed behavior, but noted.
+- **Dependent-test discovery is a transitive first-party import walk**
+  (`dependent_test_files`). It selects only tests whose import closure reaches
+  the changed module — never the full suite. A test that exercises the module
+  through a non-import path (dynamic import, subprocess, plugin entry point) is
+  not discovered and the change would fail closed.
+- **xdist + pytest-cov need no extra config.** pytest-cov combines per-worker
+  data automatically under `-n auto`; `pytest_optimizations` injects only the
+  `pytest-cov` dev dep (no `parallel=true`/`concurrency`/`sitecustomize`/
+  `COVERAGE_PROCESS_START`). The startup `validate_project_dependencies` gate
+  now fails fast if the target venv lacks pytest-cov.
+- **Waivers are never written by the gate.** They are recorded only via the
+  explicit `mcloop waive --input ... --reason ...` subcommand (task label from
+  `MCLOOP_TASK_LABEL`, baseline from `.mcloop/task-baseline`), so every bypass
+  is auditable.
+
 ### [14.7] [T-000390] targeted_pytest_command now emits an explicit, PATH/cwd-independent command (2026-06-01)
 `targeted_pytest_command(test_files, project_dir)` no longer returns a bare
 `pytest <relative paths>` string. It now emits a resolved executable prefix

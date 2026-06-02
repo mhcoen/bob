@@ -22,6 +22,15 @@ _DEFAULT_ADDOPTS = "-n auto"
 _DEFAULT_TIMEOUT = 60
 _XDIST_REQ = "pytest-xdist>=3.5"
 _TIMEOUT_REQ = "pytest-timeout>=2.3"
+# pytest-cov backs the coverage-proven verification fallback: when an
+# unmapped behavioral Python change has no namesake test, the gate runs a
+# scoped coverage measurement to prove the changed lines were executed by
+# some dependent test. The plugin works with the existing ``-n auto``
+# xdist path out of the box -- it combines per-worker coverage data
+# automatically and needs no ``parallel=true``/``concurrency``/
+# ``sitecustomize``/``COVERAGE_PROCESS_START`` configuration -- so only
+# the dev dependency is injected here.
+_COV_REQ = "pytest-cov>=4.1"
 
 
 def ensure_pytest_optimizations(project_dir: Path) -> bool:
@@ -155,6 +164,8 @@ def _ensure_pytest_deps(content: str, data: dict) -> str:
         to_add.append(_XDIST_REQ)
     if not _dep_present("pytest-timeout", all_deps):
         to_add.append(_TIMEOUT_REQ)
+    if not _dep_present("pytest-cov", all_deps):
+        to_add.append(_COV_REQ)
 
     if not to_add:
         return content

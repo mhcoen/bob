@@ -508,6 +508,85 @@ def test_run_checks_unmapped_non_behavioral_change_passes(tmp_path):
     assert not any(c and c[0] == "pytest" for c in calls)
 
 
+# --- coverage-proven verification fallback + waivers (T-000391) ---
+
+
+def test_run_checks_non_python_behavioral_cannot_pass_via_coverage(tmp_path):
+    """A flagged non-Python behavior input has no executable coverage lines,
+    so the coverage fallback can never clear it -- it must fail the gate
+    even with a task baseline present."""
+    _gate_project(tmp_path, "config.yaml", "key: new\n")
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+    result = run_checks(tmp_path, changed_files=["config.yaml"])
+
+    assert not result.passed
+    assert "config.yaml" in result.output
+
+
+def test_run_checks_waiver_clears_flagged_input(tmp_path):
+    """An explicit, logged waiver for the changed input at the task's
+    baseline clears the gate for an otherwise-blocking change."""
+    from mcloop.waivers import record_waiver
+
+    _gate_project(tmp_path, "config.yaml", "key: new\n")
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+    record_waiver(
+        tmp_path,
+        task_label="T-000391",
+        changed_input="config.yaml",
+        baseline_sha="base-sha",
+        reason="data file reviewed by hand",
+    )
+
+    result = run_checks(tmp_path, changed_files=["config.yaml"])
+
+    # No mapped tests and no Python files: with the flagged input waived,
+    # there is nothing left to run and the gate does not block.
+    assert result.passed
+
+
+def test_run_checks_coverage_proven_python_change_passes(tmp_path):
+    """An unmapped behavioral Python change whose lines are proven executed
+    by a scoped dependent test passes the gate via coverage."""
+    from mcloop.coverage_verify import CoverageVerdict
+
+    _gate_project(tmp_path, "pkg/zzwidget.py", "x = 2\n")  # baseline x = 1
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+    proven = CoverageVerdict(True, "changed lines executed", ("tests/test_engine.py",))
+    with (
+        patch("mcloop.checks.subprocess.run", side_effect=_make_side_effect("x = 1\n")),
+        patch("mcloop.coverage_verify.verify_change_covered", return_value=proven),
+    ):
+        result = run_checks(tmp_path, changed_files=["pkg/zzwidget.py"])
+
+    assert result.passed
+
+
+def test_run_checks_coverage_unproven_python_change_fails(tmp_path):
+    """When coverage cannot prove the change is exercised and no waiver
+    exists, the gate fails closed."""
+    from mcloop.coverage_verify import CoverageVerdict
+
+    _gate_project(tmp_path, "pkg/zzwidget.py", "x = 2\n")
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+    unproven = CoverageVerdict(False, "changed lines were not executed", ())
+    with (
+        patch("mcloop.checks.subprocess.run", side_effect=_make_side_effect("x = 1\n")),
+        patch("mcloop.coverage_verify.verify_change_covered", return_value=unproven),
+    ):
+        result = run_checks(tmp_path, changed_files=["pkg/zzwidget.py"])
+
+    assert not result.passed
+    assert "pkg/zzwidget.py" in result.output
+
+
 @patch("mcloop.checks.subprocess.run")
 def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
     """run_autofix runs both ruff check --fix and ruff format."""
