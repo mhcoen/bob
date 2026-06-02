@@ -160,6 +160,40 @@ def test_run_coverage_returns_executed_lines(tmp_path: Path) -> None:
     assert reason == ""
 
 
+def test_run_coverage_emits_cov_instrumentation_scoped_to_change(tmp_path: Path) -> None:
+    """The scoped per-task path is the ONLY place coverage instrumentation
+    is built: ``_run_coverage`` adds ``--cov=<module>`` and
+    ``--cov-report=json:...`` for the changed module's dotted name and the
+    explicit candidate nodes -- never a bare full-suite invocation. This is
+    the producing side of the T-000392 placement invariant (the consuming
+    full-suite path is pinned in test_checks.py)."""
+    from mcloop.coverage_verify import _run_coverage
+
+    captured: list[tuple[str, ...]] = []
+
+    def fake(args, **kwargs):
+        captured.append(tuple(args))
+        for a in args:
+            if isinstance(a, str) and a.startswith("--cov-report=json:"):
+                Path(a.split(":", 1)[1]).write_text(
+                    json.dumps({"files": {"pkg/widget.py": {"executed_lines": [1]}}})
+                )
+        return subprocess.CompletedProcess(
+            args=args, returncode=0, stdout="collected 1 item\n\n1 passed in 0.10s\n", stderr=""
+        )
+
+    with patch("mcloop.coverage_verify.subprocess.run", side_effect=fake):
+        _run_coverage(tmp_path, ["tests/test_engine.py"], "pkg/widget.py", 60)
+
+    assert len(captured) == 1
+    cmd = captured[0]
+    # Coverage is scoped to the changed module, not the whole project.
+    assert "--cov=pkg.widget" in cmd
+    assert any(a.startswith("--cov-report=json:") for a in cmd)
+    # The explicit candidate node is included; no bare "run everything".
+    assert any("test_engine.py" in a for a in cmd)
+
+
 def test_run_coverage_no_signal_returns_none(tmp_path: Path) -> None:
     from mcloop.coverage_verify import _run_coverage
 

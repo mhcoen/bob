@@ -587,6 +587,47 @@ def test_run_checks_coverage_unproven_python_change_fails(tmp_path):
     assert "pkg/zzwidget.py" in result.output
 
 
+def test_phase_boundary_full_suite_has_no_coverage_instrumentation(tmp_path):
+    """Coverage instrumentation lives only on the scoped per-task path.
+
+    The phase-boundary full-suite call uses ``run_checks(project_dir)``
+    (``changed_files=None``; see ``main.py`` ~1435). That branch must run
+    the plain configured commands -- it must NEVER consult the
+    coverage-proven verification fallback and must NEVER emit ``--cov``
+    instrumentation. Coverage is a per-task fallback gated entirely behind
+    the ``changed_files is not None`` branch; the full suite is never run
+    under coverage. This pins the T-000392 placement invariant.
+    """
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
+
+    invoked: list[tuple[str, ...]] = []
+
+    def record(args, **kwargs):
+        invoked.append(tuple(args))
+        return subprocess.CompletedProcess(
+            args=args,
+            returncode=0,
+            stdout="collected 5 items\n\n=== 5 passed in 1.23s ===\n",
+            stderr="",
+        )
+
+    with (
+        patch("mcloop.checks.subprocess.run", side_effect=record),
+        patch("mcloop.coverage_verify.verify_change_covered") as mock_verify,
+        patch("mcloop.coverage_verify._run_coverage") as mock_run_cov,
+    ):
+        result = run_checks(tmp_path)  # changed_files=None -> phase-boundary full suite
+
+    assert result.passed
+    # The coverage fallback is never consulted on the full-suite path.
+    mock_verify.assert_not_called()
+    mock_run_cov.assert_not_called()
+    # No executed command carries coverage instrumentation.
+    assert invoked  # the full suite did run real commands
+    for cmd in invoked:
+        assert not any(a.startswith("--cov") for a in cmd), cmd
+
+
 @patch("mcloop.checks.subprocess.run")
 def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
     """run_autofix runs both ruff check --fix and ruff format."""

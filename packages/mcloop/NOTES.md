@@ -2,6 +2,35 @@
 
 ## Observations
 
+### [14.9] [T-000392] Coverage instrumentation is structurally confined to the scoped per-task path (2026-06-01)
+Confirmed the placement invariant rather than re-measuring it. The only code
+that builds coverage instrumentation (`--cov=<module>` + `--cov-report=json:`)
+is `coverage_verify._run_coverage`, reached solely through
+`run_checks` → `_resolve_flagged` → `verify_change_covered`. That chain lives
+entirely inside the `if changed_files is not None:` branch of `run_checks`.
+The phase-boundary full-suite call is `run_checks(project_dir)` (main.py ~1435)
+with `changed_files=None`, which short-circuits past that branch — so the full
+suite can never run under coverage, never per-iteration beyond the per-task
+gate, and is never agent-invoked (the inner `mcloop verify` adapter routes only
+through the scoped `run_checks(changed_files=...)` form; `verify_cmd.py` ~16
+documents it never calls the unscoped form).
+
+Tests pinning the invariant from both sides:
+- `tests/test_checks.py::test_phase_boundary_full_suite_has_no_coverage_instrumentation`
+  — full-suite path never calls `verify_change_covered`/`_run_coverage` and emits
+  no `--cov` flag.
+- `tests/test_coverage_verify.py::test_run_coverage_emits_cov_instrumentation_scoped_to_change`
+  — the scoped path is where `--cov=<dotted module>` + explicit candidate nodes
+  are produced.
+
+Overhead envelope (<=~0.5s/run scoped, ~+9.5% full-suite) is unchanged because
+the scoped run is bounded to the dependent-test candidate set (never the full
+suite) and the full-suite phase-boundary call carries no coverage at all, so its
+cost is identical to the pre-coverage full-suite run. The ~+9.5% figure refers to
+adding `pytest-cov` to a coverage-enabled full run, which mcloop never performs;
+the per-task scoped coverage run is the only coverage cost and stays within the
+~0.5s envelope.
+
 ### [14.8] [T-000391] Coverage-proven verification fallback for unmapped behavioral Python changes (2026-06-01)
 `run_checks` no longer hard-fails the moment an unmapped behavioral change is
 flagged. `_resolve_flagged` now gives each flagged source a second chance:
