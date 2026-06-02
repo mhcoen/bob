@@ -709,6 +709,35 @@ def _changed_files_since(project_dir: Path, base_sha: str) -> list[str] | None:
     return files
 
 
+def read_file_at_head(project_dir: Path, path: str) -> str | None:
+    """Return the contents of *path* at HEAD, or None if unavailable.
+
+    Used by the run_checks behavioral gate to obtain a changed file's
+    pre-edit baseline so the change can be classified as behavioral or
+    provably non-behavioral. *path* is interpreted relative to
+    *project_dir*: the ``HEAD:./<path>`` pathspec resolves relative to
+    the subprocess cwd, so this works in both the standalone and the
+    consolidated-workspace layout (where the repo root is an ancestor).
+
+    Returns None on any git error -- no repo, a new file not yet in HEAD,
+    or a path that does not exist at HEAD -- which the caller treats as
+    fail-closed (the change cannot be proven non-behavioral). Runs
+    quietly: this is a read used in a hot path, not a user action, so a
+    miss is expected and must not print or notify.
+    """
+    if not _has_git_repo(project_dir):
+        return None
+    result = subprocess.run(
+        ["git", "show", f"HEAD:./{path}"],
+        cwd=project_dir,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
 def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
     """Return the diff introduced by *commit_sha*.
 

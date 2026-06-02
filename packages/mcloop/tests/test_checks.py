@@ -438,6 +438,76 @@ def test_run_checks_non_pytest_command_unaffected_by_predicate(mock_run, tmp_pat
     assert result.passed
 
 
+# --- behavioral gate: unaccounted unmapped changes (T-000389) ---
+
+
+def _gate_project(root, rel_path, new_content):
+    """Set up a project whose only changed input is *rel_path*.
+
+    A real ``.git`` is created so ``read_file_at_head`` reports the repo
+    as present; the gate's ``git show`` baseline read and the check
+    commands are both supplied through the test's ``subprocess.run``
+    side_effect (the mock patches the shared subprocess module, so even
+    git_ops's reads are intercepted).
+    """
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    (root / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
+    (root / "tests").mkdir()
+    target = root / rel_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(new_content)
+    return target
+
+
+def _make_side_effect(baseline):
+    """Return a subprocess.run stand-in: git show -> *baseline*, else pass."""
+
+    def side_effect(args, **kwargs):
+        if list(args[:2]) == ["git", "show"]:
+            return subprocess.CompletedProcess(args=args, returncode=0, stdout=baseline, stderr="")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok\n", stderr="")
+
+    return side_effect
+
+
+def test_run_checks_unmapped_behavioral_change_fails_gate(tmp_path):
+    """An unmapped Python change the classifier proves behavioral (a changed
+    value vs the HEAD baseline) fails the gate without running any check
+    command."""
+    _gate_project(tmp_path, "pkg/zzwidget.py", "x = 2\n")  # baseline was x = 1
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.side_effect = _make_side_effect("x = 1\n")
+        result = run_checks(tmp_path, changed_files=["pkg/zzwidget.py"])
+
+    assert not result.passed
+    assert "pkg/zzwidget.py" in result.output
+    # Only the baseline read happened; no check command was launched.
+    check_calls = [
+        tuple(c[0][0]) for c in mock_run.call_args_list if tuple(c[0][0][:2]) != ("git", "show")
+    ]
+    assert check_calls == []
+
+
+def test_run_checks_unmapped_non_behavioral_change_passes(tmp_path):
+    """An unmapped Python change the classifier proves inert (comment-only)
+    does NOT fail the gate. With no mapped test, pytest is skipped while the
+    scoped linter still runs over the changed file."""
+    _gate_project(tmp_path, "pkg/zzwidget.py", "x = 1  # explanatory comment only\n")
+
+    with patch("mcloop.checks.subprocess.run") as mock_run:
+        mock_run.side_effect = _make_side_effect("x = 1\n")
+        result = run_checks(tmp_path, changed_files=["pkg/zzwidget.py"])
+
+    assert result.passed
+    calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
+    # Linter scoped to the changed file; no pytest because nothing maps and
+    # the change is provably inert.
+    assert ("ruff", "check", "pkg/zzwidget.py") in calls
+    assert ("ruff", "format", "--check", "pkg/zzwidget.py") in calls
+    assert not any(c and c[0] == "pytest" for c in calls)
+
+
 @patch("mcloop.checks.subprocess.run")
 def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
     """run_autofix runs both ruff check --fix and ruff format."""

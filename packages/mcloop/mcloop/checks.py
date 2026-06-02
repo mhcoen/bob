@@ -236,6 +236,45 @@ def try_salvage_style_failures(
     return bool(patched), patched
 
 
+def _unaccounted_behavioral_changes(
+    project_dir: Path,
+    accounts: list[Any],
+) -> list[str]:
+    """Return the sources of unmapped inputs that may change behavior.
+
+    For each unmapped account, decide whether the change can be *proven*
+    inert. A Python edit is checked against its HEAD baseline with the
+    conservative classifier; anything that is not provably non-behavioral
+    (renames, ``__all__`` edits, decorators, new code, a deleted/unreadable
+    file, or any non-Python behavior input such as pyproject.toml) is
+    flagged. The classifier fails closed: a missing baseline is treated as
+    an empty file, so a brand-new module with real code is flagged while a
+    new empty/comment-only file is not.
+    """
+    from mcloop.change_class import ChangeClass, classify_change
+    from mcloop.git_ops import read_file_at_head
+
+    flagged: list[str] = []
+    for acc in accounts:
+        if not getattr(acc, "unmapped", False):
+            continue
+        src = acc.source
+        try:
+            new_source: str | None = (project_dir / src).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            new_source = None
+        # A removed/unreadable file or any non-Python behavior input cannot
+        # be proven inert -- flag it.
+        if new_source is None or not src.endswith(".py"):
+            flagged.append(src)
+            continue
+        old_source = read_file_at_head(project_dir, src)
+        baseline = old_source if old_source is not None else ""
+        if classify_change(baseline, new_source) is ChangeClass.BEHAVIORAL:
+            flagged.append(src)
+    return flagged
+
+
 def run_checks(
     project_dir: str | Path,
     changed_files: list[str] | None = None,
@@ -272,23 +311,37 @@ def run_checks(
     if changed_files is not None:
         accounts = account_changed_inputs(changed_files, project_dir)
         test_files = sorted({f for acc in accounts for f in acc.test_files})
-        # Any behavior-relevant input we could not map to a test must NOT
-        # be shipped under a green targeted gate. If anything is unmapped
-        # (a new module with no test yet, a changed pyproject.toml, a
-        # mixed batch where one file maps and another does not), fall back
-        # to the full configured test command rather than silently
-        # omitting the unmapped input.  Otherwise untested code could
-        # commit.
         py_changed = [f for f in changed_files if f.endswith(".py")]
-        fallback_to_full = any(acc.unmapped for acc in accounts)
+
+        # Close the mixed-batch fallback hole: an unmapped input that we
+        # cannot prove is non-behavioral must FAIL the gate, not merely
+        # widen the run. The old full-suite fallback could pass vacuously
+        # -- running every test while never exercising the unmapped change
+        # -- so an unaccounted behavioral change (a new module with no
+        # test, a rename in an untested module, a changed pyproject.toml)
+        # would ship green. Provably non-behavioral unmapped edits
+        # (comment/docstring/format-only, import reorder) are allowed
+        # through and simply contribute no targeted tests. A future waiver
+        # path (T-000391) will exempt specific reviewed cases.
+        flagged = _unaccounted_behavioral_changes(project_dir, accounts)
+        if flagged:
+            listed = ", ".join(sorted(flagged))
+            return CheckResult(
+                passed=False,
+                output=(
+                    "Gate failed: unaccounted behavioral change(s) with no "
+                    f"mapped test: {listed}. Add a test that exercises the "
+                    "change so the targeted gate can verify it."
+                ),
+                command="(gate: unaccounted behavioral change)",
+            )
+
         narrowed: list[str] = []
         for cmd in commands:
             if is_test_command(cmd):
-                if fallback_to_full:
-                    narrowed.append(cmd)
-                elif test_files:
+                if test_files:
                     narrowed.append(targeted_pytest_command(test_files))
-                # else: no behavior-relevant changes, safe to skip tests
+                # else: no mapped tests and nothing unaccounted, safe to skip
             elif is_scoped_python_linter(cmd):
                 # Scope the linter to the Python files this batch/task
                 # actually touched. Prevents pre-existing unrelated

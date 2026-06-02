@@ -2,6 +2,55 @@
 
 ## Observations
 
+### [14.6] [T-000389] run_checks now FAILS the gate on unaccounted behavioral changes (replaces full-suite fallback) (2026-06-01)
+The 14.5 design fell back to the full configured test suite whenever any
+changed input was unmapped. That fallback has a hole: the full suite can
+pass *vacuously* -- it runs every existing test while never exercising the
+unmapped change -- so a new module with no test, or a rename inside an
+untested module, would still ship green. T-000389 replaces the fallback
+with a fail-closed gate. `checks._unaccounted_behavioral_changes` walks the
+unmapped accounts and, for each, decides whether the change can be *proven*
+inert via `mcloop.change_class.classify_change` (compares the HEAD baseline
+from `git_ops.read_file_at_head` against the on-disk new content). Anything
+not provably non-behavioral flags the gate, and `run_checks` returns
+`CheckResult(passed=False)` *before launching any check command*.
+
+`classify_change` returns `NON_BEHAVIORAL` only for: comment-only edits,
+docstring-only edits (conventional leading string stripped), AST-equivalent
+formatting (compared via `ast.dump(..., include_attributes=False)`), and
+import reordering with an unchanged import graph (leading import block and
+per-statement alias lists sorted). Everything else -- renames, `__all__`,
+decorators, dataclass fields, added imports, deleted/unreadable files, any
+non-Python behavior input (pyproject.toml, data, templates), and any
+unparseable source -- is `BEHAVIORAL`. A missing baseline is treated as an
+empty file, so a brand-new code module flags while a new empty/comment-only
+file does not.
+
+Behavior changes worth noting:
+- Editing a non-Python behavior input (e.g. pyproject.toml) with no mapped
+  test now FAILS the gate where 14.5 ran the full suite. This is the
+  conservative direction; the T-000391 waiver path is the intended escape
+  hatch.
+- Two 14.5 tests asserting full-suite fallback were rewritten to the
+  fail-the-gate contract (`test_run_checks_unmapped_behavioral_change_fails_gate`
+  and `test_run_checks_mixed_batch_unmapped_behavioral_fails_gate` in
+  test_targeted.py).
+
+## Hypotheses
+
+### [14.6] [T-000389] docstring changes are classified non-behavioral even when `__doc__` is runtime-consumed (2026-06-01)
+`classify_change` strips the conventional leading docstring before
+comparing, so a docstring-only edit is always `NON_BEHAVIORAL`. The task's
+allowlist names "docstring-only when not runtime-consumed", but proving
+non-consumption (argparse `description=__doc__`, doctests, help text built
+from `__doc__`) is not attempted -- it would require whole-program data-flow
+analysis. The required allowlist test demands docstring-only -> non-behavioral,
+so the strip is intentional. If a docstring that feeds a runtime path is ever
+edited in an untested module, the gate would let it through; the linter and
+the eventual T-000391 waiver review are the backstops. Narrow this by only
+stripping docstrings of functions/classes that are never referenced by
+`__doc__`-reading callers if it ever bites.
+
 ### [14.5] [T-000388] map_to_tests now accounts unmapped inputs; checks.py falls back on any unmapped (2026-06-01)
 `mcloop/targeted.account_changed_inputs` replaces the silent-drop in
 `map_to_tests`: every behavior-relevant changed input yields an

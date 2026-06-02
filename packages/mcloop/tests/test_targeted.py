@@ -254,12 +254,12 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
         assert ("pytest", "tests/test_foo.py") in calls
 
 
-def test_run_checks_targeted_no_matching_tests(tmp_path):
-    """When Python source changes but no matching tests exist, fall back to full pytest.
-
-    This prevents untested code from committing when a new module has no
-    test file yet.  The fallback is to the full configured test command.
-    """
+def test_run_checks_unmapped_behavioral_change_fails_gate(tmp_path):
+    """A Python change with no mapped test that cannot be proven inert
+    fails the gate rather than falling back to a (possibly vacuous) full
+    pytest run. Here main.py is unmapped and not provably non-behavioral
+    (no baseline, no file content), so the gate fails closed and no check
+    command is ever launched."""
     from mcloop.checks import run_checks
 
     (tmp_path / "pyproject.toml").write_text(
@@ -268,30 +268,20 @@ def test_run_checks_targeted_no_matching_tests(tmp_path):
     (tmp_path / "tests").mkdir()
 
     with patch("mcloop.checks.subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args="",
-            returncode=0,
-            stdout="ok\n",
-            stderr="",
-        )
-        run_checks(
+        result = run_checks(
             tmp_path,
             changed_files=["mcloop/main.py"],
         )
-        # No test_main.py exists, but main.py is Python: fall back to full
-        # pytest while still scoping ruff to the changed file. Parallel
-        # execution means order is non-deterministic.
-        assert mock_run.call_count == 3
-        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
-        assert ("ruff", "check", "mcloop/main.py") in calls
-        assert ("ruff", "format", "--check", "mcloop/main.py") in calls
-        assert ("pytest",) in calls
+        # Fail closed before running any command.
+        assert not result.passed
+        assert "mcloop/main.py" in result.output
+        assert mock_run.call_count == 0
 
 
-def test_run_checks_mixed_batch_falls_back_to_full(tmp_path):
-    """A batch where one file maps to a test and another does not falls
-    back to the full pytest run, so the unmapped file is not shipped
-    untested under a green targeted gate."""
+def test_run_checks_mixed_batch_unmapped_behavioral_fails_gate(tmp_path):
+    """A mixed batch where one file maps to a test and another is an
+    unmapped behavioral change fails the gate: the unmapped change must
+    not ship untested under a green targeted run."""
     from mcloop.checks import run_checks
 
     (tmp_path / "pyproject.toml").write_text(
@@ -301,22 +291,15 @@ def test_run_checks_mixed_batch_falls_back_to_full(tmp_path):
     (tmp_path / "tests" / "test_checks.py").write_text("")
 
     with patch("mcloop.checks.subprocess.run") as mock_run:
-        mock_run.return_value = subprocess.CompletedProcess(
-            args="",
-            returncode=0,
-            stdout="ok\n",
-            stderr="",
-        )
-        run_checks(
+        result = run_checks(
             tmp_path,
             changed_files=["mcloop/checks.py", "mcloop/orphan.py"],
         )
-        calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
-        # orphan.py has no mapped test: full pytest, not the targeted form.
-        assert ("pytest",) in calls
-        assert ("pytest", "tests/test_checks.py") not in calls
-        # Ruff is still scoped to the changed Python files.
-        assert ("ruff", "check", "mcloop/checks.py", "mcloop/orphan.py") in calls
+        # orphan.py is unmapped and not provably inert -> gate fails closed.
+        assert not result.passed
+        assert "mcloop/orphan.py" in result.output
+        # No targeted or full pytest ran; the gate short-circuits.
+        assert mock_run.call_count == 0
 
 
 def test_run_checks_targeted_no_python_changes(tmp_path):
