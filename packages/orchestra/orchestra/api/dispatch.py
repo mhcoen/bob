@@ -587,11 +587,20 @@ def run_role(
     if role_name == "design":
         _validate_design_distinct_actors(role_name, resolved_bindings)
 
+    # T-000003: a compound role may carry its own acceptance criteria
+    # (CompoundRoleBinding.criteria). Forward those to the derived
+    # config so they reach the executor; run_workflow forwards
+    # ``cfg.criteria`` to the Executor unchanged. When the binding
+    # declares no criteria, fall back to the merged top-level criteria
+    # so a project-wide criteria set still applies.
+    derived_criteria = compound.criteria if compound.criteria else config.criteria
+
     derived_cfg = OrchestraConfig(
         roles=resolved_bindings,
         workflows={compound.pattern: WorkflowConfig(pattern=compound.pattern)},
         verbs={},
         role_bindings={},
+        criteria=derived_criteria,
     )
 
     result = run_workflow(

@@ -675,3 +675,159 @@ def test_default_config_carries_design_role_binding() -> None:
     assert judge.model == "opus"
     assert reviewer.model == "codex"
     assert judge.model != reviewer.model
+
+
+# --------------------------------------------------------------------
+# T-000003: role-scoped criteria reach the executor. run_role populates
+# the derived config's criteria from the compound binding when set,
+# falling back to the merged top-level criteria otherwise. run_workflow
+# forwards cfg.criteria to the Executor unchanged.
+# --------------------------------------------------------------------
+
+
+class _CapturedDispatch(Exception):
+    """Raised by the run_workflow stub to capture the derived config
+    and short-circuit before any executor (and thus LLM) runs."""
+
+    def __init__(self, config: OrchestraConfig) -> None:
+        super().__init__("captured")
+        self.config = config
+
+
+def _stub_run_workflow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace ``run_workflow`` with a stub that records the config it
+    is handed and aborts. The criteria the executor would see are
+    exactly ``config.criteria`` (run_workflow forwards them verbatim),
+    so asserting on the captured config is equivalent to asserting on
+    the criteria-mode observable without running a real executor."""
+
+    def _stub(name: str, inputs: dict[str, object], config: OrchestraConfig, **_: object) -> None:
+        raise _CapturedDispatch(config)
+
+    monkeypatch.setattr("orchestra.api.dispatch.run_workflow", _stub)
+
+
+def test_run_workflow_forwards_criteria_to_executor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """run_workflow hands ``cfg.criteria`` to the Executor unchanged.
+    Confirm the forwarding path so the rest of the chain (run_role ->
+    derived_cfg.criteria -> executor) is grounded at its end. The
+    Executor is stubbed to capture its ``criteria`` kwarg and abort
+    before any adapter (and thus any LLM) runs."""
+    import orchestra.api.dispatch as dispatch
+    from orchestra.config import CriterionDecl
+
+    captured: dict[str, object] = {}
+
+    class _StubExecutor:
+        def __init__(self, **kwargs: object) -> None:
+            captured["criteria"] = kwargs.get("criteria")
+            raise _CapturedDispatch(OrchestraConfig())
+
+    monkeypatch.setattr(dispatch, "Executor", _StubExecutor)
+
+    crit = (CriterionDecl(id="c1", description="must do the thing"),)
+    cfg = OrchestraConfig(
+        roles={"editor": RoleBinding(adapter="claude_code_agent")},
+        workflows={"code_edit": WorkflowConfig(pattern="single")},
+        criteria=crit,
+    )
+    # ``single`` declares every external input as required; provide
+    # them all so run_workflow reaches Executor construction.
+    inputs: dict[str, object] = {
+        "instruction": "do it",
+        "context": "",
+        "prior_errors": "",
+        "eliminated": [],
+        "project_dir": str(tmp_path),
+        "description": "",
+        "task_label": "",
+        "task_id": "",
+        "check_commands": [],
+        "is_bug_task": False,
+        "final_prompt": "x",
+    }
+    with pytest.raises(_CapturedDispatch):
+        dispatch.run_workflow("code_edit", inputs, cfg, data_root=tmp_path / "runs", quiet=True)
+    assert captured["criteria"] == crit
+
+
+def test_run_role_forwards_binding_criteria(
+    _isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A compound binding that declares its own ``criteria`` runs the
+    workflow with exactly those criteria."""
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "role_bindings": {
+                    "design": {
+                        "pattern": "design_loop",
+                        "judge_role": {"model": "opus"},
+                        "reviewer": {"model": "codex"},
+                        "criteria": [
+                            {"id": "role_crit", "description": "role-scoped criterion"},
+                        ],
+                    },
+                },
+            }
+        )
+    )
+    _stub_run_workflow(monkeypatch)
+    with pytest.raises(_CapturedDispatch) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    criteria = excinfo.value.config.criteria
+    assert [c.id for c in criteria] == ["role_crit"]
+
+
+def test_run_role_falls_back_to_top_level_criteria(
+    _isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A compound binding that declares no criteria of its own inherits
+    the merged top-level criteria."""
+    cfg_dir = tmp_path / ".orchestra"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text(
+        json.dumps(
+            {
+                "criteria": [
+                    {"id": "top_crit", "description": "project-wide criterion"},
+                ],
+                "role_bindings": {
+                    "design": {
+                        "pattern": "design_loop",
+                        "judge_role": {"model": "opus"},
+                        "reviewer": {"model": "codex"},
+                    },
+                },
+            }
+        )
+    )
+    _stub_run_workflow(monkeypatch)
+    with pytest.raises(_CapturedDispatch) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    criteria = excinfo.value.config.criteria
+    assert [c.id for c in criteria] == ["top_crit"]
+
+
+def test_run_role_design_no_criteria_is_empty(
+    _isolated_home: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing ``design`` role with neither binding-scoped nor
+    top-level criteria still dispatches, with empty criteria: the
+    new fallback does not regress the no-criteria path."""
+    _write_design_config(tmp_path)
+    _stub_run_workflow(monkeypatch)
+    with pytest.raises(_CapturedDispatch) as excinfo:
+        run_role("design", project_dir=tmp_path)
+    assert excinfo.value.config.criteria == ()
