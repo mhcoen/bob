@@ -81,6 +81,29 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9] [T-000009] Scope matcher now robust to paraphrase/decomposition; deliberately biased toward not-flagging — 2026-06-04
+
+`plan_sanity._check_scope_coverage` no longer matches scope items by
+verbatim/substring identity only. A scope item is covered when a single
+build task matches by substring, by `feat` name, or by token-overlap
+(>= 0.6 of the item's significant tokens, with 4+ char stem-prefix
+relatedness so `sync`~`synchronization`); the item's leading label
+(before the first colon) is retried the same way; and an umbrella item is
+covered when its listed constituents (parenthetical list, or comma/`and`/
+slash split) are each built.
+
+Assumption / tradeoff worth revisiting: per the task's explicit
+"bias toward not-flagging" instruction, the 0.6 per-task overlap can let a
+two-token item slip through when only one token matches a near-synonym
+task, and an "X and Y" item where only X is built can still read as covered
+via whole-item overlap if X dominates the tokens. This is intentional
+(prefer false negatives over false `scope_uncovered`), but if the gate ever
+needs to be stricter, the knob is `_TOKEN_OVERLAP_THRESHOLD` plus whether
+whole-item overlap should be suppressed once `_constituents` finds a
+multi-part item. No LLM/semantic matching is attempted, so a fully
+renamed feature with zero shared tokens is still (correctly, by design)
+unmatched and would not be flagged only if some other builder shares tokens.
+
 ### [7] [T-000007] Wired the bounded plan-sanity gate; it silently strips verify tasks when no build task carries [feat:] — 2026-06-04
 
 `pipeline._enforce_plan_sanity_gate(spec)` now runs `plan_gate.enforce_plan_sanity`

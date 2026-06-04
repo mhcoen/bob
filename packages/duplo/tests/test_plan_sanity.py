@@ -77,6 +77,67 @@ def test_scope_item_covered_by_feat_substring() -> None:
     assert report.ok
 
 
+def test_scope_item_covered_by_paraphrased_feature_name() -> None:
+    # Scope says "Offline synchronization"; the builder paraphrases it as
+    # "offline sync". Token-overlap with stem-prefix matching covers it.
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add offline sync of notes [feat: "Offline sync"]')
+    )
+    report = check_plan_sanity(plan, scope_include=["Offline synchronization"])
+    assert report.ok
+
+
+def test_scope_item_covered_by_leading_label_match() -> None:
+    # The scope item carries a "Label: description" form; a task that builds
+    # only the label noun still covers it.
+    plan = _plan(_phase(1, "Core", "- [ ] T-000001: Implement note search"))
+    report = check_plan_sanity(plan, scope_include=["Search: full-text over all notes"])
+    assert report.ok
+
+
+def test_umbrella_scope_item_covered_when_constituents_built() -> None:
+    # An umbrella scope line decomposed across several finer features is
+    # covered when each listed constituent is built by some task.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Implement the init subcommand\n"
+            "- [ ] T-000002: Implement the run subcommand\n"
+            "- [ ] T-000003: Implement the next subcommand",
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["Subcommands (init, run, next)"])
+    assert report.ok
+
+
+def test_umbrella_scope_item_flagged_when_a_constituent_missing() -> None:
+    # Decomposition does not paper over a genuinely missing constituent.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Implement the export subcommand\n"
+            "- [ ] T-000002: Implement the inspect subcommand",
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["Subcommands (export, inspect, teleport)"])
+    assert not report.ok
+    assert report.kinds() == {KIND_SCOPE_UNCOVERED}
+    assert "teleport" in report.violations[0].message
+
+
+def test_unrelated_scope_item_still_flagged() -> None:
+    # Robust matching must not collapse into "always covered": an item that
+    # shares no key tokens with any builder is still reported.
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]')
+    )
+    report = check_plan_sanity(plan, scope_include=["Push notifications"])
+    assert not report.ok
+    assert report.kinds() == {KIND_SCOPE_UNCOVERED}
+
+
 def test_scope_resolved_from_spec_object() -> None:
     class FakeSpec:
         scope_include = ["Dark mode"]

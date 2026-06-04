@@ -95,6 +95,165 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().lower()
 
 
+# Glue words that carry no feature identity; dropped before token-overlap
+# matching so a paraphrase ("offline sync" vs "sync data offline") is not
+# penalised for differing connective words.
+_SCOPE_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "of",
+        "for",
+        "to",
+        "with",
+        "in",
+        "on",
+        "via",
+        "using",
+        "from",
+        "into",
+        "by",
+        "as",
+        "able",
+        "ability",
+        "support",
+        "supports",
+        "feature",
+        "features",
+        "basic",
+        "simple",
+    }
+)
+
+# Separators that decompose an umbrella scope item into its constituents
+# ("init, run, and next" -> init / run / next).
+_CONSTITUENT_SPLIT_RE = re.compile(r",|\band\b|&|/|;")
+# Minimum fraction of a scope item's significant tokens that a single build
+# task must cover for the item to count as built. Set below a strict majority
+# so paraphrases survive, in line with the bias-toward-not-flagging contract.
+_TOKEN_OVERLAP_THRESHOLD = 0.6
+
+
+def _leading_label(text: str) -> str:
+    """Return the label before the first colon (or the whole text)."""
+    return text.split(":", 1)[0].strip()
+
+
+def _sig_tokens(text: str) -> frozenset[str]:
+    """Significant word tokens of ``text`` (alphanumeric, non-stopword)."""
+    return frozenset(
+        t for t in re.findall(r"[a-z0-9]+", text) if len(t) >= 2 and t not in _SCOPE_STOPWORDS
+    )
+
+
+def _tokens_related(a: str, b: str) -> bool:
+    """True when two tokens are equal or one is a stem-prefix of the other.
+
+    Prefix matching (with a 4-char floor on the shorter token) lets
+    morphological variants count as the same key noun: ``sync`` matches
+    ``synchronization``, ``convert`` matches ``conversion``.
+    """
+    if a == b:
+        return True
+    short, long = (a, b) if len(a) <= len(b) else (b, a)
+    return len(short) >= 4 and long.startswith(short)
+
+
+def _token_overlap_covered(item_tokens: frozenset[str], task_tokens: frozenset[str]) -> bool:
+    """True when a build task covers enough of an item's key tokens."""
+    if not item_tokens:
+        return False
+    matched = sum(1 for it in item_tokens if any(_tokens_related(it, tt) for tt in task_tokens))
+    return matched / len(item_tokens) >= _TOKEN_OVERLAP_THRESHOLD
+
+
+@dataclass(frozen=True)
+class _BuilderView:
+    """A build task reduced to the forms the scope matcher compares against."""
+
+    text_norm: str
+    feat_norms: tuple[str, ...]
+    token_bag: frozenset[str]
+
+
+def _builder_views(build_tasks: list[_ParsedTask]) -> list[_BuilderView]:
+    views: list[_BuilderView] = []
+    for t in build_tasks:
+        text_norm = _normalize(t.text)
+        feat_norms = tuple(_normalize(f) for f in t.feats)
+        token_bag = _sig_tokens(text_norm)
+        for f in feat_norms:
+            token_bag |= _sig_tokens(f)
+        views.append(_BuilderView(text_norm=text_norm, feat_norms=feat_norms, token_bag=token_bag))
+    return views
+
+
+def _scope_text_matches(item_norm: str, builders: list[_BuilderView]) -> bool:
+    """Match a single (already-normalized) scope phrase against builders.
+
+    Tries, in order of confidence: verbatim substring against a task's
+    description, two-way substring against a task's ``feat`` name, and
+    finally token-overlap against the task's combined token bag. The same
+    rules are retried against the item's leading label (the part before the
+    first colon), so ``"Search: full-text over notes"`` is covered by a task
+    that merely builds search.
+    """
+    if not item_norm:
+        return False
+    label = _leading_label(item_norm)
+    candidates = [item_norm] if label == item_norm else [item_norm, label]
+    for candidate in candidates:
+        cand_tokens = _sig_tokens(candidate)
+        for b in builders:
+            if candidate and candidate in b.text_norm:
+                return True
+            if any(f and (f in candidate or candidate in f) for f in b.feat_norms):
+                return True
+            if _token_overlap_covered(cand_tokens, b.token_bag):
+                return True
+    return False
+
+
+def _constituents(item_norm: str) -> list[str]:
+    """Split an umbrella scope item into its listed constituents.
+
+    A parenthetical list ("Subcommands (init, run, next)") is decomposed on
+    its contents; otherwise the whole phrase is split on commas/``and``/
+    slashes. Only fragments that carry a significant token are returned, so
+    connective noise does not manufacture phantom constituents.
+    """
+    paren = re.search(r"\(([^)]*)\)", item_norm)
+    source = paren.group(1) if paren else item_norm
+    out: list[str] = []
+    for part in _CONSTITUENT_SPLIT_RE.split(source):
+        part = part.strip()
+        if part and _sig_tokens(part):
+            out.append(part)
+    return out
+
+
+def _scope_item_covered(item: str, builders: list[_BuilderView]) -> bool:
+    """True when some build task plausibly builds this scope item.
+
+    First the whole item is matched directly; failing that, an umbrella item
+    is treated as covered when it decomposes into two or more constituents
+    that are each built by some task (subcommand-style scope lines whose
+    parts land in separate finer features).
+    """
+    item_norm = _normalize(item)
+    if not item_norm:
+        return True
+    if _scope_text_matches(item_norm, builders):
+        return True
+    constituents = _constituents(item_norm)
+    if len(constituents) >= 2 and all(_scope_text_matches(c, builders) for c in constituents):
+        return True
+    return False
+
+
 def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
     """Extract every checkbox task (checked or unchecked) from the plan.
 
@@ -147,27 +306,22 @@ def _check_scope_coverage(
 ) -> list[SanityViolation]:
     """Every scope ``include:`` item must be built by some build task.
 
-    A scope item is covered when its normalized text appears in a build
-    task's description, or it shares a (substring-either-direction) name
-    with one of that task's ``feat`` annotations.
+    Coverage is matched robustly rather than by verbatim identity, because
+    a feature is routinely built under a paraphrased name or decomposed
+    across several finer tasks. An item counts as covered when a single
+    build task matches it by substring, by ``feat`` name, or by sharing
+    enough key tokens (paraphrase), or when an umbrella item's listed
+    constituents are each built. The check is biased toward *not* flagging:
+    :data:`KIND_SCOPE_UNCOVERED` is reported only when no plausible builder
+    exists for the item under any of these strategies.
     """
-    haystacks: list[tuple[str, list[str]]] = [
-        (_normalize(t.text), [_normalize(f) for f in t.feats]) for t in build_tasks
-    ]
+    builders = _builder_views(build_tasks)
     violations: list[SanityViolation] = []
     for item in scope_include:
         item_norm = _normalize(item)
         if not item_norm:
             continue
-        covered = False
-        for text_norm, feat_norms in haystacks:
-            if item_norm in text_norm:
-                covered = True
-                break
-            if any(f and (f in item_norm or item_norm in f) for f in feat_norms):
-                covered = True
-                break
-        if not covered:
+        if not _scope_item_covered(item, builders):
             violations.append(
                 SanityViolation(
                     kind=KIND_SCOPE_UNCOVERED,
