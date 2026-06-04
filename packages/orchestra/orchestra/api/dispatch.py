@@ -533,9 +533,16 @@ def run_role(
 
     - Reserved keys consumed by run_role itself: ``project_dir``,
       ``quiet``, ``progress_callback``, ``max_rounds``,
-      ``invocation_options``.
+      ``invocation_options``, ``registry_customizer``.
     - Everything else is forwarded to ``run_workflow`` as workflow
       inputs (must match the workflow's declared ``external_input``s).
+
+    ``registry_customizer`` (optional) is forwarded verbatim to
+    ``run_workflow`` so a role-dispatched workflow can also register a
+    caller-owned ``actor transform`` on both the pre-load and runtime
+    registries. See ``run_workflow`` for the contract. Orchestra does
+    not import any consumer package to support this: the caller owns
+    the transform and supplies the callback.
 
     Termination is derived from the final ``transition`` log record's
     outcome and target — see ``_derive_termination`` and T-000007.
@@ -549,6 +556,7 @@ def run_role(
     progress_callback = kwargs.pop("progress_callback", None)
     max_rounds_override = kwargs.pop("max_rounds", None)
     invocation_options = dict(kwargs.pop("invocation_options", {}) or {})
+    registry_customizer = kwargs.pop("registry_customizer", None)
     inputs: dict[str, Any] = dict(kwargs)
 
     config = load_config(project_dir)
@@ -586,7 +594,15 @@ def run_role(
     # external_inputs lookup; other workflows would reject an
     # undeclared input and are left alone.
     workflow_path = resolve_workflow_path(compound.pattern, project_dir=project_dir)
-    workflow = load_workflow(workflow_path, _pre_load_registry())
+    # Apply the caller's registry_customizer to this introspection load
+    # too: run_workflow runs it again on its own registries, but this
+    # up-front load (to decide max_rounds injection) uses a separate
+    # pre-load registry and would otherwise reject a caller-owned
+    # transform as unregistered before run_workflow ever sees it.
+    pre_registry = _pre_load_registry()
+    if registry_customizer is not None:
+        registry_customizer(pre_registry)
+    workflow = load_workflow(workflow_path, pre_registry)
     if any(ext.name == "max_rounds" for ext in workflow.external_inputs):
         inputs["max_rounds"] = effective_max_rounds
 
@@ -630,6 +646,7 @@ def run_role(
         project_dir=project_dir,
         progress_callback=progress_callback,
         quiet=quiet,
+        registry_customizer=registry_customizer,
     )
 
     run_dir = result.log_path.parent
