@@ -480,19 +480,19 @@ def test_zero_diff_verification_failure_does_not_advance_model_chain(
     mock_commit.assert_not_called()
 
 
-def test_startup_chain_preflight_rejects_unusable_codex_tier(tmp_path, monkeypatch):
+def test_startup_chain_preflight_aborts_only_when_every_tier_fails(tmp_path, monkeypatch):
+    """run_loop raises at startup only when no chain tier survives preflight."""
     md = _make_project(tmp_path, "- [ ] Do something\n")
     calls = []
 
     def fake_preflight(**kwargs):
         calls.append((kwargs["cli"], kwargs["model"]))
-        if kwargs["cli"] == "codex":
-            raise SubscriptionPreflightError(
-                "Codex subscription preflight failed before starting a task.\n"
-                "Exit code: 1\n"
-                "HTTP 400: model not supported with a ChatGPT account",
-                "HTTP 400: model not supported with a ChatGPT account",
-            )
+        raise SubscriptionPreflightError(
+            f"{kwargs['cli']} subscription preflight failed before starting a task.\n"
+            "Exit code: 1\n"
+            "HTTP 400: model not supported with a ChatGPT account",
+            "HTTP 400: model not supported with a ChatGPT account",
+        )
 
     monkeypatch.setattr(
         "mcloop.runner.ensure_subscription_preflight",
@@ -509,9 +509,12 @@ def test_startup_chain_preflight_rejects_unusable_codex_tier(tmp_path, monkeypat
             ],
         )
 
+    # Every tier is probed before the hard stop.
     assert calls == [("claude", "opus"), ("codex", "gpt-5-codex")]
     message = str(excinfo.value)
-    assert "Model chain tier 2 (codex/gpt-5-codex) is unusable" in message
+    assert "No usable model chain tier" in message
+    assert "tier 1 (claude/opus)" in message
+    assert "tier 2 (codex/gpt-5-codex)" in message
     assert "model not supported with a ChatGPT account" in message
 
 

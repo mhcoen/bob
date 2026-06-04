@@ -430,16 +430,35 @@ def _is_zero_diff_check_task(task_text: str) -> bool:
     return has_verification_intent and has_check_target
 
 
-def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> None:
-    """Fail fast when a configured model tier cannot start.
+def _short_preflight_reason(exc: SubscriptionPreflightError) -> str:
+    """Condense a preflight error into a single warning-line reason."""
+    for raw_line in str(exc).splitlines():
+        line = raw_line.strip()
+        if line:
+            return line if len(line) <= 200 else line[:197] + "..."
+    return "preflight failed"
+
+
+def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEntry]:
+    """Probe each model tier and return only the ones that can start.
 
     ``run_task`` already performs the same subscription preflight immediately
-    before launching a session. Running it once per configured tier at startup
-    prevents a later fallback tier from turning a deterministic task verdict
-    into a surprise auth/model crash.
+    before launching a session. Probing once per configured tier at startup
+    keeps a later fallback tier from turning a deterministic task verdict into
+    a surprise auth/model crash.
+
+    A tier that fails preflight is *demoted*, not fatal: it is dropped from the
+    chain for this run and a one-line warning naming the tier and reason is
+    printed. As long as at least one tier passes, the run proceeds on the
+    survivors with their original order preserved. Only when *every* tier fails
+    -- no usable tier exists -- is ``SubscriptionPreflightError`` raised, listing
+    all tiers and their failure reasons. A transient quota/rate condition on one
+    tier therefore never requires editing config to disable it.
     """
     import mcloop.runner as _runner
 
+    usable: list[ChainEntry] = []
+    failures: list[tuple[int, ChainEntry, SubscriptionPreflightError]] = []
     for idx, entry in enumerate(chain, 1):
         env = _runner._build_session_env(cli=entry.cli)
         # _build_command applies provider/executor env mutations for Claude.
@@ -460,10 +479,25 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> None:
                 cwd=project_dir,
             )
         except SubscriptionPreflightError as exc:
-            raise SubscriptionPreflightError(
-                f"Model chain tier {idx} ({entry.cli}/{entry.model}) is unusable.\n{exc}",
-                exc.output,
-            ) from exc
+            failures.append((idx, entry, exc))
+            print(
+                f"Skipping chain tier {idx} ({entry.cli}/{entry.model}): "
+                f"preflight failed — {_short_preflight_reason(exc)}"
+            )
+            continue
+        usable.append(entry)
+
+    if not usable:
+        details = "\n".join(
+            f"Model chain tier {idx} ({entry.cli}/{entry.model}) is unusable.\n{exc}"
+            for idx, entry, exc in failures
+        )
+        combined_output = "\n".join(exc.output for _, _, exc in failures if exc.output)
+        raise SubscriptionPreflightError(
+            "No usable model chain tier: every configured tier failed preflight.\n" + details,
+            combined_output,
+        )
+    return usable
 
 
 def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
@@ -992,9 +1026,6 @@ def run_loop(
         )
     else:
         chain = list(chain)
-    enabled_clis = _enabled_chain_clis(chain)
-    primary_entry = chain[0]
-    primary_model = primary_entry.model
 
     project_dir = checklist_path.parent
     _lifecycle._project_dir = project_dir
@@ -1009,7 +1040,13 @@ def run_loop(
     # handler translates that to exit 3.
     _enforce_canonical_inputs(plan_path, bugs_path)
 
-    _preflight_chain(chain, project_dir)
+    # Demote (drop) any tier that fails preflight; raises only when no tier is
+    # usable. Recompute the chain-derived values from the surviving tiers so a
+    # demoted primary does not leak into selection or rate-limit waits.
+    chain = _preflight_chain(chain, project_dir)
+    enabled_clis = _enabled_chain_clis(chain)
+    primary_entry = chain[0]
+    primary_model = primary_entry.model
 
     description = parse_description(plan_path)
 
