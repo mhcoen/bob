@@ -411,6 +411,21 @@ def typed_plan_from_synthesizer_text(
             [f"synthesizer plan body could not be parsed as PLAN.md: {exc}"]
         ) from exc
 
+    # A canonical phase body carries phases only. ``## Bugs`` is an
+    # mcloop convention appended by ``duplo fix``, never something the
+    # synthesizer may emit; silently dropping it (the constructed plan
+    # sets ``bugs=None``) would lose whatever the model put there without
+    # telling the loop to re-draft. Reject it so the validation gate can
+    # feed the synthesizer named feedback instead.
+    if parsed.bugs is not None:
+        raise PlanValidationError(
+            [
+                "synthesizer plan body contains a '## Bugs' section; a "
+                "canonical phase plan must contain phases only. Remove the "
+                "'## Bugs' heading and fold any real work into a phase task."
+            ]
+        )
+
     rebuilt_phases = tuple(
         _rebuild_phase_constructed(phase, ordinal=index + 1)
         for index, phase in enumerate(parsed.phases)

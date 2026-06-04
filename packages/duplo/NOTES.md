@@ -81,6 +81,28 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.5] [T-000787] `validate_plan_body` enforces "no `## Bugs`" via `typed_plan_from_synthesizer_text`, not in the transform — 2026-06-04
+
+The `validate_plan_body` transform is intentionally thin: it delegates
+to `council.typed_plan_from_synthesizer_text` and maps
+`PlanSyntaxError`/`PlanValidationError` to `validation_ok=false`. But
+that function previously SILENTLY DROPPED a `## Bugs` section (it builds
+the constructed plan with `bugs=None`), so a `## Bugs` body validated ok
+— contradicting T-000787's required test and T-000788's contract that the
+validation transform enforces "no `## Bugs`, no project H1". Fix: the
+canonical chokepoint `typed_plan_from_synthesizer_text` now raises
+`PlanValidationError` when `parsed.bugs is not None`, so the gate fails
+and the synthesizer gets named feedback to remove it rather than losing
+the content silently.
+
+Blast radius checked: only `council.py` (council `author_phase_plan`) and
+`planner.py:618` (non-council `generate_phase_plan`) call this function;
+`reauthor.py` does NOT. No existing test feeds a `## Bugs` body to it
+expecting success — `planner._strip_bugs_section`/`save_plan` handle bugs
+on the persistence side, never via this function. Project-H1 rejection is
+NOT yet added here (T-000787 only requires `## Bugs`); T-000788 owns the
+H1 rule and can extend this same chokepoint.
+
 ### [9.1] [T-000786] plan_author validation state reads only `proposal`; `required_phase_id` reaches the transform via the registration closure — 2026-06-04
 
 The task text says the validation state's `validate_plan_body` transform
