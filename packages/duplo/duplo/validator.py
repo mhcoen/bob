@@ -108,7 +108,7 @@ def _parse_result(raw: str) -> ValidationResult:
     return ValidationResult(
         single_product=bool(data.get("single_product", True)),
         product_name=str(data.get("product_name", "")),
-        products=[str(p) for p in data.get("products", [])],
+        products=[str(p) for p in (data.get("products") or [])],
         reason=str(data.get("reason", "")),
         unclear_boundaries=bool(data.get("unclear_boundaries", False)),
     )
