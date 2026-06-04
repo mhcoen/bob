@@ -31,6 +31,12 @@ validate_plan_body>)``:
   ``registry_customizer`` closure (see
   :func:`duplo.plan_validation_transform.register_validate_plan_body`),
   not as a model-visible input.
+- ``criteria_block`` is the rendered configured-criteria list
+  (:func:`duplo.plan_author_role.render_criteria_block`) injected into the
+  judge prompt so the judge emits a ``criteria_compliance`` entry per
+  configured criterion using those exact ids -- generated from the same
+  ``PLAN_AUTHOR_CRITERIA`` the binding hands the executor, so the prompt's
+  ids and the consistency check cannot drift.
 
 Termination translation
 ------------------------
@@ -73,6 +79,7 @@ from duplo.council import (
     make_duplo_progress_callback,
     typed_plan_from_synthesizer_text,
 )
+from duplo.plan_author_role import render_criteria_block
 from duplo.plan_validation_transform import register_validate_plan_body
 
 _LOGGER = logging.getLogger("duplo.plan_author_adapter")
@@ -219,6 +226,11 @@ def run_plan_author(
             query=query,
             history=history_text,
             required_phase_id=required_phase_id,
+            # The judge prompt's criterion-id list is rendered from the same
+            # PLAN_AUTHOR_CRITERIA the binding feeds to the executor, so the
+            # ids the judge is asked to emit match the ids the consistency
+            # check enforces (no missing_ids / extra_ids).
+            criteria_block=render_criteria_block(),
             registry_customizer=register_validate_plan_body(required_phase_id),
             project_dir=project_dir,
             progress_callback=make_duplo_progress_callback(),

@@ -16,6 +16,11 @@ Your prior decision (empty string if this is the first judge call):
 Your prior feedback (empty string if this is the first judge call):
 {judge_feedback}
 
+Configured acceptance criteria (these, and ONLY these, are the criteria
+you grade):
+
+{criteria_block}
+
 Respond with a single JSON object on stdout. Nothing else. The object
 must conform to this shape exactly:
 
@@ -24,7 +29,7 @@ must conform to this shape exactly:
     "feedback": "<plain prose feedback for the reviewer>",
     "criteria_compliance": [
       {{
-        "criterion_id": "<id from .orchestra/config.json>",
+        "criterion_id": "<one of the ids listed above>",
         "observed_value": "<the actual value observed in the proposal>",
         "compliant": true | false
       }},
@@ -32,15 +37,17 @@ must conform to this shape exactly:
     ]
   }}
 
-The criteria_compliance array must contain exactly one entry per
-configured acceptance criterion (see the question/task above for the
-enumerated criteria). Use each criterion's id as the criterion_id.
-Observe the proposal directly and report what you actually see in
-observed_value as a string. Mark compliant true only if the
-observation satisfies the criterion. Decision must agree with
-compliance: choose "accept" only when every required criterion is
-compliant; choose "iterate" or "stuck" only when at least one
-required criterion is non-compliant.
+The criteria_compliance array must contain EXACTLY ONE entry per
+configured acceptance criterion listed above -- no more and no fewer.
+Use each criterion's exact id (the value after "id:") as the
+criterion_id. Emit ONLY those ids; do not invent or add any other
+criterion id from rules you infer from the question, the proposal, or
+the reviewer's critique, and do not omit any. Observe the proposal
+directly and report what you actually see in observed_value as a
+string. Mark compliant true only if the observation satisfies the
+criterion. Decision must agree with compliance: choose "accept" only
+when every required criterion is compliant; choose "iterate" or
+"stuck" only when at least one required criterion is non-compliant.
 
 A judge "accept" is not the final word: an accepted body is then run
 through canonical PLAN.md validation. Do not relax the criteria on the

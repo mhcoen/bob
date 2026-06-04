@@ -21,6 +21,13 @@ workflow plan_author
   external_input history text
   external_input required_phase_id text
   external_input max_rounds int
+  # criteria_block is the rendered list of configured acceptance criterion
+  # ids/descriptions (duplo.plan_author_role.render_criteria_block), injected
+  # into the judge prompt so the judge emits a criteria_compliance entry per
+  # configured criterion using those exact ids and no others. Threaded from
+  # the same PLAN_AUTHOR_CRITERIA tuple that becomes the executor's configured
+  # criteria, so the judge prompt and the consistency check cannot drift.
+  external_input criteria_block text
 
   max_total_steps 60
 
@@ -52,7 +59,7 @@ workflow plan_author
     prompt template "templates/plan_author_reviewer.md" with query, proposal, judge_decision, judge_feedback
 
   role judge_role
-    prompt template "templates/plan_author_judge.md" with query, proposal, review_output, judge_decision, judge_feedback
+    prompt template "templates/plan_author_judge.md" with query, proposal, review_output, judge_decision, judge_feedback, criteria_block
 
   state propose
     actor model m_proposer
@@ -75,7 +82,7 @@ workflow plan_author
   state judge
     actor model m_judge
     role judge_role
-    reads query, proposal, review_output, judge_decision, judge_feedback
+    reads query, proposal, review_output, judge_decision, judge_feedback, criteria_block
     writes judge_verdict json
     writes judge_decision text
     writes judge_feedback text

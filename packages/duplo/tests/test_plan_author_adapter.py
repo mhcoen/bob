@@ -54,6 +54,33 @@ def test_converged_returns_proposal_body():
     assert callable(kwargs.get("progress_callback"))
 
 
+def test_passes_criteria_block_rendered_from_binding():
+    """The adapter threads the configured criteria into the judge prompt
+    via the ``criteria_block`` input, rendered from the same
+    ``PLAN_AUTHOR_CRITERIA`` that reaches the executor -- so the judge is
+    asked for exactly the ids the consistency check enforces."""
+    from duplo.plan_author_role import PLAN_AUTHOR_CRITERIA, render_criteria_block
+
+    captured: dict[str, str] = {}
+
+    def fake_run_role(role_name, **kwargs):
+        captured["criteria_block"] = kwargs["criteria_block"]
+        return _make_result("CONVERGED", final_artifact="body")
+
+    with patch("orchestra.run_role", side_effect=fake_run_role):
+        run_plan_author(
+            prompt="reference material",
+            system="system directive",
+            required_phase_id="phase_001",
+        )
+
+    block = captured["criteria_block"]
+    assert block == render_criteria_block()
+    # Every configured id appears so the judge can emit one entry per id.
+    for criterion in PLAN_AUTHOR_CRITERIA:
+        assert criterion["id"] in block
+
+
 def test_capped_raises_and_returns_no_plan():
     fake = _make_result(
         "CAPPED",

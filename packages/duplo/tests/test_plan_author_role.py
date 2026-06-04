@@ -32,6 +32,7 @@ from duplo.plan_author_role import (
     PLAN_AUTHOR_CRITERIA,
     ROLE_NAME,
     plan_author_role_binding,
+    render_criteria_block,
 )
 
 
@@ -138,6 +139,33 @@ def test_criteria_encode_judgment_rules_only_not_structural_rules():
     assert "## bugs" not in text
     assert "phase_nnn" not in text
     assert "# h1" not in text
+
+
+def test_render_criteria_block_enumerates_every_configured_criterion():
+    """The judge-prompt criteria block is generated from the same
+    ``PLAN_AUTHOR_CRITERIA`` the binding feeds the executor: it lists each
+    configured id and description exactly once, so the judge is asked for
+    precisely the ids ``check_decision_consistency`` enforces and the two
+    cannot drift."""
+    block = render_criteria_block()
+
+    for criterion in PLAN_AUTHOR_CRITERIA:
+        # The exact id the consistency check expects is named verbatim.
+        assert f"id: {criterion['id']}" in block
+        # And its description rides along so the judge can grade it.
+        assert criterion["description"] in block
+
+    # Exactly one "id:" line per configured criterion -- no extras, none
+    # dropped -- matching the executor's exactly-one-entry-per-id rule.
+    assert block.count("id: ") == len(PLAN_AUTHOR_CRITERIA)
+
+    # No id from outside the configured set leaks in (the bug was the judge
+    # inventing ids from the _PHASE_SYSTEM prose rules).
+    configured_ids = {c["id"] for c in PLAN_AUTHOR_CRITERIA}
+    emitted_ids = {
+        line.split("id: ", 1)[1].strip() for line in block.splitlines() if "id: " in line
+    }
+    assert emitted_ids == configured_ids
 
 
 def test_role_binding_dict_matches_declared_constants():

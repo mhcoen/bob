@@ -72,6 +72,37 @@ def test_declares_required_phase_id_and_max_rounds_external_inputs():
     assert externals["max_rounds"] == "int"
 
 
+def test_declares_criteria_block_external_input():
+    """The judge prompt's configured-criteria list is supplied as the
+    ``criteria_block`` external input (rendered from PLAN_AUTHOR_CRITERIA by
+    the adapter), so the judge emits exactly the configured criterion ids."""
+    workflow = _parse()
+    externals = {e.name: e.type for e in workflow.external_inputs}
+    assert externals["criteria_block"] == "text"
+
+
+def test_judge_role_and_state_consume_criteria_block():
+    """The criteria block must reach the judge: it is a template var of the
+    judge role and a read of the judge state, or the prompt renders the
+    literal ``{criteria_block}`` and the judge never sees the ids."""
+    workflow = _parse()
+    judge_role = _role(workflow, "judge_role")
+    assert "criteria_block" in judge_role.default_prompt.template_vars
+    judge_state = _state(workflow, "judge")
+    assert "criteria_block" in judge_state.reads
+
+
+def test_judge_template_injects_criteria_block_and_forbids_invented_ids():
+    """The judge template references the injected criteria block and tells
+    the judge to emit one entry per configured id and no others, rather
+    than pointing vaguely at the question for the criteria."""
+    template = (WORKFLOW_PATH.parent / "templates" / "plan_author_judge.md").read_text()
+    assert "{criteria_block}" in template
+    # Exactly one entry per configured criterion, using only those ids.
+    assert "EXACTLY ONE entry" in template
+    assert "do not invent" in template.lower()
+
+
 def test_keeps_proposer_reviewer_judge_states_and_adds_validate():
     workflow = _parse()
     names = [s.name for s in workflow.states]
