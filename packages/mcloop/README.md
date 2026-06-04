@@ -1629,6 +1629,24 @@ another detected quota/rate limit, McLoop marks that CLI unavailable
 and advances to the next enabled tier without waiting for human input.
 It waits for reset only when every remaining tier is unavailable.
 
+At startup McLoop probes every configured tier before the first task
+and *demotes* — drops for this run — any tier that fails its preflight
+check, whether the failure is transient (a quota or rate limit) or
+permanent (a model the account cannot use, e.g. a Codex model on a
+ChatGPT account that rejects it). As long as one tier passes, the run
+proceeds on the survivors; only when every tier fails does McLoop
+abort. A temporarily unavailable tier therefore never requires editing
+config to disable it — it is skipped automatically and is eligible
+again on the next run.
+
+Whenever McLoop substitutes one model for another — a tier demoted at
+startup, or a mid-run fallover after a limit or failure — it announces
+the switch on both the console and Telegram, naming the model being
+left, the model taking over, and the reason. A startup demotion also
+names the surviving tiers the run will use. The notification fires once
+per actual model change; retries that stay on the same model are
+silent.
+
 Each `chain` entry is an object with these fields:
 
 | Field | Type | Description |

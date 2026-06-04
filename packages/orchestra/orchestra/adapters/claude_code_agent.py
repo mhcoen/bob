@@ -251,6 +251,10 @@ def _detect_changed_files(project_dir: Path) -> list[str]:
     files: list[str] = []
     for line in out.stdout.splitlines():
         path = line[3:].strip()
+        # Rename/copy entries are emitted as ``old -> new``; keep the
+        # destination path rather than the literal arrow expression.
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
         if path:
             files.append(path)
     return files

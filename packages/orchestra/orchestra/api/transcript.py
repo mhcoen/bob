@@ -235,10 +235,10 @@ def _count_judge_rounds(transcript: list[Turn], workflow: Workflow) -> int:
     workflow has no state named ``judge`` so non-design_loop callers
     still get a meaningful number.
     """
-    judge_state_names = {s.name for s in workflow.states if s.name == "judge"}
-    if not judge_state_names:
+    has_judge_state = any(s.name == "judge" for s in workflow.states)
+    if not has_judge_state:
         return sum(1 for t in transcript if t.status == "ok")
-    return sum(1 for t in transcript if t.state in judge_state_names and t.status == "ok")
+    return sum(1 for t in transcript if t.state == "judge" and t.status == "ok")
 
 
 def _select_final_artifact(

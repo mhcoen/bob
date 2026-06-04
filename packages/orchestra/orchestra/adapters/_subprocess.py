@@ -492,7 +492,6 @@ def extract_final_text(stream_json_output: str) -> str:
         return ""
     last_result_text: str | None = None
     deltas: list[str] = []
-    saw_any_json = False
     for line in stream_json_output.splitlines():
         line = line.strip()
         if not line:
@@ -501,7 +500,6 @@ def extract_final_text(stream_json_output: str) -> str:
             record = _json.loads(line)
         except _json.JSONDecodeError:
             continue
-        saw_any_json = True
         if not isinstance(record, dict):
             continue
         rtype = record.get("type")
@@ -536,11 +534,9 @@ def extract_final_text(stream_json_output: str) -> str:
         return last_result_text
     if deltas:
         return "".join(deltas)
-    if saw_any_json:
-        # Stream-json shape was present but neither summary nor deltas
-        # appeared. Returning the raw stream is more useful than empty
-        # string for debugging.
-        return stream_json_output
+    # Neither summary nor deltas appeared. Returning the raw stream is
+    # more useful than an empty string for debugging, whether or not the
+    # output was stream-json shaped.
     return stream_json_output
 
 

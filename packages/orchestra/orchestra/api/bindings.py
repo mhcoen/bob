@@ -179,14 +179,12 @@ def _resolve_workflow_role_bindings(
     accumulate into a single ``ConfigError``.
     """
     needed: dict[str, str] = {}
-    first_state_for_role: dict[str, str] = {}
     for state in workflow.states:
         if state.role is None:
             continue
         if state.actor.kind not in ("model", "agent"):
             continue
         needed.setdefault(state.role, state.actor.kind)
-        first_state_for_role.setdefault(state.role, state.name)
 
     resolution_errors: list[str] = []
     resolved: dict[str, RoleBinding] = {}

@@ -104,24 +104,6 @@ class _TransitionMixin(_ExecutorMixinBase):
         self._current_state = target
         return target
 
-    def _select_transition(self, state: StateDecl, envelope: Envelope) -> str:
-        """Return the next state name. Linear shape only.
-
-        For fan_out transitions, callers should use
-        ``_select_transition_decl`` and dispatch through
-        ``_run_fan_out_group``.
-        """
-        decl = self._select_transition_decl(state, envelope)
-        if decl is None:
-            raise ExecutorError(
-                f"state {state.name!r}: no transition matched outcome {envelope.outcome!r}"
-            )
-        if decl.retry_max is not None:
-            if self._retries.get(state.name, 0) < decl.retry_max:
-                return state.name
-            return str(decl.target)
-        return str(decl.target)
-
     def _select_transition_decl(
         self,
         state: StateDecl,

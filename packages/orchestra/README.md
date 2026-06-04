@@ -688,6 +688,15 @@ work and bypass the lookup; the short form is a convenience for
 the common cases. Both forms compose with the same `parameters`,
 `tools`, and `instruction_template` keys.
 
+The `codex` identifier (and any role bound to a `codex_*` adapter)
+requires an account whose Codex access permits the named model.
+The shipped `design` compound binding defaults its reviewer to
+`codex`; on a plain ChatGPT account where the Codex model is
+rejected, rebind that role to a model the account can use (e.g.
+`opus` or a `deepseek`/`kimi` identifier) before relying on the
+`design` role. The independence check still applies: the judge and
+reviewer must not resolve to the same actor.
+
 ## Choosing model bindings
 
 The role-to-model bindings in the quick-start config are not

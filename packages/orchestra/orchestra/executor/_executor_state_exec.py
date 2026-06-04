@@ -208,9 +208,7 @@ class _StateExecMixin(_ExecutorMixinBase):
         tentative_handles: list[str] = []
         if status == "ok" and state.writes and prepared is not None:
             try:
-                tentative_handles = self._dispatch_parsers(
-                    state, prepared, payload, attempt, invocation_id
-                )
+                tentative_handles = self._dispatch_parsers(state, payload, attempt, invocation_id)
             except Exception as exc:
                 self._store.discard_tentative(tentative_handles)
                 tentative_handles = []
@@ -267,9 +265,7 @@ class _StateExecMixin(_ExecutorMixinBase):
         committed_ids: list[str] = []
         if status == "ok" and tentative_handles:
             committed_ids = self._store.commit_tentative(tentative_handles)
-            artifacts_written = self._artifact_writes_record(
-                state, prepared, payload, committed_ids
-            )
+            artifacts_written = self._artifact_writes_record(state, payload, committed_ids)
             for entry in artifacts_written:
                 self._log.write(
                     "artifact_write",
@@ -547,9 +543,7 @@ class _StateExecMixin(_ExecutorMixinBase):
         tentative_handles: list[str] = []
         if status == "ok" and state.writes and prepared is not None:
             try:
-                tentative_handles = self._dispatch_parsers(
-                    state, prepared, payload, attempt, invocation_id
-                )
+                tentative_handles = self._dispatch_parsers(state, payload, attempt, invocation_id)
             except Exception as exc:
                 self._store.discard_tentative(tentative_handles)
                 tentative_handles = []
@@ -604,9 +598,7 @@ class _StateExecMixin(_ExecutorMixinBase):
         committed_ids: list[str] = []
         if status == "ok" and tentative_handles:
             committed_ids = self._store.commit_tentative(tentative_handles)
-            artifacts_written = self._artifact_writes_record(
-                state, prepared, payload, committed_ids
-            )
+            artifacts_written = self._artifact_writes_record(state, payload, committed_ids)
             for entry in artifacts_written:
                 self._log.write(
                     "artifact_write",

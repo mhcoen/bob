@@ -6,6 +6,7 @@ in slice 1 because the slice has no profiles. Phases 3-7 run here.
 
 from __future__ import annotations
 
+import warnings
 from pathlib import Path
 
 from orchestra.errors import ValidationError
@@ -23,6 +24,7 @@ from orchestra.spine import (
     GuardExpr,
     Reference,
     StateDecl,
+    Transition,
     TruthyTest,
     Workflow,
 )
@@ -1028,24 +1030,71 @@ def _state_dominates(
 # --------------------------------------------------------------------
 
 
+def _transition_targets(t: Transition) -> tuple[str, ...]:
+    """Every state name a transition can route to: its linear target,
+    any fan-out children, and the on-error join target."""
+    targets = [t.target, *t.fan_out]
+    if t.error_target is not None:
+        targets.append(t.error_target)
+    return tuple(targets)
+
+
+def _cycle_is_bounded(cycle: list[str], states_by_name: dict[str, StateDecl]) -> bool:
+    """A cycle is bounded (rule 11) when at least one of its states
+    offers a termination mechanism: a guarded transition (a counter
+    guard, a guard on workflow state the cycle can change, or a verdict
+    that routes out), a retry counter, or a human gate that can exit.
+    A cycle whose every transition is an unconditional route is the
+    unbounded case this lint warns about."""
+    for name in cycle:
+        state = states_by_name.get(name)
+        if state is None:
+            continue
+        if state.actor.kind == "human":
+            return True
+        for t in state.transitions:
+            if t.guard is not None or t.retry_max is not None:
+                return True
+    return False
+
+
 def _phase7_cycle_bounds(workflow: Workflow) -> None:
+    states_by_name = {s.name: s for s in workflow.states}
     graph: dict[str, set[str]] = {s.name: set() for s in workflow.states}
     for s in workflow.states:
         for t in s.transitions:
-            if t.target in graph:
-                graph[s.name].add(t.target)
+            for target in _transition_targets(t):
+                if target in graph:
+                    graph[s.name].add(target)
     visited: set[str] = set()
-    stack: set[str] = set()
+    path: list[str] = []
+    on_path: set[str] = set()
+    reported: set[frozenset[str]] = set()
 
     def dfs(node: str) -> None:
         visited.add(node)
-        stack.add(node)
+        path.append(node)
+        on_path.add(node)
         for nxt in graph[node]:
-            if nxt in stack:
+            if nxt in on_path:
+                cycle = path[path.index(nxt) :]
+                key = frozenset(cycle)
+                if key not in reported and not _cycle_is_bounded(cycle, states_by_name):
+                    reported.add(key)
+                    warnings.warn(
+                        f"workflow {workflow.name!r}: cycle "
+                        f"{' -> '.join([*cycle, nxt])} has no termination "
+                        "mechanism on any transition (no counter guard, "
+                        "verdict, retry, or human gate); max_total_steps "
+                        "remains the only ceiling.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
                 continue
             if nxt not in visited:
                 dfs(nxt)
-        stack.discard(node)
+        path.pop()
+        on_path.discard(node)
 
     for s in workflow.states:
         if s.name not in visited:

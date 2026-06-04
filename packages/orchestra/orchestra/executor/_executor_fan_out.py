@@ -383,9 +383,6 @@ class _FanOutMixin(_ExecutorMixinBase):
             target=target,
         )
 
-        # Loop: the next iteration's ``_execute_state_body``
-        # will increment ``_attempts[child_name]`` again.
-
     def _write_cancelled_state_exit(self, child_name: str) -> Envelope:
         """Emit a state_enter/state_exit pair for a cancelled child
         that never invoked its adapter, so replay sees a complete

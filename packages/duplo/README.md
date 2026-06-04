@@ -100,12 +100,10 @@ IDs are assigned and the canonical structure is preserved.
 
 ## Install
 
-```bash
-pip install duplo
-```
-
-For the full bob ecosystem (Duplo plus McLoop, orchestra, and
-bob-tools as a single workspace), clone the bob repo and use `uv`:
+Duplo is part of the bob workspace and is not installable standalone:
+it depends on `mcloop`, `orchestra`, and `bob-tools`, which resolve
+through the workspace rather than PyPI. Clone the bob repo and run
+`uv sync`:
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
@@ -804,7 +802,7 @@ gitignored by default.
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12+
 - [McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
 - `claude` CLI on PATH
 - macOS for appshot screenshot verification

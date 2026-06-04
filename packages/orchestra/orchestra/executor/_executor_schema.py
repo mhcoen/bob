@@ -21,7 +21,6 @@ from orchestra.spine import (
     ArtifactDecl,
     Envelope,
     ErrorRecord,
-    PreparedInvocation,
     StateDecl,
 )
 
@@ -86,7 +85,6 @@ class _SchemaMixin(_ExecutorMixinBase):
     def _dispatch_parsers(
         self,
         state: StateDecl,
-        prepared: PreparedInvocation,
         payload: dict[str, Any],
         attempt: int,
         invocation_id: str | None = None,
@@ -157,7 +155,6 @@ class _SchemaMixin(_ExecutorMixinBase):
     def _artifact_writes_record(
         self,
         state: StateDecl,
-        prepared: PreparedInvocation | None,
         payload: dict[str, Any],
         committed_ids: list[str],
     ) -> list[dict[str, str]]:

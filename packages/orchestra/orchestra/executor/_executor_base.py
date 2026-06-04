@@ -157,7 +157,6 @@ class _ExecutorMixinBase:
     def _dispatch_parsers(
         self,
         state: StateDecl,
-        prepared: PreparedInvocation,
         payload: dict[str, Any],
         attempt: int,
         invocation_id: str | None = None,
@@ -167,7 +166,6 @@ class _ExecutorMixinBase:
     def _artifact_writes_record(
         self,
         state: StateDecl,
-        prepared: PreparedInvocation | None,
         payload: dict[str, Any],
         committed_ids: list[str],
     ) -> list[dict[str, str]]:
@@ -251,9 +249,6 @@ class _ExecutorMixinBase:
         outcome: str,
         target: str,
     ) -> str:
-        raise NotImplementedError
-
-    def _select_transition(self, state: StateDecl, envelope: Envelope) -> str:
         raise NotImplementedError
 
     def _select_transition_decl(
