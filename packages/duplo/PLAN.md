@@ -1127,3 +1127,56 @@ declarations to SPEC.md.
 - [x] T-000784: Add integration test for the full platform knowledge flow. Create test_platform_integration.py. Given a SPEC.md with a SwiftUI architecture entry, mock the LLM calls and verify that: resolve_profiles returns the swiftui_spm profile, the planner system prompt contains platform rules, a run.sh file exists on disk, CLAUDE.md contains the platform rules section, and gitignore contains .build/ and *.app/ entries. <!-- created_at: 2026-04-18T20:33:59Z --> <!-- completed_at: 2026-05-29T04:14:59Z -->
 
 - [x] T-000785: Run the full test suite and confirm all tests pass. Execute pytest -x against the duplo repo. If any test fails, the task fails and mcloop will retry. <!-- created_at: 2026-04-18T20:33:59Z --> <!-- completed_at: 2026-05-29T04:14:59Z -->
+
+## Phase 9: Iterative plan authoring (opus/codex), council demoted
+<!-- phase_id: phase_009 -->
+
+Duplo's PLAN.md authoring path currently runs either a single-pass
+council (`council.author_phase_plan` -> `council_four_canonical`) or a
+single `claude_cli.query`. Neither is the intended development path,
+which is an iterative refinement between the top arbitrators (opus and
+gpt/codex): a proposer drafts the phase body, a reviewer critiques, a
+judge accepts only when the body passes real canonical validation, else
+the loop iterates. This phase routes `generate_phase_plan` through that
+loop and demotes the council to explicit escalation only. Design
+rationale: `bob-tools/.scratch/iterative_authoring_proposal.md` (rev 2,
+Path 1 decided).
+
+PRECONDITION (Orchestra phase_001, separate package PLAN.md): this
+phase depends on two Orchestra extension points that must land first —
+(A) role-scoped criteria reaching the executor via a compound role
+binding, and (B) a caller-supplied transform-registration hook on
+`run_workflow`/`run_role`. Do NOT start the tasks below until Orchestra
+phase_001 is complete; the authoring loop's validation gate and
+role-scoped criteria are not expressible without them.
+
+Key design points (from the reviewed proposal):
+- The authoring workflow is a FORK, `plan_author.orc`, based on
+  `iterate_until_acceptable.orc` (a true proposer->reviewer->judge loop
+  whose proposer writes the `proposal` body), NOT `design_loop.orc`
+  (which refines only a verdict and writes no body).
+- A post-accept validation STATE (not a hook — hooks swallow exceptions
+  and cannot alter routing) runs a duplo-owned transform that calls
+  `typed_plan_from_synthesizer_text` / `validate_plan(constructed=True)`
+  / `assert_mcloop_canonical`; the transform returns `validation_ok`
+  plus feedback, and a guard branches `validation_ok == true => done`,
+  else `=> propose`. Convergence cannot accept a body that fails
+  canonical validation.
+- A NEW compound role `plan_author` (distinct from the shared `design`
+  role, which `design_extractor` uses) carries the authoring criteria.
+  Leaf bindings map the two arbitrators: proposer=opus, reviewer=codex,
+  judge=opus (only the `design` role forbids same-actor judge/reviewer;
+  the validation gate covers the opus self-accept risk).
+- CAPPED (cap hit without accept) fails closed: no PLAN.md write; the
+  best-so-far body goes only to audit output.
+- `max_rounds` is an external input on `plan_author.orc` (the base
+  workflow hardcodes `attempts.judge < 6`), configured on the compound
+  binding, overridable per call only via an explicit duplo knob.
+
+- [ ] T-000786: Fork `plan_author.orc` as a DUPLO-OWNED, project-local workflow under `<duplo-managed project>/.orchestra/workflows/` (Orchestra resolves project-local workflows before packaged ones; do NOT add this Duplo-specific workflow to Orchestra's packaged set). Base it on `iterate_until_acceptable.orc`. Add `required_phase_id` and `max_rounds` as external inputs. Keep the proposer->reviewer->judge states (proposer writes `proposal`). Add a post-accept validation state with `actor transform validate_plan_body` that reads the `proposal` body and `required_phase_id` and writes `validation_ok` (bool) and `validation_feedback` (text). Wire the judge's `accept` transition to the validation state instead of `done`. The validation state must route with the SAME cap discipline the judge uses, so a never-validating body terminates as CAPPED not ERROR: `on complete when validation_ok == true => done`; `on complete when attempts.judge < max_rounds => propose`; `on complete => done` (cap reached with validation still failing routes to `done` with a non-accept outcome so `run_role` derives CAPPED, NOT an uncapped loop to `max_total_steps` which would derive ERROR). The feedback MUST reach the proposer: add `validation_feedback` to the proposer role's read set and prompt template (or map it into `judge_feedback`), otherwise the proposer re-drafts blind and the loop cannot converge on validation errors. Replace the hardcoded `attempts.judge < 6` judge cap with `max_rounds`. Workflow-load/parse tests confirm the fork parses, declares the new inputs, references the `validate_plan_body` transform, the proposer reads `validation_feedback`, and the validation state's cap routing yields CAPPED (not ERROR) when the body never validates. <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000787: Implement the duplo-owned `validate_plan_body` transform and register it via Orchestra's caller-supplied transform-registration hook (Orchestra phase_001 extension point B). The transform runs the candidate body through `council.typed_plan_from_synthesizer_text(body, required_phase_id=...)` (which already parses, rebuilds constructed, migrates ids, runs `validate_plan(constructed=True)` and `assert_mcloop_canonical`, and checks the required phase id); on success it returns `validation_ok=true`; on `PlanSyntaxError`/`PlanValidationError` it returns `validation_ok=false` with the error text as `validation_feedback`. The transform is owned by duplo and supplied to Orchestra through the registration callback — Orchestra does not import duplo or bob_tools. Unit tests: a canonical body validates ok; a body with a wrong phase id, a malformed checklist, and a `## Bugs` section each return `validation_ok=false` with feedback; the transform never raises for a merely-invalid body (only `validation_ok=false`). <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000788: Define the `plan_author` compound role and its acceptance criteria, and add the leaf bindings (proposer=opus, reviewer=codex, judge=opus) plus `max_rounds`. Criteria encode the judgment-level PLAN.md quality rules from `planner._PHASE_SYSTEM` that the structural validation transform does not already enforce (task granularity 5-15, [BATCH]/[USER]/[AUTO] discipline, `[feat:]`/`[fix:]` annotation presence). The hard structural rules (canonical header, required phase id, no `## Bugs`, no project H1) are enforced by the validation transform, not duplicated as prose criteria. Document where this role config lives and that it is distinct from the shared `design` role. Tests: the role resolves with distinct-enough bindings; criteria reach the executor (via Orchestra phase_001 extension point A). <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000789: Add a duplo authoring adapter (NOT the shared `run_iterative_design`, which `design_extractor` uses) that calls `run_role("plan_author", query=..., history=..., required_phase_id=..., registry_customizer=<register validate_plan_body>)`. Build `query` from the same prompt/system material `author_phase_plan` assembles (system directive folded into the query text as `council._build_state_text` does). Build `history` as compact prior-phase context: prior phase ids/titles, completed-phase summaries, files already created, and prior validation failures on retry — NOT full transcripts, and NOT the current phase's source/spec (that stays in `query`). Translate the result: CONVERGED -> return the converged `proposal` body; CAPPED -> fail closed (raise, no body returned for PLAN.md; best-so-far to audit only); ERROR -> raise with transcript path. Note CAPPED is the disposition produced by T-000786's validation-cap routing when a body never validates within `max_rounds`; the adapter must treat it as fail-closed, never as a usable plan. Unit tests: CONVERGED returns the body; CAPPED raises and writes no plan; ERROR raises with transcript path; `history` carries the compact fields and not the full source. <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000790: Route `planner.generate_phase_plan` through the new authoring adapter and the unchanged `typed_plan_from_synthesizer_text` -> `save_plan` tail. Replace the `council.is_enabled()` branch so iterative authoring is the unconditional default. The converged body flows through the existing validation/persistence tail with no change to `save_plan`. Demote council to explicit opt-in escalation: keep `council.py` for reauthor, audit value, and its spec/pyproject/run.sh preflight. NOTE: `council.is_enabled()` is ALREADY opt-in (true only when `DUPLO_USE_COUNCIL` is truthy) — do NOT invert the env var. The change is that `generate_phase_plan` no longer routes to council on that flag as part of normal authoring; iterative authoring is unconditional and council is reachable only via an explicit escalation/experiment path. Tests in `test_planner.py`: `generate_phase_plan` invokes the iterative adapter by default (council not called); the converged body is persisted via the typed tail; council runs only when the explicit escalation flag is set; a CAPPED authoring run does not write PLAN.md. <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000791: Add an end-to-end test of the iterative authoring path with the LLM calls mocked: a proposer body that initially fails canonical validation (wrong phase id) and on the next round passes, exercising the validation-state feedback loop to convergence (assert the proposer actually receives `validation_feedback` on the retry round); assert the final PLAN.md is canonical, carries the runtime-supplied phase id, and that a body which never validates within `max_rounds` results in CAPPED fail-closed (no PLAN.md write) — and is derived as CAPPED, not ERROR. <!-- created_at: 2026-06-03T19:01:54Z -->
+- [ ] T-000792: Run the full duplo test suite and confirm the phase closes cleanly. Execute pytest -x against the duplo package. Confirm the shared `design` role and `design_extractor` are unaffected by the new `plan_author` role. If any test fails, the task fails and mcloop will retry. <!-- created_at: 2026-06-03T19:01:54Z -->
