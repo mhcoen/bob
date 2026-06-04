@@ -444,6 +444,8 @@ def run_checks(
             )
         except subprocess.TimeoutExpired:
             return False, f"TIMEOUT after {check_timeout}s"
+        except FileNotFoundError:
+            return False, f"Command not found: {parts[0]}"
         output = f"{result.stdout}{result.stderr}"
         # Pytest can exit 0 while producing no real signal (nothing
         # collected, everything skipped/deselected, or a summary we

@@ -21,9 +21,9 @@ if _TESTS_DIR not in sys.path:
 # Auto-injected by mcloop. Blocks real claude/codex subprocess calls
 # during pytest so unmocked LLM paths fail fast instead of silently
 # burning 5-15 seconds per call. Opt out with @pytest.mark.llm.
-import subprocess as _mcloop_subprocess
+import subprocess as _mcloop_subprocess  # noqa: E402
 
-import pytest
+import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -35,7 +35,7 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
     _real_popen = _mcloop_subprocess.Popen
 
     def _is_llm_binary(cmd):
-        if isinstance(cmd, (list, tuple)) and cmd:
+        if isinstance(cmd, (list, tuple)) and cmd:  # noqa: UP038
             binary = str(cmd[0])
             return (
                 binary in ("claude", "codex")
@@ -68,4 +68,3 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
 
     monkeypatch.setattr(_mcloop_subprocess, "run", _guarded_run)
     monkeypatch.setattr(_mcloop_subprocess, "Popen", _guarded_popen)
-

@@ -92,6 +92,26 @@ class CriterionDecl:
         return cls(id=cid, description=description, required=required)
 
 
+def _parse_criteria(context: str, raw_value: Any) -> tuple[CriterionDecl, ...]:
+    """Parse a ``criteria`` array into a tuple of ``CriterionDecl``.
+
+    Shared by ``OrchestraConfig.from_dict`` (top-level criteria) and
+    ``CompoundRoleBinding.from_dict`` (role-scoped criteria) so both
+    accept the same shape and enforce the same unique-id rule.
+    ``context`` names the owning scope for error messages.
+    """
+    criteria_raw = raw_value or []
+    if not isinstance(criteria_raw, list):
+        raise ConfigError(f"{context}: 'criteria' must be an array")
+    criteria_list = [CriterionDecl.from_dict(item) for item in criteria_raw]
+    seen_ids: set[str] = set()
+    for crit in criteria_list:
+        if crit.id in seen_ids:
+            raise ConfigError(f"{context}: duplicate criterion id {crit.id!r}; ids must be unique")
+        seen_ids.add(crit.id)
+    return tuple(criteria_list)
+
+
 @dataclass(frozen=True)
 class RoleBinding:
     """One role's binding to an adapter, model, template, and parameters.
@@ -232,14 +252,19 @@ class CompoundRoleBinding:
 
     ``max_rounds`` is a Phase-2 design-loop knob; it is parsed here
     so the schema accepts it without forcing every consumer to
-    re-validate. ``extra`` captures any future top-level keys so
-    forward-compatible config additions do not require schema
-    surgery (the consumer reads them by name).
+    re-validate. ``criteria`` carries role-scoped acceptance criteria
+    in the same shape ``OrchestraConfig.criteria`` accepts, letting a
+    compound role run a workflow with its own criteria; it defaults to
+    an empty tuple so existing bindings are unchanged. ``extra``
+    captures any future top-level keys so forward-compatible config
+    additions do not require schema surgery (the consumer reads them
+    by name).
     """
 
     pattern: str
     bindings: dict[str, RoleBinding] = field(default_factory=dict)
     max_rounds: int | None = None
+    criteria: tuple[CriterionDecl, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -251,7 +276,7 @@ class CompoundRoleBinding:
         pattern = raw.get("pattern")
         if not isinstance(pattern, str) or not pattern:
             raise ConfigError(f"role_binding {role_name!r}: missing or empty 'pattern' key")
-        reserved = {"pattern", "max_rounds"}
+        reserved = {"pattern", "max_rounds", "criteria"}
         max_rounds_raw = raw.get("max_rounds")
         if max_rounds_raw is not None and not isinstance(max_rounds_raw, int):
             raise ConfigError(
@@ -281,10 +306,12 @@ class CompoundRoleBinding:
                 )
             else:
                 extra[key] = value
+        criteria = _parse_criteria(f"role_binding {role_name!r}", raw.get("criteria"))
         return cls(
             pattern=pattern,
             bindings=bindings,
             max_rounds=max_rounds_raw,
+            criteria=criteria,
             extra=extra,
         )
 
@@ -420,21 +447,13 @@ class OrchestraConfig:
             name: CompoundRoleBinding.from_dict(name, body)
             for name, body in role_bindings_raw.items()
         }
-        criteria_raw = raw.get("criteria") or []
-        if not isinstance(criteria_raw, list):
-            raise ConfigError("'criteria' must be an array")
-        criteria_list = [CriterionDecl.from_dict(item) for item in criteria_raw]
-        seen_ids: set[str] = set()
-        for crit in criteria_list:
-            if crit.id in seen_ids:
-                raise ConfigError(f"criteria: duplicate id {crit.id!r}; ids must be unique")
-            seen_ids.add(crit.id)
+        criteria = _parse_criteria("criteria", raw.get("criteria"))
         return cls(
             roles=roles,
             workflows=workflows,
             verbs=verbs,
             role_bindings=role_bindings,
-            criteria=tuple(criteria_list),
+            criteria=criteria,
         )
 
 

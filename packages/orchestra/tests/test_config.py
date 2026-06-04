@@ -25,6 +25,7 @@ import pytest
 from orchestra.config import (
     CompoundRoleBinding,
     ConfigError,
+    CriterionDecl,
     OrchestraConfig,
     RoleBinding,
     WorkflowConfig,
@@ -697,3 +698,53 @@ def test_compound_role_binding_from_dict_used_directly() -> None:
     assert rb.pattern == "design_loop"
     assert rb.max_rounds == 5
     assert rb.extra == {"future_knob": "ignored-but-preserved"}
+
+
+def test_compound_role_binding_with_criteria_round_trips() -> None:
+    """A compound binding may carry its own acceptance criteria, in the
+    same shape the top-level ``criteria`` parser accepts. The parsed
+    criteria are not swept into ``extra``."""
+    rb = CompoundRoleBinding.from_dict(
+        "design",
+        {
+            "pattern": "design_loop",
+            "judge": {"adapter": "claude_code_text"},
+            "criteria": [
+                {"id": "exact_12_words", "description": "d", "required": True},
+                {"id": "ends_question", "description": "d", "required": False},
+            ],
+        },
+    )
+    assert rb.criteria == (
+        CriterionDecl(id="exact_12_words", description="d", required=True),
+        CriterionDecl(id="ends_question", description="d", required=False),
+    )
+    assert "criteria" not in rb.extra
+
+
+def test_compound_role_binding_without_criteria_is_empty() -> None:
+    """A compound binding that omits ``criteria`` parses and carries an
+    empty criteria tuple, leaving existing bindings unchanged."""
+    rb = CompoundRoleBinding.from_dict(
+        "design",
+        {"pattern": "design_loop"},
+    )
+    assert rb.criteria == ()
+    assert "criteria" not in rb.extra
+
+
+def test_compound_role_binding_rejects_duplicate_criterion_ids() -> None:
+    raw = {
+        "role_bindings": {
+            "design": {
+                "pattern": "design_loop",
+                "criteria": [
+                    {"id": "dup", "description": "d"},
+                    {"id": "dup", "description": "d"},
+                ],
+            },
+        },
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(raw)
+    assert "dup" in str(excinfo.value)
