@@ -76,11 +76,18 @@ class PlanSanityReport:
 
 @dataclass(frozen=True)
 class _ParsedTask:
-    """A task line reduced to the fields the checks care about."""
+    """A task line reduced to the fields the checks care about.
+
+    ``line_index`` is the task line's 0-based position in
+    ``plan_text.splitlines()``. The pure checks ignore it; a downstream
+    repairer (see :mod:`duplo.plan_gate`) uses it to target the exact
+    source line for a deterministic edit without re-parsing.
+    """
 
     text: str
     feats: tuple[str, ...]
     is_verification: bool
+    line_index: int = -1
 
 
 def _normalize(text: str) -> str:
@@ -99,7 +106,7 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
     (``Verify: type ...``).
     """
     tasks: list[_ParsedTask] = []
-    for line in plan_text.splitlines():
+    for index, line in enumerate(plan_text.splitlines()):
         match = _TASK_LINE_RE.match(line)
         if match is None:
             continue
@@ -118,6 +125,7 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
                 text=body,
                 feats=tuple(feats),
                 is_verification=bool(_VERIFY_PREFIX_RE.match(body)),
+                line_index=index,
             )
         )
     return tasks
@@ -172,6 +180,23 @@ def _check_scope_coverage(
     return violations
 
 
+def _is_orphan_verification(task: _ParsedTask, built_features: set[str]) -> bool:
+    """True when a verification task maps to no feature any phase builds.
+
+    A verification task with ``[feat: ...]`` annotations is an orphan
+    when none of those features is built by a non-verify task. An
+    unannotated verification task is an orphan only when the plan builds
+    nothing at all (otherwise it is assumed to exercise some built
+    feature). This is the single predicate behind both the
+    :data:`KIND_VERIFY_WITHOUT_BUILD` check and the repairer's
+    line-targeting in :mod:`duplo.plan_gate`.
+    """
+    if task.feats:
+        named = [_normalize(f) for f in task.feats]
+        return not any(f in built_features for f in named)
+    return not built_features
+
+
 def _check_verification_mapping(
     verify_tasks: list[_ParsedTask], built_features: set[str]
 ) -> list[SanityViolation]:
@@ -185,20 +210,20 @@ def _check_verification_mapping(
     """
     violations: list[SanityViolation] = []
     for task in verify_tasks:
+        if not _is_orphan_verification(task, built_features):
+            continue
         if task.feats:
-            named = [_normalize(f) for f in task.feats]
-            if not any(f in built_features for f in named):
-                missing = ", ".join(repr(f) for f in task.feats)
-                violations.append(
-                    SanityViolation(
-                        kind=KIND_VERIFY_WITHOUT_BUILD,
-                        message=(
-                            f"Verification task {task.text!r} references "
-                            f"feature(s) {missing} that no phase builds."
-                        ),
-                    )
+            missing = ", ".join(repr(f) for f in task.feats)
+            violations.append(
+                SanityViolation(
+                    kind=KIND_VERIFY_WITHOUT_BUILD,
+                    message=(
+                        f"Verification task {task.text!r} references "
+                        f"feature(s) {missing} that no phase builds."
+                    ),
                 )
-        elif not built_features:
+            )
+        else:
             violations.append(
                 SanityViolation(
                     kind=KIND_VERIFY_WITHOUT_BUILD,
@@ -209,6 +234,25 @@ def _check_verification_mapping(
                 )
             )
     return violations
+
+
+def orphan_verification_lines(plan_text: str) -> list[int]:
+    """Return the 0-based source line indices of orphan verification tasks.
+
+    An orphan verification task is one that :func:`check_plan_sanity`
+    flags as :data:`KIND_VERIFY_WITHOUT_BUILD`. This read-only accessor
+    lets a deterministic repairer drop exactly those lines using the same
+    parse and the same orphan predicate the checker uses, so the two can
+    never diverge. Indices are returned in source order.
+    """
+    tasks = _parse_tasks(plan_text)
+    build_tasks = [t for t in tasks if not t.is_verification]
+    built_features = {_normalize(f) for t in build_tasks for f in t.feats}
+    return [
+        t.line_index
+        for t in tasks
+        if t.is_verification and _is_orphan_verification(t, built_features)
+    ]
 
 
 def _check_phase_ids(plan_text: str) -> list[SanityViolation]:
@@ -285,4 +329,5 @@ __all__ = [
     "PlanSanityReport",
     "SanityViolation",
     "check_plan_sanity",
+    "orphan_verification_lines",
 ]

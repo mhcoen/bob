@@ -33,6 +33,7 @@ from duplo.plan_author_adapter import PlanAuthorError
 from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
 from duplo.diagnostics import record_failure
+from duplo.plan_gate import PlanSanityHardStop, enforce_plan_sanity
 from duplo.design_extractor import (
     extract_design,
     format_design_block,
@@ -1505,6 +1506,20 @@ def _run_phase_generation_loop(
     return saved_count, total_phases
 
 
+def _enforce_plan_sanity_gate(spec) -> None:
+    """Run the bounded post-assembly sanity gate on the completed PLAN.md.
+
+    Called only once every roadmap phase is on disk (the plan is fully
+    assembled). Clean or auto-repaired plans return normally; a hard stop
+    has already printed its actionable report, so this exits without a
+    traceback and without retrying.
+    """
+    try:
+        enforce_plan_sanity(spec)
+    except PlanSanityHardStop:
+        sys.exit(1)
+
+
 def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 
@@ -1870,6 +1885,7 @@ def _subsequent_run() -> None:
             )
             all_saved = observed + saved_this_call
             if all_saved == total:
+                _enforce_plan_sanity_gate(spec)
                 print(f"\nPlan ready for all {total} phases.")
                 print("Run mcloop to start building.")
                 return
@@ -2019,6 +2035,7 @@ def _subsequent_run() -> None:
         project_name=app_name,
     )
     if saved_this_call == total_phases:
+        _enforce_plan_sanity_gate(spec)
         print(f"\nPlan ready for all {total_phases} phases.")
         print("Run mcloop to start building.")
     else:

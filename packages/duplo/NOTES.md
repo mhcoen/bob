@@ -81,6 +81,30 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [7] [T-000007] Wired the bounded plan-sanity gate; it silently strips verify tasks when no build task carries [feat:] — 2026-06-04
+
+`pipeline._enforce_plan_sanity_gate(spec)` now runs `plan_gate.enforce_plan_sanity`
+once after the full plan is assembled (both the early all-phases-already-on-disk
+return and the post-generation tail in `_subsequent_run`). On `clean` it is a
+no-op; on `repaired` it writes back + commits the loud change log; on `hard_stop`
+it has already printed the actionable report so the wrapper just `sys.exit(1)`
+(no traceback, no retry).
+
+Subtlety surfaced by wiring it in: the gate's verify-without-build repair keys
+off `built_features`, which is the set of `[feat: "..."]` annotations on
+non-verify tasks. An *unannotated* `Verify:` task is treated as an orphan (and
+removed) only when the assembled plan carries NO `[feat:]` annotation at all.
+Real planner output always ends feature-building tasks with `[feat: "..."]`
+(planner.py:80), so production plans never hit this. But pipeline tests that
+mock `generate_phase_plan` with bare `- [ ] dummy task` bodies build no
+annotated feature, so the gate stripped every `Verify:` task they appended.
+`tests/test_pipeline.py::test_verify_lines_only_after_last_phase_heading_in_plan_md`
+is the one test that assembles a real PLAN.md on disk (others mock `save_plan`,
+so no file exists and the gate is a no-op) and asserts the Verify lines survive;
+its `_gen_plan` mock now emits a `[feat: "..."]` annotation to match the planner
+contract. Worth revisiting in plan_sanity if unannotated build tasks ever become
+legitimate: the orphan-verify predicate would then delete real verification.
+
 ### [3] [T-000003] Added end-to-end regression for scope-beyond-sources — 2026-06-04
 
 Added tests/test_scope_beyond_sources_regression.py: parses a real

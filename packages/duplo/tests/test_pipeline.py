@@ -5704,7 +5704,15 @@ class TestVerificationTasksAppendToLastPhase:
                 phase_number if phase_number is not None else (phase.get("phase") if phase else 0)
             )
             required_id = _council.compute_required_phase_id(tmp_path / "PLAN.md")
-            return f"## Phase {required_id}: Dummy\n\n- [ ] dummy task for phase {num}\n"
+            # Every real build task ends with a [feat: "..."] annotation (see
+            # planner.py). Without one, the post-assembly sanity gate sees a
+            # plan that builds no annotated feature and repairs it by dropping
+            # the unannotated ``Verify:`` tasks this test asserts on. Annotate
+            # the dummy task so the mock matches the planner contract.
+            return (
+                f"## Phase {required_id}: Dummy\n\n"
+                f'- [ ] dummy task for phase {num} [feat: "Feature {num}"]\n'
+            )
 
         with (
             patch("duplo.pipeline.read_spec", return_value=spec),
