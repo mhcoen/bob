@@ -145,6 +145,7 @@ def test_persistent_failure_hard_stops_after_single_repair(monkeypatch) -> None:
     assert outcome.status == "hard_stop"
     assert outcome.report_after is not None  # a repair pass DID run
     assert not outcome.report_after.ok
+    assert outcome.stop_report is not None
     assert "single deterministic repair pass" in outcome.stop_report
 
 
