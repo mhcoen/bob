@@ -209,3 +209,116 @@ def test_enforce_hard_stop_raises_and_records(tmp_path: Path) -> None:
 def test_enforce_missing_plan_is_clean(tmp_path: Path) -> None:
     outcome = enforce_plan_sanity(target_dir=tmp_path)
     assert outcome.status == "clean"
+
+
+# --- Regression: repairs known, stops on unknown, never loops -------------
+#
+# T-000008. The gate's whole point is a bounded policy: known mechanical
+# defects are repaired in a single pass; anything else hard-stops with a
+# report and is NOT retried. These tests pin that end-to-end and, crucially,
+# count how many times the plan is re-validated so a future change that
+# reintroduces a retry loop cannot pass silently.
+
+
+def _counting_check(monkeypatch) -> list[int]:
+    """Wrap plan_gate.check_plan_sanity to count its invocations.
+
+    Returns a single-element list holding the call count. run_plan_sanity_gate
+    validates once up front and, on the repair path, exactly once more after
+    the single repair pass -- so the count is the gate's loop bound made
+    observable: 1 on a hard stop with no repair, 2 on a repair pass, never more.
+    """
+    from duplo.plan_sanity import check_plan_sanity as real_check
+
+    calls = [0]
+
+    def counted(*args, **kwargs):
+        calls[0] += 1
+        return real_check(*args, **kwargs)
+
+    monkeypatch.setattr(plan_gate, "check_plan_sanity", counted)
+    return calls
+
+
+def test_regression_known_bad_plan_repaired_clean_in_one_pass(monkeypatch) -> None:
+    # A single plan carrying BOTH repairable defect classes at once:
+    # a verify-without-build orphan task AND duplicate phase_ids.
+    calls = _counting_check(monkeypatch)
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add dark mode [feat: "Dark mode"]\n'
+            '- [ ] T-000002: Verify: currency converts [feat: "Currency exchange"]',
+            phase_id=1,
+        ),
+        _phase(2, "More", '- [ ] T-000003: Add export [feat: "Export"]', phase_id=1),
+    )
+    outcome = run_plan_sanity_gate(plan)
+
+    # One repair pass produced a clean plan.
+    assert outcome.status == "repaired"
+    assert check_plan_sanity(outcome.plan_text).ok
+    assert outcome.report_after is not None and outcome.report_after.ok
+    # Both repairs are logged, loudly and specifically.
+    assert any("verify-without-build" in c for c in outcome.changes)
+    assert any(c.startswith("phase_ids:") for c in outcome.changes)
+    # The orphan verify task is gone; both build tasks survive.
+    assert "currency converts" not in outcome.plan_text
+    assert "Add dark mode" in outcome.plan_text
+    assert "Add export" in outcome.plan_text
+    assert "<!-- phase_id: phase_002 -->" in outcome.plan_text
+    # Never loops: validate once, repair once, re-validate once -> exactly two.
+    assert calls[0] == 2
+
+
+def test_regression_unrepairable_hard_stops_with_report_no_retry(monkeypatch) -> None:
+    # A scope include item built by no phase is unrepairable: the gate cannot
+    # synthesize the missing build, so it must stop with an actionable report
+    # and must NOT run a repair or a second validation.
+    calls = _counting_check(monkeypatch)
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]')
+    )
+    outcome = run_plan_sanity_gate(plan, scope_include=["Unit conversion", "Currency exchange"])
+
+    assert outcome.status == "hard_stop"
+    assert outcome.changes == []
+    assert outcome.plan_text == plan
+    assert outcome.report_after is None  # no repair pass was attempted
+    assert outcome.stop_report is not None
+    assert "Currency exchange" in outcome.stop_report
+    assert "does not retry" in outcome.stop_report
+    # No retry: a single validation, then a hard stop. Never a second pass.
+    assert calls[0] == 1
+
+
+def test_regression_unknown_violation_kind_hard_stops_without_repair(monkeypatch) -> None:
+    # Guard the REPAIRABLE_KINDS dispatch itself: a violation kind the gate
+    # does not recognize (e.g. one added later) must hard-stop without any
+    # repair attempt -- the gate never guesses at an unknown defect class.
+    from duplo.plan_sanity import PlanSanityReport, SanityViolation
+
+    bogus = PlanSanityReport(
+        violations=[SanityViolation(kind="some_future_kind", message="unknown defect")]
+    )
+    repair_called = [False]
+
+    def fake_check(*args, **kwargs):
+        return bogus
+
+    def fake_repair(text, kinds):
+        repair_called[0] = True
+        return text, []
+
+    monkeypatch.setattr(plan_gate, "check_plan_sanity", fake_check)
+    monkeypatch.setattr(plan_gate, "_repair", fake_repair)
+
+    outcome = run_plan_sanity_gate(_plan(_phase(1, "Core", "- [ ] T-000001: scaffold")))
+
+    assert outcome.status == "hard_stop"
+    assert outcome.changes == []
+    assert outcome.report_after is None
+    assert repair_called[0] is False  # never tried to repair an unknown class
+    assert outcome.stop_report is not None
+    assert "some_future_kind" in outcome.stop_report
