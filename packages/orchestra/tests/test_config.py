@@ -541,6 +541,53 @@ def test_merge_inherits_when_overlay_section_absent() -> None:
     assert merged.verbs["ask"].workflow == "ask_single"
 
 
+def test_merge_unions_distinct_criteria() -> None:
+    """Merging two configs whose criteria have disjoint ids yields the
+    union of both, base entries first then overlay entries."""
+    base = OrchestraConfig(
+        criteria=(CriterionDecl(id="a", description="alpha"),),
+    )
+    overlay = OrchestraConfig(
+        criteria=(CriterionDecl(id="b", description="beta"),),
+    )
+    merged = _merge_configs(base, overlay)
+    assert merged.criteria == (
+        CriterionDecl(id="a", description="alpha"),
+        CriterionDecl(id="b", description="beta"),
+    )
+
+
+def test_merge_overlay_criterion_overrides_same_id() -> None:
+    """When both configs declare the same criterion id, the overlay's
+    criterion wins and the base's is replaced in place."""
+    base = OrchestraConfig(
+        criteria=(
+            CriterionDecl(id="a", description="base alpha", required=True),
+            CriterionDecl(id="b", description="beta"),
+        ),
+    )
+    overlay = OrchestraConfig(
+        criteria=(CriterionDecl(id="a", description="overlay alpha", required=False),),
+    )
+    merged = _merge_configs(base, overlay)
+    assert merged.criteria == (
+        CriterionDecl(id="a", description="overlay alpha", required=False),
+        CriterionDecl(id="b", description="beta"),
+    )
+
+
+def test_merge_preserves_criteria_when_other_side_has_none() -> None:
+    """Merging a config that carries criteria with one that does not
+    preserves the criteria rather than dropping them."""
+    base = OrchestraConfig(
+        criteria=(CriterionDecl(id="a", description="alpha"),),
+    )
+    overlay = OrchestraConfig()
+    assert _merge_configs(base, overlay).criteria == (CriterionDecl(id="a", description="alpha"),)
+    # And the symmetric case: criteria supplied only by the overlay.
+    assert _merge_configs(overlay, base).criteria == (CriterionDecl(id="a", description="alpha"),)
+
+
 def test_load_global_config_raises_when_missing(
     isolated_home: Path,
 ) -> None:

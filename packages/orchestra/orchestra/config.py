@@ -540,12 +540,23 @@ def _merge_configs(
     redefine are inherited unchanged. There is no nested merging:
     overriding a single role replaces the entire RoleBinding for that
     role, including its parameters and tools.
+
+    Top-level ``criteria`` merge by criterion ``id``: ``overlay``'s
+    criteria override ``base``'s per id (the later config wins for a
+    shared id), and criteria whose ids do not overlap union together.
+    ``base``'s ordering is preserved for inherited ids; new ids from
+    ``overlay`` are appended in ``overlay`` order. Without this rule
+    the criteria would be silently dropped when both files are present.
     """
+    merged_criteria: dict[str, CriterionDecl] = {crit.id: crit for crit in base.criteria}
+    for crit in overlay.criteria:
+        merged_criteria[crit.id] = crit
     return OrchestraConfig(
         roles={**base.roles, **overlay.roles},
         workflows={**base.workflows, **overlay.workflows},
         verbs={**base.verbs, **overlay.verbs},
         role_bindings={**base.role_bindings, **overlay.role_bindings},
+        criteria=tuple(merged_criteria.values()),
     )
 
 
