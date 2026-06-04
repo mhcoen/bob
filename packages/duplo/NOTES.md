@@ -1816,7 +1816,32 @@ Confirmed the save round-trip preserves the stamped ids: the renderer emits
 whatever `Phase.phase_id` holds and the parser reads ids back from the comment
 lines, so unique sequential ids survive the parse/render cycle unchanged.
 
+[6] [T-000006] Added `duplo/plan_sanity.py::check_plan_sanity`, a pure
+whole-plan verifier returning a `PlanSanityReport` of `SanityViolation`s tagged
+with stable kind constants (`scope_uncovered`, `verify_without_build`,
+`phase_ids`). The kinds are deliberately exposed so the T-000007 corrective gate
+can dispatch per defect class. The verifier reuses
+`reauthor_phase_ids.parse_plan_phases` for the phase_id check and a self-contained
+line scanner (matching the style of `planner.parse_completed_tasks`) for tasks, so
+it does not depend on `bob_tools.planfile.parse_plan` succeeding on a possibly
+malformed assembled plan. Task ids (`T-000002:`) are stripped before verify-prefix
+detection, since behavior contracts and video cases render as `Verify: ...`
+(`spec_reader.format_contracts_as_verification`,
+`verification_extractor.format_verification_tasks`).
+
 ## Hypotheses
+
+[6] [T-000006] The verify-without-build check is intentionally false-positive-safe
+rather than exhaustive: an *annotated* verify task is flagged when none of its
+`[feat: ...]` names are built by a non-verify task; an *unannotated* verify task
+(the shape spec/video cases take, e.g. `Verify: type 5km expect 3.1mi`) is only
+flagged when the plan builds nothing at all, because its target feature cannot be
+inferred from the input/expected text alone. This catches the headline
+"verify-without-build" defect (T-000008's bad-plan example) and the degenerate
+all-verify-no-build plan without false-stopping legitimate spec-derived
+verification tasks. If a stronger mapping is wanted later, contracts could be
+emitted with an explicit `[feat: ...]` annotation at injection time so the check
+becomes exact.
 
 [4] [T-000004] The new `stamp_sequential_phase_ids` is not yet wired into the
 pipeline. T-000007 ("wire the verifier into the pipeline after full-plan assembly")

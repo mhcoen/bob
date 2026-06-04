@@ -1,0 +1,222 @@
+"""Tests for duplo.plan_sanity.check_plan_sanity.
+
+Covers the T-000006 whole-plan verifier: scope-include coverage,
+behavior/verification task mapping, and unique/sequential phase_ids.
+"""
+
+from __future__ import annotations
+
+from duplo.plan_sanity import (
+    KIND_PHASE_IDS,
+    KIND_SCOPE_UNCOVERED,
+    KIND_VERIFY_WITHOUT_BUILD,
+    check_plan_sanity,
+)
+
+
+def _plan(*phases: str) -> str:
+    """Assemble a minimal PLAN.md envelope around phase blocks."""
+    return "<!-- bob-plan-format: 1 -->\n\n# MyApp\n\n" + "\n".join(phases)
+
+
+def _phase(n: int, title: str, body: str, *, phase_id: int | None = None) -> str:
+    pid = phase_id if phase_id is not None else n
+    return f"## Phase {n}: {title}\n<!-- phase_id: phase_{pid:03d} -->\n\n{body}\n"
+
+
+# --- Clean plans -----------------------------------------------------------
+
+
+def test_clean_plan_passes() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]\n'
+            '- [ ] T-000002: Verify: convert km to mi [feat: "Unit conversion"]',
+        ),
+        _phase(2, "Polish", '- [ ] T-000003: Add dark mode [feat: "Dark mode"]'),
+    )
+    report = check_plan_sanity(plan, scope_include=["Unit conversion", "Dark mode"])
+    assert report.ok
+    assert report.violations == []
+
+
+def test_no_scope_no_phase_ids_is_clean() -> None:
+    plan = _plan(_phase(1, "Core", "- [ ] T-000001: scaffold the project"))
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+# --- Scope coverage --------------------------------------------------------
+
+
+def test_uncovered_scope_item_flagged() -> None:
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]')
+    )
+    report = check_plan_sanity(plan, scope_include=["Unit conversion", "Currency exchange"])
+    assert not report.ok
+    assert report.kinds() == {KIND_SCOPE_UNCOVERED}
+    assert "Currency exchange" in report.violations[0].message
+
+
+def test_scope_item_covered_by_task_text() -> None:
+    plan = _plan(_phase(1, "Core", "- [ ] T-000001: Implement currency exchange rates"))
+    report = check_plan_sanity(plan, scope_include=["currency exchange"])
+    assert report.ok
+
+
+def test_scope_item_covered_by_feat_substring() -> None:
+    plan = _plan(
+        _phase(
+            1, "Core", '- [ ] T-000001: Add metric/imperial conversion [feat: "Unit conversion"]'
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["Unit conversion (metric and imperial)"])
+    assert report.ok
+
+
+def test_scope_resolved_from_spec_object() -> None:
+    class FakeSpec:
+        scope_include = ["Dark mode"]
+
+    plan = _plan(_phase(1, "Core", "- [ ] T-000001: scaffold"))
+    report = check_plan_sanity(plan, spec=FakeSpec())
+    assert not report.ok
+    assert report.kinds() == {KIND_SCOPE_UNCOVERED}
+
+
+def test_verification_task_does_not_cover_scope() -> None:
+    # A scope item is only satisfied by a build task, not a verify task.
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Verify: dark mode toggles [feat: "Dark mode"]')
+    )
+    report = check_plan_sanity(plan, scope_include=["Dark mode"])
+    assert not report.ok
+    assert KIND_SCOPE_UNCOVERED in report.kinds()
+
+
+# --- Verification mapping --------------------------------------------------
+
+
+def test_verify_without_build_flagged() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add dark mode [feat: "Dark mode"]\n'
+            '- [ ] T-000002: Verify: currency converts [feat: "Currency exchange"]',
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
+    assert "Currency exchange" in report.violations[0].message
+
+
+def test_unannotated_verify_ok_when_plan_builds_something() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]\n'
+            "- [ ] T-000002: Verify: type `5km`, expect result `3.1mi`",
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+def test_unannotated_verify_flagged_when_plan_builds_nothing() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: scaffold the project\n"
+            "- [ ] T-000002: Verify: type `5km`, expect result `3.1mi`",
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
+
+
+def test_verify_mapping_ok_when_feature_built_elsewhere() -> None:
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]'),
+        _phase(2, "Tests", '- [ ] T-000002: Verify: conversion works [feat: "Unit conversion"]'),
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+# --- phase_ids -------------------------------------------------------------
+
+
+def test_duplicate_phase_ids_flagged() -> None:
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: a [feat: "A"]', phase_id=1),
+        _phase(2, "More", '- [ ] T-000002: b [feat: "B"]', phase_id=1),
+    )
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_PHASE_IDS}
+    assert "phase_001" in report.violations[0].message
+    assert "Duplicate" in report.violations[0].message
+
+
+def test_non_sequential_phase_ids_flagged() -> None:
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: a [feat: "A"]', phase_id=1),
+        _phase(2, "More", '- [ ] T-000002: b [feat: "B"]', phase_id=3),
+    )
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_PHASE_IDS}
+    assert "sequential" in report.violations[0].message
+
+
+def test_sequential_phase_ids_pass() -> None:
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: a [feat: "A"]'),
+        _phase(2, "More", '- [ ] T-000002: b [feat: "B"]'),
+        _phase(3, "Done", '- [ ] T-000003: c [feat: "C"]'),
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+# --- Combined --------------------------------------------------------------
+
+
+def test_multiple_violation_classes_reported_together() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add dark mode [feat: "Dark mode"]\n'
+            '- [ ] T-000002: Verify: currency [feat: "Currency"]',
+            phase_id=1,
+        ),
+        _phase(2, "More", "- [ ] T-000003: scaffold", phase_id=1),
+    )
+    report = check_plan_sanity(plan, scope_include=["Offline sync"])
+    assert report.kinds() == {
+        KIND_SCOPE_UNCOVERED,
+        KIND_VERIFY_WITHOUT_BUILD,
+        KIND_PHASE_IDS,
+    }
+
+
+def test_checked_tasks_count_as_built() -> None:
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [x] T-000001: Add unit conversion [feat: "Unit conversion"]\n'
+            '- [x] T-000002: Verify: conversion [feat: "Unit conversion"]',
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["Unit conversion"])
+    assert report.ok
