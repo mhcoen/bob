@@ -25,6 +25,7 @@ from duplo.claude_cli import query
 from duplo.extractor import Feature
 from duplo.plan_author_adapter import run_plan_author
 from duplo.questioner import BuildPreferences
+from duplo.reauthor_phase_ids import stamp_sequential_phase_ids
 
 _PHASE_SYSTEM = """\
 You are a senior software architect generating a build plan for one
@@ -782,6 +783,10 @@ def save_plan(
         plan = _merge_existing_plan(existing_plan, plan)
 
     planfile_save(path, plan, validation="unchecked")
+    saved_text = path.read_text(encoding="utf-8")
+    stamped_text = stamp_sequential_phase_ids(saved_text)
+    if stamped_text != saved_text:
+        path.write_text(stamped_text, encoding="utf-8")
 
     if expected_h1_ordinals is not None:
         accumulated = path.read_text(encoding="utf-8")
