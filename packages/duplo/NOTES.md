@@ -1,5 +1,21 @@
 # Notes
 
+## Observations
+
+### [10] [T-000008] Gate regression suite now pins the stdout contract — 2026-06-04
+
+T-000008 was already complete (commit ec5bce1f) with three pure-core
+regression tests over run_plan_sanity_gate (status, changes list, and a
+call-count assertion that makes the loop bound observable: 1 on hard
+stop, 2 on repair, never more). Those tests assert the returned
+GateOutcome but not the *observable* behavior the task wording names: a
+known-bad plan "triggers a logged repair", an unrepairable one yields "a
+hard stop with a report". Both are emitted only by enforce_plan_sanity
+(the filesystem wrapper) — a loud change log to stdout on repair, the
+actionable report to stdout plus a raised PlanSanityHardStop on stop.
+Added two capsys-based tests pinning that wiring so a refactor that drops
+the logging or swallows the hard stop cannot pass silently.
+
 ## Follow-ups
 
 ### Corrupt prior PLAN.md cannot self-heal through reauthor — 2026-05-10

@@ -323,3 +323,67 @@ def test_regression_unknown_violation_kind_hard_stops_without_repair(monkeypatch
     assert repair_called[0] is False  # never tried to repair an unknown class
     assert outcome.stop_report is not None
     assert "some_future_kind" in outcome.stop_report
+
+
+# --- Regression: the observable end-to-end contract through enforce_plan_sanity
+#
+# The pure-core tests above assert the GateOutcome (status, changes list, call
+# count). But the task's wording is about observable behavior: a known-bad plan
+# "triggers a logged repair", an unrepairable one yields "a hard stop with a
+# report". Those are emitted by enforce_plan_sanity (the filesystem wrapper):
+# a loud change log to stdout on repair, the actionable report to stdout plus a
+# raised PlanSanityHardStop on stop. Pin that wiring so a refactor that drops the
+# logging -- or, worse, swallows the hard stop -- cannot pass silently.
+
+
+def test_regression_enforce_logs_repair_for_known_bad_plan(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.setattr(plan_gate, "_commit_repair", lambda path: None)
+    # Same known-bad plan as the pure-core regression: verify-without-build
+    # orphan AND duplicate phase_ids, both repairable in one pass.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add dark mode [feat: "Dark mode"]\n'
+            '- [ ] T-000002: Verify: currency converts [feat: "Currency exchange"]',
+            phase_id=1,
+        ),
+        _phase(2, "More", '- [ ] T-000003: Add export [feat: "Export"]', phase_id=1),
+    )
+    plan_path = _write_plan(tmp_path, plan)
+
+    outcome = enforce_plan_sanity(target_dir=tmp_path)
+
+    assert outcome.status == "repaired"
+    on_disk = plan_path.read_text(encoding="utf-8")
+    assert check_plan_sanity(on_disk).ok
+    # The repair is logged loudly and specifically to stdout, naming both
+    # mechanical fixes -- not just buried in the returned changes list.
+    out = capsys.readouterr().out
+    assert "repaired known defect(s) in PLAN.md" in out
+    assert "verify-without-build" in out
+    assert "phase_ids:" in out
+
+
+def test_regression_enforce_hard_stops_loudly_for_unrepairable(tmp_path, capsys) -> None:
+    # An unrepairable scope-uncovered defect must reach the user as a printed,
+    # actionable report AND raise PlanSanityHardStop -- never a silent return,
+    # never a rewrite of PLAN.md, never a retry.
+    plan = _plan(
+        _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]')
+    )
+    plan_path = _write_plan(tmp_path, plan)
+
+    class FakeSpec:
+        scope_include = ["Unit conversion", "Currency exchange"]
+
+    with pytest.raises(PlanSanityHardStop) as excinfo:
+        enforce_plan_sanity(FakeSpec(), target_dir=tmp_path)
+
+    out = capsys.readouterr().out
+    assert "failed the post-assembly sanity gate" in out
+    assert "Currency exchange" in out
+    assert "does not retry" in out
+    # The raised error carries the same report and the plan is left untouched.
+    assert "Currency exchange" in excinfo.value.report_text
+    assert plan_path.read_text(encoding="utf-8") == plan
