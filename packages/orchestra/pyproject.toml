@@ -19,6 +19,9 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "pytest-xdist>=3.5",
+    "pytest-timeout>=2.3",
+    "pytest-cov>=4.1",
 ]
 
 [project.scripts]
@@ -35,6 +38,8 @@ orchestra = [
 ]
 
 [tool.pytest.ini_options]
+addopts = "-n auto"
+timeout = 60
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 
