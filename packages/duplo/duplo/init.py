@@ -19,6 +19,8 @@ from typing import Literal
 from duplo.claude_cli import ClaudeCliError
 from duplo.diagnostics import record_failure
 from duplo.fetcher import fetch_site
+from duplo.plan_author_role import ROLE_NAME as _PLAN_AUTHOR_ROLE_NAME
+from duplo.plan_author_role import plan_author_role_binding
 from duplo.scanner import scan_directory  # noqa: F401
 from duplo.spec_reader import ProductSpec, ReferenceEntry, SourceEntry
 from duplo.spec_writer import (
@@ -194,6 +196,13 @@ _ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
         "council_four_canonical": {"pattern": "council_four_canonical"},
         "council_four_reauthor": {"pattern": "council_four_reauthor"},
     },
+    # Duplo-owned compound role consumed by run_role("plan_author").
+    # Distinct from Orchestra's shared "design" role: its own workflow
+    # pattern, proposer/reviewer/judge leaf bindings, and role-scoped
+    # acceptance criteria. See duplo/plan_author_role.py.
+    "role_bindings": {
+        _PLAN_AUTHOR_ROLE_NAME: plan_author_role_binding(),
+    },
 }
 
 
@@ -211,6 +220,12 @@ def _write_orchestra_council_config(cwd: Path) -> None:
     not distinct model strings). The same defaults are encoded as a
     hardcoded fallback in ``duplo.council`` for projects that
     pre-date this template.
+
+    The written config also carries the duplo-owned ``plan_author``
+    compound role under ``role_bindings`` (see
+    ``duplo.plan_author_role``); ``run_role("plan_author", ...)``
+    resolves it to the proposer/reviewer/judge loop plus the
+    role-scoped acceptance criteria.
     """
     import json
 

@@ -81,6 +81,38 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.6] [T-000788] `plan_author` compound role: leaf keys are workflow role names; proposer/judge may share an actor — 2026-06-04
+
+Defined the duplo-owned `plan_author` compound role in
+`duplo/plan_author_role.py` and emit it into the project-local
+`.orchestra/config.json` `role_bindings` table from `duplo.init`
+(`_ORCHESTRA_COUNCIL_CONFIG`). Three points worth carrying forward:
+
+  - Leaf-binding keys must be the WORKFLOW's role names, not the
+    informal labels in the task. `plan_author.orc` declares roles
+    `proposer`, `reviewer`, `judge_role`; the config binds
+    `judge_role` (NOT `judge`). `_resolve_workflow_role_bindings`
+    resolves the workflow's `state.role` names against the leaf table,
+    so a key named `judge` would leave `judge_role` unbound.
+
+  - `_validate_design_distinct_actors` is gated on `role_name ==
+    "design"` only. `plan_author` is therefore NOT required to have
+    pairwise-distinct actors: proposer=opus and judge_role=opus
+    deliberately collapse to the same `(claude_code_text, opus)`
+    actor. Only the reviewer is bound to a distinct actor
+    (`codex` -> `(codex_text, gpt-5-codex)`) so the critique is
+    independent of the authoring/judging model -- "distinct-enough",
+    not fully distinct.
+
+  - Extension point A is the criteria path
+    (`CompoundRoleBinding.criteria` -> dispatch `derived_criteria`
+    -> Executor); extension point B is the registry_customizer
+    transform-registration path (T-000787). The `plan_author`
+    criteria encode ONLY judgment-level rules (granularity 5-15,
+    [BATCH]/[USER]/[AUTO], [feat:]/[fix:]); the hard structural rules
+    are left to the `validate_plan_body` gate so they are checked
+    mechanically, not re-litigated by the judge.
+
 ### [9.5] [T-000787] `validate_plan_body` enforces "no `## Bugs`" via `typed_plan_from_synthesizer_text`, not in the transform — 2026-06-04
 
 The `validate_plan_body` transform is intentionally thin: it delegates
