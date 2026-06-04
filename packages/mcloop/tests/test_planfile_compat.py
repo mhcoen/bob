@@ -98,3 +98,16 @@ def test_mutation_requires_migrated_task_ids(tmp_path: Path) -> None:
         assert "requires migrated PLAN.md task ids" in str(exc)
     else:
         raise AssertionError("check_off accepted an ID-less task")
+
+
+def test_mark_failed_marks_idless_bugs_task_by_source_position(tmp_path: Path) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [ ] Fix crash in loose bug queue\n")
+    task = shim.find_next(shim.parse(path))
+
+    assert task is not None
+    assert task.task_id is None
+
+    shim.mark_failed(path, task)
+
+    assert path.read_text() == "## Bugs\n\n- [!] Fix crash in loose bug queue\n"
