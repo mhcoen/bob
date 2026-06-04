@@ -79,6 +79,7 @@ from duplo.council import (
     make_duplo_progress_callback,
     typed_plan_from_synthesizer_text,
 )
+from duplo.init import _deploy_plan_author_workflow
 from duplo.plan_author_role import render_criteria_block
 from duplo.plan_validation_transform import register_validate_plan_body
 
@@ -217,6 +218,9 @@ def run_plan_author(
     the final body never validates (fail closed -- no body) and
     :class:`PlanAuthorRunError` on ``ERROR``.
     """
+    effective_project_dir = Path(project_dir) if project_dir is not None else Path.cwd()
+    _deploy_plan_author_workflow(effective_project_dir)
+
     query = _build_state_text(prompt=prompt, system=system)
     history_text = build_history(history or PriorPhaseContext())
 
@@ -232,7 +236,7 @@ def run_plan_author(
             # check enforces (no missing_ids / extra_ids).
             criteria_block=render_criteria_block(),
             registry_customizer=register_validate_plan_body(required_phase_id),
-            project_dir=project_dir,
+            project_dir=effective_project_dir,
             progress_callback=make_duplo_progress_callback(),
         )
     except WorkflowApiError as exc:

@@ -158,15 +158,15 @@ def run_init(args: argparse.Namespace) -> None:
     from_description = getattr(args, "from_description", None)
     if url is None and from_description is None:
         _run_no_args(args)
-        _write_orchestra_council_config(Path.cwd())
+        _deploy_orchestra_assets(Path.cwd())
         return
     if url is not None and from_description is None:
         _run_url(args, url)
-        _write_orchestra_council_config(Path.cwd())
+        _deploy_orchestra_assets(Path.cwd())
         return
     if url is None and from_description is not None:
         _run_description(args, from_description)
-        _write_orchestra_council_config(Path.cwd())
+        _deploy_orchestra_assets(Path.cwd())
         return
     # Reached only when BOTH url and from_description are non-None;
     # the three preceding branches handled the other cases. Narrow
@@ -174,7 +174,7 @@ def run_init(args: argparse.Namespace) -> None:
     assert url is not None
     assert from_description is not None
     _run_combined(args, url, from_description)
-    _write_orchestra_council_config(Path.cwd())
+    _deploy_orchestra_assets(Path.cwd())
 
 
 _ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
@@ -236,6 +236,37 @@ def _write_orchestra_council_config(cwd: Path) -> None:
     orchestra_dir.mkdir(exist_ok=True)
     config_path.write_text(json.dumps(_ORCHESTRA_COUNCIL_CONFIG, indent=2, sort_keys=True) + "\n")
     print("Created .orchestra/config.json (council_four defaults).")
+
+
+def _deploy_orchestra_assets(cwd: Path) -> None:
+    """Deploy Duplo's managed Orchestra config and workflow assets."""
+    _write_orchestra_council_config(cwd)
+    _deploy_plan_author_workflow(cwd)
+
+
+def _deploy_plan_author_workflow(cwd: Path) -> None:
+    """Mirror Duplo's ``plan_author`` workflow assets into a project.
+
+    The copied files are duplo-owned, so unlike ``config.json`` they are
+    refreshed when package bytes differ from the project-local copy. Unrelated
+    files under ``.orchestra/workflows`` are never removed or modified.
+    """
+    source_dir = Path(__file__).resolve().parent / "workflows"
+    workflows_dir = cwd / ".orchestra" / "workflows"
+    relative_paths = [
+        Path("plan_author.orc"),
+        *sorted(Path("templates") / path.name for path in (source_dir / "templates").glob("*.md")),
+        *sorted(Path("schemas") / path.name for path in (source_dir / "schemas").glob("*.json")),
+    ]
+
+    for relative_path in relative_paths:
+        source = source_dir / relative_path
+        destination = workflows_dir / relative_path
+        source_bytes = source.read_bytes()
+        if destination.exists() and destination.read_bytes() == source_bytes:
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(source_bytes)
 
 
 def _run_no_args(args: argparse.Namespace) -> None:
