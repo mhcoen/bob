@@ -1794,3 +1794,22 @@ test_status.py:53, and similar). Confirmed by `git stash` + `mypy .` on the clea
 tree. The T-000002 regression tests (tests/test_plan_author_role.py,
 tests/test_plan_author_e2e.py) add zero mypy errors; "keep mypy green" here means
 introducing no new errors, not clearing the pre-existing unrelated backlog.
+
+[4] [T-000004] The canonical generation path already stamps sequential phase_ids
+correctly: `bob_tools.planfile.migration.migrate` increments `next_phase_num` per
+phase and `renderer.py` emits whatever `Phase.phase_id` holds, and
+`council.compute_required_phase_id` returns `highest + 1` per run. No constant
+`phase_001` stamper exists in `saver.py` (it stores no phase_id at all) or in the
+bob_tools stack. The genuine gap was in `duplo/reauthor_phase_ids.py`: despite its
+name it had no re-authoring/stamping function, only `parse_plan_phases` and the
+lineage validator. Added `stamp_sequential_phase_ids(plan_text)` there to rewrite
+the per-phase `<!-- phase_id: ... -->` comments to phase_001..phase_NNN by position.
+
+## Hypotheses
+
+[4] [T-000004] The new `stamp_sequential_phase_ids` is not yet wired into the
+pipeline. T-000007 ("wire the verifier into the pipeline after full-plan assembly")
+is the natural integration point; until then it is a standalone, tested utility
+consumed by the T-000005 regression test. Wiring it unconditionally into the
+canonical flow would risk double-stamping against `migrate`, so it is intentionally
+left as a post-assembly normalization step for the corrective gate to call.

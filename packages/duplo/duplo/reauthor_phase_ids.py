@@ -17,6 +17,10 @@ Public surface:
 
   - :func:`parse_plan_phases` extracts header id + title pairs from
     PLAN.md in source order.
+  - :func:`stamp_sequential_phase_ids` re-authors the per-phase
+    ``<!-- phase_id: ... -->`` comments so each phase carries a
+    unique id (``phase_001``..``phase_NNN``) tracking its position,
+    rather than every phase sharing a constant ``phase_001``.
   - :func:`validate_lineage` enforces the Slice C invariants on the
     sidecar and raises :class:`LineageValidationError` fail-closed.
   - :func:`compute_lineage_diff` walks the sidecar and returns a
@@ -32,6 +36,19 @@ from typing import Any
 
 _HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")
 _PHASE_ID_COMMENT_RE = re.compile(r"^<!--\s*phase_id:\s*(?P<phase_id>[A-Za-z0-9_]+)\s*-->\s*$")
+
+# Stamping recognizes both mcloop phase keywords (``Phase`` and
+# ``Stage``); the canonical renderer emits either, so re-authoring ids
+# must cover both. ``prefix``/``rest``/``trail`` partition the header so
+# the keyword, ordinal/title, and any trailing whitespace round-trip
+# untouched while only the id token is rewritten.
+_PHASE_HEADER_REWRITE_RE = re.compile(
+    r"^(?P<prefix>##\s+(?:Phase|Stage)\s+)(?P<id>[A-Za-z0-9_]+)(?P<rest>:\s+.+?)(?P<trail>\s*)$"
+)
+# A legacy inline id (``## Phase phase_007: ...``). Display-ordinal
+# headers (``## Phase 1: ...``) do not match, so their ordinal is left
+# alone — the authoritative id lives in the comment line for those.
+_LEGACY_INLINE_ID_RE = re.compile(r"^phase_\d+$")
 
 _VALID_ACTIONS = frozenset(["preserve", "supersede", "split", "merge", "new"])
 _NO_FROM_ACTIONS = frozenset(["preserve", "new"])
@@ -95,6 +112,59 @@ def parse_plan_phases(plan_text: str) -> list[ParsedHeader]:
             )
         )
     return headers
+
+
+def stamp_sequential_phase_ids(plan_text: str) -> str:
+    """Re-author the phase ids in *plan_text* to be unique and sequential.
+
+    Walks PLAN.md in source order and assigns ``phase_001`` to the first
+    phase, ``phase_002`` to the second, and so on, so each phase's id
+    tracks its position. This is the corrected counterpart to the naive
+    stamper that wrote a constant ``phase_001`` onto every phase: the
+    counter increments per header rather than being fixed.
+
+    For each ``## Phase <id>: <title>`` (or ``## Stage ...``) header the
+    authoritative ``<!-- phase_id: ... -->`` comment on the following
+    line is rewritten to the sequential id; when no such comment is
+    present one is inserted directly beneath the header. Headers that
+    carry a legacy inline ``phase_NNN`` id token have that token
+    rewritten too so the header and comment never disagree; display
+    ordinal headers (``## Phase 1: ...``) keep their ordinal untouched
+    because the comment is the id of record for them.
+
+    Lines that are not phase headers (prose, tasks, the H1 envelope,
+    blank lines) round-trip verbatim, and the trailing newline is
+    preserved. The transform is idempotent: stamping an
+    already-sequential plan returns equal text.
+    """
+    lines = plan_text.split("\n")
+    out: list[str] = []
+    counter = 0
+    index = 0
+    total = len(lines)
+    while index < total:
+        line = lines[index]
+        header = _PHASE_HEADER_REWRITE_RE.match(line)
+        if header is None:
+            out.append(line)
+            index += 1
+            continue
+
+        counter += 1
+        new_id = f"phase_{counter:03d}"
+        if _LEGACY_INLINE_ID_RE.match(header.group("id")):
+            line = f"{header.group('prefix')}{new_id}{header.group('rest')}{header.group('trail')}"
+        out.append(line)
+        out.append(f"<!-- phase_id: {new_id} -->")
+
+        # Consume an existing comment line so it is replaced, not
+        # duplicated; otherwise the new comment is an insertion.
+        if index + 1 < total and _PHASE_ID_COMMENT_RE.match(lines[index + 1]):
+            index += 2
+        else:
+            index += 1
+
+    return "\n".join(out)
 
 
 @dataclass
@@ -427,5 +497,6 @@ __all__ = [
     "ParsedHeader",
     "compute_lineage_diff",
     "parse_plan_phases",
+    "stamp_sequential_phase_ids",
     "validate_lineage",
 ]
