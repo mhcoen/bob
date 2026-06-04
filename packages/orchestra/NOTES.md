@@ -85,6 +85,21 @@
   is complete and committed; the working tree carries only the two
   import-fix edits to `_common.py`/`validators.py`.
 
+- 2026-06-03 [1.4] [T-000004] The `registry_customizer` hook is invoked
+  twice per `run_workflow` call: once on the pre-load registry (so the
+  loader's transform-record validator sees the registration) and once on
+  the runtime registry (so the executor can resolve the transform). These
+  are two distinct `ProfileRegistry` instances, so the caller's callback
+  must be idempotent. `ProfileRegistry.register_transform` raises
+  `RegistryConflict` on a duplicate name, so a naive callback that always
+  registers would crash on the second (runtime) registry only if the same
+  registry object were reused; because the two registries are distinct it
+  does not crash here, but a caller that caches and reuses a registry, or
+  that the framework later collapses to one registry, would. The hook's
+  docstring instructs callers to guard with `if name not in reg.transforms`
+  and the test's customizer does so. If a future change shares one registry
+  across both passes, the guard becomes load-bearing rather than advisory.
+
 ## Hypotheses
 
 - 2026-06-03 [1.1] [T-000001] The effective lint/type gate appears to be

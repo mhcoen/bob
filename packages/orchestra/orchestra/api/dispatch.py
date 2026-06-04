@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -49,7 +50,7 @@ from orchestra.progress import (
     ProgressCallback,
 )
 from orchestra.prompts import build_code_edit_prompt
-from orchestra.registry.registry import BUILTIN_MODEL_IDENTIFIERS
+from orchestra.registry.registry import BUILTIN_MODEL_IDENTIFIERS, ProfileRegistry
 from orchestra.spine import (
     Envelope,
     Workflow,
@@ -149,6 +150,7 @@ def run_workflow(
     data_root: Path | str | None = None,
     progress_callback: ProgressCallback | None = None,
     quiet: bool = False,
+    registry_customizer: Callable[[ProfileRegistry], None] | None = None,
 ) -> WorkflowRunResult:
     """Execute a configured workflow by name.
 
@@ -165,6 +167,19 @@ def run_workflow(
     Pass ``quiet=True`` to suppress, or pass an explicit
     ``progress_callback`` to install a custom reporter. The CLI
     installs ``stderr_reporter`` up front for every dispatch.
+
+    ``registry_customizer`` (optional) is a caller-supplied callback
+    invoked on BOTH the pre-load registry (before the workflow is
+    loaded, so the loader's transform-record validator sees the
+    registration) and the runtime registry (before the executor runs,
+    so the executor's transform states can resolve the registration).
+    It is invoked after core registration on each registry. A consumer
+    uses it to register a caller-owned ``actor transform`` without
+    Orchestra importing the consumer package: Orchestra exposes the
+    callback, the caller supplies a function that registers its own
+    transform. The same callable must be safe to call twice (once per
+    registry); the built-in registration helpers are idempotent and
+    callers should match that.
     """
     if name == "council_four":
         import warnings
@@ -193,9 +208,13 @@ def run_workflow(
     # the per-workflow role bindings against the project config and
     # build the runtime registry whose dispatchers fan out per role.
     pre_registry = _pre_load_registry()
+    if registry_customizer is not None:
+        registry_customizer(pre_registry)
     workflow = load_workflow(workflow_path, pre_registry)
     role_bindings = _validate_role_bindings(workflow, name, cfg)
     registry = _build_registry(role_bindings)
+    if registry_customizer is not None:
+        registry_customizer(registry)
 
     run_id = new_run_id()
     if data_root is None:
