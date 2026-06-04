@@ -158,6 +158,67 @@ def test_verification_task_does_not_cover_scope() -> None:
     assert KIND_SCOPE_UNCOVERED in report.kinds()
 
 
+# --- Regression: real writer cases (T-000010) ------------------------------
+
+
+def test_scope_item_covered_by_parenthetical_qualified_feat_name() -> None:
+    # Real writer case: the planner builds a feature whose [feat: ...] name
+    # carries a parenthetical qualifier ("init (starter SPEC.md + ref/)"),
+    # while the scope item names only the bare command. The build task's
+    # own description does not mention the scope token, so coverage must
+    # come from the qualified feat name (the bare item is a substring of it).
+    plan = _plan(
+        _phase(
+            1,
+            "Bootstrapping",
+            "- [ ] T-000001: Build the project bootstrap command "
+            '[feat: "init (starter SPEC.md + ref/)"]',
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["init"])
+    assert report.ok
+    assert report.violations == []
+
+
+def test_umbrella_cli_scope_item_covered_by_per_subcommand_features() -> None:
+    # Real writer case: a single umbrella scope line names the CLI's
+    # subcommands, but the planner decomposes it into one finer feature per
+    # subcommand. The umbrella item is covered because each listed
+    # constituent (init, run, fix) is built by some task.
+    plan = _plan(
+        _phase(
+            1,
+            "CLI",
+            '- [ ] T-000001: Implement the init command [feat: "init command"]\n'
+            '- [ ] T-000002: Implement the default run command [feat: "run command"]\n'
+            '- [ ] T-000003: Implement the fix command [feat: "fix command"]',
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["CLI subcommands (init, run, fix)"])
+    assert report.ok
+    assert report.violations == []
+
+
+def test_genuine_scope_gap_still_flagged_amid_covered_items() -> None:
+    # True negative guard: robust matching must not collapse into
+    # "always covered". A scope item that no task builds under any strategy
+    # (substring, feat name, paraphrase, or decomposition) is still reported,
+    # even alongside an item that IS covered by a qualified feat name.
+    plan = _plan(
+        _phase(
+            1,
+            "CLI",
+            '- [ ] T-000001: Implement the init command [feat: "init command"]\n'
+            '- [ ] T-000002: Implement the fix command [feat: "fix command"]',
+        )
+    )
+    report = check_plan_sanity(plan, scope_include=["init", "Continuous background watch mode"])
+    assert not report.ok
+    assert report.kinds() == {KIND_SCOPE_UNCOVERED}
+    assert len(report.violations) == 1
+    assert "Continuous background watch mode" in report.violations[0].message
+
+
 # --- Verification mapping --------------------------------------------------
 
 
