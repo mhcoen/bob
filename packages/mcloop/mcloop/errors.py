@@ -13,6 +13,41 @@ from mcloop.ratelimit import RateLimitState, run_session_with_fallover
 from mcloop.runner import RunResult, run_diagnostic
 
 _MAX_FIX_ATTEMPTS = 3
+_EPHEMERAL_SOURCE_DIRS = frozenset(
+    {
+        ".cache",
+        ".mcloop",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "logs",
+        "node_modules",
+        "temp",
+        "tmp",
+        "venv",
+    }
+)
+
+
+def _resolve_error_source_path(project_dir: Path, source_file: str) -> Path:
+    source_path = Path(source_file).expanduser()
+    if source_path.is_absolute():
+        return source_path.resolve(strict=False)
+    return (project_dir / source_path).resolve(strict=False)
+
+
+def _is_ephemeral_error_source(project_dir: Path, source_file: object) -> bool:
+    if not isinstance(source_file, str) or not source_file.strip():
+        return False
+
+    project_root = project_dir.resolve(strict=False)
+    source_path = _resolve_error_source_path(project_root, source_file)
+    if not source_path.is_relative_to(project_root):
+        return True
+
+    relative_parts = source_path.relative_to(project_root).parts
+    return any(part in _EPHEMERAL_SOURCE_DIRS for part in relative_parts[:-1])
 
 
 def _check_errors_json(
@@ -42,6 +77,34 @@ def _check_errors_json(
         return True
     if not isinstance(entries, list) or not entries:
         return True
+
+    skipped_ephemeral = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and _is_ephemeral_error_source(project_dir, entry.get("source_file", ""))
+    ]
+    if skipped_ephemeral:
+        entries = [
+            entry
+            for entry in entries
+            if not (
+                isinstance(entry, dict)
+                and _is_ephemeral_error_source(project_dir, entry.get("source_file", ""))
+            )
+        ]
+        try:
+            errors_path.write_text(_json.dumps(entries, indent=2))
+        except OSError:
+            pass
+        print(
+            formatting.system_msg(
+                f"Skipped {len(skipped_ephemeral)} transient error(s) from .mcloop/errors.json"
+            ),
+            flush=True,
+        )
+        if not entries:
+            return True
 
     # Classify entries by fix_attempts
     resolvable: list[dict] = []
@@ -155,7 +218,7 @@ def _check_errors_json(
         # Read relevant source file
         source_content = ""
         if source_file:
-            source_path = project_dir / source_file
+            source_path = _resolve_error_source_path(project_dir, str(source_file))
             if source_path.is_file():
                 try:
                     source_content = source_path.read_text()

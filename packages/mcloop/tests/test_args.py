@@ -5843,6 +5843,56 @@ def test_check_errors_user_accepts(tmp_path, capsys):
     assert "Added 2 fix task(s)" in out
 
 
+def test_check_errors_skips_tmp_ephemeral_sources(tmp_path, capsys):
+    """Transient /tmp crash locations are not turned into durable fix tasks."""
+    entries = [
+        {
+            "timestamp": "2026-03-10T10:00:00+00:00",
+            "exception_type": "RuntimeError",
+            "description": "transient experiment failed",
+            "source_file": "/tmp/claude-501/exp_e2e.py",
+            "line": 12,
+        },
+        {
+            "timestamp": "2026-03-10T10:01:00+00:00",
+            "exception_type": "ValueError",
+            "description": "bad value",
+            "source_file": "app.py",
+            "line": 42,
+        },
+    ]
+    errors_path = _make_errors_json(tmp_path, entries)
+    _make_plan(tmp_path)
+    (tmp_path / "app.py").write_text("x = 1\n")
+
+    diag_result = MagicMock(
+        success=True,
+        output="--- FIX DESCRIPTION ---\nFix durable app crash\n--- END FIX ---",
+    )
+    with (
+        patch("builtins.input", return_value=""),
+        patch("mcloop.errors.run_diagnostic", return_value=diag_result) as mock_diag,
+        patch("subprocess.run") as mock_git,
+    ):
+        mock_git.return_value = MagicMock(returncode=0, stdout="")
+        result = _check_errors_json(tmp_path)
+
+    assert result is True
+    mock_diag.assert_called_once()
+    bugs_text = (tmp_path / "BUGS.md").read_text()
+    assert "Fix durable app crash" in bugs_text
+    assert "exp_e2e.py" not in bugs_text
+
+    updated = json.loads(errors_path.read_text())
+    assert len(updated) == 1
+    assert updated[0]["source_file"] == "app.py"
+    assert updated[0]["fix_attempts"] == 1
+
+    out = capsys.readouterr().out
+    assert "Skipped 1 transient error(s)" in out
+    assert "Added 1 fix task(s)" in out
+
+
 def test_check_errors_default_yes(tmp_path):
     """Empty input (just Enter) defaults to yes, runs diagnostics."""
     entries = [
