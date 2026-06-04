@@ -1502,19 +1502,32 @@ workflow race_test
     # still appear in per_child_outcome but routing must stay at
     # the error target.
     a_invoked = threading.Event()
+    b_in_invoke = threading.Event()
     b_proceed = threading.Event()
 
     class _Race(MockModelAdapter):
         def invoke(self, prepared: Any) -> dict[str, Any]:
             model_id = prepared.summary.get("model")
             if model_id == "m_a":
+                # Only error once b's worker has entered adapter.invoke
+                # (it is past the worker's pre-invoke cancel check, so
+                # its entry is ``registered``). Without this gate a can
+                # error while b is still ``pending``, in which case
+                # request_cancel_all flags b's worker and it short
+                # circuits before invoking: b_in_invoke would never
+                # fire and the race the test means to exercise (a
+                # registered child draining to success after cancel)
+                # would not occur.
+                b_in_invoke.wait(timeout=5)
                 a_invoked.set()
                 raise RuntimeError("synthetic failure on a")
             if model_id == "m_b":
-                # Wait for a to error so the controller has called
+                # Signal that b has reached adapter.invoke, then wait
+                # for a to error so the controller has called
                 # request_cancel_all by the time b completes. The
                 # mock adapter's cancel is a no-op, so b's invoke
                 # drains and returns success.
+                b_in_invoke.set()
                 a_invoked.wait(timeout=5)
                 # Small additional delay so a's drain reaches the
                 # controller and request_cancel_all has fired.

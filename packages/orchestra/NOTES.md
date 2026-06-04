@@ -100,6 +100,29 @@
   and the test's customizer does so. If a future change shares one registry
   across both passes, the guard becomes load-bearing rather than advisory.
 
+- 2026-06-04 [1.6] [T-000006] Phase-close verification. All four
+  mandatory checks pass: `ruff check .` (No issues found), `ruff format
+  --check .` (108 files already formatted), `mypy .` (No issues found),
+  `pytest` (699 passed, 8 skipped, 0 failed). The phase-3-confirmed
+  whole-repo mypy now reports clean (the 525 pre-existing errors noted
+  under T-000001 were cleared by intervening commit `ab2ec61d`).
+- 2026-06-04 [1.6] [T-000006] The first `pytest` run failed once on
+  `test_cancellation_race_preserves_concurrent_success` (the flaky timing
+  test flagged under T-000001). It is unrelated to the phase work (which
+  touched only `orchestra/config.py` and `orchestra/api/dispatch.py`); the
+  fan-out executor was not modified. Root cause confirmed by reading the
+  executor: `request_cancel_all` (`_executor_common.py:401-415`) flags a
+  child still in the `pending` state with `cancel_requested` and the worker
+  short circuits before calling `adapter.invoke`. The test only synchronized
+  on `a_invoked` from inside b's invoke, which does not fire if b's worker
+  is still `pending` when a errors and triggers cancellation, so b's invoke
+  was never entered and `b_proceed` stayed clear. Fixed deterministically as
+  the earlier note predicted: added a `b_in_invoke` event so a errors only
+  after b's worker has reached `adapter.invoke` (entry is `registered`,
+  where the mock's cancel is a no-op and b drains to success). No product
+  code changed; the assertions about routing and per-child outcome are
+  unchanged. Re-run is green.
+
 ## Hypotheses
 
 - 2026-06-03 [1.1] [T-000001] The effective lint/type gate appears to be
