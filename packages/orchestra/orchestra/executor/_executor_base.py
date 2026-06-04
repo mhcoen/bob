@@ -34,7 +34,6 @@ from orchestra.spine import (
 from orchestra.store import ArtifactStore
 from orchestra.visibility import VisibilityIndex
 
-
 ProgressCallback = Callable[
     [
         str,

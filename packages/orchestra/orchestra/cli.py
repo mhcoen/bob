@@ -648,9 +648,7 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
     except OrchestraError as exc:
         print(f"  workflow failed to load: {exc}", file=err)
         return 1
-    role_names = sorted(
-        {role for state in workflow.states if (role := state.role) is not None}
-    )
+    role_names = sorted({role for state in workflow.states if (role := state.role) is not None})
     print(
         "Required roles: " + (", ".join(role_names) if role_names else "(none)"),
         file=out,

@@ -1237,8 +1237,8 @@ def test_run_workflow_quiet_true_silences_progress(
     so library callers that want to capture output for their own
     purposes can do so."""
     from orchestra.api import dispatch as _api
-    from orchestra.api.registry import _build_registry
     from orchestra.api import run_workflow
+    from orchestra.api.registry import _build_registry
 
     real_build = _build_registry
 
@@ -1517,8 +1517,8 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     get the two-line ticker without the caller threading it in. T-000001
     regression check.
     """
-    from orchestra.api import bindings as api_module
     from orchestra.adapters._subprocess import get_current_activity
+    from orchestra.api import bindings as api_module
 
     captured: dict[str, Any] = {}
 
