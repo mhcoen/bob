@@ -124,15 +124,56 @@ def extract_features(
     try:
         raw = query(prompt, system=system, call_site="extract_features")
     except ClaudeCliError:
-        return []
+        # Even when extraction fails entirely, user scope includes are
+        # authoritative and must still surface as features.
+        return _reconcile_scope_include([], scope_include)
     features = _parse_features(raw)
 
-    # Scope includes are handled by the LLM prompt; no post-filter needed
-    # since the user wants them added even if not in scraped text.
+    # User spec scope is authoritative; scraped Sources only add. Any
+    # scope_include item the LLM did not surface is synthesized below so a
+    # required feature present in no scraped Source is never dropped.
     # scope_exclude filtering is applied at the orchestrator level
     # (main.py) after this function returns.
+    features = _reconcile_scope_include(features, scope_include)
 
     return features
+
+
+def _reconcile_scope_include(
+    features: list[Feature],
+    scope_include: list[str] | None,
+) -> list[Feature]:
+    """Append a synthesized :class:`Feature` for unmatched scope includes.
+
+    For every name in *scope_include* that has no matching feature in
+    *features* (case-insensitive name match), a deterministic ``Feature``
+    sourced from the spec item is appended. User spec scope is
+    authoritative, so a required item present in no scraped Source is
+    never dropped.
+
+    The original ordering of *features* is preserved; synthesized
+    features are appended in *scope_include* order. Blank include items
+    are ignored, and duplicate include items synthesize only once.
+    """
+    if not scope_include:
+        return features
+
+    have = {f.name.strip().lower() for f in features}
+    result = list(features)
+    for item in scope_include:
+        name = item.strip()
+        key = name.lower()
+        if not key or key in have:
+            continue
+        have.add(key)
+        result.append(
+            Feature(
+                name=name,
+                description=f"User-specified scope item from SPEC: {name}.",
+                category="core",
+            )
+        )
+    return result
 
 
 def _matches_excluded(

@@ -261,7 +261,7 @@ class TestExtractFeaturesWithSpec:
         assert len(features) == 2
 
     def test_scope_include_does_not_filter(self):
-        """Scope includes are handled by the LLM prompt, not by post-filtering."""
+        """Scope includes never drop extracted features; they only add."""
         raw = json_array(
             [
                 {"name": "Math", "description": "Basic math.", "category": "core"},
@@ -269,7 +269,11 @@ class TestExtractFeaturesWithSpec:
         )
         with patch("duplo.extractor.query", return_value=raw):
             features = extract_features("content", scope_include=["Variables"])
-        assert len(features) == 1
+        # Math is kept and Variables is synthesized because it was not
+        # surfaced by the LLM.
+        names = {f.name for f in features}
+        assert "Math" in names
+        assert "Variables" in names
 
     def test_combined_spec_and_existing_names(self):
         with patch("duplo.extractor.query", return_value="[]") as mock_query:
@@ -281,6 +285,81 @@ class TestExtractFeaturesWithSpec:
         system = mock_query.call_args.kwargs.get("system", "")
         assert "Build a widget." in system
         assert "Search" in system
+
+
+class TestScopeIncludeReconciliation:
+    """Unmatched scope_include items are deterministically synthesized."""
+
+    def _raw(self, *names: str) -> str:
+        return json_array(
+            [{"name": n, "description": f"Does {n}.", "category": "core"} for n in names]
+        )
+
+    def test_unmatched_include_is_synthesized(self):
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content", scope_include=["Variables"])
+        synth = [f for f in features if f.name == "Variables"]
+        assert len(synth) == 1
+        assert synth[0].category == "core"
+        assert "Variables" in synth[0].description
+
+    def test_matched_include_is_not_duplicated(self):
+        """An include already extracted by the LLM is not synthesized again."""
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content", scope_include=["Math"])
+        assert [f.name for f in features].count("Math") == 1
+        assert len(features) == 1
+
+    def test_match_is_case_insensitive(self):
+        """Case differences between include and extracted name still match."""
+        with patch("duplo.extractor.query", return_value=self._raw("Real-Time Sync")):
+            features = extract_features("content", scope_include=["real-time sync"])
+        assert len(features) == 1
+        assert features[0].name == "Real-Time Sync"
+
+    def test_extracted_features_preserved_before_synthesized(self):
+        """Extracted features keep their order; synthesized ones append after."""
+        with patch("duplo.extractor.query", return_value=self._raw("Math", "Charts")):
+            features = extract_features("content", scope_include=["Charts", "Variables"])
+        names = [f.name for f in features]
+        assert names == ["Math", "Charts", "Variables"]
+
+    def test_multiple_unmatched_includes_all_synthesized(self):
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content", scope_include=["Variables", "Functions"])
+        names = {f.name for f in features}
+        assert {"Math", "Variables", "Functions"} <= names
+
+    def test_blank_include_items_ignored(self):
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content", scope_include=["", "   ", "Variables"])
+        names = [f.name for f in features]
+        assert names == ["Math", "Variables"]
+
+    def test_duplicate_includes_synthesized_once(self):
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content", scope_include=["Variables", "variables"])
+        assert [f.name for f in features].count("Variables") == 1
+
+    def test_synthesized_even_when_extraction_empty(self):
+        """Includes surface even if the LLM returned nothing usable."""
+        with patch("duplo.extractor.query", return_value="not json"):
+            features = extract_features("content", scope_include=["Variables"])
+        assert [f.name for f in features] == ["Variables"]
+
+    def test_synthesized_on_claude_cli_error(self):
+        """A failed extraction still surfaces required scope includes."""
+        with patch(
+            "duplo.extractor.query",
+            side_effect=ClaudeCliError("timed out"),
+        ):
+            features = extract_features("content", scope_include=["Variables"])
+        assert [f.name for f in features] == ["Variables"]
+
+    def test_no_scope_include_leaves_features_unchanged(self):
+        with patch("duplo.extractor.query", return_value=self._raw("Math")):
+            features = extract_features("content")
+        assert [f.name for f in features] == ["Math"]
 
 
 class TestMatchesExcluded:
