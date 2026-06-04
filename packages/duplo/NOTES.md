@@ -81,6 +81,39 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.7] [T-000789] `run_plan_author` adapter: fail-closed on CAPPED; `final_artifact` needs a typed local for mypy — 2026-06-04
+
+Added `duplo/plan_author_adapter.py` (`run_plan_author`) as the PLAN.md
+authoring counterpart to `duplo.design`. It builds `query` via
+`council._build_state_text(prompt=..., system=...)` (system directive
+folded into the query text) and `history` from a compact
+`PriorPhaseContext` (prior phase ids/titles, completed-phase summaries,
+files created, prior validation failures) — never the current phase's
+source/spec, which stays in `query`. It dispatches
+`orchestra.run_role("plan_author", ..., required_phase_id=...,
+registry_customizer=register_validate_plan_body(required_phase_id))`.
+
+Termination translation, worth carrying forward:
+
+  - CONVERGED -> return `result.final_artifact` (the converged proposal
+    body).
+  - CAPPED -> FAIL CLOSED: raise `PlanAuthorCappedError`, return no body
+    for PLAN.md. CAPPED is T-000786's validation-cap disposition (body
+    never validated within `max_rounds`); the best-so-far is attached to
+    the exception for audit ONLY and must never be used as a plan. This
+    is the key behavioral difference from `duplo.design`, which tolerates
+    CAPPED and returns its best-so-far body.
+  - ERROR -> raise `PlanAuthorRunError` carrying the `ErrorRecord` and
+    the on-disk transcript path. A pre-run `WorkflowApiError` (role/config
+    missing, no transcript) is also surfaced as `PlanAuthorRunError` with
+    kind `config_missing` and an empty transcript path.
+
+mypy gotcha (same as `duplo.design`): orchestra ships no `py.typed`
+marker, so `result.final_artifact` is seen as `Any`. Returning it
+directly trips `[no-any-return]`; assign to a `str`-annotated local
+(`converged_body: str = result.final_artifact`) first. `test_mypy_clean`
+caught this in the first run of the full suite.
+
 ### [9.6] [T-000788] `plan_author` compound role: leaf keys are workflow role names; proposer/judge may share an actor — 2026-06-04
 
 Defined the duplo-owned `plan_author` compound role in
