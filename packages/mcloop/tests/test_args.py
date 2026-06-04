@@ -4908,7 +4908,7 @@ def test_fallback_model_retry_on_exhaustion(tmp_path):
 
 
 def test_fallback_model_prints_message(tmp_path, capsys):
-    """Prints 'Primary model failed, retrying with <model>' on fallback."""
+    """Prints a model-switch line on fallback to the next tier."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(canonical_plan_text("- [ ] Do something\n"))
     (tmp_path / ".git").mkdir()
@@ -4961,7 +4961,111 @@ def test_fallback_model_prints_message(tmp_path, capsys):
         )
 
     captured = capsys.readouterr().out
-    assert "Primary model failed, retrying with sonnet" in captured
+    assert "switched opus → sonnet" in captured
+
+
+def test_model_transition_fires_single_switch_notify(tmp_path):
+    """A real opus->sonnet transition fires exactly one switch notify."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count <= 2:  # both opus attempts fail -> advance to sonnet
+            result.success = False
+            result.output = "some error"
+            result.exit_code = 1
+        else:  # sonnet succeeds
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+    ):
+        run_loop(
+            plan,
+            max_retries=2,
+            model="opus",
+            fallback_model="sonnet",
+            no_audit=True,
+        )
+
+    switch_calls = [c for c in mock_notify.call_args_list if "switched opus → sonnet" in c.args[0]]
+    assert len(switch_calls) == 1
+    message = switch_calls[0].args[0]
+    assert "opus failed" in message  # the carried reason
+    assert switch_calls[0].kwargs.get("level") == "warning"
+
+
+def test_same_model_retries_fire_no_switch_notify(tmp_path):
+    """Retries that stay on the same model emit no switch notify."""
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(canonical_plan_text("- [ ] Do something\n"))
+    (tmp_path / ".git").mkdir()
+
+    call_count = 0
+
+    def fake_run_task(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        result = MagicMock()
+        if call_count == 1:  # first opus attempt fails, second succeeds
+            result.success = False
+            result.output = "some error"
+            result.exit_code = 1
+        else:
+            result.success = True
+            result.output = ""
+            result.exit_code = 0
+        return result
+
+    mock_check_result = MagicMock()
+    mock_check_result.passed = True
+
+    with (
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main.run_checks", return_value=mock_check_result),
+        patch("mcloop.main.notify") as mock_notify,
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main._commit"),
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+    ):
+        run_loop(
+            plan,
+            max_retries=3,
+            model="opus",  # single-tier chain: no other model to switch to
+            no_audit=True,
+        )
+
+    switch_calls = [c for c in mock_notify.call_args_list if "switched" in c.args[0]]
+    assert switch_calls == []
 
 
 def test_fallback_model_also_exhausted(tmp_path):

@@ -1672,6 +1672,12 @@ Worked three-tier example:
           "MAX_THINKING_TOKENS": "0"
         }
       }
+    },
+    {
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "deepseek-v4-pro"
     }
   ]
 }
@@ -1715,6 +1721,12 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
           "MAX_THINKING_TOKENS": "0"
         }
       }
+    },
+    {
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "enabled": false,
+      "cli": "claude",
+      "model": "deepseek-v4-pro"
     }
   ]
 }

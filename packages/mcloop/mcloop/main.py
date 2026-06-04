@@ -493,11 +493,55 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
             for idx, entry, exc in failures
         )
         combined_output = "\n".join(exc.output for _, _, exc in failures if exc.output)
+        # Hard stop: every tier failed. Mirror the raised error to Telegram so
+        # an unattended operator learns the run aborted without watching stderr.
+        notify(
+            "mcloop: all model chain tiers failed preflight ("
+            + ", ".join(f"{entry.cli}/{entry.model}" for _, entry, _ in failures)
+            + "); aborting run.",
+            level="error",
+        )
         raise SubscriptionPreflightError(
             "No usable model chain tier: every configured tier failed preflight.\n" + details,
             combined_output,
         )
+
+    # Demotion: at least one tier survives. Echo each skipped tier to Telegram
+    # (the inline prints above already covered the console) naming the survivors
+    # the run will use instead, so a skipped tier is never silent off-console.
+    if failures:
+        survivors = ", ".join(entry.model or entry.cli for entry in usable)
+        for idx, entry, err in failures:
+            notify(
+                f"mcloop: skipping model tier {idx} ({entry.cli}/{entry.model}) — "
+                f"preflight failed: {_short_preflight_reason(err)}. "
+                f"Running on: {survivors}.",
+                level="warning",
+            )
     return usable
+
+
+def _notify_model_switch(
+    from_model: str | None,
+    to_model: str | None,
+    reason: str,
+    task_label: str = "",
+) -> None:
+    """Announce an actual model substitution on both console and Telegram.
+
+    Centralising both surfaces here keeps the console line and the Telegram
+    message from drifting: every mid-run tier change goes through this one
+    helper. ``notify`` no-ops gracefully when Telegram is unconfigured, so this
+    adds no new failure mode. Callers must invoke this only when the active
+    model genuinely changes (not on every retry of the same model).
+    """
+    from_name = from_model or "?"
+    to_name = to_model or "?"
+    detail = f" ({reason})" if reason else ""
+    suffix = f" Task {task_label} continues on {to_name}." if task_label else ""
+    message = f"mcloop: switched {from_name} → {to_name}{detail}.{suffix}"
+    print(formatting.system_msg(message), flush=True)
+    notify(message, level="warning")
 
 
 def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
@@ -1091,6 +1135,13 @@ def run_loop(
     reconcile_pending(project_dir)
 
     rate_state = RateLimitState()
+    # Track the model the operator was last told about so an *actual* tier
+    # change is announced exactly once (console + Telegram), not on every
+    # retry of the same model. Seeded with the starting tier so the run's
+    # opening model is never reported as a "switch". ``pending_switch_reason``
+    # carries why the previous tier was abandoned to the next transition.
+    active_model_notified: str | None = primary_model
+    pending_switch_reason = ""
 
     project_checks = get_check_commands(project_dir)
 
@@ -1816,11 +1867,18 @@ def run_loop(
             active_cli = active_entry.cli
             task_model = active_entry.model
             active_model_for_summary = task_model
-            if active_chain_idx > 0 or exhausted_chain_indices:
-                print(
-                    formatting.system_msg(f"Primary model failed, retrying with {task_model}"),
-                    flush=True,
+            # Announce only a genuine model change, once per transition. Repeated
+            # retries that re-select the same tier leave active_model_notified
+            # unchanged and stay silent.
+            if task_model != active_model_notified:
+                _notify_model_switch(
+                    active_model_notified,
+                    task_model,
+                    pending_switch_reason,
+                    task_label=label,
                 )
+                active_model_notified = task_model
+                pending_switch_reason = ""
             attempt = 0
             last_error = ""
             limit_hit = False
@@ -1908,6 +1966,8 @@ def run_loop(
                         ),
                         flush=True,
                     )
+                    # Reason carried to the next tier's switch announcement.
+                    pending_switch_reason = f"{active_entry.model} session-limited"
                     limit_hit = True
                     break
 
@@ -1923,6 +1983,7 @@ def run_loop(
                         ),
                         flush=True,
                     )
+                    pending_switch_reason = f"{active_entry.model} rate-limited"
                     limit_hit = True
                     break
 
@@ -2310,6 +2371,9 @@ def run_loop(
                 if active_chain_idx < len(chain) - 1:
                     exhausted_chain_indices.add(active_chain_idx)
                 continue
+            # The tier exhausted its retries without a quota/rate limit; record
+            # why for the next tier's switch announcement before advancing.
+            pending_switch_reason = f"{active_entry.model} failed"
             exhausted_chain_indices.add(active_chain_idx)
 
         if terminal_failure:

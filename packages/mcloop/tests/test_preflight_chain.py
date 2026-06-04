@@ -28,6 +28,23 @@ def _stub_runner_env(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def notify_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    """Capture (message, level) for every notify() the preflight emits.
+
+    Autouse so no test in this module ever reaches the real Telegram path.
+    """
+    import mcloop.main as main
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        main,
+        "notify",
+        lambda message, level="info": calls.append((message, level)),
+    )
+    return calls
+
+
 def _make_preflight(failing_models: set[str]):
     """Build an ensure_subscription_preflight stub that fails for given models."""
 
@@ -118,6 +135,57 @@ def test_surviving_tiers_preserve_chain_order(
         ("claude", "first"),
         ("claude", "last"),
     ]
+
+
+def test_demotion_fires_warning_notify_naming_skipped_and_survivors(
+    monkeypatch: pytest.MonkeyPatch,
+    notify_calls: list[tuple[str, str]],
+) -> None:
+    """A demoted tier emits a warning-level notify naming skip + survivors."""
+    import mcloop.runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "ensure_subscription_preflight",
+        _make_preflight({"gpt-5-codex"}),
+    )
+    chain = [
+        ChainEntry(cli="claude", model="opus"),
+        ChainEntry(cli="codex", model="gpt-5-codex"),
+        ChainEntry(cli="claude", model="kimi-k2.6"),
+    ]
+
+    _preflight_chain(chain, Path("/tmp"))
+
+    warnings = [msg for msg, level in notify_calls if level == "warning"]
+    assert len(warnings) == 1
+    assert "skipping model tier 2 (codex/gpt-5-codex)" in warnings[0]
+    assert "Running on: opus, kimi-k2.6" in warnings[0]
+
+
+def test_all_tiers_fail_fires_error_notify(
+    monkeypatch: pytest.MonkeyPatch,
+    notify_calls: list[tuple[str, str]],
+) -> None:
+    """The hard-stop path emits an error-level notify before raising."""
+    import mcloop.runner as runner
+
+    monkeypatch.setattr(
+        runner,
+        "ensure_subscription_preflight",
+        _make_preflight({"opus", "gpt-5-codex"}),
+    )
+    chain = [
+        ChainEntry(cli="claude", model="opus"),
+        ChainEntry(cli="codex", model="gpt-5-codex"),
+    ]
+
+    with pytest.raises(SubscriptionPreflightError):
+        _preflight_chain(chain, Path("/tmp"))
+
+    errors = [msg for msg, level in notify_calls if level == "error"]
+    assert len(errors) == 1
+    assert "all model chain tiers failed preflight" in errors[0]
 
 
 def test_all_tiers_pass_returns_full_chain(
