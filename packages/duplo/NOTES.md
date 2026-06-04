@@ -81,6 +81,52 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.1] [T-000786] plan_author validation state reads only `proposal`; `required_phase_id` reaches the transform via the registration closure — 2026-06-04
+
+The task text says the validation state's `validate_plan_body` transform
+"reads the `proposal` body and `required_phase_id`". Orchestra's loader
+forbids that literally: `_validate_transform_state`
+(`orchestra/loader/validator.py`) requires every transform read to be a
+declared *artifact*, and external inputs are explicitly rejected ("External
+inputs are not admissible reads for transforms in Slice B"). Declaring
+`required_phase_id` as both an `external_input` and an `artifact` is also
+rejected (Phase 4 name-uniqueness). Empirically, a fork whose validate
+state reads `proposal, required_phase_id` fails `load_workflow` with
+"input 'required_phase_id' is not a declared artifact".
+
+Resolution (matches T-000787/T-000789's design): `required_phase_id` stays
+an `external_input` so `run_role(..., required_phase_id=...)` accepts it,
+but the validation state reads only `proposal`. The transform obtains
+`required_phase_id` via the closure duplo builds when it registers
+`validate_plan_body` through `run_role`'s `registry_customizer` hook
+(T-000787: `typed_plan_from_synthesizer_text(body, required_phase_id=...)`,
+where the kwarg is bound at registration time, not read from the store).
+So the transform's workflow-level `input_schema` is `{proposal: str}`. This
+keeps the fork fully loadable today (verified with a stub transform in
+`tests/test_plan_author_workflow.py`) and leaves `required_phase_id`
+declared but unread at the workflow level, which Orchestra permits.
+
+### [9.1] [T-000786] `validation_ok` is a `json` artifact, not a `bool` type — 2026-06-04
+
+Orchestra's core registry registers artifact types `text, json, messages,
+prompt, schema, document` only; there is no `bool` artifact type. A
+transform output declared `bool` maps to the `json` artifact type
+(`transforms._TYPE_TO_ARTIFACT_TYPE`). So the workflow declares `artifact
+validation_ok json` (with `initial false`) while the transform's
+`output_schema` uses Python `bool`; the guard `validation_ok == true`
+compares the stored bool against the `true` literal. `validation_feedback`
+is `text` (transform output `str`).
+
+### [9.1] [T-000786] workflow assets ship via package-data and must travel together — 2026-06-04
+
+`plan_author.orc` lives at `duplo/workflows/` with its `templates/` and
+`schemas/` siblings. Orchestra resolves `prompt template "..."` and
+`schema "..."` paths relative to the `.orc` file's directory, so the three
+must deploy together to `<project>/.orchestra/workflows/`. Added a
+`[tool.setuptools.package-data]` block so the non-`.py` assets ship in the
+built package (editable installs read the source tree directly, so tests
+passed before this was added; a wheel would not have included them).
+
 ### [4.7] [T-000026] call_log test coverage already broad; only call_site thread-through was missing — 2026-05-28
 
 Auditing the requested assertions against existing tests, nearly all

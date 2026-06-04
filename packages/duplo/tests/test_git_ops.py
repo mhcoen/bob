@@ -337,9 +337,7 @@ class TestRemoteKillSwitch:
             monkeypatch.setenv("DUPLO_NO_GITHUB", value)
             assert git_ops._remote_disabled() is True
 
-    def test_falsy_or_unset_enables_remote(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_falsy_or_unset_enables_remote(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for value in ("0", "false", "no", ""):
             monkeypatch.setenv("DUPLO_NO_GITHUB", value)
             assert git_ops._remote_disabled() is False

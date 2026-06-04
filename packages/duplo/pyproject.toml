@@ -27,6 +27,17 @@ dependencies = [
 [tool.setuptools]
 packages = ["duplo"]
 
+[tool.setuptools.package-data]
+# DUPLO-owned, project-local Orchestra workflow assets (T-000786). These
+# ship with the package so duplo can deploy them to a managed project's
+# .orchestra/workflows/ directory; Orchestra resolves templates and
+# schemas relative to the .orc file, so all three globs must travel together.
+duplo = [
+    "workflows/*.orc",
+    "workflows/templates/*.md",
+    "workflows/schemas/*.json",
+]
+
 [project.scripts]
 duplo = "duplo.main:main"
 
@@ -40,6 +51,11 @@ line-length = 99
 
 [tool.ruff.lint.per-file-ignores]
 "duplo/main.py" = ["E402"]
+# __init__.py eagerly re-exports every submodule for deterministic
+# attribute-style access under pytest-xdist (see its docstring); the
+# imports are intentionally "unused". Ruff >=0.12 dropped the implicit
+# ignore-init-module-imports default, so the suppression is now explicit.
+"duplo/__init__.py" = ["F401"]
 
 [tool.mypy]
 strict = false
