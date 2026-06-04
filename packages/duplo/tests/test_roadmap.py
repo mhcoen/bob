@@ -6,7 +6,12 @@ from unittest.mock import patch
 
 from duplo.extractor import Feature
 from duplo.questioner import BuildPreferences
-from duplo.roadmap import _parse_roadmap, format_roadmap, generate_roadmap
+from duplo.roadmap import (
+    _parse_roadmap,
+    _reconcile_scope_into_roadmap,
+    format_roadmap,
+    generate_roadmap,
+)
 
 
 def _sample_features() -> list[Feature]:
@@ -124,3 +129,71 @@ class TestGenerateRoadmap:
         prompt = mock_query.call_args[0][0]
         assert "Arithmetic" in prompt
         assert "completed" in prompt.lower()
+
+    def test_scope_include_feature_reaches_build_phase(self):
+        # LLM returns a scaffold-only roadmap that omits the required item.
+        with patch("duplo.roadmap.query", return_value=_SAMPLE_ROADMAP):
+            result = generate_roadmap(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                scope_include=["CSV export"],
+            )
+        allocated = {
+            name for phase in result if phase["phase"] != 0 for name in phase.get("features", [])
+        }
+        assert "CSV export" in allocated
+
+
+class TestReconcileScopeIntoRoadmap:
+    def test_no_scope_returns_roadmap_unchanged(self):
+        roadmap = [{"phase": 0, "title": "Scaffold", "goal": "", "features": [], "test": ""}]
+        assert _reconcile_scope_into_roadmap(roadmap, None) is roadmap
+        assert _reconcile_scope_into_roadmap(roadmap, []) is roadmap
+
+    def test_empty_roadmap_returns_unchanged(self):
+        assert _reconcile_scope_into_roadmap([], ["X"]) == []
+
+    def test_missing_feature_appended_to_last_build_phase(self):
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "", "features": [], "test": ""},
+            {"phase": 1, "title": "Core", "goal": "", "features": ["Arithmetic"], "test": ""},
+            {"phase": 2, "title": "More", "goal": "", "features": ["Variables"], "test": ""},
+        ]
+        _reconcile_scope_into_roadmap(roadmap, ["CSV export"])
+        assert roadmap[2]["features"] == ["Variables", "CSV export"]
+        # Earlier build phases are untouched.
+        assert roadmap[1]["features"] == ["Arithmetic"]
+
+    def test_feature_only_in_scaffold_is_reallocated(self):
+        # Listed only under Phase 0 -> never built; must reach a build phase.
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "", "features": ["CSV export"], "test": ""},
+            {"phase": 1, "title": "Core", "goal": "", "features": ["Arithmetic"], "test": ""},
+        ]
+        _reconcile_scope_into_roadmap(roadmap, ["CSV export"])
+        assert "CSV export" in roadmap[1]["features"]
+
+    def test_already_allocated_feature_not_duplicated(self):
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "", "features": [], "test": ""},
+            {"phase": 1, "title": "Core", "goal": "", "features": ["CSV Export"], "test": ""},
+        ]
+        _reconcile_scope_into_roadmap(roadmap, ["csv export"])
+        # Case-insensitive match -> no duplicate appended.
+        assert roadmap[1]["features"] == ["CSV Export"]
+
+    def test_scaffold_only_roadmap_synthesizes_build_phase(self):
+        roadmap = [{"phase": 0, "title": "Scaffold", "goal": "", "features": [], "test": ""}]
+        _reconcile_scope_into_roadmap(roadmap, ["CSV export"])
+        assert len(roadmap) == 2
+        assert roadmap[1]["phase"] == 1
+        assert "CSV export" in roadmap[1]["features"]
+
+    def test_duplicate_and_blank_scope_items_handled(self):
+        roadmap = [
+            {"phase": 0, "title": "Scaffold", "goal": "", "features": [], "test": ""},
+            {"phase": 1, "title": "Core", "goal": "", "features": [], "test": ""},
+        ]
+        _reconcile_scope_into_roadmap(roadmap, ["CSV export", "  ", "csv export", "PDF export"])
+        assert roadmap[1]["features"] == ["CSV export", "PDF export"]

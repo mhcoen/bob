@@ -35,3 +35,6 @@ No fixes available (2 hidden fixes can be enabled with the `--unsafe-fixes` opti
 ```
 
 Offending construct: both helpers are generic functions using the module-level `_T = TypeVar("_T")` style in signatures with `Sequence[_T]` and `_T` return values. Required end state: `.venv/bin/ruff check .` is clean; `.venv/bin/pytest -q` still reports 353 passing tests; `.venv/bin/mypy --strict bob_tools` still passes.
+
+- [ ] `bob-plan fmt` should assign ids to bare checkboxes regardless of the `<!-- bob-plan-format: N -->` marker. Currently a file carrying the marker is validated (bare checkbox rejected with "expected task id after checkbox marker") instead of migrated. Confirm the migrate-vs-validate trigger in `bob_tools/planfile/cli.py:cmd_fmt` / `operations.migrate` and make `fmt` migrate un-id'd checkboxes even when the marker is present, since assigning ids is what `fmt` is for. Add a regression test: a marker-bearing file with a bare checkbox gets an id assigned, not an error.
+- [ ] `bob-plan` error messages report the wrong filename: `bob-plan fmt BUGS.md` surfaced "PLAN.md invalid at line 127" when the offending line was in BUGS.md. Fix the error formatting to name the file actually being processed. Add a regression test asserting the reported path matches the input argument.

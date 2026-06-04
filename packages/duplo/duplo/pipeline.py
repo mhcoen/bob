@@ -1919,6 +1919,7 @@ def _subsequent_run() -> None:
             _primary_prefs(preferences),
             completion_history=history,
             spec_text=spec_prompt,
+            scope_include=spec.scope_include if spec else None,
         )
         if not new_roadmap:
             print("Error: failed to generate roadmap.")

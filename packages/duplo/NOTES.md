@@ -81,6 +81,20 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [2] [T-000002] scope_include features can be dropped or stranded in the scaffold by the roadmap LLM — 2026-06-04
+
+generate_roadmap delegates phase allocation to the LLM, which may omit
+a required scope_include feature entirely or list it only under Phase 0
+(scaffold-only, no feature tasks). Added _reconcile_scope_into_roadmap
+to roadmap.py: after parsing, any scope_include name not already in a
+build phase (non-scaffold, case-insensitive) is appended to the last
+build phase, or a synthesized build phase if the roadmap is
+scaffold-only. This mirrors extractor._reconcile_scope_include, which
+guarantees the same names exist as Features; together they ensure a
+guaranteed user scope item always reaches a buildable phase. The fix
+appends all missing scope items to a single (last) build phase rather
+than distributing them, to keep allocation deterministic.
+
 ### [9.9] [T-000791] `run_role` reports a converged validation-gated run as CAPPED; the adapter now decides fail-closed from the gate, not the label — 2026-06-04
 
 The first true end-to-end run of the iterative authoring path (real

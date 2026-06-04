@@ -350,16 +350,14 @@ class TestCheckMigration:
         (tmp_path / ".duplo").mkdir()
         (tmp_path / ".duplo" / "duplo.json").write_text("{}")
         (tmp_path / "SPEC.md").write_text("How the pieces fit together:\n")
-        result = _check_migration(tmp_path)
-        assert result is None
+        _check_migration(tmp_path)
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""
 
     def test_no_exit_on_non_duplo_dir(self, tmp_path: Path, capsys) -> None:
         """Non-duplo directory (no .duplo/duplo.json) → no output, no exit."""
-        result = _check_migration(tmp_path)
-        assert result is None
+        _check_migration(tmp_path)
         captured = capsys.readouterr()
         assert captured.out == ""
         assert captured.err == ""

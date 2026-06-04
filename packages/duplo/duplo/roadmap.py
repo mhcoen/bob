@@ -48,6 +48,7 @@ def generate_roadmap(
     *,
     completion_history: list[dict] | None = None,
     spec_text: str = "",
+    scope_include: list[str] | None = None,
 ) -> list[dict]:
     """Generate a phased build roadmap.
 
@@ -59,6 +60,10 @@ def generate_roadmap(
             and ``features`` (list of feature names implemented in that
             phase).  When provided, the prompt tells the model what has
             already been built so the new roadmap continues from there.
+        scope_include: Feature names the user requires (from SPEC). Each
+            such name is guaranteed a slot in a build phase after the LLM
+            roadmap is parsed, so a required item is never left
+            feature-only or stranded in the scaffold phase.
 
     Returns a list of phase dicts, each with phase, title, goal,
     features, and test.
@@ -109,7 +114,8 @@ Generate the roadmap now.
 """
 
     raw = query(prompt, system=_SYSTEM, call_site="generate_roadmap")
-    return _parse_roadmap(raw)
+    roadmap = _parse_roadmap(raw)
+    return _reconcile_scope_into_roadmap(roadmap, scope_include)
 
 
 def _parse_roadmap(raw: str) -> list[dict]:
@@ -140,6 +146,78 @@ def _parse_roadmap(raw: str) -> list[dict]:
             }
         )
 
+    return roadmap
+
+
+def _is_build_phase(phase: dict) -> bool:
+    """Return True if *phase* is a buildable phase (not the scaffold).
+
+    Phase 0 is always scaffolding and carries no feature tasks, so a
+    scope feature listed only there would never be built.  Every other
+    phase produces real feature tasks for the planner.
+    """
+    return phase.get("phase") != 0
+
+
+def _reconcile_scope_into_roadmap(
+    roadmap: list[dict],
+    scope_include: list[str] | None,
+) -> list[dict]:
+    """Guarantee every ``scope_include`` feature reaches a build phase.
+
+    The LLM that generates the roadmap may drop a required feature
+    entirely or list it only under the scaffold phase (Phase 0), which
+    produces no feature tasks.  Either way the user's required scope item
+    would never be built.  For each name in *scope_include* not already
+    allocated to a build phase (case-insensitive match against every
+    non-scaffold phase's ``features`` list), the name is appended to a
+    build phase so the planner generates real tasks for it.
+
+    Missing names are appended to the last existing build phase.  If the
+    roadmap is scaffold-only (no build phase exists), a new build phase
+    is synthesized to hold them.  The roadmap is mutated in place and
+    also returned.  User spec scope is authoritative, so a required item
+    is never left feature-only.
+    """
+    if not roadmap or not scope_include:
+        return roadmap
+
+    allocated = {
+        str(name).strip().lower()
+        for phase in roadmap
+        if _is_build_phase(phase)
+        for name in phase.get("features", [])
+    }
+
+    missing: list[str] = []
+    seen: set[str] = set()
+    for item in scope_include:
+        name = item.strip()
+        key = name.lower()
+        if not key or key in allocated or key in seen:
+            continue
+        seen.add(key)
+        missing.append(name)
+
+    if not missing:
+        return roadmap
+
+    target: dict[str, Any] | None = None
+    for phase in roadmap:
+        if _is_build_phase(phase):
+            target = phase
+    if target is None:
+        max_phase = max((p.get("phase", 0) for p in roadmap), default=-1)
+        target = {
+            "phase": max_phase + 1,
+            "title": "Required scope features",
+            "goal": "Implement user-specified scope features from the SPEC.",
+            "features": [],
+            "test": "Each required scope feature works end to end.",
+        }
+        roadmap.append(target)
+
+    target["features"] = list(target.get("features", [])) + missing
     return roadmap
 
 
