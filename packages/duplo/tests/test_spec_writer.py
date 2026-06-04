@@ -2412,8 +2412,8 @@ class TestDraftSpec:
 
         monkeypatch.setattr("duplo.spec_writer.query", fake_query)
 
-    def _llm_response(self, **overrides) -> str:
-        data = {
+    def _llm_response(self, **overrides: object) -> str:
+        data: dict[str, object] = {
             "purpose": None,
             "architecture": None,
             "design": None,
@@ -2616,8 +2616,9 @@ class TestDraftSpec:
         """Pin Step 1 of draft_spec: it calls _draft_from_inputs(inputs) and
         treats the returned ProductSpec as the base that later steps
         mutate. Per DRAFTER-design.md § draft_spec."""
-        captured: dict = {}
-        sentinel = ProductSpec(
+        captured_inputs: dict[str, DraftInputs] = {}
+        call_count = 0
+        sentinel: ProductSpec = ProductSpec(
             purpose="SENTINEL PURPOSE",
             architecture="SENTINEL ARCH",
             design=DesignBlock(user_prose="SENTINEL DESIGN"),
@@ -2627,8 +2628,9 @@ class TestDraftSpec:
         )
 
         def fake_draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
-            captured["inputs"] = inputs
-            captured["call_count"] = captured.get("call_count", 0) + 1
+            nonlocal call_count
+            captured_inputs["inputs"] = inputs
+            call_count += 1
             return sentinel
 
         monkeypatch.setattr(
@@ -2640,8 +2642,8 @@ class TestDraftSpec:
         text = draft_spec(inputs)
 
         # _draft_from_inputs invoked exactly once with the exact inputs object.
-        assert captured["call_count"] == 1
-        assert captured["inputs"] is inputs
+        assert call_count == 1
+        assert captured_inputs["inputs"] is inputs
 
         # The returned ProductSpec's fields propagate through to the
         # serialized output (proving later steps operate on its return value).
@@ -2662,7 +2664,7 @@ class TestDraftSpec:
         # Sentinel returned by step 1 has pre-existing notes content; step 2
         # must replace it with the header + verbatim description so the LLM
         # never gets to author ## Notes.
-        sentinel = ProductSpec(purpose="p", architecture="a", notes="LLM WROTE THIS")
+        sentinel: ProductSpec = ProductSpec(purpose="p", architecture="a", notes="LLM WROTE THIS")
 
         def fake_draft_from_inputs(inputs: DraftInputs) -> ProductSpec:
             return sentinel

@@ -81,6 +81,20 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [3] [T-000003] Added end-to-end regression for scope-beyond-sources — 2026-06-04
+
+Added tests/test_scope_beyond_sources_regression.py: parses a real
+SPEC.md whose ## Scope include list names "Offline mode" (mentioned in
+no scraped Source), then asserts both reconciliation paths fire from
+the parsed scope_include — extract_features yields a "Offline mode"
+Feature even though the LLM omitted it, and generate_roadmap allocates
+it to a non-scaffold build phase even though the LLM roadmap omitted it.
+This guards the chain spec_reader -> extractor -> roadmap so the
+guarantee cannot regress in any one module. While running the mandatory
+`ruff format --check .`, tests/test_build_prefs.py reported as needing
+formatting; it was already modified in the working tree before this task
+(not touched by T-000003), so it was left as-is for the user to decide.
+
 ### [2] [T-000002] scope_include features can be dropped or stranded in the scaffold by the roadmap LLM — 2026-06-04
 
 generate_roadmap delegates phase allocation to the LLM, which may omit

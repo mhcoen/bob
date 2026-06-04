@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -64,7 +65,7 @@ def _typed_plan(project: str, phases: tuple[Phase, ...]) -> str:
     )
     plan = migrate(plan)
     validate_plan(plan, constructed=True)
-    return render_plan(plan)
+    return cast(str, render_plan(plan))
 
 
 class TestObservedPhaseCount:

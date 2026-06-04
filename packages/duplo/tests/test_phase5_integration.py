@@ -23,6 +23,8 @@ from duplo.main import main
 from duplo.pipeline import ScrapeResult
 from duplo.questioner import BuildPreferences
 
+FetchSiteResult = tuple[str, list[object], DocStructures, list[PageRecord], dict[str, str]]
+
 # The legacy fresh-directory pipeline was removed in Phase 7.2.1. Classes
 # that exercised it (fresh directory, no duplo.json, `ref/` + SPEC.md)
 # cannot run anymore; rewrite against `duplo init` + `_subsequent_run`
@@ -63,7 +65,7 @@ _PAGE_RECORD = PageRecord(
 )
 
 # The 5-tuple that fetch_site returns
-_FETCH_SITE_RESULT = (
+_FETCH_SITE_RESULT: FetchSiteResult = (
     _SCRAPED_TEXT,
     [],  # empty code_examples
     DocStructures(),  # empty doc_structures
@@ -2649,7 +2651,7 @@ _XORIGIN_SCRAPED_TEXT = (
     "Features include task management and integrations."
 )
 
-_XORIGIN_FETCH_SITE_RESULT = (
+_XORIGIN_FETCH_SITE_RESULT: FetchSiteResult = (
     _XORIGIN_SCRAPED_TEXT,
     [],  # empty code_examples
     DocStructures(),  # empty doc_structures
@@ -3102,7 +3104,7 @@ _XORIGIN_DISCOVERED_PAGE_RECORD = PageRecord(
     content_hash=_XORIGIN_DISCOVERED_CONTENT_HASH,
 )
 
-_XORIGIN_DISCOVERED_FETCH_RESULT = (
+_XORIGIN_DISCOVERED_FETCH_RESULT: FetchSiteResult = (
     "Connect MyProduct with your favorite tools.",
     [],  # empty code_examples
     DocStructures(),  # empty doc_structures
@@ -3408,7 +3410,7 @@ _AUTOGEN_PAGE_RECORD = PageRecord(
     fetched_at="2026-04-15T12:00:00Z",
     content_hash=_AUTOGEN_CONTENT_HASH,
 )
-_AUTOGEN_FETCH_SITE_RESULT = (
+_AUTOGEN_FETCH_SITE_RESULT: FetchSiteResult = (
     _AUTOGEN_SCRAPED_TEXT,
     [],
     DocStructures(),

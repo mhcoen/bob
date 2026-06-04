@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 from duplo.extractor import Feature
@@ -71,15 +72,16 @@ class TestParseMatches:
 
 
 class TestMatchUnannotatedTasks:
-    def _setup_duplo_json(self, tmp_path: Path, features: list[dict]) -> None:
+    def _setup_duplo_json(self, tmp_path: Path, features: list[dict[str, object]]) -> None:
         duplo_dir = tmp_path / ".duplo"
         duplo_dir.mkdir()
         path = tmp_path / DUPLO_JSON
         path.write_text(json.dumps({"features": features}), encoding="utf-8")
 
-    def _read_features(self, tmp_path: Path) -> list[dict]:
+    def _read_features(self, tmp_path: Path) -> list[dict[str, object]]:
         path = tmp_path / DUPLO_JSON
-        return json.loads(path.read_text(encoding="utf-8"))["features"]
+        data = cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
+        return cast(list[dict[str, object]], data["features"])
 
     def test_skips_annotated_tasks(self, tmp_path):
         self._setup_duplo_json(tmp_path, [])

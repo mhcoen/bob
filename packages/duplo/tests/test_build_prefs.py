@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from duplo.build_prefs import (
     _parse_response,
@@ -33,8 +33,8 @@ class TestParseBuildPreferences:
         assert result == [_DEFAULT]
 
     @patch("duplo.build_prefs.query")
-    def test_successful_parse(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+    def test_successful_parse(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps(
             {
                 "platform": "web",
                 "language": "TypeScript",
@@ -51,27 +51,27 @@ class TestParseBuildPreferences:
         assert result[0].preferences == ["prefer functional style"]
 
     @patch("duplo.build_prefs.query")
-    def test_llm_failure_returns_single_defaults(self, mock_query: object) -> None:
-        mock_query.side_effect = ClaudeCliError("timeout")  # type: ignore[union-attr]
+    def test_llm_failure_returns_single_defaults(self, mock_query: Mock) -> None:
+        mock_query.side_effect = ClaudeCliError("timeout")
         result = parse_build_preferences("Some architecture prose")
         assert result == [_DEFAULT]
 
     @patch("duplo.build_prefs.query")
-    def test_llm_failure_records_diagnostic(self, mock_query: object) -> None:
-        mock_query.side_effect = ClaudeCliError("timeout")  # type: ignore[union-attr]
+    def test_llm_failure_records_diagnostic(self, mock_query: Mock) -> None:
+        mock_query.side_effect = ClaudeCliError("timeout")
         with patch("duplo.build_prefs.record_failure") as mock_rec:
             parse_build_preferences("Some prose")
             mock_rec.assert_called_once()
             assert "LLM call failed" in mock_rec.call_args[0][2]
 
     @patch("duplo.build_prefs.query")
-    def test_passes_system_prompt(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+    def test_passes_system_prompt(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps(
             {"platform": "", "language": "", "constraints": [], "preferences": []}
         )
         parse_build_preferences("CLI tool in Rust")
-        mock_query.assert_called_once()  # type: ignore[union-attr]
-        _, kwargs = mock_query.call_args  # type: ignore[union-attr]
+        mock_query.assert_called_once()
+        _, kwargs = mock_query.call_args
         assert "system" in kwargs
         assert kwargs["system"]  # non-empty system prompt
 
@@ -80,10 +80,10 @@ class TestParseBuildPreferencesStructuredEntries:
     """Structured PlatformEntry inputs bypass the LLM entirely."""
 
     @patch("duplo.build_prefs.query")
-    def test_single_entry_no_llm_call(self, mock_query: object) -> None:
+    def test_single_entry_no_llm_call(self, mock_query: Mock) -> None:
         entries = [PlatformEntry(platform="macos", language="swift", build="spm")]
         result = parse_build_preferences("ignored prose", structured_entries=entries)
-        mock_query.assert_not_called()  # type: ignore[union-attr]
+        mock_query.assert_not_called()
         assert len(result) == 1
         assert result[0].platform == "macos"
         assert result[0].language == "swift"
@@ -91,13 +91,13 @@ class TestParseBuildPreferencesStructuredEntries:
         assert result[0].constraints == []
 
     @patch("duplo.build_prefs.query")
-    def test_multiple_entries_returns_one_per_stack(self, mock_query: object) -> None:
+    def test_multiple_entries_returns_one_per_stack(self, mock_query: Mock) -> None:
         entries = [
             PlatformEntry(platform="web", language="typescript", build="vite"),
             PlatformEntry(platform="linux", language="python", build="poetry"),
         ]
         result = parse_build_preferences("", structured_entries=entries)
-        mock_query.assert_not_called()  # type: ignore[union-attr]
+        mock_query.assert_not_called()
         assert len(result) == 2
         assert result[0].platform == "web"
         assert result[0].language == "typescript"
@@ -113,22 +113,18 @@ class TestParseBuildPreferencesStructuredEntries:
         assert result[0].preferences == []
 
     @patch("duplo.build_prefs.query")
-    def test_empty_structured_list_falls_back_to_llm(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
-            {"platform": "cli", "language": "Go"}
-        )
+    def test_empty_structured_list_falls_back_to_llm(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps({"platform": "cli", "language": "Go"})
         result = parse_build_preferences("Go CLI tool.", structured_entries=[])
-        mock_query.assert_called_once()  # type: ignore[union-attr]
+        mock_query.assert_called_once()
         assert len(result) == 1
         assert result[0].platform == "cli"
 
     @patch("duplo.build_prefs.query")
-    def test_none_structured_falls_back_to_llm(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
-            {"platform": "cli", "language": "Go"}
-        )
+    def test_none_structured_falls_back_to_llm(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps({"platform": "cli", "language": "Go"})
         result = parse_build_preferences("Go CLI tool.", structured_entries=None)
-        mock_query.assert_called_once()  # type: ignore[union-attr]
+        mock_query.assert_called_once()
         assert len(result) == 1
 
 
@@ -434,8 +430,8 @@ class TestParseResponseAllDefaults:
         assert is_all_defaults(result)
 
     @patch("duplo.build_prefs.query")
-    def test_llm_no_usable_fields_returns_defaults(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+    def test_llm_no_usable_fields_returns_defaults(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps(
             {
                 "platform": "",
                 "language": "",
@@ -453,8 +449,8 @@ class TestTypicalArchitectureProse:
     """Parse with typical architecture prose — fields populated correctly."""
 
     @patch("duplo.build_prefs.query")
-    def test_swift_macos_app(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+    def test_swift_macos_app(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps(
             {
                 "platform": "desktop",
                 "language": "Swift",
@@ -474,9 +470,9 @@ class TestTypicalArchitectureProse:
         assert result[0].preferences == ["macOS only", "minimum macOS 14"]
 
     @patch("duplo.build_prefs.query")
-    def test_missing_fields_default(self, mock_query: object) -> None:
+    def test_missing_fields_default(self, mock_query: Mock) -> None:
         """LLM returns only platform and language; rest defaults."""
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+        mock_query.return_value = json.dumps(
             {
                 "platform": "cli",
                 "language": "Go",
@@ -490,8 +486,8 @@ class TestTypicalArchitectureProse:
         assert result[0].preferences == []
 
     @patch("duplo.build_prefs.query")
-    def test_web_fullstack(self, mock_query: object) -> None:
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+    def test_web_fullstack(self, mock_query: Mock) -> None:
+        mock_query.return_value = json.dumps(
             {
                 "platform": "web",
                 "language": "TypeScript",
@@ -625,9 +621,9 @@ class TestAllDefaultsWarningViaValidate:
         assert "Plan generation will proceed" in warnings[0]
 
     @patch("duplo.build_prefs.query")
-    def test_all_defaults_from_parse_triggers_warning(self, mock_query: object) -> None:
+    def test_all_defaults_from_parse_triggers_warning(self, mock_query: Mock) -> None:
         """End-to-end: LLM returns empty -> validate emits warning."""
-        mock_query.return_value = json.dumps(  # type: ignore[union-attr]
+        mock_query.return_value = json.dumps(
             {
                 "platform": "",
                 "language": "",

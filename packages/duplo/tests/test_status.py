@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -48,9 +49,9 @@ def _write_duplo_json(tmp_path: Path, data: dict) -> None:
         spec_path.write_text(_STUB_SPEC, encoding="utf-8")
 
 
-def _read_duplo_json(tmp_path: Path) -> dict:
+def _read_duplo_json(tmp_path: Path) -> dict[str, object]:
     """Read duplo.json from the .duplo/ subdirectory of *tmp_path*."""
-    return json.loads((tmp_path / _DUPLO_JSON).read_text())
+    return cast(dict[str, object], json.loads((tmp_path / _DUPLO_JSON).read_text()))
 
 
 class TestPrintSummary:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 from unittest.mock import patch
 
 import re
@@ -89,7 +90,7 @@ def _plan_to_text(plan: Plan) -> str:
     renderer so tests can grep for canonical-form structural markers
     (``## Phase phase_NNN:``, ``<!-- phase_id: ... -->``, task lines).
     """
-    return render_plan(plan)
+    return cast(str, render_plan(plan))
 
 
 def _walk_with_children(task):
