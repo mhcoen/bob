@@ -316,10 +316,15 @@ _CHECKS_FAIL = CheckResult(passed=False, output="FAILED", command="pytest")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
-def test_noop_task_checks_fail_treated_as_failure(
+def test_noop_nonbug_task_fails_terminally_when_checks_fail(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """No file changes without acceptance evidence fails before global checks."""
+    """Non-bug zero-diff task fails terminally when the project checks fail.
+
+    No diff plus a red suite means the required end-state is NOT present;
+    the task is a terminal failure (no retry), with the check output
+    surfaced. The fallthrough now runs the checks before deciding.
+    """
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
@@ -329,7 +334,8 @@ def test_noop_task_checks_fail_treated_as_failure(
     # No-op + checks fail is a terminal failure (no retry)
     assert mock_run.call_count == 1
     mock_commit.assert_not_called()
-    mock_checks.assert_not_called()
+    # The fallthrough now runs the project checks (and they fail) before failing.
+    assert mock_checks.call_count >= 1
     content = md.read_text()
     assert_canonical_checkbox(content, "!", "Already done task")
     assert "- [x] T-" not in content
@@ -346,27 +352,31 @@ def test_noop_task_checks_fail_treated_as_failure(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
+def test_noop_nonbug_task_accepted_when_checks_pass(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """No file changes + global green is not task-specific acceptance evidence."""
+    """Non-bug zero-diff task is accepted when the project checks pass.
+
+    A task whose required end-state already exists on disk (produced and
+    committed by a prior session, or a "verify the file matches this spec"
+    task that correctly found nothing to change) makes no diff. A green
+    check suite IS acceptance evidence the end-state exists, so the task is
+    checked off rather than failed forever as a no-op.
+    """
     md = _make_project(tmp_path, "- [ ] Already done task\n")
     mock_run.return_value = _ok_run_result()
 
     result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert not result.ok
+    assert result.ok
     assert mock_run.call_count == 1
-    mock_commit.assert_not_called()
-    mock_checks.assert_not_called()
+    # The fallthrough runs the project checks before deciding.
+    assert mock_checks.call_count >= 1
     content = md.read_text()
-    assert_canonical_checkbox(content, "!", "Already done task")
-    assert "- [x] T-" not in content
+    assert_canonical_checkbox(content, "x", "Already done task")
 
     calls = _notify_calls(mock_notify)
-    assert len(calls) == 1
-    # R4 = Option B: notify body surfaces [T-NNNNNN] alongside text.
-    assert calls[0] == ("Giving up on: [T-000001] Already done task", "error")
+    assert calls == [("All tasks completed!", "info")]
 
 
 @patch("mcloop.main.notify")
@@ -563,22 +573,25 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_single_task_noop_false_positive_does_not_check_off_without_acceptance_evidence(
+def test_noop_nonbug_already_satisfied_accepts_without_new_commit(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):
-    """Defect A regression: single task no-op + global green does not check off."""
+    """An already-satisfied plan task is accepted on green checks without a
+    new commit. Zero diff means there is nothing to commit; the green suite
+    alone evidences the end-state, so the task is checked off and the loop
+    never calls _commit."""
     md = _make_project(tmp_path, "- [ ] Already done plan task\n")
     mock_run.return_value = _ok_run_result()
 
     result = run_loop(md, max_retries=3, no_audit=True)
 
-    assert not result.ok
+    assert result.ok
     assert mock_run.call_count == 1
-    mock_checks.assert_not_called()
+    # Zero diff => nothing to commit, yet the task is accepted on green checks.
     mock_commit.assert_not_called()
+    assert mock_checks.call_count >= 1
     content = md.read_text()
-    assert_canonical_checkbox(content, "!", "Already done plan task")
-    assert "- [x] T-" not in content
+    assert_canonical_checkbox(content, "x", "Already done plan task")
 
 
 # --- T-000001: cumulative-commit verdict ---

@@ -2192,18 +2192,76 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    # Non-read-only no-op: editor was supposed to make
-                    # changes or produce a dedicated verification artifact,
-                    # but didn't. A globally green suite is not acceptance
-                    # evidence for this task.
+                    # Non-read-only no-op on a NON-BUG (plan) task: the editor
+                    # made no changes. The task's required end-state may already
+                    # exist on disk -- produced and committed by a prior session,
+                    # or a "verify the file matches this spec, correct only if it
+                    # diverges" task that correctly found nothing to fix. Run the
+                    # project checks: a green suite IS acceptance evidence that
+                    # the required end-state exists, whoever created it. This
+                    # generalises the _is_zero_diff_check_task path above (now a
+                    # subset of "non-bug zero-diff + checks pass"). Bug tasks
+                    # never reach here -- they fail on zero diff above.
+                    _lifecycle._current_phase = "checks"
+                    no_diff_check = run_checks(project_dir)
+                    if no_diff_check.passed:
+                        elapsed = _format_elapsed(
+                            time.monotonic() - task_start,
+                        )
+                        check_off(active_file, task)
+                        if active_file == plan_path and active_phase_name:
+                            acceptance_evidence_phases.add(active_phase_name)
+                        completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                        task_entries.append(
+                            TaskEntry(
+                                label=label,
+                                text=task.text,
+                                outcome="success",
+                                elapsed=round(time.monotonic() - task_start, 2),
+                                model=task_model or "",
+                                attempts=attempt,
+                                success=True,
+                                exit_code=result.exit_code,
+                                log_path=str(result.log_path) if result.log_path else "",
+                                changed_files=[],
+                                task_id=task.task_id or "",
+                            )
+                        )
+                        print(
+                            formatting.system_msg(
+                                "Task produced no diff; project checks pass"
+                                " — accepting as already-satisfied"
+                            ),
+                            flush=True,
+                        )
+                        print(
+                            formatting.task_complete(label, elapsed),
+                            flush=True,
+                        )
+                        ctx.add(label, task.text, elapsed, result.output)
+                        _ledger_settle(
+                            label,
+                            TaskOutcome(
+                                success=True,
+                                abandoned=False,
+                                summary=task.text[:200],
+                                changed_files=(),
+                            ),
+                        )
+                        success = True
+                        break
                     last_error = (
-                        "Session produced no file changes and no task-specific"
-                        " acceptance evidence."
+                        "Session produced no file changes and the project"
+                        f" checks fail: {no_diff_check.command}\n"
+                        + _tail(no_diff_check.output, 50)
                     )
                     print(
-                        formatting.error_msg("No-op task without acceptance evidence"),
+                        formatting.error_msg(
+                            f"No-op task and checks fail: {no_diff_check.command}"
+                        ),
                         flush=True,
                     )
+                    _print_error_tail(no_diff_check.output)
                     terminal_task_failure = True
                     break
 
