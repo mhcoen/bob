@@ -23,14 +23,18 @@ and Orchestra's pure resolution helpers.
 
 from __future__ import annotations
 
+from typing import Any
+
 from orchestra.api.dispatch import _resolve_compound_model_identifiers
-from orchestra.config import CompoundRoleBinding, OrchestraConfig
+from orchestra.config import CompoundRoleBinding, CriterionDecl, OrchestraConfig
+from orchestra.executor.criteria import check_decision_consistency, mode_for_workflow
 
 from duplo.init import _ORCHESTRA_COUNCIL_CONFIG
 from duplo.plan_author_role import (
     MAX_ROUNDS,
     PLAN_AUTHOR_CRITERIA,
     ROLE_NAME,
+    WORKFLOW_PATTERN,
     plan_author_role_binding,
     render_criteria_block,
 )
@@ -40,6 +44,28 @@ def _compound() -> CompoundRoleBinding:
     """Parse the duplo-written config and return the plan_author binding."""
     cfg = OrchestraConfig.from_dict(_ORCHESTRA_COUNCIL_CONFIG)
     return cfg.role_bindings[ROLE_NAME]
+
+
+def _configured_criteria() -> tuple[CriterionDecl, ...]:
+    """The criterion decls the executor gates plan_author verdicts against.
+
+    These are the exact ``CriterionDecl`` objects dispatch forwards to the
+    Executor (extension point A), so running ``check_decision_consistency``
+    against them mirrors what the live judge state does at runtime."""
+    return tuple(_compound().criteria)
+
+
+def _compliance(*, compliant: bool) -> list[dict[str, Any]]:
+    """A ``criteria_compliance`` array naming exactly the configured ids.
+
+    Sourced from :data:`PLAN_AUTHOR_CRITERIA` -- the same tuple the binding
+    feeds the executor -- so the entries carry precisely the ids the
+    consistency check expects, never a hardcoded second copy that could
+    drift from the configuration."""
+    return [
+        {"criterion_id": c["id"], "observed_value": "ok", "compliant": compliant}
+        for c in PLAN_AUTHOR_CRITERIA
+    ]
 
 
 def test_init_config_carries_plan_author_role_binding():
@@ -178,3 +204,70 @@ def test_role_binding_dict_matches_declared_constants():
     assert binding["reviewer"] == {"model": "codex"}
     assert binding["judge_role"] == {"model": "opus"}
     assert len(binding["criteria"]) == len(PLAN_AUTHOR_CRITERIA)
+
+
+def test_verdict_with_configured_ids_clears_consistency_for_accept_and_iterate():
+    """Regression for the plan_author ``missing_ids`` bug (T-000001 fix,
+    T-000002 guard): a judge verdict that reports exactly the three
+    configured criterion ids -- which the repaired judge prompt now demands
+    -- clears ``check_decision_consistency`` for BOTH an ``accept`` (all
+    compliant) and an ``iterate`` (a required criterion non-compliant),
+    with no ``missing_ids`` and no ``extra_ids``.
+
+    This runs the same pure check the executor runs post-schema in the
+    judge state (``_executor_schema``), against the same criteria dispatch
+    forwards, so it pins the exact runtime contract the bug violated."""
+    configured = _configured_criteria()
+    mode = mode_for_workflow(WORKFLOW_PATTERN)
+
+    accept = check_decision_consistency(
+        decision="accept",
+        criteria_compliance=_compliance(compliant=True),
+        configured=configured,
+        mode=mode,
+    )
+    assert accept.ok
+    assert accept.reason == ""
+    assert accept.missing_ids == ()
+    assert accept.extra_ids == ()
+
+    # An iterate verdict that flags a non-compliant criterion (the realistic
+    # iterate case) also survives: reporting the configured ids is what keeps
+    # the loop alive, independent of the per-criterion compliance values.
+    iterate = check_decision_consistency(
+        decision="iterate",
+        criteria_compliance=_compliance(compliant=False),
+        configured=configured,
+        mode=mode,
+    )
+    assert iterate.ok
+    assert iterate.missing_ids == ()
+    assert iterate.extra_ids == ()
+
+
+def test_verdict_inventing_ids_is_rejected_as_missing_ids():
+    """The regression has teeth: had the judge invented an id from the
+    ``_PHASE_SYSTEM`` prose rules (the original bug) instead of using the
+    configured ids, the SAME consistency check flags every configured id as
+    ``missing`` and the invented one as ``extra`` -- the ``missing_ids``
+    failure that routed the judge state through its error outcome."""
+    configured = _configured_criteria()
+    invented = [
+        {
+            "criterion_id": "every_item_leaves_project_building",
+            "observed_value": "ok",
+            "compliant": True,
+        },
+    ]
+
+    result = check_decision_consistency(
+        decision="accept",
+        criteria_compliance=invented,
+        configured=configured,
+        mode=mode_for_workflow(WORKFLOW_PATTERN),
+    )
+
+    assert not result.ok
+    assert result.reason == "missing_ids"
+    assert set(result.missing_ids) == {c["id"] for c in PLAN_AUTHOR_CRITERIA}
+    assert "every_item_leaves_project_building" in result.extra_ids

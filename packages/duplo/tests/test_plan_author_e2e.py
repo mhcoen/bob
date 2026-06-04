@@ -43,6 +43,7 @@ from duplo import plan_author_adapter
 from duplo.extractor import Feature
 from duplo.init import _ORCHESTRA_COUNCIL_CONFIG
 from duplo.plan_author_adapter import PlanAuthorCappedError, PlanAuthorRunError
+from duplo.plan_author_role import PLAN_AUTHOR_CRITERIA
 from duplo.questioner import BuildPreferences
 
 _WORKFLOWS_SRC = Path(duplo.__file__).resolve().parent / "workflows"
@@ -120,37 +121,33 @@ class _ScriptedModelAdapter:
         return [c["prompt"] for c in self.calls if c["state_id"] == "propose"]
 
 
-def _accept_verdict() -> str:
-    """A judge ``accept`` verdict that satisfies the plan_author role's
-    decision-consistency invariant.
+def _verdict(decision: str, *, compliant: bool = True) -> str:
+    """A judge verdict reporting exactly the configured criterion ids.
 
-    The role declares three required acceptance criteria; an ``accept``
-    must report compliance on every one or the executor rejects the
-    verdict as inconsistent.
+    The role declares three required acceptance criteria; every verdict
+    must report a ``criteria_compliance`` entry for each one (no missing,
+    no extra ids) or the executor's decision-consistency check rejects it.
+    Sourcing the ids from :data:`PLAN_AUTHOR_CRITERIA` -- the same tuple the
+    binding feeds the executor -- means the canned verdict carries precisely
+    the ids the runtime check expects, so these tests track the live
+    configuration instead of a hardcoded copy that could drift.
     """
     return json.dumps(
         {
-            "decision": "accept",
+            "decision": decision,
             "feedback": "ok",
             "criteria_compliance": [
-                {
-                    "criterion_id": "task_granularity_5_to_15",
-                    "observed_value": "ok",
-                    "compliant": True,
-                },
-                {
-                    "criterion_id": "batch_user_auto_discipline",
-                    "observed_value": "ok",
-                    "compliant": True,
-                },
-                {
-                    "criterion_id": "feat_fix_annotations_present",
-                    "observed_value": "ok",
-                    "compliant": True,
-                },
+                {"criterion_id": c["id"], "observed_value": "ok", "compliant": compliant}
+                for c in PLAN_AUTHOR_CRITERIA
             ],
         }
     )
+
+
+def _accept_verdict() -> str:
+    """A judge ``accept`` verdict that satisfies the plan_author role's
+    decision-consistency invariant (every required criterion compliant)."""
+    return _verdict("accept", compliant=True)
 
 
 def _deploy_project(project_dir: Path, *, max_rounds: int | None = None) -> None:
@@ -331,3 +328,70 @@ def test_never_validating_body_caps_fail_closed_without_writing_plan(
     final = _final_transition(raised.transcript_path)
     assert final.get("target") == "done"
     assert final.get("outcome") not in {"error", "stuck", "timeout", "cancelled"}
+
+
+def test_iterate_verdict_with_configured_ids_survives_without_missing_ids(
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Regression for the plan_author ``missing_ids`` bug, exercised through
+    the WHOLE real loop: a judge ``iterate`` verdict that reports exactly the
+    three configured criterion ids clears the executor's decision-consistency
+    check, routes back to the proposer (``attempts.judge < max_rounds``), and
+    the next round's ``accept`` converges to a canonical PLAN.md.
+
+    Had the verdict reported the wrong ids (the original bug, where the judge
+    invented ids from the ``_PHASE_SYSTEM`` prose), the consistency check
+    would flag ``missing_ids``, drive the judge state through its error
+    outcome, and ``generate_phase_plan`` would raise ``PlanAuthorRunError``.
+    So a clean convergence here is the regression guard: the loop SURVIVES
+    the iterate verdict.
+    """
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _deploy_project(project_dir)
+
+    # First judge call iterates (a required criterion non-compliant, the
+    # realistic iterate shape); the loop must survive it and re-draft. The
+    # second judge call accepts and the body validates.
+    adapter = _ScriptedModelAdapter(
+        {
+            "propose": [_VALID_BODY, _VALID_BODY],
+            "review": ["needs work", "looks fine"],
+            "judge": [_verdict("iterate", compliant=False), _accept_verdict()],
+        }
+    )
+    _install_scripted_adapter(monkeypatch, adapter)
+
+    features, prefs, phase = _build_inputs()
+    # No PlanAuthorRunError: the iterate verdict's ids matched the configured
+    # set, so no missing_ids violation routed the judge to its error outcome.
+    plan = planner.generate_phase_plan(
+        "http://example.com",
+        features,
+        prefs,
+        phase=phase,
+        project_name="App",
+        target_dir=project_dir,
+    )
+
+    # The iterate verdict looped the loop: judge ran twice and the proposer
+    # was re-invoked for the post-iterate re-draft.
+    judge_calls = [c for c in adapter.calls if c["state_id"] == "judge"]
+    assert len(judge_calls) == 2
+    assert len(adapter.proposer_prompts()) == 2
+
+    # The verdict the loop survived reported precisely the configured ids --
+    # no more, no fewer -- which is why the consistency check passed.
+    first_verdict = json.loads(_verdict("iterate", compliant=False))
+    emitted_ids = [e["criterion_id"] for e in first_verdict["criteria_compliance"]]
+    assert emitted_ids == [c["id"] for c in PLAN_AUTHOR_CRITERIA]
+    assert len(emitted_ids) == 3
+
+    # And the converged body persists as a canonical PLAN.md.
+    plan_path = planner.save_plan(plan, target_dir=project_dir)
+    from bob_tools.planfile import load as planfile_load
+
+    persisted = planfile_load(plan_path)
+    assert [p.phase_id for p in persisted.phases] == ["phase_001"]

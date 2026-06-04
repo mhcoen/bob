@@ -1756,3 +1756,13 @@ ad4498b: Changed verification section headers from Markdown H2 to HTML comments 
 de2b816: Added guidance for marking tasks requiring visual confirmation or manual interaction with [USER] tags. Updated test to verify this rule is included in system prompts.
 
 6371c67: Updated the file creation detection regex to capture any file path inside backticks, not just those starting with "Sources/" or "Package". This allows the pipeline to correctly track all files created in earlier phases, including test files, preventing duplicate creation in later phases.
+
+## Observations
+
+[2] [T-000002] `mypy .` is not fully green on the baseline tree: ~6 pre-existing
+`[no-any-return]` / `[var-annotated]` errors live in unrelated test files
+(test_pipeline.py:78, test_planner.py:92, test_init.py:249, test_task_matcher.py:82,
+test_status.py:53, and similar). Confirmed by `git stash` + `mypy .` on the clean
+tree. The T-000002 regression tests (tests/test_plan_author_role.py,
+tests/test_plan_author_e2e.py) add zero mypy errors; "keep mypy green" here means
+introducing no new errors, not clearing the pre-existing unrelated backlog.
