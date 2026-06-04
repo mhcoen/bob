@@ -323,12 +323,13 @@ def is_test_command(cmd: str) -> bool:
 
 
 def is_scoped_python_linter(cmd: str) -> bool:
-    """Return True if cmd is a ruff check/format invocation we can scope.
+    """Return True if cmd is a ruff check/format or mypy invocation we can scope.
 
-    Recognizes the two repo-wide forms mcloop itself generates via
+    Recognizes the repo-wide forms mcloop itself generates via
     auto-detection:
       - ``ruff check .``
       - ``ruff format --check .``
+      - ``mypy .``
 
     Non-default invocations (with extra flags, glob patterns, or config
     overrides) are left alone to avoid changing behavior the user
@@ -339,6 +340,8 @@ def is_scoped_python_linter(cmd: str) -> bool:
         return True
     if parts == ["ruff", "format", "--check", "."]:
         return True
+    if parts == ["mypy", "."]:
+        return True
     return False
 
 
@@ -346,13 +349,17 @@ def targeted_linter_command(
     cmd: str,
     python_files: list[str],
 ) -> str:
-    """Rewrite a scoped ruff command to target specific Python files.
+    """Rewrite a scoped ruff/mypy command to target specific Python files.
 
     Replaces the trailing ``.`` (whole repo) with a space-joined list
     of file paths. Caller must have already filtered ``python_files``
-    to .py files that actually exist.
+    to .py files that actually exist. Scoping mypy to changed files is
+    what keeps a task from being gated on the repo's pre-existing,
+    unrelated type-debt: a strict-mode baseline with standing errors
+    elsewhere would otherwise fail every task regardless of its own
+    correctness.
     """
     parts = cmd.split()
-    # Drop the trailing "." and append the explicit file list.
+    # Drop the trailing "." (whole repo) and append the explicit file list.
     assert parts[-1] == ".", f"unexpected linter cmd shape: {cmd!r}"
     return " ".join(parts[:-1] + python_files)
