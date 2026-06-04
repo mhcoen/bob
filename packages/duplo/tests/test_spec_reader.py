@@ -103,7 +103,11 @@ class TestSplitSections:
         text = "# Main\nIntro.\n### Detail\nBody."
         sections = _split_sections(text)
         assert "Main" in sections
-        assert "Detail" in sections
+        # Level-3 headings are not section boundaries; they remain part of
+        # the enclosing level-1/level-2 section so AUTO-GENERATED design
+        # blocks (which contain ### subheadings) round-trip intact.
+        assert "Detail" not in sections
+        assert "### Detail" in sections["Main"]
 
     def test_preamble_before_first_heading(self):
         text = "Preamble text.\n## Purpose\nDetails."

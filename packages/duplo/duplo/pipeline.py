@@ -28,6 +28,8 @@ from pathlib import Path
 
 from duplo.appshot import capture_appshot
 from duplo.claude_cli import ClaudeCliError
+from duplo.council import CouncilError
+from duplo.plan_author_adapter import PlanAuthorError
 from duplo.collector import collect_feedback, collect_issues
 from duplo.comparator import compare_screenshots
 from duplo.diagnostics import record_failure
@@ -82,6 +84,7 @@ from duplo.video_extractor import extract_all_videos
 from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
 from bob_tools.planfile import (
     Plan,
+    PlanValidationError,
     add_bug_task,
     add_phase_task,
     make_task,
@@ -1469,7 +1472,12 @@ def _run_phase_generation_loop(
             saved_plan_path = save_plan(content, extra_tasks=extra_tasks)
             _git_commit_artifact(saved_plan_path, "save_plan")
             prior_phases_files.extend(_extract_created_files_from_plan(content))
-        except ClaudeCliError as exc:
+        except (
+            ClaudeCliError,
+            PlanAuthorError,
+            CouncilError,
+            PlanValidationError,
+        ) as exc:
             record_failure(
                 "pipeline:phase_generation",
                 "llm",

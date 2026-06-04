@@ -275,7 +275,6 @@ def assemble_reauthored_plan(
                 abandoned_ids.add(aid)
 
     replacement_at_prior: dict[str, list[str]] = {}
-    consumed_priors: set[str] = set()
     new_phase_ids: list[str] = []
     merge_first_source: dict[str, str] = {}
 
@@ -291,12 +290,10 @@ def assemble_reauthored_plan(
             for fid in from_field:
                 if isinstance(fid, str):
                     replacement_at_prior.setdefault(fid, []).append(new_id)
-                    consumed_priors.add(fid)
         elif action == "split":
             for fid in from_field:
                 if isinstance(fid, str):
                     replacement_at_prior.setdefault(fid, []).append(new_id)
-                    consumed_priors.add(fid)
         elif action == "merge":
             string_sources = [s for s in from_field if isinstance(s, str)]
             if string_sources:
@@ -309,7 +306,6 @@ def assemble_reauthored_plan(
                 # without leaking the consumed prior into the output.
                 for fid in string_sources:
                     replacement_at_prior.setdefault(fid, []).append(new_id)
-                    consumed_priors.add(fid)
         elif action == "new":
             new_phase_ids.append(new_id)
         # preserve: no replacement; the prior's phase at that
