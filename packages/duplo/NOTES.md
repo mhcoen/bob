@@ -1805,6 +1805,17 @@ name it had no re-authoring/stamping function, only `parse_plan_phases` and the
 lineage validator. Added `stamp_sequential_phase_ids(plan_text)` there to rewrite
 the per-phase `<!-- phase_id: ... -->` comments to phase_001..phase_NNN by position.
 
+[5] [T-000005] The regression test
+(tests/test_reauthor_phase_ids.py::test_generated_saved_plan_has_unique_sequential_phase_id_comments)
+exercises the full generate -> stamp -> save path, not just the stamper in
+isolation. It starts from generator output reproducing the constant-`phase_001`
+bug, applies `stamp_sequential_phase_ids`, then round-trips through the canonical
+save path (`bob_tools.planfile.parse_plan` -> `render_plan`) and asserts directly
+on the `<!-- phase_id: ... -->` comment lines extracted from the saved artifact.
+Confirmed the save round-trip preserves the stamped ids: the renderer emits
+whatever `Phase.phase_id` holds and the parser reads ids back from the comment
+lines, so unique sequential ids survive the parse/render cycle unchanged.
+
 ## Hypotheses
 
 [4] [T-000004] The new `stamp_sequential_phase_ids` is not yet wired into the

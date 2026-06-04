@@ -7,7 +7,18 @@ position, never a constant phase_001.
 
 from __future__ import annotations
 
+import re
+
+from bob_tools.planfile import parse_plan, render_plan
+
 from duplo.reauthor_phase_ids import parse_plan_phases, stamp_sequential_phase_ids
+
+_PHASE_ID_COMMENT = re.compile(r"<!-- phase_id: (?P<phase_id>\S+) -->")
+
+
+def _phase_id_comments(plan_text: str) -> list[str]:
+    """Return every ``<!-- phase_id: ... -->`` comment id in source order."""
+    return _PHASE_ID_COMMENT.findall(plan_text)
 
 
 def test_constant_phase_001_becomes_sequential() -> None:
@@ -156,3 +167,40 @@ def test_empty_and_no_phase_text_unchanged() -> None:
     assert stamp_sequential_phase_ids("") == ""
     plain = "# Just a title\n\nsome notes\n"
     assert stamp_sequential_phase_ids(plain) == plain
+
+
+def test_generated_saved_plan_has_unique_sequential_phase_id_comments() -> None:
+    """Regression: a generated, then saved, multi-phase plan must carry
+    unique, sequential ``<!-- phase_id: ... -->`` comments across all
+    phases.
+
+    Exercises the full generate -> stamp -> save path. The generator's
+    pre-stamp output reproduces the original bug, where every phase
+    shares a constant ``phase_001``. After stamping (the fix) the plan
+    is round-tripped through the canonical save path
+    (``parse_plan`` -> ``render_plan``) that writes PLAN.md, and the
+    saved artifact's phase_id comment lines are asserted unique and
+    sequential ``phase_001``..``phase_NNN`` across every phase.
+    """
+    phase_count = 6
+    generated = "<!-- bob-plan-format: 1 -->\n\n# MyApp\n\n"
+    for n in range(1, phase_count + 1):
+        generated += (
+            f"## Phase {n}: Phase {n}\n"
+            "<!-- phase_id: phase_001 -->\n"
+            "\n"
+            f"- [ ] T-{n:06d}: do thing {n}\n"
+            "\n"
+        )
+
+    # The unstamped generator output exhibits the bug: a constant id.
+    assert _phase_id_comments(generated) == ["phase_001"] * phase_count
+
+    stamped = stamp_sequential_phase_ids(generated)
+    saved = render_plan(parse_plan(stamped))
+
+    ids = _phase_id_comments(saved)
+    expected = [f"phase_{n:03d}" for n in range(1, phase_count + 1)]
+    assert ids == expected
+    assert len(ids) == phase_count
+    assert len(ids) == len(set(ids))
