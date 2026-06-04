@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from orchestra.errors import OrchestraError
 from orchestra.spine import Envelope
@@ -111,7 +111,7 @@ class IterativeDesignResult:
     - ``error``: populated iff ``termination == "ERROR"``.
     """
 
-    termination: Literal[CONVERGED, CAPPED, ERROR]
+    termination: Literal["CONVERGED", "CAPPED", "ERROR"]
     rounds_completed: int
     final_artifact: str
     transcript: list[Turn]

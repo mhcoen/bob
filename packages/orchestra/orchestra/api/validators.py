@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from orchestra.api._common import WorkflowApiError
@@ -55,7 +56,9 @@ def _validate_role_bindings(
     mismatches: list[str] = []
     for role_name, expected_kind in needed.items():
         binding = resolved[role_name]
-        adapter_kind = _ADAPTER_TO_KIND.get(binding.adapter)
+        adapter_kind = (
+            _ADAPTER_TO_KIND.get(binding.adapter) if binding.adapter is not None else None
+        )
         if adapter_kind is None:
             mismatches.append(
                 f"role {role_name!r} (state {first_state_for_role[role_name]!r}): "

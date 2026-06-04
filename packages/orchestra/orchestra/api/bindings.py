@@ -226,6 +226,12 @@ def _actor_identity(binding: RoleBinding) -> tuple[str, str | None]:
     different system prompts or temperatures still count as the same
     actor.
     """
+    if binding.adapter is None:
+        raise ConfigError(
+            "actor identity requires a resolved adapter, but the role "
+            "binding has none. A compound-role leaf must have its "
+            "adapter resolved from the registry before identity is taken."
+        )
     return (binding.adapter, binding.model)
 
 
@@ -243,7 +249,7 @@ def _adapter_workspace_mutation(binding: RoleBinding) -> str:
     finding; the contract is now read from the class without
     instantiation, and any contract violation aborts validation.
     """
-    cls = _ADAPTER_CLASSES.get(binding.adapter)
+    cls = _ADAPTER_CLASSES.get(binding.adapter) if binding.adapter is not None else None
     if cls is None:
         raise ConfigError(
             f"adapter {binding.adapter!r} is not registered in "

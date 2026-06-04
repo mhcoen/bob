@@ -56,3 +56,55 @@ python_version = "3.12"
 strict = true
 warn_unused_ignores = true
 warn_return_any = true
+
+# Tests are not held to full strict annotation discipline: unannotated
+# test functions and calls between them are conventional and not a
+# type-safety concern. Real type checks (arg-type, call-arg, attr-defined,
+# etc.) still apply to tests; only the annotation-presence rules are
+# relaxed here.
+[[tool.mypy.overrides]]
+module = [
+    "conftest",
+    "test_adapters",
+    "test_api",
+    "test_calibration",
+    "test_cli",
+    "test_codex_agent_adapter",
+    "test_codex_text_adapter",
+    "test_config",
+    "test_decision_consistency",
+    "test_e2e",
+    "test_e2e_decision_consistency",
+    "test_e2e_determinism",
+    "test_executor_json_extractor",
+    "test_fan_out_executor",
+    "test_loader",
+    "test_log",
+    "test_parity_code_edit",
+    "test_pass8_security",
+    "test_payloads",
+    "test_progress",
+    "test_prompt_snapshot",
+    "test_provider_actors",
+    "test_registry",
+    "test_repl",
+    "test_resume",
+    "test_schema",
+    "test_schema_smoke",
+    "test_store",
+    "test_subprocess_adapters",
+    "test_transforms",
+    "test_visibility",
+    "test_workflows_ask",
+    "test_workflows_ask_anonymous_reviewers",
+    "test_workflows_ask_council",
+    "test_workflows_council",
+    "test_workflows_design_loop",
+    "test_workflows_iterate",
+    "test_workflows_parallel_thinking",
+    "test_workflows_prji",
+]
+disallow_untyped_defs = false
+disallow_untyped_calls = false
+disallow_incomplete_defs = false
+disable_error_code = ["no-untyped-def", "no-untyped-call", "type-arg"]

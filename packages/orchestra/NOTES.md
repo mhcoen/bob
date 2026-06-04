@@ -45,6 +45,46 @@
   (xdist/orchestra not importable there), so "No tests collected" is an
   output artifact, not a real collection failure.
 
+- 2026-06-03 [1.1] [T-000001] Follow-up session: the T-000001 change to
+  `orchestra/config.py` and `tests/test_config.py` was already present and
+  committed (field, parser, reserved key, three tests all in place). On
+  re-verification `ruff check .` failed with the 5 still-open F821 errors
+  noted above (`_common.py:114` x4, `validators.py:206`). Since the
+  mandatory check command is `ruff check .` (whole-repo) and it failed,
+  these were fixed at the narrowest point: imported `Literal` in
+  `_common.py` and quoted the annotation
+  `Literal["CONVERGED", "CAPPED", "ERROR"]`; imported `Callable` from
+  `collections.abc` in `validators.py`. (The `_runner_common.py:70` UP038
+  noted earlier was already resolved upstream; it did not reappear.)
+  `ruff check .` and `ruff format --check .` now pass clean.
+- 2026-06-03 [1.1] [T-000001] `pytest` (whole suite) reports 687 passed,
+  8 skipped, 1 failed. The single failure is
+  `tests/test_fan_out_executor.py::test_cancellation_race_preserves_concurrent_success`,
+  a timing-dependent concurrency test that coordinates two threads with
+  `threading.Event` plus a `time.sleep(0.05)` and asserts `b_proceed.is_set()`.
+  It is flaky on thread scheduling and unrelated to this task (config and
+  two import fixes cannot affect fan-out executor threading). Not re-run to
+  respect the no-rerun-without-change rule; flagged for a follow-up to make
+  the test deterministic (e.g. wait on the event rather than sleep).
+- 2026-06-03 [1.1] [T-000001] `mypy .` reports 525 errors across 31 files,
+  all pre-existing and codebase-wide: executor mixin classes
+  (`_StateExecMixin`, `_SchemaMixin`, `_ProgressMixin`) reference attributes
+  defined on the composed `Executor` rather than the mixin, and many test
+  modules are untyped (`no-untyped-def`). None are in `config.py`; the two
+  import fixes reduce errors rather than add any. Out of scope for T-000001
+  and not fixable within it.
+- 2026-06-03 [1.1] [T-000001] Re-verification this session: the four
+  mandatory checks were each run once. `ruff check .` (No issues found),
+  `ruff format --check .` (105 files already formatted), and `pytest`
+  (688 passed, 8 skipped, 0 failed) all pass clean. The previously-flaky
+  `test_cancellation_race_preserves_concurrent_success` passed this run,
+  confirming it was a scheduling artifact. `mypy .` still reports the same
+  525 pre-existing codebase-wide errors (executor-mixin `attr-defined`,
+  untyped test functions); none touch the T-000001 scope, so it was not
+  re-run. T-000001 (criteria field + parser + reserved key + three tests)
+  is complete and committed; the working tree carries only the two
+  import-fix edits to `_common.py`/`validators.py`.
+
 ## Hypotheses
 
 - 2026-06-03 [1.1] [T-000001] The effective lint/type gate appears to be

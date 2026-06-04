@@ -648,7 +648,9 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
     except OrchestraError as exc:
         print(f"  workflow failed to load: {exc}", file=err)
         return 1
-    role_names = sorted({state.role for state in workflow.states if state.role is not None})
+    role_names = sorted(
+        {role for state in workflow.states if (role := state.role) is not None}
+    )
     print(
         "Required roles: " + (", ".join(role_names) if role_names else "(none)"),
         file=out,
@@ -662,7 +664,11 @@ def _print_help_for_verb(verb_name: str, config: OrchestraConfig) -> int:
         if binding is None:
             print(f"  {role}: NOT CONFIGURED", file=out)
             continue
-        details = [binding.adapter]
+        if binding.adapter is None:
+            print(f"  {role}: INVALID (adapter missing)", file=out)
+            continue
+        adapter: str = binding.adapter
+        details = [adapter]
         if binding.model:
             details.append(f"model={binding.model}")
         print(f"  {role}: " + ", ".join(details), file=out)
