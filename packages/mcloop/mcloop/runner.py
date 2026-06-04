@@ -146,6 +146,7 @@ _MODEL_PROVIDERS = {
 
 _THIRD_PARTY_PREFIXES = ("deepseek/", "moonshotai/", "openai/")
 _SUBSCRIPTION_PREFLIGHT_OK = False
+_SUBSCRIPTION_PREFLIGHT_OK_KEYS: set[tuple[str, str | None]] = set()
 
 
 def warn_unknown_model(cli: str, model: str) -> None:
@@ -264,6 +265,7 @@ def _build_session_env(
 def _reset_subscription_preflight_for_tests() -> None:
     global _SUBSCRIPTION_PREFLIGHT_OK
     _SUBSCRIPTION_PREFLIGHT_OK = False
+    _SUBSCRIPTION_PREFLIGHT_OK_KEYS.clear()
 
 
 def _subscription_preflight_required(
@@ -272,19 +274,22 @@ def _subscription_preflight_required(
     model: str | None,
     env: dict[str, str],
 ) -> bool:
-    """Return True when this session should probe Claude subscription auth."""
-    if cli != "claude":
+    """Return True when this session should probe subscription auth."""
+    if cli not in {"claude", "codex"}:
         return False
     from mcloop.install_cmd import _load_mcloop_config
 
     billing = _load_mcloop_config().get("billing")
     if billing in {"api", "openrouter"}:
         return False
-    if model and _provider_for_model(model) is not None:
-        return False
-    if env.get("ANTHROPIC_API_KEY"):
-        return False
-    if env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_AUTH_TOKEN"):
+    if cli == "claude":
+        if model and _provider_for_model(model) is not None:
+            return False
+        if env.get("ANTHROPIC_API_KEY"):
+            return False
+        if env.get("ANTHROPIC_BASE_URL") or env.get("ANTHROPIC_AUTH_TOKEN"):
+            return False
+    if cli == "codex" and env.get("OPENAI_API_KEY"):
         return False
     return True
 
@@ -296,23 +301,38 @@ def ensure_subscription_preflight(
     env: dict[str, str],
     cwd: Path,
 ) -> None:
-    """Fail fast if a native Claude Code subscription session is unusable.
+    """Fail fast if a native CLI subscription session is unusable.
 
     The check is intentionally narrow: it runs only for subscription-backed
-    ``claude`` sessions after the caller has constructed the same env that
-    the real task session will use. API billing, OpenRouter billing, Codex,
-    and third-party provider-routed models are skipped because they have
-    different auth surfaces.
+    native CLI sessions after the caller has constructed the same env that
+    the real task session will use. API billing, OpenRouter billing, and
+    third-party provider-routed models are skipped because they have different
+    auth surfaces.
     """
     global _SUBSCRIPTION_PREFLIGHT_OK
-    if _SUBSCRIPTION_PREFLIGHT_OK:
+    cache_key = (cli, model)
+    if _SUBSCRIPTION_PREFLIGHT_OK and cli == "claude":
+        return
+    if cache_key in _SUBSCRIPTION_PREFLIGHT_OK_KEYS:
         return
     if not _subscription_preflight_required(cli=cli, model=model, env=env):
         return
 
-    cmd = ["claude", "-p", "ok", "--output-format", "stream-json", "--verbose"]
-    if model:
-        cmd.extend(["--model", model])
+    if cli == "claude":
+        display_name = "Claude Code"
+        login_hint = "Run `claude /login` and retry mcloop."
+        cmd = ["claude", "-p", "ok", "--output-format", "stream-json", "--verbose"]
+        if model:
+            cmd.extend(["--model", model])
+    elif cli == "codex":
+        display_name = "Codex"
+        login_hint = "Run `codex login` and retry mcloop."
+        cmd = ["codex", "exec", "--full-auto"]
+        if model:
+            cmd.extend(["--model", model])
+        cmd.append("ok")
+    else:
+        return
     try:
         result = subprocess.run(
             cmd,
@@ -327,18 +347,18 @@ def ensure_subscription_preflight(
     except subprocess.TimeoutExpired as exc:
         output = _decode_subprocess_output(exc.stdout) + _decode_subprocess_output(exc.stderr)
         raise SubscriptionPreflightError(
-            "Claude Code subscription preflight timed out. Run `claude /login` and retry mcloop.",
+            f"{display_name} subscription preflight timed out. {login_hint}",
             output,
         ) from exc
     except OSError as exc:
         raise SubscriptionPreflightError(
-            f"Claude Code subscription preflight could not start: {exc}",
+            f"{display_name} subscription preflight could not start: {exc}",
             str(exc),
         ) from exc
 
     output = (result.stdout or "") + (result.stderr or "")
     normalized = output.lower()
-    has_result = _stream_json_has_result(output)
+    has_result = cli == "codex" or _stream_json_has_result(output)
     if (
         result.returncode != 0
         or "not logged in" in normalized
@@ -346,16 +366,18 @@ def ensure_subscription_preflight(
         or not has_result
     ):
         reason = (
-            "Claude Code subscription preflight failed before starting a task.\n"
+            f"{display_name} subscription preflight failed before starting a task.\n"
             f"Exit code: {result.returncode}\n"
         )
         if not has_result:
             reason += "\nNo stream-json result was produced."
         if output.strip():
             reason += "\n" + output.strip()
-        reason += "\n\nRun `claude /login` and retry mcloop."
+        reason += f"\n\n{login_hint}"
         raise SubscriptionPreflightError(reason, output)
-    _SUBSCRIPTION_PREFLIGHT_OK = True
+    if cli == "claude":
+        _SUBSCRIPTION_PREFLIGHT_OK = True
+    _SUBSCRIPTION_PREFLIGHT_OK_KEYS.add(cache_key)
 
 
 def _stream_json_has_result(output: str) -> bool:

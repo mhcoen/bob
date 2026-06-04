@@ -4,12 +4,13 @@ from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
+import pytest
 from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 from mcloop.audit import AuditResult, _run_audit_fix_cycle
 from mcloop.checks import CheckResult
-from mcloop.main import _checkpoint, _commit, run_loop
-from mcloop.runner import RunResult
+from mcloop.main import ChainEntry, _checkpoint, _commit, run_loop
+from mcloop.runner import RunResult, SubscriptionPreflightError
 
 
 def _isolated_git_state():
@@ -374,7 +375,7 @@ def test_noop_task_checks_pass_does_not_auto_check_without_acceptance_evidence(
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
-def test_noop_stage_gate_with_task_specific_evidence_is_success(
+def test_zero_diff_verification_task_accepts_on_real_checks_not_prose(
     mock_run,
     mock_checks,
     mock_meaningful,
@@ -391,15 +392,9 @@ def test_noop_stage_gate_with_task_specific_evidence_is_success(
         "ruff, ruff format, mypy strict, full pytest all green."
     )
     md = _make_project(tmp_path, f"- [ ] {task_text}\n")
-    mock_run.return_value = _ok_run_result(
-        output=(
-            "Stage 13 gate verified - all four mandatory checks pass.\n"
-            "`ruff check .` clean; `ruff format --check .` 40 files already formatted;\n"
-            "pytest 626 passed / 2 skipped; `mypy .` no issues in 40 files.\n"
-        )
-    )
+    mock_run.return_value = _ok_run_result(output="Done.")
 
-    result = run_loop(md, max_retries=3, no_audit=True)
+    result = run_loop(md, max_retries=3, no_audit=True, stop_after_one=True)
 
     assert result.ok
     mock_run.assert_called_once()
@@ -409,7 +404,115 @@ def test_noop_stage_gate_with_task_specific_evidence_is_success(
     assert_canonical_checkbox(content, "x", task_text)
 
     calls = _notify_calls(mock_notify)
-    assert calls == [("All tasks completed!", "info")]
+    assert calls == [("Stopped after one task as requested", "info")]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
+@patch("mcloop.main.run_task")
+def test_zero_diff_verification_task_rejects_on_real_check_failure(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    task_text = "Run the full suite and confirm the phase closes."
+    md = _make_project(tmp_path, f"- [ ] {task_text}\n")
+    mock_run.return_value = _ok_run_result(
+        output=("T-000001 complete: ruff and pytest passed with all checks green.")
+    )
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert not result.ok
+    mock_run.assert_called_once()
+    mock_checks.assert_called_once_with(tmp_path)
+    mock_commit.assert_not_called()
+    content = md.read_text()
+    assert_canonical_checkbox(content, "!", task_text)
+
+    calls = _notify_calls(mock_notify)
+    assert calls == [
+        ("Giving up on: [T-000001] Run the full suite and confirm the phase closes.", "error")
+    ]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
+@patch("mcloop.main.run_task")
+def test_zero_diff_verification_failure_does_not_advance_model_chain(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    task_text = "Run the full suite and confirm the phase closes."
+    md = _make_project(tmp_path, f"- [ ] {task_text}\n")
+    mock_run.return_value = _ok_run_result()
+
+    result = run_loop(
+        md,
+        max_retries=3,
+        no_audit=True,
+        chain=[
+            ChainEntry(cli="claude", model="opus"),
+            ChainEntry(cli="codex", model="gpt-5-codex"),
+        ],
+    )
+
+    assert not result.ok
+    mock_run.assert_called_once()
+    assert mock_run.call_args.args[1] == "claude"
+    assert mock_run.call_args.kwargs["model"] == "opus"
+    mock_checks.assert_called_once_with(tmp_path)
+    mock_commit.assert_not_called()
+
+
+def test_startup_chain_preflight_rejects_unusable_codex_tier(tmp_path, monkeypatch):
+    md = _make_project(tmp_path, "- [ ] Do something\n")
+    calls = []
+
+    def fake_preflight(**kwargs):
+        calls.append((kwargs["cli"], kwargs["model"]))
+        if kwargs["cli"] == "codex":
+            raise SubscriptionPreflightError(
+                "Codex subscription preflight failed before starting a task.\n"
+                "Exit code: 1\n"
+                "HTTP 400: model not supported with a ChatGPT account",
+                "HTTP 400: model not supported with a ChatGPT account",
+            )
+
+    monkeypatch.setattr(
+        "mcloop.runner.ensure_subscription_preflight",
+        fake_preflight,
+    )
+
+    with pytest.raises(SubscriptionPreflightError) as excinfo:
+        run_loop(
+            md,
+            no_audit=True,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="codex", model="gpt-5-codex"),
+            ],
+        )
+
+    assert calls == [("claude", "opus"), ("codex", "gpt-5-codex")]
+    message = str(excinfo.value)
+    assert "Model chain tier 2 (codex/gpt-5-codex) is unusable" in message
+    assert "model not supported with a ChatGPT account" in message
 
 
 @patch("mcloop.main.notify")

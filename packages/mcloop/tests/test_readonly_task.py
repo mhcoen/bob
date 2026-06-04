@@ -21,8 +21,8 @@ import pytest
 
 from mcloop.main import (
     _READONLY_TASK_PHRASES,
-    _has_task_specific_acceptance_evidence,
     _is_readonly_task,
+    _is_zero_diff_check_task,
 )
 
 # -- positive cases: deliberate read-only ----------------------------
@@ -95,61 +95,28 @@ def test_phrase_set_is_non_empty() -> None:
         assert phrase == phrase.lower()
 
 
-def test_task_specific_evidence_accepts_stage_gate_output() -> None:
-    task_text = (
-        "Verify Stage 13 gate: absent section, append, unchanged-TODO, "
-        "reopen-DONE, reopen-FAILED, fix-key dedup, text-key dedup, "
-        "id assignment, children preserved, field-stability rejection; "
-        "ruff, ruff format, mypy strict, full pytest all green."
-    )
-    output = """
-    Stage 13 gate verified - all four mandatory checks pass.
-    `ruff check .` clean; `ruff format --check .` 40 files already formatted;
-    pytest 626 passed / 2 skipped; `mypy .` no issues in 40 files.
-    """
-
-    assert _has_task_specific_acceptance_evidence(task_text, output, task_id="T-000176")
-
-
-def test_task_specific_evidence_accepts_explicit_task_id_evidence() -> None:
-    task_text = "Implement idempotent canonical rendering."
-    output = """
-    Acceptance evidence for T-000999:
-    - `pytest tests/test_render.py` passed
-    - `mypy mcloop` passed with no issues
-    """
-
-    assert _has_task_specific_acceptance_evidence(task_text, output, task_id="T-000999")
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Run the full suite and confirm the phase closes.",
+        "Verify Stage 13 gate: ruff, mypy, pytest all green.",
+        "Confirm all checks are green before release.",
+        "Quality gate verification: pytest and mypy.",
+    ],
+)
+def test_zero_diff_check_task_recognizes_verification_gates(text: str) -> None:
+    assert _is_zero_diff_check_task(text)
 
 
 @pytest.mark.parametrize(
-    ("task_text", "output", "task_id"),
+    "text",
     [
-        (
-            "Verify Stage 13 gate: ruff, mypy, pytest all green.",
-            "Ready. What would you like to work on?",
-            "T-000176",
-        ),
-        (
-            "Already done task",
-            "All checks pass.",
-            "T-000001",
-        ),
-        (
-            "Verify Stage 13 gate: ruff, mypy, pytest all green.",
-            "All checks pass: ruff, pytest, and mypy are green.",
-            "T-000176",
-        ),
-        (
-            "Verify Stage 13 gate: ruff, mypy, pytest all green.",
-            "Stage 13 looks complete.",
-            "T-000176",
-        ),
+        "Add tests for the renderer.",
+        "Implement the verifier and run pytest.",
+        "Already done task",
+        "Capture baseline without modifying files.",
+        "Refactor the queueing logic so checks pass.",
     ],
 )
-def test_task_specific_evidence_rejects_generic_stdout(
-    task_text: str,
-    output: str,
-    task_id: str,
-) -> None:
-    assert not _has_task_specific_acceptance_evidence(task_text, output, task_id=task_id)
+def test_zero_diff_check_task_rejects_implementation_or_readonly_tasks(text: str) -> None:
+    assert not _is_zero_diff_check_task(text)

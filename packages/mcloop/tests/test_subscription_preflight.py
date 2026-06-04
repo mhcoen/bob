@@ -139,7 +139,7 @@ def test_subscription_preflight_rejects_error_result(
 @pytest.mark.parametrize(
     ("cli", "model", "env_extra", "config"),
     [
-        ("codex", "gpt-5.4", {}, {}),
+        ("codex", "gpt-5.4", {"OPENAI_API_KEY": "sk-test"}, {"billing": "api"}),
         ("claude", "opus", {"ANTHROPIC_API_KEY": "sk-test"}, {"billing": "api"}),
         (
             "claude",
@@ -155,7 +155,7 @@ def test_subscription_preflight_rejects_error_result(
         ),
     ],
 )
-def test_subscription_preflight_skips_non_subscription_claude_paths(
+def test_subscription_preflight_skips_non_subscription_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     cli: str,
@@ -173,6 +173,75 @@ def test_subscription_preflight_skips_non_subscription_claude_paths(
         env=env,
         cwd=tmp_path,
     )
+
+
+def test_codex_subscription_preflight_rejects_unsupported_chatgpt_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)}
+
+    def _fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(
+            args[0],
+            1,
+            stdout="",
+            stderr="HTTP 400: model not supported with a ChatGPT account\n",
+        )
+
+    monkeypatch.setattr("mcloop.runner.subprocess.run", _fake_run)
+
+    with pytest.raises(runner.SubscriptionPreflightError) as excinfo:
+        runner.ensure_subscription_preflight(
+            cli="codex",
+            model="gpt-5-codex",
+            env=env,
+            cwd=tmp_path,
+        )
+
+    assert excinfo.value.exit_code == runner.SUBSCRIPTION_PREFLIGHT_EXIT_CODE
+    message = str(excinfo.value)
+    assert "Codex subscription preflight failed before starting a task" in message
+    assert "Exit code: 1" in message
+    assert "model not supported with a ChatGPT account" in message
+
+
+def test_codex_subscription_preflight_accepts_exit_zero_and_caches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(tmp_path)}
+    calls = 0
+
+    def _fake_run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        assert args[0] == [
+            "codex",
+            "exec",
+            "--full-auto",
+            "--model",
+            "gpt-5.4",
+            "ok",
+        ]
+        return subprocess.CompletedProcess(args[0], 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr("mcloop.runner.subprocess.run", _fake_run)
+
+    runner.ensure_subscription_preflight(
+        cli="codex",
+        model="gpt-5.4",
+        env=env,
+        cwd=tmp_path,
+    )
+    runner.ensure_subscription_preflight(
+        cli="codex",
+        model="gpt-5.4",
+        env=env,
+        cwd=tmp_path,
+    )
+
+    assert calls == 1
 
 
 def test_decode_subprocess_output_handles_bytes() -> None:

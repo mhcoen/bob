@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
-import re
 import select
 import shlex
 import subprocess
@@ -379,18 +378,6 @@ def _is_readonly_task(task_text: str) -> bool:
     return any(phrase in text for phrase in _READONLY_TASK_PHRASES)
 
 
-_PASS_EVIDENCE_TERMS = (
-    "already formatted",
-    "all checks pass",
-    "all four checks pass",
-    "clean",
-    "green",
-    "no failures",
-    "no issues",
-    "pass",
-    "passed",
-)
-
 _CHECK_EVIDENCE_TERMS = (
     "cargo test",
     "go test",
@@ -406,62 +393,77 @@ _CHECK_EVIDENCE_TERMS = (
 
 _VERIFICATION_TASK_TERMS = (
     "all green",
+    "checks",
+    "confirm",
     "gate",
+    "full suite",
+    "full test suite",
+    "run the suite",
+    "test suite",
     "verify",
     "verification",
 )
 
 
-def _stage_anchor(task_text: str) -> str:
-    match = re.search(r"\bstage\s+(\d+)\b", task_text, flags=re.IGNORECASE)
-    if not match:
-        return ""
-    return f"stage {match.group(1)}"
+def _is_zero_diff_check_task(task_text: str) -> bool:
+    """Return True when a no-diff task is asking mcloop to verify checks.
 
-
-def _has_task_specific_acceptance_evidence(
-    task_text: str,
-    output: str,
-    *,
-    task_id: str = "",
-) -> bool:
-    """Return True when a no-change session proves the requested task."""
-    normalized_output = output.lower()
-    if not normalized_output.strip():
-        return False
-
-    anchors = [anchor for anchor in (task_id.lower(), _stage_anchor(task_text)) if anchor]
-    if not anchors or not any(anchor in normalized_output for anchor in anchors):
-        return False
-
-    check_terms_seen = {term for term in _CHECK_EVIDENCE_TERMS if term in normalized_output}
-    has_check_evidence = len(check_terms_seen) >= 2
-    has_pass_evidence = any(term in normalized_output for term in _PASS_EVIDENCE_TERMS)
-    return has_check_evidence and has_pass_evidence
-
-
-def _acceptance_evidence_text(result: object) -> str:
-    """Return the best available text to inspect for acceptance evidence.
-
-    ``result.output`` from the orchestra path is ``extract_final_text`` —
-    just the final assistant message. Verify-style tasks often summarize
-    tersely in that final line while the actual evidence (tool names,
-    pass counts) appears earlier in the transcript. When a log path is
-    available, prefer the full transcript so the gate sees what really
-    happened. Fall back to ``result.output`` if the log is missing or
-    unreadable (e.g. tests that mock the editor result without a log).
+    This is intentionally narrower than "mentions tests": implementation tasks
+    often mention tests as the desired result, and a no-diff implementation
+    task must still fail. The classifier is for explicit gate/verification
+    tasks where the deterministic acceptance signal is mcloop's own check
+    runner, not the model's prose.
     """
-    log_attr = getattr(result, "log_path", None)
-    if log_attr:
+    text = task_text.lower()
+    has_verification_intent = any(term in text for term in _VERIFICATION_TASK_TERMS)
+    has_check_target = any(term in text for term in _CHECK_EVIDENCE_TERMS) or any(
+        phrase in text
+        for phrase in (
+            "all checks",
+            "full suite",
+            "full test suite",
+            "quality gate",
+            "run the suite",
+            "test suite",
+        )
+    )
+    return has_verification_intent and has_check_target
+
+
+def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> None:
+    """Fail fast when a configured model tier cannot start.
+
+    ``run_task`` already performs the same subscription preflight immediately
+    before launching a session. Running it once per configured tier at startup
+    prevents a later fallback tier from turning a deterministic task verdict
+    into a surprise auth/model crash.
+    """
+    import mcloop.runner as _runner
+
+    for idx, entry in enumerate(chain, 1):
+        env = _runner._build_session_env(cli=entry.cli)
+        # _build_command applies provider/executor env mutations for Claude.
+        # The command itself is discarded; ensure_subscription_preflight builds
+        # its own minimal probe command from the same effective env.
+        _runner._build_command(
+            entry.cli,
+            "",
+            model=entry.model,
+            env=env,
+            executor_override=entry.executor,
+        )
         try:
-            log_path = Path(log_attr) if not isinstance(log_attr, Path) else log_attr
-            if log_path.exists():
-                full = log_path.read_text(encoding="utf-8", errors="replace")
-                if full.strip():
-                    return full
-        except OSError:
-            pass
-    return getattr(result, "output", "") or ""
+            _runner.ensure_subscription_preflight(
+                cli=entry.cli,
+                model=entry.model,
+                env=env,
+                cwd=project_dir,
+            )
+        except SubscriptionPreflightError as exc:
+            raise SubscriptionPreflightError(
+                f"Model chain tier {idx} ({entry.cli}/{entry.model}) is unusable.\n{exc}",
+                exc.output,
+            ) from exc
 
 
 def _has_checked_acceptance_task(tasks: list[Task]) -> bool:
@@ -1006,6 +1008,8 @@ def run_loop(
     # check. Raises PlanNotCanonicalError on non-canonical input; main()'s
     # handler translates that to exit 3.
     _enforce_canonical_inputs(plan_path, bugs_path)
+
+    _preflight_chain(chain, project_dir)
 
     description = parse_description(plan_path)
 
@@ -1752,6 +1756,7 @@ def run_loop(
         changed_files = []
         active_model_for_summary = active_entry.model
         last_error = ""
+        terminal_task_failure = False
         while True:
             active_selection = _select_chain_entry(
                 chain,
@@ -1990,6 +1995,7 @@ def run_loop(
                             flush=True,
                         )
                         _print_error_tail(cumulative_check.output)
+                        terminal_task_failure = True
                         break
                     if active_file == bugs_path:
                         last_error = (
@@ -2003,6 +2009,68 @@ def run_loop(
                             ),
                             flush=True,
                         )
+                        terminal_task_failure = True
+                        break
+                    if _is_zero_diff_check_task(task.text):
+                        _lifecycle._current_phase = "checks"
+                        zero_diff_check = run_checks(project_dir)
+                        if zero_diff_check.passed:
+                            elapsed = _format_elapsed(
+                                time.monotonic() - task_start,
+                            )
+                            check_off(active_file, task)
+                            if active_file == plan_path and active_phase_name:
+                                acceptance_evidence_phases.add(active_phase_name)
+                            completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                            task_entries.append(
+                                TaskEntry(
+                                    label=label,
+                                    text=task.text,
+                                    outcome="success",
+                                    elapsed=round(time.monotonic() - task_start, 2),
+                                    model=task_model or "",
+                                    attempts=attempt,
+                                    success=True,
+                                    exit_code=result.exit_code,
+                                    log_path=str(result.log_path) if result.log_path else "",
+                                    changed_files=[],
+                                    task_id=task.task_id or "",
+                                )
+                            )
+                            print(
+                                formatting.system_msg(
+                                    "Zero-diff verification task passed mcloop checks"
+                                ),
+                                flush=True,
+                            )
+                            print(
+                                formatting.task_complete(label, elapsed),
+                                flush=True,
+                            )
+                            ctx.add(label, task.text, elapsed, result.output)
+                            _ledger_settle(
+                                label,
+                                TaskOutcome(
+                                    success=True,
+                                    abandoned=False,
+                                    summary=task.text[:200],
+                                    changed_files=(),
+                                ),
+                            )
+                            success = True
+                            break
+                        last_error = (
+                            f"Zero-diff verification failed: {zero_diff_check.command}\n"
+                            + _tail(zero_diff_check.output, 50)
+                        )
+                        print(
+                            formatting.error_msg(
+                                f"Zero-diff verification failed: {zero_diff_check.command}"
+                            ),
+                            flush=True,
+                        )
+                        _print_error_tail(zero_diff_check.output)
+                        terminal_task_failure = True
                         break
                     if _is_readonly_task(task.text):
                         elapsed = _format_elapsed(
@@ -2026,56 +2094,6 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    if _has_task_specific_acceptance_evidence(
-                        task.text,
-                        _acceptance_evidence_text(result),
-                        task_id=task.task_id or "",
-                    ):
-                        elapsed = _format_elapsed(
-                            time.monotonic() - task_start,
-                        )
-                        check_off(active_file, task)
-                        if active_file == plan_path and active_phase_name:
-                            acceptance_evidence_phases.add(active_phase_name)
-                        completed.append(f"{label}) {format_task_id(task)}{task.text}")
-                        task_entries.append(
-                            TaskEntry(
-                                label=label,
-                                text=task.text,
-                                outcome="success",
-                                elapsed=round(time.monotonic() - task_start, 2),
-                                model=task_model or "",
-                                attempts=attempt,
-                                success=True,
-                                exit_code=result.exit_code,
-                                log_path=str(result.log_path) if result.log_path else "",
-                                changed_files=[],
-                                task_id=task.task_id or "",
-                            )
-                        )
-                        print(
-                            formatting.system_msg(
-                                "Task produced no file changes but provided"
-                                " task-specific acceptance evidence"
-                            ),
-                            flush=True,
-                        )
-                        print(
-                            formatting.task_complete(label, elapsed),
-                            flush=True,
-                        )
-                        ctx.add(label, task.text, elapsed, result.output)
-                        _ledger_settle(
-                            label,
-                            TaskOutcome(
-                                success=True,
-                                abandoned=False,
-                                summary=task.text[:200],
-                                changed_files=(),
-                            ),
-                        )
-                        success = True
-                        break
                     # Non-read-only no-op: editor was supposed to make
                     # changes or produce a dedicated verification artifact,
                     # but didn't. A globally green suite is not acceptance
@@ -2088,6 +2106,7 @@ def run_loop(
                         formatting.error_msg("No-op task without acceptance evidence"),
                         flush=True,
                     )
+                    terminal_task_failure = True
                     break
 
                 _lifecycle._current_phase = "checks"
@@ -2247,6 +2266,8 @@ def run_loop(
             if success:
                 break
             if terminal_failure:
+                break
+            if terminal_task_failure:
                 break
             if limit_hit:
                 if active_chain_idx < len(chain) - 1:
