@@ -81,6 +81,53 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.9] [T-000791] `run_role` reports a converged validation-gated run as CAPPED; the adapter now decides fail-closed from the gate, not the label — 2026-06-04
+
+The first true end-to-end run of the iterative authoring path (real
+Orchestra executor, only the proposer/reviewer/judge LLM leaves mocked)
+surfaced a disposition bug that every prior task missed because they all
+mocked at the `orchestra.run_role` boundary and hand-built
+`IterativeDesignResult(termination="CONVERGED")`.
+
+`run_role`'s `_derive_termination` (orchestra/api/transcript.py) classifies
+a run purely from the last `transition` record's `(outcome, target)`:
+`outcome == "done"` -> CONVERGED, any other `outcome` into `done` -> CAPPED.
+But `plan_author.orc` reaches the `done` terminal through the `validate`
+transform state, and a transform's outcome is ALWAYS the generic
+`complete` (see `_executor_transition._derive_outcome`). Both the success
+transition (`on complete when validation_ok == true => done`) and the
+cap-exhausted fallthrough (`on complete => done`) therefore emit an
+identical `(complete, done)` pair. `_derive_termination` cannot tell them
+apart, so it labels EVERY terminating plan_author run CAPPED -- including a
+run whose final draft passed the gate. Empirically: a (WRONG-then-RIGHT)
+convergence returns `termination=CAPPED, rounds_completed=2,
+final_artifact=<the valid RIGHT body>`.
+
+Consequence before the fix: `run_plan_author` trusted the label and raised
+`PlanAuthorCappedError` on every run, so `generate_phase_plan` (iterative
+default since T-000790) could NEVER author a plan -- a latent
+total-failure of the default path.
+
+Fix (duplo-local, in `plan_author_adapter.run_plan_author`): on a CAPPED
+label, do not trust it -- re-run the gate's own check,
+`typed_plan_from_synthesizer_text(final_artifact, required_phase_id)`
+(exactly what `validate_plan_body` runs), on the final body. Passes -> that
+body IS the converged plan, return it. Never passed -> true cap, fail
+closed with `PlanAuthorCappedError`. CONVERGED (if `run_role` ever emits it)
+and ERROR are unchanged, so the adapter's existing unit tests (which mock
+`run_role`) keep their fixtures. This re-validation is also exactly the
+adapter's documented contract ("a body that never passes canonical
+validation within max_rounds is never returned for PLAN.md"), so it is
+defense-in-depth rather than a workaround bolted on.
+
+Kept in duplo deliberately: Orchestra never imports duplo, and duplo is the
+only consumer of a validation-gated workflow, so the engine fix would touch
+a shared component for a single consumer. A cleaner root-cause fix, if a
+second validation-gated consumer ever appears, is for `run_role` to refine
+the disposition from the final `validation_ok` artifact value (already in
+`result.artifacts`): `true` -> CONVERGED, `false` -> CAPPED. Surfaced here
+as a follow-up.
+
 ### [9.8] [T-000790] `generate_phase_plan` default route is now the iterative adapter; `--use-council`/`is_enabled()` is orphaned from this path — 2026-06-04
 
 `planner.generate_phase_plan` no longer consults `council.is_enabled()`

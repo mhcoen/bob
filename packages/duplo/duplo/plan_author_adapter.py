@@ -37,12 +37,21 @@ Termination translation
 - ``CONVERGED``: return the converged ``proposal`` body (the
   ``final_artifact``, which for ``plan_author`` is the ``proposal``
   artifact -- see ``orchestra.api._select_final_artifact``).
-- ``CAPPED``: fail closed. Raise :class:`PlanAuthorCappedError`; no
-  body is returned for PLAN.md. The best-so-far body is attached to the
-  exception for audit/postmortem ONLY and must never be used as a plan.
-  ``CAPPED`` is the disposition produced by the ``plan_author.orc``
-  validation-cap routing (T-000786) when a body never validates within
-  ``max_rounds``.
+- ``CAPPED``: ``run_role``'s termination derivation cannot tell a
+  passing validation gate from a cap-exhausted fallthrough -- the
+  ``validate`` transform emits the same ``complete`` outcome into
+  ``done`` for both, so a run whose final draft DID validate is still
+  labelled ``CAPPED`` (see NOTES [9.9] [T-000791]). So the adapter does
+  not trust the label here: it re-runs the gate's own check
+  (:func:`duplo.council.typed_plan_from_synthesizer_text` against
+  ``required_phase_id``, exactly what ``validate_plan_body`` runs) on
+  the final body. If it passes, that body IS the converged plan and is
+  returned. If it never passed, the adapter fails closed -- raises
+  :class:`PlanAuthorCappedError`, no body for PLAN.md; the best-so-far
+  body rides the exception for audit/postmortem ONLY and must never be
+  used as a plan. ``CAPPED`` is the disposition produced by the
+  ``plan_author.orc`` validation-cap routing (T-000786) when a body
+  never validates within ``max_rounds``.
 - ``ERROR``: raise :class:`PlanAuthorRunError` carrying the orchestra
   ``ErrorRecord`` and the on-disk transcript path for postmortem.
 """
@@ -55,10 +64,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import orchestra
+from bob_tools.planfile import PlanSyntaxError, PlanValidationError
 from orchestra import ErrorRecord, IterativeDesignResult
 from orchestra.api import WorkflowApiError
 
-from duplo.council import _build_state_text, make_duplo_progress_callback
+from duplo.council import (
+    _build_state_text,
+    make_duplo_progress_callback,
+    typed_plan_from_synthesizer_text,
+)
 from duplo.plan_validation_transform import register_validate_plan_body
 
 _LOGGER = logging.getLogger("duplo.plan_author_adapter")
@@ -189,9 +203,12 @@ def run_plan_author(
     transform registered through the ``registry_customizer`` hook bound to
     ``required_phase_id``.
 
-    Returns the converged ``proposal`` body on ``CONVERGED``. Raises
-    :class:`PlanAuthorCappedError` on ``CAPPED`` (fail closed -- no body)
-    and :class:`PlanAuthorRunError` on ``ERROR``.
+    Returns the final ``proposal`` body when it passes the canonical
+    validation gate (whether ``run_role`` labelled the run ``CONVERGED``
+    or, because it cannot distinguish a passing gate from a cap
+    fallthrough, ``CAPPED``). Raises :class:`PlanAuthorCappedError` when
+    the final body never validates (fail closed -- no body) and
+    :class:`PlanAuthorRunError` on ``ERROR``.
     """
     query = _build_state_text(prompt=prompt, system=system)
     history_text = build_history(history or PriorPhaseContext())
@@ -223,11 +240,37 @@ def run_plan_author(
         converged_body: str = result.final_artifact
         return converged_body
 
-    if result.termination == "CAPPED":
-        # Fail closed: a body that never validated is never a usable plan.
-        # Keep the best-so-far on the exception for audit only.
+    if result.termination == "ERROR":
+        error = result.error or ErrorRecord(
+            kind="runner_failure",
+            message="orchestra returned ERROR termination without an ErrorRecord",
+        )
+        raise PlanAuthorRunError(
+            error=error,
+            transcript_path=result.transcript_path,
+            run_id=result.run_id,
+        )
+
+    # result.termination == "CAPPED". run_role's generic termination
+    # derivation cannot distinguish a passing validation gate from a
+    # cap-exhausted fallthrough: the plan_author ``validate`` transform
+    # emits the same ``complete`` outcome into ``done`` for both, so a run
+    # whose final draft DID pass canonical validation is still reported as
+    # CAPPED (the two reach ``done`` via an identical (outcome, target)
+    # pair in the run log -- see NOTES [9.9] [T-000791]). Decide fail-closed
+    # from the ground truth instead of the label: re-run the gate's own
+    # check -- ``typed_plan_from_synthesizer_text`` against
+    # ``required_phase_id``, exactly what ``validate_plan_body`` runs -- on
+    # the final body. A body that passes IS the converged plan and is
+    # returned; a body that never passed is a true cap and is never
+    # returned for PLAN.md (the best-so-far rides the exception for audit
+    # only).
+    capped_body: str = result.final_artifact
+    try:
+        typed_plan_from_synthesizer_text(capped_body, required_phase_id=required_phase_id)
+    except (PlanSyntaxError, PlanValidationError):
         _LOGGER.warning(
-            "plan_author did not converge within max_rounds "
+            "plan_author did not converge to a valid body within max_rounds "
             "(run_id=%s, rounds_completed=%d, transcript=%s); failing closed",
             result.run_id,
             result.rounds_completed,
@@ -237,15 +280,6 @@ def run_plan_author(
             run_id=result.run_id,
             transcript_path=result.transcript_path,
             rounds_completed=result.rounds_completed,
-            best_so_far=result.final_artifact,
-        )
-
-    error = result.error or ErrorRecord(
-        kind="runner_failure",
-        message="orchestra returned ERROR termination without an ErrorRecord",
-    )
-    raise PlanAuthorRunError(
-        error=error,
-        transcript_path=result.transcript_path,
-        run_id=result.run_id,
-    )
+            best_so_far=capped_body,
+        ) from None
+    return capped_body
