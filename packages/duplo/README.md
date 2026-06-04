@@ -815,8 +815,10 @@ gitignored by default.
 
 ## Development
 
-If you're working on Duplo itself, the bob workspace is the natural
-development environment:
+Duplo is developed inside the bob workspace; it cannot be developed
+against in isolation, because its dependencies (`mcloop`,
+`orchestra`, `bob-tools`) resolve through the workspace rather than
+PyPI.
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
@@ -825,19 +827,11 @@ uv sync
 ```
 
 Duplo, its sibling packages, and all dev dependencies are then
-installed editable in a single `.venv/` at the workspace root.
-
-If you need to develop against Duplo standalone:
-
-```bash
-git clone https://github.com/mhcoen/duplo.git
-cd duplo
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-```
+installed editable in a single `.venv/` at the workspace root. Run
+lint, format, and tests from the Duplo package directory:
 
 ```bash
+cd packages/duplo
 ruff check .              # Lint
 ruff format --check .     # Format check
 pytest                    # Tests

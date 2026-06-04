@@ -691,6 +691,11 @@ def _validate_transform_state(
                 f"{actual!r}"
             )
     for write_name, write_type in transform.output_schema.items():
+        if write_name not in artifact_names:
+            raise ValidationError(
+                f"state {state.name!r}: transform {transform.name!r} output "
+                f"{write_name!r} is not a declared artifact"
+            )
         expected_artifact_type = schema_artifact_type(write_type)
         actual = artifact_types[write_name]
         if actual != expected_artifact_type:

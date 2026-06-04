@@ -249,6 +249,8 @@ three models, with which prompts, for this problem."
 
 ## Quick start
 
+Requires Python 3.12+.
+
 Standalone install:
 
 ```bash

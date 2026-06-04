@@ -16,6 +16,7 @@ from orchestra.executor.criteria import (
     check_decision_consistency,
 )
 from orchestra.payloads import payload_name_from_invocation, write_payload
+from orchestra.registry.registry import ResultParser
 from orchestra.schema import Invalid, Valid
 from orchestra.spine import (
     ArtifactDecl,
@@ -82,6 +83,45 @@ class _SchemaMixin(_ExecutorMixinBase):
             payload,
         )
 
+    def _parser_setup(
+        self,
+        state: StateDecl,
+        payload: dict[str, Any],
+        attempt: int,
+    ) -> tuple[list[ResultParser], Envelope]:
+        """Filter the state's parser-handled writes, select the
+        applicable parsers, and build the per-parser envelope.
+
+        Shared by ``_dispatch_parsers`` and ``_artifact_writes_record``
+        so the two stay aligned: the parser order this returns is the
+        order ``_artifact_writes_record`` relies on to pair artifact
+        names with committed version IDs. The ``attempt`` field is the
+        only call-site difference and does not affect parser order.
+        """
+        parser_writes = tuple(
+            w for w in state.writes if w.name not in self._schema_handled_artifacts
+        )
+        write_types = tuple(w.type for w in parser_writes)
+        parsers = self._registry.parsers_for(backing=state.actor.kind, artifact_types=write_types)
+        envelope_for_parser = Envelope(
+            state_id=state.name,
+            attempt=attempt,
+            actor_binding={},
+            status="ok",
+            outcome="complete",
+            started_at="",
+            ended_at="",
+            duration_ms=0,
+            inputs_read=[],
+            artifacts_written=[],
+            payload={
+                **payload,
+                "_declared_writes": [{"name": w.name, "type": w.type} for w in parser_writes],
+            },
+            error=None,
+        )
+        return parsers, envelope_for_parser
+
     def _dispatch_parsers(
         self,
         state: StateDecl,
@@ -100,30 +140,9 @@ class _SchemaMixin(_ExecutorMixinBase):
         schema layer commits them directly in the same transaction
         as the json write, after this method returns.
         """
-        parser_writes = tuple(
-            w for w in state.writes if w.name not in self._schema_handled_artifacts
-        )
-        write_types = tuple(w.type for w in parser_writes)
-        parsers = self._registry.parsers_for(backing=state.actor.kind, artifact_types=write_types)
+        parsers, envelope_for_parser = self._parser_setup(state, payload, attempt)
         if not parsers:
             return []
-        envelope_for_parser = Envelope(
-            state_id=state.name,
-            attempt=attempt,
-            actor_binding={},
-            status="ok",
-            outcome="complete",
-            started_at="",
-            ended_at="",
-            duration_ms=0,
-            inputs_read=[],
-            artifacts_written=[],
-            payload={
-                **payload,
-                "_declared_writes": [{"name": w.name, "type": w.type} for w in parser_writes],
-            },
-            error=None,
-        )
         handles: list[str] = []
         for parser in parsers:
             self._log.write(
@@ -169,28 +188,7 @@ class _SchemaMixin(_ExecutorMixinBase):
         names so the (name, version_id) pairing matches the order of
         ``commit_tentative``'s input.
         """
-        parser_writes = tuple(
-            w for w in state.writes if w.name not in self._schema_handled_artifacts
-        )
-        write_types = tuple(w.type for w in parser_writes)
-        parsers = self._registry.parsers_for(backing=state.actor.kind, artifact_types=write_types)
-        envelope_for_parser = Envelope(
-            state_id=state.name,
-            attempt=0,
-            actor_binding={},
-            status="ok",
-            outcome="complete",
-            started_at="",
-            ended_at="",
-            duration_ms=0,
-            inputs_read=[],
-            artifacts_written=[],
-            payload={
-                **payload,
-                "_declared_writes": [{"name": w.name, "type": w.type} for w in parser_writes],
-            },
-            error=None,
-        )
+        parsers, envelope_for_parser = self._parser_setup(state, payload, 0)
         names: list[str] = []
         for parser in parsers:
             for name, _ in parser.fn(envelope_for_parser, self._store):
