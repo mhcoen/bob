@@ -225,8 +225,8 @@ honest status.
 Each package also carries its own `PLAN.md` — the canonical,
 machine-owned build document that package is developed against. Plans
 are per-package, not one global plan: McLoop advances each package's
-own `PLAN.md` independently. (Orchestra is the exception: it has no
-root `PLAN.md`; its design material lives under
+own `PLAN.md` independently. (Orchestra adopted a `PLAN.md` only late in its development; its
+earlier design material still lives under
 `packages/orchestra/design/`.)
 
 ## Installation
