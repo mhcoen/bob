@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -543,7 +543,7 @@ def _reauthor_schema() -> dict[str, Any]:
         / "schemas"
         / "council_synthesis_verdict_reauthor.json"
     )
-    return json.loads(path.read_text())
+    return cast(dict[str, Any], json.loads(path.read_text()))
 
 
 def _canonical_schema() -> dict[str, Any]:
@@ -554,7 +554,7 @@ def _canonical_schema() -> dict[str, Any]:
         / "schemas"
         / "council_synthesis_verdict_canonical.json"
     )
-    return json.loads(path.read_text())
+    return cast(dict[str, Any], json.loads(path.read_text()))
 
 
 def _base_reauthor_verdict() -> dict[str, Any]:

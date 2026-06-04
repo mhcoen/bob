@@ -13,7 +13,7 @@ No external model calls.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from orchestra.executor.executor import Executor, new_run_id
 from orchestra.loader import load_workflow
@@ -485,7 +485,7 @@ def test_visibility_not_success_until_state_exit_durable(tmp_path: Path) -> None
                 released.wait(timeout=5)
             return rec
 
-    log = _PausingWriter(real_writer)
+    log = cast(LogWriter, _PausingWriter(real_writer))
     log.write("run_start", fields={})
 
     store = _initialize_store(workflow, tmp_path / "store.sqlite")
@@ -875,7 +875,11 @@ workflow retry
     records = LogReader(run_dir / "log.jsonl").read_all()
     enters = [r for r in records if r.event == "state_enter" and r.state_id == "flaky"]
     assert len(enters) == 3
-    inv_ids = [r.fields.get("invocation_id") for r in enters]
+    inv_ids: list[str] = []
+    for record in enters:
+        invocation_id = record.fields.get("invocation_id")
+        assert isinstance(invocation_id, str)
+        inv_ids.append(invocation_id)
     assert len(set(inv_ids)) == 3
     # attempt_seq monotonic 1, 2, 3.
     seqs = sorted(int(i.split("::")[2]) for i in inv_ids)
@@ -1713,7 +1717,7 @@ def test_lock_order_deadlock_prevention(tmp_path: Path) -> None:
             return self._real.__exit__(*args)
 
         def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
-            ok = self._real.acquire(blocking, timeout)
+            ok = bool(self._real.acquire(blocking, timeout))
             if ok:
                 tname = threading.current_thread().name
                 with rec_lock:
@@ -1770,8 +1774,8 @@ def test_lock_order_deadlock_prevention(tmp_path: Path) -> None:
         result = real_log_enter()
         return result
 
-    store._lock.__enter__ = _store_enter_checked  # type: ignore[method-assign]
-    log._lock.__enter__ = _log_enter_checked  # type: ignore[method-assign]
+    store._lock.__enter__ = _store_enter_checked  # type: ignore[method-assign, assignment]
+    log._lock.__enter__ = _log_enter_checked  # type: ignore[method-assign, assignment]
 
     executor = Executor(
         workflow=workflow,
@@ -3559,7 +3563,10 @@ def test_fan_out_payload_files_do_not_collide_under_barrier(
         f"{[(r.state_id, r.fields.get('outcome')) for r in child_exits]}"
     )
 
-    payload_refs = {r.state_id: r.fields["payload_ref"] for r in child_exits}
+    payload_refs: dict[str, Any] = {}
+    for record in child_exits:
+        assert record.state_id is not None
+        payload_refs[record.state_id] = record.fields["payload_ref"]
     assert len(set(payload_refs.values())) == 3, (
         f"payload_refs collided across children: {payload_refs}"
     )

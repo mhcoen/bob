@@ -9,6 +9,7 @@ from typing import Any
 
 from orchestra.adapters.base import Adapter
 from orchestra.errors import ExecutorError
+from orchestra.executor._executor_base import _ExecutorMixinBase
 from orchestra.executor._executor_common import (
     FanOutSnapshot,
     _adapter_manages_own_timeout,
@@ -27,7 +28,7 @@ from orchestra.spine import (
 from orchestra.visibility import make_invocation_id
 
 
-class _StateExecMixin:
+class _StateExecMixin(_ExecutorMixinBase):
     """Mixin: Per-state execution loop and timeout wrapper."""
 
     # ----- main loop ---------------------------------------------

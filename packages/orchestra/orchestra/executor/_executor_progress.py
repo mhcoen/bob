@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from orchestra.adapters.base import Adapter
+from orchestra.executor._executor_base import _ExecutorMixinBase
 from orchestra.spine import (
     Envelope,
     PreparedInvocation,
@@ -14,7 +15,7 @@ from orchestra.spine import (
 )
 
 
-class _ProgressMixin:
+class _ProgressMixin(_ExecutorMixinBase):
     """Mixin: Progress reporting + actor-invocation watchdog wiring."""
 
     # ----- helpers ------------------------------------------------

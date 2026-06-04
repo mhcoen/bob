@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from orchestra.adapters.mock_human import MockHumanAdapter
 from orchestra.executor.executor import Executor, new_run_id
@@ -45,7 +45,7 @@ _NONDETERMINISTIC_NESTED_FIELDS = {
 
 
 def _normalize(record_text: str) -> dict[str, Any]:
-    obj = json.loads(record_text)
+    obj = cast(dict[str, Any], json.loads(record_text))
     for k in _NONDETERMINISTIC_RECORD_FIELDS:
         if k in obj:
             obj[k] = "<nondet>"

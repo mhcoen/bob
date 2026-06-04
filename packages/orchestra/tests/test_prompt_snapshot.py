@@ -360,7 +360,9 @@ def test_restore_with_symlink_retargeting_does_not_bypass(
         source_dir=str(tmp_path),
     )
     restored = restore_prompt_snapshots(fresh_workflow, manifest)
-    snapshot_path = Path(restored.roles[0].default_prompt.path)
+    prompt = restored.roles[0].default_prompt
+    assert prompt.path is not None
+    snapshot_path = Path(prompt.path)
     assert snapshot_path.read_text() == "ORIGINAL A\n", (
         "snapshot must hold the bytes captured at run_start, not the "
         "retargeted symlink's new target"

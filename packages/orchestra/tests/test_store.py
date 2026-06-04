@@ -82,8 +82,12 @@ def test_commit_is_atomic(tmp_path):
     h1 = store.tentative_write("a", "x", written_by="t")
     h2 = store.tentative_write("b", "y", written_by="t")
     store.commit_tentative([h1, h2])
-    assert store.read_latest("a").value == "x"
-    assert store.read_latest("b").value == "y"
+    latest_a = store.read_latest("a")
+    latest_b = store.read_latest("b")
+    assert latest_a is not None
+    assert latest_b is not None
+    assert latest_a.value == "x"
+    assert latest_b.value == "y"
     store.close()
 
 
@@ -105,6 +109,8 @@ def test_versions_are_content_addressed(tmp_path):
     h2 = store.tentative_write("a", "same content", written_by="t2")
     store.commit_tentative([h2])
     v2 = store.read_latest("a")
+    assert v1 is not None
+    assert v2 is not None
     assert v1.version_id == v2.version_id
     store.close()
 
@@ -118,10 +124,13 @@ def test_a_b_a_rewrite_returns_a_as_latest(tmp_path):
     store.commit_tentative([h1])
     h2 = store.tentative_write("a", "B", written_by="s2")
     store.commit_tentative([h2])
-    assert store.read_latest("a").value == "B"
+    latest = store.read_latest("a")
+    assert latest is not None
+    assert latest.value == "B"
     h3 = store.tentative_write("a", "A", written_by="s3")
     store.commit_tentative([h3])
     v = store.read_latest("a")
+    assert v is not None
     assert v.value == "A"
     # Three commits in history.
     assert len(store.list_versions("a")) == 3
@@ -185,6 +194,7 @@ def test_initial_artifact_always_visible(tmp_path):
     store = ArtifactStore(tmp_path / "store.sqlite", visibility_index=idx)
     store.declare("seed", "text", qualifiers={"initial": "default"})
     v = store.read_latest("seed")
+    assert v is not None
     assert v.value == "default"
     versions = store.list_versions("seed")
     assert versions[0].producer_kind == "initial"
@@ -245,6 +255,7 @@ def test_visibility_key_by_invocation_not_state(tmp_path):
     # version.
     idx.set(inv2, "success")
     v = store.read_latest("a")
+    assert v is not None
     assert v.value == "V2"
     store.close()
 
@@ -261,6 +272,7 @@ def test_legacy_rows_always_visible(tmp_path):
     versions = store.list_versions("a")
     assert versions[0].producer_kind == "legacy"
     v = store.read_latest("a")
+    assert v is not None
     assert v.value == "old"
     store.close()
 
@@ -315,6 +327,7 @@ def test_schema_migration_tags_pre_slice_a_rows_as_legacy(tmp_path):
     assert versions[0].invocation_id is None
     # Legacy rows visible without index entry.
     v = store.read_latest("a")
+    assert v is not None
     assert v.value == "old-row"
     # New writes use the strict invocation keying.
     inv = "run::a::1"
@@ -322,6 +335,7 @@ def test_schema_migration_tags_pre_slice_a_rows_as_legacy(tmp_path):
     store.commit_tentative([h])
     idx.set(inv, "success")
     v = store.read_latest("a")
+    assert v is not None
     assert v.value == "new-row"
     store.close()
 
@@ -344,13 +358,17 @@ def test_purge_invisible_state_invocation_versions(tmp_path):
     store.commit_tentative([h_err])
     idx.set("i2", "error")
     # Confirm pre-purge visible value is the success row.
-    assert store.read_latest("b").value == "good"
+    latest_b = store.read_latest("b")
+    assert latest_b is not None
+    assert latest_b.value == "good"
     # Purge.
     deleted = store.purge_invisible_state_invocation_versions()
     assert deleted == 1
     # Initial (a) still visible. External (b external) and success
     # (b good) still in history.
-    assert store.read_latest("a").value == "init-value"
+    latest_a = store.read_latest("a")
+    assert latest_a is not None
+    assert latest_a.value == "init-value"
     versions_b = store.list_versions("b")
     kinds = sorted(v.producer_kind for v in versions_b)
     assert kinds == ["external", "state_invocation"]

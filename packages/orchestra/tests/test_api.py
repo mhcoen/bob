@@ -549,7 +549,7 @@ def test_run_role_rejects_non_int_max_rounds_override(
         run_role("design", max_rounds=True, project_dir=tmp_path)
     assert "max_rounds" in str(excinfo.value)
     with pytest.raises(WorkflowApiError) as excinfo:
-        run_role("design", max_rounds="four", project_dir=tmp_path)  # type: ignore[arg-type]
+        run_role("design", max_rounds="four", project_dir=tmp_path)
     assert "max_rounds" in str(excinfo.value)
 
 

@@ -207,7 +207,7 @@ def test_retag_rejects_invalid_classifier(tmp_path: Path) -> None:
     meta = tmp_path / "run_meta.json"
     meta.write_text(json.dumps({"tags": {}}) + "\n")
     with pytest.raises(ValueError, match="classifier must be one of"):
-        retag_polluted_meta(meta, "bogus")  # type: ignore[arg-type]
+        retag_polluted_meta(meta, "bogus")
 
 
 # --------------------------------------------------------------------

@@ -218,8 +218,8 @@ def test_wrap_progress_callback_enriches_with_adapter_and_model() -> None:
 
     inner = _wrap_progress_callback(_user_cb, bindings)
     assert inner is not None
-    inner("state_enter", "frame", "framer", 1, 7, None)
-    inner("state_exit", "frame", "framer", 1, 7, 3.0)
+    inner("state_enter", "frame", "framer", 1, 7, None, None)
+    inner("state_exit", "frame", "framer", 1, 7, 3.0, None)
 
     assert len(received) == 2
     enter, exit_ = received
@@ -237,7 +237,7 @@ def test_wrap_progress_callback_handles_unbound_role() -> None:
     received: list[ProgressEvent] = []
     inner = _wrap_progress_callback(lambda e: received.append(e), {})
     assert inner is not None
-    inner("state_enter", "anonymize", None, 7, 13, None)
+    inner("state_enter", "anonymize", None, 7, 13, None, None)
     assert received[0].adapter is None
     assert received[0].model is None
     assert received[0].role is None
@@ -258,7 +258,7 @@ def test_wrap_progress_callback_swallows_user_exceptions() -> None:
     inner = _wrap_progress_callback(_angry, {})
     assert inner is not None
     # Should not raise.
-    inner("state_enter", "x", None, 1, 1, None)
+    inner("state_enter", "x", None, 1, 1, None, None)
 
 
 # --------------------------------------------------------------------
@@ -1198,8 +1198,9 @@ def test_run_workflow_default_prints_progress_to_stderr(
     # runs without any subprocesses. The recording adapter returns
     # canned text per state_id so every state can complete.
     from orchestra.api import dispatch as _api
+    from orchestra.api.registry import _build_registry
 
-    real_build = _api._build_registry
+    real_build = _build_registry
 
     def _patched_build(role_bindings: dict[str, Any]) -> Any:
         reg = real_build(role_bindings)
@@ -1236,9 +1237,10 @@ def test_run_workflow_quiet_true_silences_progress(
     so library callers that want to capture output for their own
     purposes can do so."""
     from orchestra.api import dispatch as _api
+    from orchestra.api.registry import _build_registry
     from orchestra.api import run_workflow
 
-    real_build = _api._build_registry
+    real_build = _build_registry
 
     def _patched_build(role_bindings: dict[str, Any]) -> Any:
         reg = real_build(role_bindings)
@@ -1516,6 +1518,7 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     regression check.
     """
     from orchestra.api import bindings as api_module
+    from orchestra.adapters._subprocess import get_current_activity
 
     captured: dict[str, Any] = {}
 
@@ -1533,4 +1536,4 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     # The api wires its module-level get_current_activity reference as
     # the default activity_getter. Identity check confirms the live
     # subprocess tracker is the one that will fire under actor_progress.
-    assert captured["activity_getter"] is api_module.get_current_activity
+    assert captured["activity_getter"] is get_current_activity

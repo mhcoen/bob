@@ -7,6 +7,7 @@ from typing import Any, Literal
 
 from orchestra.adapters.base import Adapter
 from orchestra.errors import ExecutorError
+from orchestra.executor._executor_base import _ExecutorMixinBase
 from orchestra.executor._executor_common import (
     FanOutSnapshot,
     _CancellationRegistry,
@@ -23,7 +24,7 @@ from orchestra.spine import (
 from orchestra.visibility import make_invocation_id
 
 
-class _FanOutMixin:
+class _FanOutMixin(_ExecutorMixinBase):
     """Mixin: Fan-out parent/child execution, cancellation, resume."""
 
     # ----- fan-out execution -------------------------------------

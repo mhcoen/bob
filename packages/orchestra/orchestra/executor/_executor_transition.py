@@ -7,6 +7,7 @@ from typing import Any
 
 from orchestra.errors import ExecutorError
 from orchestra.executor import guards
+from orchestra.executor._executor_base import _ExecutorMixinBase
 from orchestra.executor._executor_common import (
     _TERMINAL_TARGETS,
     FanOutSnapshot,
@@ -27,8 +28,14 @@ from orchestra.transforms import (
 from orchestra.visibility import make_invocation_id
 
 
-class _TransitionMixin:
+class _TransitionMixin(_ExecutorMixinBase):
     """Mixin: Transition outcome derivation, selection, transform execution, resume."""
+
+    # Declared so the type is consistent with the composed Executor
+    # (_executor_core), which initializes these from optional resume
+    # state. They are None before the first transition is recorded.
+    _last_state: str | None
+    _last_outcome: str | None
 
     def _derive_outcome(self, state: StateDecl, payload: dict[str, Any], status: str) -> str:
         if status == "timeout":

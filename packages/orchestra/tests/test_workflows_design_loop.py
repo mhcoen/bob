@@ -240,7 +240,7 @@ def test_round_threading_with_cap3_converging_at_round_3(tmp_path: Path) -> None
     completions sit in the transcript, and the last judge transition
     targets ``done`` with the schema-derived accept outcome.
     """
-    responses = {
+    responses: dict[str, list[Any]] = {
         "judge": [
             _verdict("iterate", "needs structural work"),
             _verdict("iterate", "still missing item 3"),
@@ -287,7 +287,7 @@ def test_cap_enforcement_at_exactly_max_rounds_terminates_capped(tmp_path: Path)
     is not the judge's own done action.
     """
     iterate = _verdict("iterate", "more work")
-    responses = {
+    responses: dict[str, list[Any]] = {
         "judge": [iterate, iterate, iterate],
         "review": [
             json.dumps({"issues": [], "rationale": "r1"}),
@@ -370,7 +370,7 @@ def test_judge_adapter_failure_preserves_transcript_and_terminates_error(
     JSONL retains the first judge turn plus the reviewer turn — the
     completions that landed before the failure are durable on disk.
     """
-    responses = {
+    responses: dict[str, list[Any]] = {
         "judge": [
             _verdict("iterate", "needs revision"),
             _ScriptedModelAdapter.RAISE,
@@ -414,7 +414,7 @@ def test_reviewer_adapter_failure_preserves_transcript_and_terminates_error(
     review state; terminal=stop; the judge's first turn is preserved
     in the transcript.
     """
-    responses = {
+    responses: dict[str, list[Any]] = {
         "judge": [_verdict("iterate", "needs revision")],
         "review": [_ScriptedModelAdapter.RAISE],
     }

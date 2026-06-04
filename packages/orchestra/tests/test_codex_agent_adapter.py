@@ -309,7 +309,7 @@ def test_class_attributes() -> None:
 def test_cancel_is_noop() -> None:
     a = CodexAgentAdapter()
     p = a.prepare(_request())
-    assert a.cancel(p) is None
+    a.cancel(p)
 
 
 # --------------------------------------------------------------------

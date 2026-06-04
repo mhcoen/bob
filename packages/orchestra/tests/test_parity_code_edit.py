@@ -294,6 +294,7 @@ class _FakePopen:
         self.pid = 12345 + len(_popen_calls)
         self.returncode: int | None = None
         is_watchdog = bool(cmd and cmd[0] == "sh" and "-c" in cmd)
+        self.stdout: io.StringIO | None
         if not is_watchdog:
             self.stdout = io.StringIO("".join(_TRANSCRIPT_LINES))
         else:
@@ -329,6 +330,8 @@ _EXPECTED_CHANGED_FILES = ["src/example.py"]
 
 def _fake_subprocess_run(*args: Any, **kwargs: Any) -> Any:
     cmd = args[0] if args else kwargs.get("args")
+    if cmd is None:
+        cmd = []
     return subprocess.CompletedProcess(
         args=cmd,
         returncode=0,
@@ -391,14 +394,12 @@ def _clear_popen_calls() -> None:
 
 @pytest.fixture
 def patched_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(orch_sp.subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(subprocess, "Popen", _FakePopen)
     monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
 
 
 @pytest.fixture
 def patched_failing_subprocess(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(orch_sp.subprocess, "Popen", _FailingFakePopen)
     monkeypatch.setattr(subprocess, "Popen", _FailingFakePopen)
     monkeypatch.setattr(subprocess, "run", _fake_subprocess_run)
 

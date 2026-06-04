@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from orchestra.executor._executor_base import _ExecutorMixinBase
 from orchestra.executor._executor_common import (
     FanOutSnapshot,
     _coerce_to_text,
@@ -25,7 +26,7 @@ from orchestra.spine import (
 )
 
 
-class _SchemaMixin:
+class _SchemaMixin(_ExecutorMixinBase):
     """Mixin: Result-parser dispatch + tentative artifact writes + per-state schema layer."""
 
     def _read_artifacts(

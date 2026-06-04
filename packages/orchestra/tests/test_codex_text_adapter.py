@@ -391,7 +391,7 @@ def test_cancel_is_noop() -> None:
     a = CodexTextAdapter()
     p = a.prepare(_request())
     # cancel returns None and does not raise.
-    assert a.cancel(p) is None
+    a.cancel(p)
 
 
 # --------------------------------------------------------------------

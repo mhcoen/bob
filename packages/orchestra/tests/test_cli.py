@@ -113,7 +113,9 @@ def test_verb_dispatch_runs_configured_verb(
     assert out.out == "Paris.\n\n"
     assert captured["verb"] == "ask"
     assert captured["query"] == "what is the capital of france"
-    assert "ask" in captured["config_verbs"]
+    config_verbs = captured["config_verbs"]
+    assert isinstance(config_verbs, list)
+    assert "ask" in config_verbs
 
 
 def test_verb_dispatch_unknown_verb_exits_2(
@@ -480,6 +482,7 @@ def test_verb_dispatch_passes_project_dir_to_run_verb(
     assert rc == 0
     project_dir = captured.get("project_dir")
     assert project_dir is not None, "_dispatch_verb must thread project_dir through to run_verb"
+    assert isinstance(project_dir, str | Path)
     # The CLI uses Path.cwd() at dispatch time.
     assert Path(project_dir) == Path.cwd()
 
