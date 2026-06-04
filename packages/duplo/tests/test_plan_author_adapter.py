@@ -37,6 +37,11 @@ def _make_result(
     )
 
 
+@pytest.fixture(autouse=True)
+def _run_in_project_tmpdir(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+
 def test_converged_returns_proposal_body():
     fake = _make_result("CONVERGED", final_artifact="## Phase phase_001: x\n", rounds_completed=2)
     with patch("orchestra.run_role", return_value=fake) as m:

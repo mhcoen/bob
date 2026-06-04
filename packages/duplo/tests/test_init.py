@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import os
+from pathlib import Path
 from unittest.mock import patch
 
+import duplo
 import pytest
 
 from duplo.doc_tables import DocStructures
@@ -21,11 +24,13 @@ from duplo.init import (
     _URL_NEXT_STEPS_FETCH_FAILED,
     _URL_NEXT_STEPS_IDENTIFIED,
     _URL_NEXT_STEPS_UNIDENTIFIED,
+    _deploy_plan_author_workflow,
     run_init,
 )
 from duplo.spec_reader import ProductSpec
 from duplo.spec_writer import format_spec
 from duplo.validator import ValidationResult
+from orchestra.loader.lookup import resolve_workflow_path
 
 
 def _make_args(**overrides) -> argparse.Namespace:
@@ -246,7 +251,85 @@ def _fetch_site_success(
     return (text, [], DocStructures(), [record], {url: "<html></html>"})
 
 
-_FETCH_SITE_FAILURE = ("", [], DocStructures(), [], {})
+_FETCH_SITE_FAILURE: tuple[str, list[object], DocStructures, list[PageRecord], dict[str, str]] = (
+    "",
+    [],
+    DocStructures(),
+    [],
+    {},
+)
+
+_PLAN_AUTHOR_WORKFLOW_RELATIVE_PATHS = (
+    Path("plan_author.orc"),
+    Path("templates/plan_author_proposer.md"),
+    Path("templates/plan_author_reviewer.md"),
+    Path("templates/plan_author_judge.md"),
+    Path("schemas/iterate_judge_verdict.json"),
+)
+
+
+def _duplo_workflows_dir() -> Path:
+    return Path(duplo.__file__).resolve().parent / "workflows"
+
+
+def _project_workflows_dir(project_dir: Path) -> Path:
+    return project_dir / ".orchestra" / "workflows"
+
+
+class TestPlanAuthorWorkflowDeploy:
+    """Tests for Duplo-owned project-local Orchestra workflow deployment."""
+
+    def test_empty_project_gets_plan_author_workflow_tree(self, tmp_path):
+        _deploy_plan_author_workflow(tmp_path)
+
+        source_dir = _duplo_workflows_dir()
+        project_workflows_dir = _project_workflows_dir(tmp_path)
+        for relative_path in _PLAN_AUTHOR_WORKFLOW_RELATIVE_PATHS:
+            deployed = project_workflows_dir / relative_path
+            assert deployed.is_file()
+            assert deployed.read_bytes() == (source_dir / relative_path).read_bytes()
+
+    def test_byte_identical_project_copy_is_not_rewritten(self, tmp_path):
+        _deploy_plan_author_workflow(tmp_path)
+        deployed = _project_workflows_dir(tmp_path) / "plan_author.orc"
+        os.utime(deployed, (1, 1))
+        before = deployed.stat()
+        before_bytes = deployed.read_bytes()
+
+        _deploy_plan_author_workflow(tmp_path)
+
+        after = deployed.stat()
+        assert deployed.read_bytes() == before_bytes
+        assert after.st_mtime_ns == before.st_mtime_ns
+
+    def test_stale_project_copy_is_overwritten_from_package_source(self, tmp_path):
+        _deploy_plan_author_workflow(tmp_path)
+        deployed = _project_workflows_dir(tmp_path) / "plan_author.orc"
+        deployed.write_bytes(b"stale plan_author workflow\n")
+
+        _deploy_plan_author_workflow(tmp_path)
+
+        assert deployed.read_bytes() == (_duplo_workflows_dir() / "plan_author.orc").read_bytes()
+
+    def test_unrelated_project_workflow_file_is_preserved(self, tmp_path):
+        unrelated = _project_workflows_dir(tmp_path) / "local_user_workflow.orc"
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_bytes(b"user-owned workflow\n")
+        os.utime(unrelated, (1, 1))
+        before = unrelated.stat()
+
+        _deploy_plan_author_workflow(tmp_path)
+
+        after = unrelated.stat()
+        assert unrelated.read_bytes() == b"user-owned workflow\n"
+        assert after.st_mtime_ns == before.st_mtime_ns
+
+    def test_orchestra_resolves_deployed_plan_author_from_project(self, tmp_path):
+        _deploy_plan_author_workflow(tmp_path)
+
+        resolved = resolve_workflow_path("plan_author", project_dir=tmp_path)
+
+        assert resolved == _project_workflows_dir(tmp_path) / "plan_author.orc"
 
 
 class TestRunInitUrlSuccess:
