@@ -205,7 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     if output:
         _emit_output(output, stream_json)
 
-    return task.get("exit_code", 0)
+    exit_code = task.get("exit_code", 0)
+    return exit_code if isinstance(exit_code, int) else 1
 
 
 if __name__ == "__main__":

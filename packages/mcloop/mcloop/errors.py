@@ -10,7 +10,7 @@ from mcloop import formatting
 from mcloop.notify import notify
 from mcloop.prompts import parse_diagnostic_output
 from mcloop.ratelimit import RateLimitState, run_session_with_fallover
-from mcloop.runner import run_diagnostic
+from mcloop.runner import RunResult, run_diagnostic
 
 _MAX_FIX_ATTEMPTS = 3
 
@@ -167,15 +167,18 @@ def _check_errors_json(
             flush=True,
         )
 
-        _diag_outcome = run_session_with_fallover(
-            lambda _cli, _entry=entry, _src=source_content: run_diagnostic(
+        def _run_diagnostic_session(_cli: str) -> RunResult:
+            return run_diagnostic(
                 project_dir,
                 log_dir,
-                _entry,
-                source_content=_src,
+                entry,
+                source_content=source_content,
                 git_log=git_log,
                 model=model,
-            ),
+            )
+
+        _diag_outcome = run_session_with_fallover(
+            _run_diagnostic_session,
             state=rate_state,
             context=f"diagnostic {exc_type}",
             notify_fn=notify,

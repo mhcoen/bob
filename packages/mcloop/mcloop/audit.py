@@ -26,7 +26,7 @@ from mcloop.prompts import (
     review_found_problems,
 )
 from mcloop.ratelimit import RateLimitState, run_session_with_fallover
-from mcloop.runner import run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
+from mcloop.runner import RunResult, run_audit, run_bug_fix, run_bug_verify, run_post_fix_review
 
 AUDIT_HASH_FILE = ".mcloop-last-audit"
 AUDIT_REPORT_FILE = ".mcloop/audit-report.md"
@@ -351,14 +351,18 @@ def _run_single_audit_round(
                     flush=True,
                 )
                 _review_start = time.monotonic()
-                _review_outcome = run_session_with_fallover(
-                    lambda _cli, _bugs=bugs_content, _diff=diff: run_post_fix_review(
+
+                def _run_post_fix_review_session(_cli: str) -> RunResult:
+                    return run_post_fix_review(
                         project_dir,
                         log_dir,
-                        _bugs,
-                        _diff,
+                        bugs_content,
+                        diff,
                         model=model,
-                    ),
+                    )
+
+                _review_outcome = run_session_with_fallover(
+                    _run_post_fix_review_session,
                     state=rate_state,
                     context="post-fix-review",
                     notify_fn=notify,

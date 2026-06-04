@@ -23,6 +23,14 @@ from mcloop._planfile_compat import (
 )
 from mcloop.formatting import format_elapsed
 
+_OrchestraClearActiveProcess = Callable[[], None]
+_OrchestraGetActiveProcess = Callable[[], Any]
+_OrchestraSetInterrupted = Callable[[bool], None]
+
+_orchestra_clear_active_process: _OrchestraClearActiveProcess | None
+_orchestra_get_active_process: _OrchestraGetActiveProcess | None
+_orchestra_set_interrupted: _OrchestraSetInterrupted | None
+
 try:
     from orchestra.adapters._subprocess import (
         clear_active_process as _orchestra_clear_active_process,

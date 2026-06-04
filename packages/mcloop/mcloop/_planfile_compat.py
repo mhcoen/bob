@@ -12,6 +12,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from bob_tools.planfile import (
     ConcurrentUpdateError,
@@ -415,7 +416,7 @@ def _update_with_retry(
     path: Path,
     operation: Callable[[Plan], Plan],
     *,
-    validation: str = "canonical",
+    validation: Literal["canonical", "unchecked"] = "canonical",
 ) -> Plan:
     """Apply ``operation`` with a bounded retry on concurrent edits (§2(g)).
 

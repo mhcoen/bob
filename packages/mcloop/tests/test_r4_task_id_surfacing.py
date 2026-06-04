@@ -120,7 +120,12 @@ def _drive_one_success(
     from mcloop.main import run_loop
     from mcloop.runner import RunResult
 
-    success_result = RunResult(success=True, output="ok", exit_code=0, log_path=None)
+    success_result = RunResult(
+        success=True,
+        output="ok",
+        exit_code=0,
+        log_path=plan_md.parent / "logs" / "task.log",
+    )
     check_passed = MagicMock(passed=True, output="", command="", failures=())
 
     if capture_summary_into is None:

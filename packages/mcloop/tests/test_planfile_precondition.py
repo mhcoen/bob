@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import TypedDict, cast
 
 import pytest
 from bob_tools.planfile import parse_plan
@@ -43,14 +44,25 @@ _EXPECTED: dict[str, str] = {
 }
 
 
-def _load_corpus() -> list[dict]:
+class CorpusEntry(TypedDict):
+    label: str
+    text: str
+    sites: list[str]
+    site_count: int
+
+
+def _load_corpus() -> list[CorpusEntry]:
     if not CORPUS_PATH.exists():
         pytest.skip(
             f"corpus not found at {CORPUS_PATH}; run .scratch/harvest_plans.py first",
             allow_module_level=True,
         )
-    data = json.loads(CORPUS_PATH.read_text())
-    return data["corpus"]
+    data: object = json.loads(CORPUS_PATH.read_text())
+    assert isinstance(data, dict)
+    corpus = data.get("corpus")
+    assert isinstance(corpus, list)
+    assert all(isinstance(entry, dict) for entry in corpus)
+    return cast(list[CorpusEntry], corpus)
 
 
 CORPUS = _load_corpus()

@@ -187,15 +187,15 @@ def main() -> None:
     if not isinstance(message, dict):
         print(f"Unexpected response structure: {json.dumps(body)[:500]}")
         return
-    content = message.get("content")
-    if not isinstance(content, str):
+    response_content = message.get("content")
+    if not isinstance(response_content, str):
         print(f"Unexpected response structure: {json.dumps(body)[:500]}")
         return
 
-    print(f"Raw response ({len(content)} chars):")
-    print(content[:2000])
-    if len(content) > 2000:
-        print(f"... ({len(content) - 2000} more chars)")
+    print(f"Raw response ({len(response_content)} chars):")
+    print(response_content[:2000])
+    if len(response_content) > 2000:
+        print(f"... ({len(response_content) - 2000} more chars)")
     print()
 
     # Also check for reasoning_details

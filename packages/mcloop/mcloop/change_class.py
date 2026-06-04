@@ -22,6 +22,9 @@ from __future__ import annotations
 
 import ast
 from enum import Enum
+from typing import TypeAlias
+
+_BodyNode: TypeAlias = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
 
 
 class ChangeClass(str, Enum):
@@ -69,10 +72,8 @@ def _sort_leading_imports(body: list[ast.stmt]) -> list[ast.stmt]:
 class _Normalizer(ast.NodeTransformer):
     """Rewrite a tree into a form invariant to the provable-inert edits."""
 
-    def _normalize_body(self, node: ast.AST) -> ast.AST:
-        body = getattr(node, "body", None)
-        if isinstance(body, list):
-            node.body = _sort_leading_imports(_strip_leading_docstring(body))
+    def _normalize_body(self, node: _BodyNode) -> ast.AST:
+        node.body = _sort_leading_imports(_strip_leading_docstring(node.body))
         return node
 
     def visit_Module(self, node: ast.Module) -> ast.AST:

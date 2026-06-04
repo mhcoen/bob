@@ -11,6 +11,8 @@ from unittest.mock import patch
 # Load the hook script as a module (it's not a package)
 _hook_path = Path(__file__).resolve().parent.parent / "telegram-permission-hook.py"
 _spec = importlib.util.spec_from_file_location("telegram_hook", _hook_path)
+assert _spec is not None
+assert _spec.loader is not None
 _hook = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_hook)
 
