@@ -13,6 +13,7 @@ from bob_tools.planfile import Plan
 from bob_tools.planfile.renderer import render_plan
 
 from duplo.extractor import Feature
+from duplo.plan_author_adapter import PlanAuthorCappedError
 from duplo.planner import (
     CanonicalH1OrdinalError,
     CompletedTask,
@@ -104,6 +105,14 @@ _SAMPLE_PLAN = _canonical_body()
 
 
 class TestGeneratePhasePlan:
+    """``generate_phase_plan`` authors via the iterative adapter by
+    default. These tests mock :func:`duplo.planner.run_plan_author`
+    (the unconditional default authoring path) and inspect the
+    ``prompt`` keyword it receives. The adapter's return value is the
+    canonical Slice C body that flows through the unchanged
+    :func:`duplo.council.typed_plan_from_synthesizer_text` tail.
+    """
+
     def test_returns_typed_plan(self):
         """After T-000186, generate_phase_plan returns a typed
         :class:`bob_tools.planfile.Plan` value, not a markdown string.
@@ -112,7 +121,7 @@ class TestGeneratePhasePlan:
         validated end-to-end via
         :func:`duplo.council.typed_plan_from_synthesizer_text`.
         """
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -126,49 +135,49 @@ class TestGeneratePhasePlan:
         assert any("Set up project structure" in t.text for t in phase.tasks)
 
     def test_passes_source_url_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://acme.io",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "https://acme.io" in prompt
 
     def test_passes_features_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "User auth" in prompt
         assert "Dashboard" in prompt
 
     def test_passes_preferences_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Python/FastAPI" in prompt
         assert "PostgreSQL only" in prompt
 
     def test_passes_platform_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "web" in prompt
 
     def test_handles_empty_features(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 [],
@@ -178,72 +187,72 @@ class TestGeneratePhasePlan:
 
     def test_handles_empty_constraints_and_preferences(self):
         prefs = BuildPreferences(platform="cli", language="Go", constraints=[], preferences=[])
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 prefs,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "(none)" in prompt
         assert isinstance(result, Plan)
 
     def test_spec_text_injected_into_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 spec_text="Build a calculator app.",
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Build a calculator app." in prompt
         assert "authoritative" in prompt.lower()
 
     def test_spec_text_empty_not_in_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 spec_text="",
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Product specification" not in prompt
 
     def test_prior_phases_files_listed_in_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 prior_phases_files=["Package.swift", "Sources/App/App.swift"],
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Files already created in earlier phases" in prompt
         assert "do NOT recreate" in prompt
         assert "- Package.swift" in prompt
         assert "- Sources/App/App.swift" in prompt
 
     def test_prior_phases_files_empty_omitted(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 prior_phases_files=[],
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Files already created in earlier phases" not in prompt
 
     def test_prior_phases_files_none_omitted(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Files already created in earlier phases" not in prompt
 
     def test_includes_issues_in_prompt(self):
@@ -255,14 +264,14 @@ class TestGeneratePhasePlan:
             "test": "All issues resolved",
             "issues": ["Sidebar overlaps on mobile", "Login timeout too short"],
         }
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 phase=phase,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Sidebar overlaps on mobile" in prompt
         assert "Login timeout too short" in prompt
         assert "Known issues to fix" in prompt
@@ -276,24 +285,24 @@ class TestGeneratePhasePlan:
             "test": "",
             "issues": [],
         }
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 phase=phase,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Known issues to fix" not in prompt
 
     def test_no_issues_block_when_no_phase(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Known issues to fix" not in prompt
 
     def test_phase_number_overrides_phase_dict(self):
@@ -304,7 +313,7 @@ class TestGeneratePhasePlan:
             "features": ["Auth"],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -312,19 +321,19 @@ class TestGeneratePhasePlan:
                 phase=phase,
                 phase_number=3,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Phase 3:" in prompt
         assert "Phase 0:" not in prompt
 
     def test_phase_number_used_without_phase_dict(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 phase_number=5,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Phase 5:" in prompt
 
     def test_phase_number_defaults_to_phase_dict(self):
@@ -335,52 +344,161 @@ class TestGeneratePhasePlan:
             "features": ["Dashboard"],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 phase=phase,
             )
-        prompt = mock_query.call_args[0][0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "Phase 2:" in prompt
 
 
-class TestGeneratePhasePlanCallSite:
-    """The legacy ``query()`` call must carry a ``call_site`` label that
-    identifies the phase the call belongs to, so a reader of the call_log
-    can reconstruct which PLAN.md phase each LLM call produced. The label
-    is ``phase_plan:<required_phase_id>``, where ``required_phase_id`` is
-    the deterministic id computed from the PLAN.md in ``target_dir``.
+class TestGeneratePhasePlanRequiredPhaseId:
+    """The iterative authoring adapter must receive the deterministic
+    ``required_phase_id`` computed from the PLAN.md in ``target_dir``,
+    so the validation-gated loop demands the runtime-owned phase id
+    (and the call_log can reconstruct which PLAN.md phase each run
+    produced).
     """
 
-    def test_threads_call_site_for_first_phase(self, tmp_path):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+    def test_threads_required_phase_id_for_first_phase(self, tmp_path):
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 target_dir=tmp_path,
             )
-        assert mock_query.call_args.kwargs["call_site"] == "phase_plan:phase_001"
+        assert mock_author.call_args.kwargs["required_phase_id"] == "phase_001"
 
-    def test_call_site_reflects_computed_phase_id(self, tmp_path):
+    def test_required_phase_id_reflects_computed_phase_id(self, tmp_path):
         # An existing PLAN.md with phase_001 and phase_002 means the next
-        # phase Duplo demands is phase_003; the call_site label tracks it.
+        # phase Duplo demands is phase_003; the adapter receives it.
         (tmp_path / _PLAN_FILENAME).write_text(
             "## Phase phase_001: One\n\n- [ ] a\n\n## Phase phase_002: Two\n\n- [ ] b\n"
         )
         with patch(
-            "duplo.planner.query",
+            "duplo.planner.run_plan_author",
             return_value=_canonical_body("phase_003", "Third"),
-        ) as mock_query:
+        ) as mock_author:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
                 target_dir=tmp_path,
             )
-        assert mock_query.call_args.kwargs["call_site"] == "phase_plan:phase_003"
+        assert mock_author.call_args.kwargs["required_phase_id"] == "phase_003"
+
+
+class TestGeneratePhasePlanAuthoringRoute:
+    """T-000790: iterative authoring is the unconditional default route
+    for :func:`generate_phase_plan`; council is reachable only via the
+    explicit ``escalate_to_council`` flag (the ``DUPLO_USE_COUNCIL`` env
+    var / :func:`council.is_enabled` is no longer consulted here). The
+    converged adapter body flows through the unchanged
+    :func:`typed_plan_from_synthesizer_text` -> :func:`save_plan` tail,
+    and a non-converging (CAPPED) run writes no PLAN.md.
+    """
+
+    def test_default_invokes_iterative_adapter_not_council(self, tmp_path):
+        with (
+            patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author,
+            patch("duplo.planner.council.author_phase_plan") as mock_council,
+        ):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                target_dir=tmp_path,
+            )
+        assert mock_author.call_count == 1
+        assert mock_council.call_count == 0
+        assert isinstance(result, Plan)
+        assert result.phases[0].phase_id == "phase_001"
+
+    def test_default_route_ignores_council_env_flag(self, tmp_path, monkeypatch):
+        """Even with ``DUPLO_USE_COUNCIL`` set, normal authoring stays on
+        the iterative adapter: the env var no longer routes
+        generate_phase_plan to council.
+        """
+        monkeypatch.setenv("DUPLO_USE_COUNCIL", "1")
+        monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
+        with (
+            patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_author,
+            patch("duplo.planner.council.author_phase_plan") as mock_council,
+        ):
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                target_dir=tmp_path,
+            )
+        assert mock_author.call_count == 1
+        assert mock_council.call_count == 0
+
+    def test_converged_body_persisted_via_typed_tail(self, tmp_path):
+        body = _canonical_body(phase_id="phase_001", title="Core Auth")
+        with patch("duplo.planner.run_plan_author", return_value=body):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                project_name="App",
+                target_dir=tmp_path,
+            )
+        # The converged body is a validated typed Plan ...
+        assert isinstance(result, Plan)
+        # ... that the unchanged save_plan tail persists to PLAN.md.
+        saved = save_plan(result, target_dir=tmp_path)
+        text = saved.read_text(encoding="utf-8")
+        assert "## Phase 1: Core Auth" in text
+        assert "<!-- phase_id: phase_001 -->" in text
+
+    def test_council_runs_only_when_escalation_flag_set(self, tmp_path):
+        sentinel = object()
+        with (
+            patch("duplo.planner.run_plan_author") as mock_author,
+            patch(
+                "duplo.planner.council.author_phase_plan",
+                return_value=sentinel,
+            ) as mock_council,
+        ):
+            result = generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+                phase={"phase": 4, "title": "Council", "goal": "g"},
+                target_dir=tmp_path,
+                escalate_to_council=True,
+            )
+        assert mock_council.call_count == 1
+        assert mock_author.call_count == 0
+        assert mock_council.call_args.kwargs["phase_num"] == 4
+        # generate_phase_plan returns the council result verbatim.
+        assert result is sentinel
+
+    def test_capped_authoring_writes_no_plan(self, tmp_path):
+        """A CAPPED iterative run fails closed: the adapter raises
+        :class:`PlanAuthorCappedError`, generate_phase_plan does not
+        swallow it, and no PLAN.md is written.
+        """
+        capped = PlanAuthorCappedError(
+            run_id="capped-run",
+            transcript_path=Path("/tmp/capped.jsonl"),
+            rounds_completed=6,
+            best_so_far="## Phase phase_001: still invalid\n",
+        )
+        with patch("duplo.planner.run_plan_author", side_effect=capped):
+            with pytest.raises(PlanAuthorCappedError):
+                generate_phase_plan(
+                    "https://example.com",
+                    _sample_features(),
+                    _sample_prefs(),
+                    target_dir=tmp_path,
+                )
+        assert not (tmp_path / _PLAN_FILENAME).exists()
 
 
 class TestGeneratePhasePlanH1Heading:
@@ -397,7 +515,7 @@ class TestGeneratePhasePlanH1Heading:
     """
 
     def test_returned_value_is_typed_plan_with_canonical_phase_id(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -417,7 +535,7 @@ class TestGeneratePhasePlanH1Heading:
         from bob_tools.planfile import PlanValidationError
 
         no_phase_header = "Some preamble describing the phase.\n\n- [ ] Build thing\n"
-        with patch("duplo.planner.query", return_value=no_phase_header):
+        with patch("duplo.planner.run_plan_author", return_value=no_phase_header):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
                     "https://example.com",
@@ -436,7 +554,7 @@ class TestGeneratePhasePlanH1Heading:
         from bob_tools.planfile import PlanValidationError
 
         wrong_id_body = _canonical_body(phase_id="phase_007", title="Wrong")
-        with patch("duplo.planner.query", return_value=wrong_id_body):
+        with patch("duplo.planner.run_plan_author", return_value=wrong_id_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
                     "https://example.com",
@@ -454,7 +572,7 @@ class TestGeneratePhasePlanH1Heading:
         envelope.
         """
         body = _canonical_body(phase_id="phase_001", title="Advanced")
-        with patch("duplo.planner.query", return_value=body):
+        with patch("duplo.planner.run_plan_author", return_value=body):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -481,7 +599,7 @@ class TestGeneratePhasePlanH1Heading:
             title="Advanced",
             phase_prose="Python/SwiftUI calculator app.",
         )
-        with patch("duplo.planner.query", return_value=body):
+        with patch("duplo.planner.run_plan_author", return_value=body):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -506,7 +624,7 @@ class TestGeneratePhasePlanH1Heading:
             "features": [],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=body):
+        with patch("duplo.planner.run_plan_author", return_value=body):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -811,7 +929,7 @@ class TestPlanAnnotationOutput:
                     yield from _walk_with_children(task)
 
     def test_phase_plan_contains_feat_annotations(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -827,7 +945,7 @@ class TestPlanAnnotationOutput:
         assert feat_values
 
     def test_phase_plan_contains_fix_annotations(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -849,7 +967,7 @@ class TestPlanAnnotationOutput:
         the task body — that property is preserved by construction in
         the typed model.
         """
-        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -880,7 +998,7 @@ class TestPlanAnnotationOutput:
         assert len(multi) >= 1
 
     def test_scaffolding_lines_have_no_annotation(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_PHASE_PLAN):
+        with patch("duplo.planner.run_plan_author", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -981,7 +1099,7 @@ _PLATFORM_ADDENDUM = (
 
 class TestPlatformAddendum:
     def test_phase_plan_appends_addendum_to_system_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_query:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -993,7 +1111,7 @@ class TestPlatformAddendum:
         assert _PLATFORM_ADDENDUM in system
 
     def test_phase_plan_empty_addendum_leaves_system_unchanged(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_query:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -1004,7 +1122,7 @@ class TestPlatformAddendum:
         assert system == _PHASE_SYSTEM
 
     def test_phase_plan_default_has_no_addendum(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_PLAN) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=_SAMPLE_PLAN) as mock_query:
             generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -1486,7 +1604,7 @@ class TestStripAndRenderEndToEnd:
             "features": [],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=wrong_body):
+        with patch("duplo.planner.run_plan_author", return_value=wrong_body):
             with pytest.raises(PlanValidationError) as exc_info:
                 generate_phase_plan(
                     "https://example.com",
@@ -1531,7 +1649,7 @@ class TestStripAndRenderEndToEnd:
             "features": [],
             "test": "",
         }
-        with patch("duplo.planner.query", return_value=right_body):
+        with patch("duplo.planner.run_plan_author", return_value=right_body):
             content = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -1603,7 +1721,7 @@ class TestSavePlanH1OrdinalValidation:
         )
 
         wrong_body = "## Phase phase_001: Dup\n\n- [ ] dup\n"
-        with patch("duplo.planner.query", return_value=wrong_body):
+        with patch("duplo.planner.run_plan_author", return_value=wrong_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
                     "https://example.com",
@@ -2049,7 +2167,7 @@ class TestStripTrailingCommentary:
             "\n"
             "Want me to write it?\n"
         )
-        with patch("duplo.planner.query", return_value=llm_output):
+        with patch("duplo.planner.run_plan_author", return_value=llm_output):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -2201,15 +2319,17 @@ class TestStripFences:
         wrapped = "  ```markdown\n# Phase 1\n```  "
         assert _strip_fences(wrapped) == "# Phase 1"
 
-    def test_generate_phase_plan_strips_fences(self):
-        """generate_phase_plan strips an outer code fence from the
-        synthesizer's body before parsing it into a typed Plan.
-        After T-000186 the return is a typed Plan, not markdown, so
-        the assertion is on the parsed phase header and surviving
-        task.
+    def test_generate_phase_plan_uses_adapter_body_without_refencing(self):
+        """The default authoring path receives an already-canonical
+        body from the validation-gated iterative adapter (a fenced or
+        otherwise non-canonical body would have been rejected mid-loop),
+        so generate_phase_plan does NOT re-strip code fences the way the
+        legacy single-actor path did. A clean Slice C body lands as a
+        typed Plan; fence-stripping now lives only on the
+        :func:`generate_next_phase_plan` path.
         """
-        fenced = "```markdown\n## Phase phase_001: Core\n\n- [ ] Task\n```"
-        with patch("duplo.planner.query", return_value=fenced):
+        clean = "## Phase phase_001: Core\n\n- [ ] Task\n"
+        with patch("duplo.planner.run_plan_author", return_value=clean):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -2256,7 +2376,7 @@ class TestPhaseIdAgreementFirstPhase:
         assert not (tmp_path / "PLAN.md").exists()
 
         body = _canonical_body(phase_id="phase_001", title="Scaffold")
-        with patch("duplo.planner.query", return_value=body) as mock_query:
+        with patch("duplo.planner.run_plan_author", return_value=body) as mock_author:
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
@@ -2269,7 +2389,7 @@ class TestPhaseIdAgreementFirstPhase:
 
         # 1. The synthesizer was instructed to use phase_001 verbatim,
         #    even though the human-facing label is "Phase 0".
-        prompt = mock_query.call_args.args[0]
+        prompt = mock_author.call_args.kwargs["prompt"]
         assert "## Phase phase_001: Scaffold" in prompt
         assert "do NOT renumber" in prompt
 
@@ -2287,7 +2407,7 @@ class TestPhaseIdAgreementFirstPhase:
 
         monkeypatch.chdir(tmp_path)
         bad_body = _canonical_body(phase_id="phase_000", title="Scaffold")
-        with patch("duplo.planner.query", return_value=bad_body):
+        with patch("duplo.planner.run_plan_author", return_value=bad_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
                     "https://example.com",

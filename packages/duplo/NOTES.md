@@ -81,6 +81,32 @@ mcloop touches checklist.py.
 
 ## Observations
 
+### [9.8] [T-000790] `generate_phase_plan` default route is now the iterative adapter; `--use-council`/`is_enabled()` is orphaned from this path — 2026-06-04
+
+`planner.generate_phase_plan` no longer consults `council.is_enabled()`
+(`DUPLO_USE_COUNCIL`). Iterative authoring via
+`plan_author_adapter.run_plan_author` is the unconditional default; the
+converged body flows through the unchanged
+`council.typed_plan_from_synthesizer_text` -> `save_plan` tail with no
+change to `save_plan`. Council is reachable only through the explicit
+`escalate_to_council: bool = False` keyword on `generate_phase_plan`,
+which routes to `council.author_phase_plan`. A CAPPED authoring run
+raises `PlanAuthorCappedError` (not swallowed here), so PLAN.md is never
+written with an unvalidated body.
+
+Worth revisiting: `main.py` still wires the `--use-council` / `--no-council`
+/ `--council-config` CLI flags to `council.set_enabled()` /
+`set_config_path()`, and `council.is_enabled()` still reads the env var,
+but NOTHING in the normal authoring path consults `is_enabled()` anymore.
+So `duplo --use-council` is currently a silent no-op for phase authoring
+(it only matters to any future explicit escalation/experiment caller that
+passes `escalate_to_council=True`, plus council's preflight/audit/reauthor
+value). Per the task NOTE the env var was intentionally NOT inverted, and
+the env-var path was intentionally demoted; the dangling CLI flag is a
+follow-up decision for the user (wire it to `escalate_to_council`, or drop
+the flag). `pipeline.py` calls `generate_phase_plan` without
+`escalate_to_council`, so the pipeline is always iterative now.
+
 ### [9.7] [T-000789] `run_plan_author` adapter: fail-closed on CAPPED; `final_artifact` needs a typed local for mypy — 2026-06-04
 
 Added `duplo/plan_author_adapter.py` (`run_plan_author`) as the PLAN.md

@@ -776,11 +776,20 @@ class TestConfigResolution:
 
 
 class TestPlannerCouncilBranch:
-    def test_planner_uses_query_when_council_disabled(self, monkeypatch):
+    """T-000790: normal authoring routes to the iterative adapter; the
+    ``DUPLO_USE_COUNCIL`` env var no longer drives generate_phase_plan.
+    Council is reachable only via the explicit ``escalate_to_council``
+    flag.
+    """
+
+    def test_planner_uses_iterative_adapter_by_default(self, monkeypatch):
         monkeypatch.delenv("DUPLO_USE_COUNCIL", raising=False)
         monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
         with (
-            patch("duplo.planner.query", return_value="# Phase 1: legacy") as mock_query,
+            patch(
+                "duplo.planner.run_plan_author",
+                return_value="## Phase phase_001: legacy\n\n- [ ] task\n",
+            ) as mock_author,
             patch("duplo.planner.council.author_phase_plan") as mock_council,
         ):
             generate_phase_plan(
@@ -788,38 +797,52 @@ class TestPlannerCouncilBranch:
                 _sample_features(),
                 _sample_prefs(),
             )
-        assert mock_query.call_count == 1
+        assert mock_author.call_count == 1
         assert mock_council.call_count == 0
 
-    def test_planner_uses_council_when_enabled(self, monkeypatch):
-        """Confirm the council branch is exercised when the env var is
-        set. The council's H1 phase heading gets stripped-and-rendered
-        per the new envelope contract; assert against the council's
-        body content (which survives the strip) rather than against
-        the council's H1 (which Duplo overwrites)."""
+    def test_planner_env_flag_does_not_route_to_council(self, monkeypatch):
+        """Even with ``DUPLO_USE_COUNCIL`` set, normal authoring stays on
+        the iterative adapter -- the env var is no longer the routing
+        condition for generate_phase_plan."""
         monkeypatch.setenv("DUPLO_USE_COUNCIL", "1")
         monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
         with (
-            patch("duplo.planner.query") as mock_query,
+            patch(
+                "duplo.planner.run_plan_author",
+                return_value="## Phase phase_001: legacy\n\n- [ ] task\n",
+            ) as mock_author,
+            patch("duplo.planner.council.author_phase_plan") as mock_council,
+        ):
+            generate_phase_plan(
+                "https://example.com",
+                _sample_features(),
+                _sample_prefs(),
+            )
+        assert mock_author.call_count == 1
+        assert mock_council.call_count == 0
+
+    def test_planner_uses_council_when_escalation_flag_set(self):
+        """The council branch is exercised only when the explicit
+        ``escalate_to_council`` flag is set."""
+        sentinel = object()
+        with (
+            patch("duplo.planner.run_plan_author") as mock_author,
             patch(
                 "duplo.planner.council.author_phase_plan",
-                return_value=("# Council Phase 1\n\n- [ ] task-from-council\n"),
+                return_value=sentinel,
             ) as mock_council,
         ):
             result = generate_phase_plan(
                 "https://example.com",
                 _sample_features(),
                 _sample_prefs(),
+                escalate_to_council=True,
             )
         assert mock_council.call_count == 1
-        assert mock_query.call_count == 0
-        # The council's H1 is stripped; Duplo prepends its canonical.
-        # The council's body content survives.
-        assert "- [ ] task-from-council" in result
+        assert mock_author.call_count == 0
+        assert result is sentinel
 
-    def test_planner_council_receives_phase_num(self, monkeypatch):
-        monkeypatch.setenv("DUPLO_USE_COUNCIL", "1")
-        monkeypatch.delenv("DUPLO_NO_COUNCIL", raising=False)
+    def test_planner_council_receives_phase_num(self):
         with patch(
             "duplo.planner.council.author_phase_plan",
             return_value="# X",
@@ -829,6 +852,7 @@ class TestPlannerCouncilBranch:
                 _sample_features(),
                 _sample_prefs(),
                 phase={"phase": 4, "title": "T", "goal": "g"},
+                escalate_to_council=True,
             )
         kwargs = mock_council.call_args.kwargs
         assert kwargs["phase_num"] == 4

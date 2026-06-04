@@ -23,6 +23,7 @@ from bob_tools.planfile import save as planfile_save
 from duplo import council
 from duplo.claude_cli import query
 from duplo.extractor import Feature
+from duplo.plan_author_adapter import run_plan_author
 from duplo.questioner import BuildPreferences
 
 _PHASE_SYSTEM = """\
@@ -490,20 +491,29 @@ def generate_phase_plan(
     platform_addendum: str = "",
     prior_phases_files: list[str] | None = None,
     target_dir: Path | str = ".",
+    escalate_to_council: bool = False,
 ) -> Plan:
     """Generate a typed :class:`Plan` for a specific roadmap phase.
 
     Returns a validated :class:`bob_tools.planfile.Plan` that:
 
-    1. When the council path is enabled, comes directly from
-       :func:`duplo.council.author_phase_plan` (which already runs the
-       parsed body through ``validate_plan(constructed=True)`` and
-       ``assert_mcloop_canonical``).
-    2. Otherwise, runs the legacy ``query()`` LLM call, strips outer
-       code fences, then converts the markdown body to a typed Plan via
-       :func:`duplo.council.typed_plan_from_synthesizer_text` using a
-       ``required_phase_id`` computed deterministically from any
-       existing PLAN.md in ``target_dir``.
+    1. By default (unconditional), comes from the iterative authoring
+       adapter :func:`duplo.plan_author_adapter.run_plan_author`, which
+       drives the duplo-owned ``plan_author`` role through Orchestra's
+       validation-gated loop and returns a canonical-Slice-C body. That
+       body flows through the unchanged
+       :func:`duplo.council.typed_plan_from_synthesizer_text` ->
+       :func:`save_plan` tail (the converged body is parsed, rebuilt as a
+       constructed plan, ids assigned, and validated under both
+       ``validate_plan(constructed=True)`` and ``assert_mcloop_canonical``).
+       A non-converging (``CAPPED``) run raises and produces no plan, so
+       PLAN.md is never written with an unvalidated body.
+    2. Only when ``escalate_to_council`` is explicitly set does plan
+       authoring route to :func:`duplo.council.author_phase_plan` (the
+       council_four fan-out). Council is an opt-in escalation/experiment
+       path, not part of normal authoring; the ``DUPLO_USE_COUNCIL`` env
+       var / :func:`duplo.council.is_enabled` is no longer consulted by
+       this function.
 
     No raw markdown leaks past this boundary; the caller must persist
     via :func:`save_plan`, which delegates to
@@ -527,9 +537,13 @@ def generate_phase_plan(
             LLM not to recreate or redefine these files so the next phase
             builds on prior output instead of duplicating it.
         target_dir: Directory whose PLAN.md drives the deterministic
-            ``required_phase_id`` for the non-council legacy path.
-            Ignored by the council path (which computes the same value
-            internally).
+            ``required_phase_id`` for the default iterative-authoring
+            path. Ignored by the council path (which computes the same
+            value internally).
+        escalate_to_council: Explicit opt-in escalation. When True, route
+            authoring to :func:`duplo.council.author_phase_plan` instead
+            of the default iterative adapter. Defaults to False so
+            iterative authoring is the unconditional default.
     """
     prefs_dict = dataclasses.asdict(preferences)
     constraints_text = (
@@ -611,11 +625,16 @@ Generate the phase body now.
 """
 
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
-    if council.is_enabled():
+    if escalate_to_council:
         return council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
 
-    raw = _strip_fences(query(prompt, system=system, call_site=f"phase_plan:{required_phase_id}"))
-    return council.typed_plan_from_synthesizer_text(raw, required_phase_id=required_phase_id)
+    body = run_plan_author(
+        prompt=prompt,
+        system=system,
+        required_phase_id=required_phase_id,
+        project_dir=Path(target_dir),
+    )
+    return council.typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
 
 
 def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
