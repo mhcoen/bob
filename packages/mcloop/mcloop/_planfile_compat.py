@@ -379,25 +379,47 @@ def parse_auto_task(task: Task) -> tuple[str, str]:
 
 
 def _parse_run_cli_action(args: str) -> tuple[str, str]:
-    """Extract the single backtick-delimited command from a run_cli task.
+    """Resolve the command a run_cli task should execute.
 
-    A ``run_cli`` task must execute exactly one backtick-quoted command, not
-    its surrounding prose description. When the task text holds exactly one
-    backtick-delimited command, run that command verbatim. When it holds none
-    (or is ambiguous with several), return an ``error`` action carrying a clear
-    message so the loop reports a failure instead of passing prose to the
-    shell.
+    A ``run_cli`` task's args can take one of three shapes:
+
+    * **Prose with a backtick-quoted command** ("Run ``<cmd>`` to confirm ...").
+      Execute exactly that command, never the surrounding prose. Several
+      backtick-delimited commands are ambiguous and error.
+    * **A bare command/path** with no backticks and no surrounding prose (the
+      args is a single token, or its first token resolves to an existing
+      script path). Run it verbatim.
+    * **Prose with no extractable command.** Return an ``error`` action with a
+      clear message so the loop reports a failure instead of shelling out the
+      prose.
     """
     commands = [m.group(1).strip() for m in _RUN_CLI_BACKTICK_RE.finditer(args)]
     commands = [c for c in commands if c]
     if len(commands) == 1:
         return ("run_cli", commands[0])
-    if not commands:
-        return ("error", f"run_cli task has no backtick-delimited command: {args!r}")
-    return (
-        "error",
-        f"run_cli task has multiple backtick-delimited commands; expected one: {args!r}",
-    )
+    if commands:
+        return (
+            "error",
+            f"run_cli task has multiple backtick-delimited commands; expected one: {args!r}",
+        )
+    bare = args.strip()
+    if bare and _is_bare_command(bare):
+        return ("run_cli", bare)
+    return ("error", f"run_cli task has no backtick-delimited command: {args!r}")
+
+
+def _is_bare_command(text: str) -> bool:
+    """Decide whether ``text`` is a bare command/path rather than prose.
+
+    A single whitespace-free token (``pytest``, ``./verify.sh``) is treated as
+    a bare command. Multi-token args count only when the first token resolves
+    to an existing file path (``./scripts/run.sh --fast``); otherwise the args
+    is prose and the caller errors.
+    """
+    tokens = text.split()
+    if len(tokens) <= 1:
+        return bool(tokens)
+    return Path(tokens[0]).exists()
 
 
 def task_label(tasks: list[Task], target: Task) -> str:

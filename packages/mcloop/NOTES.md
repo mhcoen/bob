@@ -17,6 +17,19 @@ show up in practice and the busywork is real. A bare class-level annotation
 (`name: str`, AnnAssign with no value) IS allowed inside an interface class;
 an annotation with a value is not.
 
+### [3] [T-000003] `run_cli` now accepts a bare command/path as well as a backtick-quoted command (2026-06-04)
+`_parse_run_cli_action` no longer errors when the args has no backticks. It now
+distinguishes a bare command/path from prose via `_is_bare_command`: a single
+whitespace-free token (`pytest`, `./verify.sh`) runs as-is, and a multi-token
+args runs as-is only when its first token resolves to an existing file path
+(`./scripts/run.sh --fast`). Genuine prose with no extractable command still
+errors. Assumption worth revisiting: a multi-token command whose first token is
+on `$PATH` but not a filesystem path relative to cwd (e.g. `pytest -x -n auto`)
+is treated as prose and errors; the documented fix in BUGS.md only promises
+single-token or existing-path bare commands, so such cases must still be written
+with backticks. The path check uses `Path(tokens[0]).exists()`, which is
+cwd-relative at parse time.
+
 ### [1] [T-000001] `run_cli` AUTO tasks now require a backtick-delimited command (2026-06-04)
 `parse_auto_task` no longer hands the full `[AUTO:run_cli]` prose to the shell.
 For the `run_cli` action it extracts the single backtick-quoted command from

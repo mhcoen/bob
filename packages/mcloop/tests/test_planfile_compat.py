@@ -63,6 +63,24 @@ def test_parse_auto_run_cli_without_backticks_returns_error(tmp_path: Path) -> N
     assert "no backtick-delimited command" in message
 
 
+def test_parse_auto_run_cli_bare_single_token_command_runs_as_is(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text("# Demo\n\n## Stage 1: Core\n\n- [ ] [AUTO:run_cli] pytest\n")
+    auto = shim.parse(path)[0]
+    # A bare command with no backticks and no surrounding prose runs verbatim.
+    assert shim.parse_auto_task(auto) == ("run_cli", "pytest")
+
+
+def test_parse_auto_run_cli_bare_path_command_runs_as_is(tmp_path: Path) -> None:
+    script = tmp_path / "run.sh"
+    script.write_text("#!/bin/sh\n")
+    path = tmp_path / "PLAN.md"
+    path.write_text(f"# Demo\n\n## Stage 1: Core\n\n- [ ] [AUTO:run_cli] {script} --fast\n")
+    auto = shim.parse(path)[0]
+    # First token resolves to an existing script path, so the whole args runs.
+    assert shim.parse_auto_task(auto) == ("run_cli", f"{script} --fast")
+
+
 def test_parse_auto_run_cli_multiple_backticks_returns_error(tmp_path: Path) -> None:
     path = tmp_path / "PLAN.md"
     path.write_text(
