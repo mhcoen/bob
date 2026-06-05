@@ -59,6 +59,7 @@ from mcloop.main import (
     ChainEntry,
     RunStatus,
     _all_tasks,
+    _auto_response_failed,
     _check_interrupted,
     _check_user_input,
     _main,
@@ -4396,6 +4397,71 @@ def test_dispatch_error_action_surfaces_message():
     result = _dispatch_auto_action("error", "run_cli task has no backtick-delimited command")
     assert result.startswith("ERROR:")
     assert "no backtick-delimited command" in result
+
+
+def test_run_cli_run_to_confirm_form_executes_only_command(tmp_path):
+    """A 'Run `<cmd>` to confirm ...' task shells out exactly <cmd>, not the prose.
+
+    End-to-end across the extraction seam: PLAN.md text -> parse ->
+    parse_auto_task -> _dispatch_auto_action. The backtick command is the
+    only thing handed to process_monitor.run_cli; the surrounding prose
+    ('Run', 'to confirm ...') must never reach the shell.
+    """
+    from mcloop._planfile_compat import parse, parse_auto_task
+
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Stage 1: Core\n\n"
+        "- [ ] [AUTO:run_cli] Run `pytest -q tests/test_smoke.py` to confirm the suite passes\n"
+    )
+    auto = parse(path)[0]
+    action, args = parse_auto_task(auto)
+    assert action == "run_cli"
+
+    mock_result = MagicMock()
+    mock_result.exit_code = 0
+    mock_result.hung = False
+    mock_result.output = "1 passed"
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
+        result = _dispatch_auto_action(action, args)
+
+    mock.assert_called_once_with("pytest -q tests/test_smoke.py")
+    shelled = mock.call_args[0][0]
+    for prose_word in ("Run", "confirm", "suite", "passes"):
+        assert prose_word not in shelled
+    assert "OK" in result
+    assert not _auto_response_failed(result)
+
+
+def test_run_cli_without_backtick_command_fails_without_shelling_prose(tmp_path):
+    """A run_cli task with no backtick command fails clearly, never shelling prose.
+
+    Without an extracted command the loop must report an error rather than
+    feed the prose to the shell, which would surface as a spurious 127
+    (command-not-found) from shell-parsing the description.
+    """
+    from mcloop._planfile_compat import parse, parse_auto_task
+
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n## Stage 1: Core\n\n- [ ] [AUTO:run_cli] Make sure the suite passes cleanly\n"
+    )
+    auto = parse(path)[0]
+    action, args = parse_auto_task(auto)
+    assert action == "error"
+
+    with patch("mcloop.process_monitor.run_cli") as mock:
+        result = _dispatch_auto_action(action, args)
+
+    # The shell is never invoked, so there is no 127 from parsing prose.
+    mock.assert_not_called()
+    assert result.startswith("ERROR:")
+    assert "no backtick-delimited command" in result
+    # The loop treats this clear error as a task failure.
+    assert _auto_response_failed(result)
 
 
 # --- run_loop with [AUTO] tasks ---
