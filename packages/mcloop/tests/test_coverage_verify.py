@@ -344,6 +344,84 @@ def test_verify_exempt_interface_file_passes_without_coverage(tmp_path: Path) ->
     run_cov.assert_not_called()
 
 
+def test_verify_exempt_abc_only_file_passes_without_coverage(tmp_path: Path) -> None:
+    """A changed ABC-only file (abstract stub methods) is proven exempt with
+    no mapped test and no waiver -- no coverage run, no line resolution."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "base.py").write_text(
+        "from abc import ABC, abstractmethod\n\n\n"
+        "class Base(ABC):\n"
+        "    @abstractmethod\n"
+        "    def run(self) -> int:\n"
+        "        raise NotImplementedError\n\n"
+        "    @abstractmethod\n"
+        "    def stop(self) -> None: ...\n"
+    )
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines") as changed,
+        patch("mcloop.coverage_verify._run_coverage") as run_cov,
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/base.py", [])
+    assert verdict.proven is True
+    assert "interface-only" in verdict.reason
+    assert verdict.candidate_nodes == ()
+    changed.assert_not_called()
+    run_cov.assert_not_called()
+
+
+def test_verify_exempt_reexport_init_passes_without_coverage(tmp_path: Path) -> None:
+    """A changed import-and-re-export-only ``__init__.py`` is proven exempt
+    with no mapped test and no waiver -- it has no executable line to cover."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text(
+        '"""Public API surface."""\n'
+        "from __future__ import annotations\n\n"
+        "from pkg.widget import Widget\n"
+        "from pkg.engine import Engine\n\n"
+        '__all__ = ["Widget", "Engine"]\n'
+    )
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines") as changed,
+        patch("mcloop.coverage_verify._run_coverage") as run_cov,
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/__init__.py", [])
+    assert verdict.proven is True
+    assert "interface-only" in verdict.reason
+    assert verdict.candidate_nodes == ()
+    changed.assert_not_called()
+    run_cov.assert_not_called()
+
+
+def test_verify_protocol_mixed_with_function_still_gated(tmp_path: Path) -> None:
+    """A file mixing a Protocol with one real executable function is NOT
+    exempt: the function carries logic, so the gate still runs the coverage
+    path and fails closed when nothing exercises the change."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "mixed.py").write_text(
+        "from typing import Protocol\n\n\n"
+        "class Reader(Protocol):\n"
+        "    def read(self, n: int) -> bytes: ...\n\n\n"
+        "def helper(x):\n"
+        "    return x + 1\n"
+    )
+    # Confirm the exemption check itself rejects the mixed module.
+    assert is_coverage_exempt_python((pkg / "mixed.py").read_text()) is False
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines", return_value={7}) as changed,
+        patch("mcloop.coverage_verify.dependent_test_files", return_value=[]),
+        patch("mcloop.coverage_verify._run_coverage") as run_cov,
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/mixed.py", [])
+    assert verdict.proven is False
+    assert "no scoped candidate" in verdict.reason
+    # The mixed file went through the normal gate, not the exemption.
+    changed.assert_called_once()
+    run_cov.assert_not_called()
+
+
 def test_verify_logic_bearing_py_file_still_gated(tmp_path: Path) -> None:
     """An ordinary .py file with executable logic is not exempt and still
     goes through the coverage path."""
