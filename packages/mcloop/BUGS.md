@@ -15,5 +15,5 @@
 
 ### Tasks
 
-- [ ] T-000003: Fix `mcloop`'s `parse_auto_task` so a run_cli task whose args is a bare command/path with no backticks and no surrounding prose runs as-is, while still extracting the backtick-delimited command when the args is prose containing one, and still erroring only when the args is prose with no extractable command. [fix: "run_cli accepts bare command as well as backtick-quoted command in prose"]
+- [x] T-000003: Fix `mcloop`'s `parse_auto_task` so a run_cli task whose args is a bare command/path with no backticks and no surrounding prose runs as-is, while still extracting the backtick-delimited command when the args is prose containing one, and still erroring only when the args is prose with no extractable command. [fix: "run_cli accepts bare command as well as backtick-quoted command in prose"] <!-- completed_at: 2026-06-05T04:42:58Z -->
 - [ ] T-000004: Add tests covering all three run_cli arg shapes: (1) prose with a backtick-quoted command runs exactly that command; (2) a bare path/command with no backticks runs as-is; (3) prose with no extractable command errors with a clear message. [fix: "regression: run_cli handles bare, backtick-quoted, and unextractable args"]
