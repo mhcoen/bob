@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from mcloop.waivers import (
@@ -129,6 +130,55 @@ def test_has_waiver_empty_task_label_falls_back_to_baseline(tmp_path: Path) -> N
     assert has_waiver(tmp_path, "x.py", "base-A", task_label="") is True
     # A different baseline with no task identity still does not match.
     assert has_waiver(tmp_path, "x.py", "base-B") is False
+
+
+def test_has_waiver_matches_after_intervening_commit_changes_baseline(
+    tmp_path: Path,
+) -> None:
+    """Regression: an intervening commit advances the baseline SHA, but a
+    waiver recorded under the task identity still matches.
+
+    This exercises the real git scenario the synthetic-SHA test stands in
+    for: the user records a waiver for a task's changed input at the SHA
+    that was HEAD at record time, then a checkpoint/commit lands and HEAD
+    moves on. ``has_waiver`` must still match on the task identity even
+    though the current pre-edit baseline SHA no longer equals the recorded
+    one, so the gate is not silently re-armed by an unrelated commit.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    src = tmp_path / "widget.py"
+    src.write_text("a = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=tmp_path, check=True)
+    baseline_at_record = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+
+    # The waiver is recorded against the SHA that was HEAD when it was taken.
+    record_waiver(
+        tmp_path,
+        task_label="T-000005",
+        changed_input="widget.py",
+        baseline_sha=baseline_at_record,
+        reason="data-file change verified by manual inspection",
+    )
+
+    # An intervening commit lands, advancing HEAD to a new SHA.
+    (tmp_path / "other.py").write_text("b = 2\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "checkpoint"], cwd=tmp_path, check=True)
+    new_baseline = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    assert new_baseline != baseline_at_record
+
+    # The recorded waiver still covers the task at the advanced baseline.
+    assert has_waiver(tmp_path, "widget.py", new_baseline, task_label="T-000005") is True
+    # And without the (now-stale) recorded SHA matching, it would have been
+    # nullified if identity were not the durable key.
+    assert has_waiver(tmp_path, "widget.py", new_baseline) is False
 
 
 def test_load_waivers_missing_file(tmp_path: Path) -> None:

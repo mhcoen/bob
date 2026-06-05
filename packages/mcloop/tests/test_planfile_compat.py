@@ -177,3 +177,31 @@ def test_reset_task_leaves_other_failed_markers_intact(tmp_path: Path) -> None:
     after = {t.text: t for t in shim.parse(path)}
     assert not after["First task"].failed
     assert after["Second task"].failed
+
+
+def test_reset_makes_previously_failed_task_runnable_again(tmp_path: Path) -> None:
+    """Regression: a [!]-failed task the scheduler skips becomes selectable
+    again once reset to pending.
+
+    A failed task is a hard stop for ``find_next`` — it is permanently
+    skipped, so the loop would never retry it even after its blocking
+    condition (a missing mapped test, an absent waiver, a stale baseline)
+    is cleared. Resetting it must restore runnability: it is the task
+    ``find_next`` selects once more. Covers the id-less loose BUGS.md path,
+    where runnability (not just the rewritten marker) is the contract.
+    """
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [!] Fix the blocked bug\n- [ ] Later bug\n")
+
+    # While failed, the scheduler skips it and selects the next pending task.
+    failed = next(t for t in shim.parse(path) if t.failed)
+    assert failed.task_id is None
+    assert shim.find_next(shim.parse(path)).text == "Later bug"
+
+    shim.reset_task(path, failed)
+
+    # Now pending again and first in line: runnable, not permanently skipped.
+    selected = shim.find_next(shim.parse(path))
+    assert selected.text == "Fix the blocked bug"
+    assert not selected.failed
+    assert not selected.checked
