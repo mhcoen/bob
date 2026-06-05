@@ -7,9 +7,12 @@ imports, decorators, dataclass fields, unparseable source -- must classify
 as BEHAVIORAL (fail closed).
 """
 
+import pytest
+
 from mcloop.change_class import (
     ChangeClass,
     classify_change,
+    is_no_test_needed_input,
     is_provably_non_behavioral,
 )
 
@@ -116,3 +119,52 @@ def test_unparseable_source_fails_closed():
 def test_is_provably_non_behavioral_predicate():
     assert is_provably_non_behavioral("x = 1\n", "x = 1  # note\n")
     assert not is_provably_non_behavioral("x = 1\n", "x = 2\n")
+
+
+# --- no-test-needed non-code input class ---
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pyproject.toml",  # dependency manifest
+        "deep/nested/pyproject.toml",
+        "ruff.toml",  # tool config
+        "mypy.ini",
+        "pytest.ini",
+        "setup.cfg",
+        "tox.ini",
+        ".flake8",  # dotfile config (empty pathlib suffix)
+        ".coveragerc",
+        ".editorconfig",
+        "requirements.txt",  # requirements / lock
+        "requirements/dev.txt",
+        "poetry.lock",
+        "uv.lock",
+        "Pipfile",
+        "data/fixtures.json",  # plain data / docs
+        "config/settings.yaml",
+        "table.csv",
+        "README.md",
+        "docs/guide.rst",
+    ],
+)
+def test_non_code_inputs_need_no_test(path):
+    assert is_no_test_needed_input(path) is True
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "pkg/widget.py",  # executable Python is never exempt
+        "tests/test_widget.py",
+        "templates/email.j2",  # logic-bearing inputs stay subject to the gate
+        "templates/page.html",
+        "queries/report.sql",
+        "scripts/deploy.sh",
+        "Makefile",
+        "app/main.js",
+    ],
+)
+def test_code_and_logic_inputs_are_not_exempt(path):
+    assert is_no_test_needed_input(path) is False

@@ -287,13 +287,16 @@ def _resolve_flagged(
       * an explicit waiver exists for it at the task's pre-edit baseline
         (the auditable bypass recorded in
         ``.mcloop/test-verification-waivers.jsonl``), or
-      * it is a Python change whose diff-hunk lines are *proven executed*
-        by a scoped candidate test via coverage-proven verification.
+      * the coverage gate proves it clean -- either it is a no-test-needed
+        non-code input (dependency manifest, tool config, lock, or data
+        file: nothing to cover), or it is a Python change whose diff-hunk
+        lines are *proven executed* by a scoped candidate test.
 
     Coverage verification is the primary fallback: for an unmapped Python
     change it runs coverage over a scoped affected-test set (mapped nodes
     plus transitive dependent tests) and never expands to the full suite.
-    Non-Python behavior inputs have no executable coverage lines, so they
+    Logic-bearing non-Python inputs (templates, SQL, build scripts) have no
+    executable coverage lines and are not the no-test-needed class, so they
     can only be cleared by a named-test mapping (handled upstream) or a
     waiver -- otherwise they remain blocking.
 
@@ -311,12 +314,15 @@ def _resolve_flagged(
     for src in flagged:
         if has_waiver(project_dir, src, baseline):
             continue
-        if src.endswith(".py") and baseline:
-            acc = by_source.get(src)
-            mapped = list(getattr(acc, "test_files", ()) or ())
-            verdict = verify_change_covered(project_dir, baseline, src, mapped)
-            if verdict.proven:
-                continue
+        # The coverage gate decides every flagged input: a no-test-needed
+        # non-code input is proven exempt with no run, a Python change is
+        # proven only when its diff lines execute under a scoped candidate
+        # test, and anything else stays unresolved and blocks.
+        acc = by_source.get(src)
+        mapped = list(getattr(acc, "test_files", ()) or ())
+        verdict = verify_change_covered(project_dir, baseline, src, mapped)
+        if verdict.proven:
+            continue
         unresolved.append(src)
     return unresolved
 
@@ -371,13 +377,15 @@ def run_checks(
         # (comment/docstring/format-only, import reorder) are allowed
         # through and simply contribute no targeted tests.
         #
-        # Before failing, give each flagged change the coverage-proven
-        # verification fallback (T-000391): an unmapped Python change with
-        # no namesake test still passes if a scoped dependent test proves
-        # its changed lines execute. Non-Python inputs (no coverage lines)
-        # and changes nothing exercises remain blocking unless an explicit,
-        # logged waiver exists. Coverage is scoped to a dependent-test
-        # candidate set -- the full suite is never run as the fallback.
+        # Before failing, give each flagged change the coverage gate
+        # (T-000391): a no-test-needed non-code input (dependency manifest,
+        # tool config, lock, or data file) is exempt outright, and an
+        # unmapped Python change with no namesake test still passes if a
+        # scoped dependent test proves its changed lines execute. Logic-
+        # bearing non-Python inputs (templates, SQL) and changes nothing
+        # exercises remain blocking unless an explicit, logged waiver
+        # exists. Coverage is scoped to a dependent-test candidate set --
+        # the full suite is never run as the fallback.
         flagged = _unaccounted_behavioral_changes(project_dir, accounts)
         if flagged:
             flagged = _resolve_flagged(project_dir, flagged, accounts)

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ast
 from enum import Enum
+from pathlib import Path
 from typing import TypeAlias
 
 _BodyNode: TypeAlias = ast.Module | ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
@@ -134,3 +135,81 @@ def classify_change(old_source: str, new_source: str) -> ChangeClass:
 def is_provably_non_behavioral(old_source: str, new_source: str) -> bool:
     """Convenience predicate: True iff the change is provably inert."""
     return classify_change(old_source, new_source) is ChangeClass.NON_BEHAVIORAL
+
+
+# --------------------------------------------------------------------------
+# Non-code input classification (the no-test-needed change class).
+# --------------------------------------------------------------------------
+#
+# Some changed inputs carry no executable application logic: dependency
+# manifests, tool configuration, requirement/lock files, and plain data or
+# documentation. A change to one of these has no source line a test could
+# execute, so the coverage gate cannot -- and should not -- demand a mapped
+# test or a logged waiver for it. Recognition is generalized over the
+# filename suffix plus a small set of conventional dotfile/config names; it
+# is deliberately NOT a single-file ``pyproject.toml`` whitelist.
+#
+# Logic-bearing non-Python inputs are intentionally excluded: templates
+# (Jinja/Mako/HTML), SQL, and build scripts embed behavior, so they stay
+# subject to the normal mapped-test / waiver requirement.
+
+# Filename suffixes that denote a non-executable input. Each comment lists
+# representative members so the class reads as a category, not a list.
+_NO_TEST_NEEDED_SUFFIXES = frozenset(
+    {
+        ".toml",  # pyproject.toml, ruff.toml, poetry/uv config
+        ".cfg",  # setup.cfg, .isort.cfg
+        ".ini",  # pytest.ini, mypy.ini, tox.ini
+        ".conf",
+        ".json",  # package.json, tsconfig, plain data
+        ".yaml",  # CI / pre-commit / data
+        ".yml",
+        ".lock",  # poetry.lock, Pipfile.lock, uv.lock
+        ".txt",  # requirements.txt, constraints.txt, data
+        ".csv",  # tabular data
+        ".tsv",
+        ".md",  # documentation
+        ".rst",
+        ".properties",
+    }
+)
+
+# Conventional manifest/config filenames whose name carries the meaning
+# (a leading-dot dotfile has an empty pathlib suffix, so suffix matching
+# alone would miss these).
+_NO_TEST_NEEDED_FILENAMES = frozenset(
+    {
+        "pipfile",
+        "requirements",
+        "constraints",
+        ".flake8",
+        ".coveragerc",
+        ".editorconfig",
+        ".gitignore",
+        ".gitattributes",
+        ".dockerignore",
+        ".pylintrc",
+    }
+)
+
+
+def is_no_test_needed_input(path: str) -> bool:
+    """True iff *path* is a non-code input that needs no mapped test.
+
+    Recognizes dependency manifests (``pyproject.toml``, ``Pipfile``),
+    tool configuration (ruff/mypy/pytest/flake8/coverage configs),
+    requirement and lock files, and plain data/documentation. Detection
+    generalizes over the filename suffix and a small set of conventional
+    config filenames -- it is not a single-file whitelist.
+
+    Executable Python source (``.py``) and logic-bearing non-Python inputs
+    (templates, SQL, build scripts) always return False, preserving the
+    test/coverage requirement for anything that can carry behavior in an
+    executable line.
+    """
+    name = Path(path).name.lower()
+    if name.endswith(".py"):
+        return False
+    if name in _NO_TEST_NEEDED_FILENAMES:
+        return True
+    return Path(name).suffix in _NO_TEST_NEEDED_SUFFIXES

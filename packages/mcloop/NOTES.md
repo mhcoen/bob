@@ -2,6 +2,20 @@
 
 ## Observations
 
+### [1] [T-000001] No-test-needed class draws the line at "carries executable logic", not "is non-.py" (2026-06-04)
+`change_class.is_no_test_needed_input` exempts dependency manifests, tool
+config, requirement/lock files, and plain data/docs (by suffix + a few
+dotfile names), routed through `verify_change_covered` so the coverage gate
+itself clears them with no run. It deliberately does NOT exempt every
+non-Python input: templates (.j2/.jinja/.html/.mako), .sql, build scripts
+(.sh), and Makefile still embed behavior and remain subject to the normal
+mapped-test / waiver requirement. Only the inputs whose `_BEHAVIOR_SUFFIXES`
+membership in `targeted.py` causes them to be accounted *and* that match the
+exempt class actually exercise the new bypass; non-accounted files
+(e.g. requirements.txt, *.lock) were never flagged to begin with and pass
+trivially. `.py` is never exempt (the existing test/coverage requirement for
+executable source is preserved).
+
 ### [14.9] [T-000392] Coverage instrumentation is structurally confined to the scoped per-task path (2026-06-01)
 Confirmed the placement invariant rather than re-measuring it. The only code
 that builds coverage instrumentation (`--cov=<module>` + `--cov-report=json:`)

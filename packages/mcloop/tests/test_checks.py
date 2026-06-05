@@ -511,18 +511,35 @@ def test_run_checks_unmapped_non_behavioral_change_passes(tmp_path):
 # --- coverage-proven verification fallback + waivers (T-000391) ---
 
 
-def test_run_checks_non_python_behavioral_cannot_pass_via_coverage(tmp_path):
-    """A flagged non-Python behavior input has no executable coverage lines,
-    so the coverage fallback can never clear it -- it must fail the gate
-    even with a task baseline present."""
-    _gate_project(tmp_path, "config.yaml", "key: new\n")
+def test_run_checks_logic_bearing_non_python_cannot_pass_via_coverage(tmp_path):
+    """A flagged logic-bearing non-Python input (a template) has no
+    executable coverage lines and is not the no-test-needed class, so the
+    coverage fallback can never clear it -- it must fail the gate even with
+    a task baseline present."""
+    _gate_project(tmp_path, "templates/email.j2", "Hello {{ name }} now\n")
     (tmp_path / ".mcloop").mkdir(exist_ok=True)
     (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
 
-    result = run_checks(tmp_path, changed_files=["config.yaml"])
+    result = run_checks(tmp_path, changed_files=["templates/email.j2"])
 
     assert not result.passed
-    assert "config.yaml" in result.output
+    assert "templates/email.j2" in result.output
+
+
+def test_run_checks_non_code_input_passes_without_test_or_waiver(tmp_path):
+    """A non-code input (dependency manifest, tool config, lock, or plain
+    data file) carries no executable logic, so the gate clears it with no
+    mapped test and no waiver. This generalizes beyond pyproject.toml."""
+    for i, rel in enumerate(("ruff.toml", "config.yaml", "requirements.txt", "uv.lock")):
+        root = tmp_path / f"proj{i}"
+        root.mkdir()
+        _gate_project(root, rel, "changed contents\n")
+        (root / ".mcloop").mkdir(exist_ok=True)
+        (root / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+        result = run_checks(root, changed_files=[rel])
+
+        assert result.passed, rel
 
 
 def test_run_checks_waiver_clears_flagged_input(tmp_path):
@@ -530,18 +547,18 @@ def test_run_checks_waiver_clears_flagged_input(tmp_path):
     baseline clears the gate for an otherwise-blocking change."""
     from mcloop.waivers import record_waiver
 
-    _gate_project(tmp_path, "config.yaml", "key: new\n")
+    _gate_project(tmp_path, "templates/email.j2", "Hello {{ name }} now\n")
     (tmp_path / ".mcloop").mkdir(exist_ok=True)
     (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
     record_waiver(
         tmp_path,
         task_label="T-000391",
-        changed_input="config.yaml",
+        changed_input="templates/email.j2",
         baseline_sha="base-sha",
-        reason="data file reviewed by hand",
+        reason="template reviewed by hand",
     )
 
-    result = run_checks(tmp_path, changed_files=["config.yaml"])
+    result = run_checks(tmp_path, changed_files=["templates/email.j2"])
 
     # No mapped tests and no Python files: with the flagged input waived,
     # there is nothing left to run and the gate does not block.

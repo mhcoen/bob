@@ -256,10 +256,27 @@ def test_verify_fails_when_no_candidate_tests(tmp_path: Path) -> None:
     run_cov.assert_not_called()
 
 
-def test_verify_non_python_cannot_pass(tmp_path: Path) -> None:
-    verdict = verify_change_covered(tmp_path, "base-sha", "config/data.yaml", [])
+def test_verify_logic_bearing_non_python_cannot_pass(tmp_path: Path) -> None:
+    # A template embeds behavior but has no executable coverage line here
+    # and is not the no-test-needed class, so it cannot be proven.
+    verdict = verify_change_covered(tmp_path, "base-sha", "templates/email.j2", [])
     assert verdict.proven is False
     assert "non-Python" in verdict.reason
+
+
+def test_verify_non_code_input_passes_without_test(tmp_path: Path) -> None:
+    # Dependency manifests, tool config, lock, and plain data files carry
+    # no executable logic: the gate exempts them with no coverage run.
+    for src in (
+        "pyproject.toml",
+        "config/data.yaml",
+        "requirements.txt",
+        "poetry.lock",
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", src, [])
+        assert verdict.proven is True, src
+        assert "needs no test" in verdict.reason
+        assert verdict.candidate_nodes == ()
 
 
 def test_verify_missing_baseline_fails_closed(tmp_path: Path) -> None:

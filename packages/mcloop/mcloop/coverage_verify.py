@@ -21,10 +21,15 @@ fails closed (or requires an explicit waiver); it is NEVER widened to the
 whole suite. A change exercised by an integration/dependent test passes
 even with no namesake test; a change exercised by nothing fails.
 
-Non-Python behavior inputs (pyproject.toml, templates, data files) have
-no executable coverage lines and therefore can never pass through this
-path -- they require a named-test mapping or the explicit waiver/
-hard-failure path handled by the caller.
+Non-code inputs that carry no executable logic -- dependency manifests
+(pyproject.toml), tool config (ruff/mypy/pytest), requirement/lock files,
+and plain data/docs -- are recognized as a no-test-needed change class
+(see :func:`mcloop.change_class.is_no_test_needed_input`) and pass this
+gate directly: there is no source line to cover, so demanding a test or a
+waiver would be busywork. Logic-bearing non-Python inputs (templates,
+SQL, build scripts) still have no executable coverage lines here and
+require a named-test mapping or the explicit waiver/hard-failure path
+handled by the caller.
 """
 
 from __future__ import annotations
@@ -335,14 +340,24 @@ def verify_change_covered(
 
     Returns a :class:`CoverageVerdict`. ``proven`` is True only when the
     scoped coverage run passes and at least one changed line of *src* was
-    executed by a candidate test. Non-Python inputs, an unresolvable
-    baseline, an empty candidate set, a failing coverage run, and a run
-    that never touches the changed lines all return ``proven=False`` with
-    a distinguishing reason.
+    executed by a candidate test. A no-test-needed non-code input
+    (manifest/config/lock/data) is proven exempt with no coverage run. A
+    logic-bearing non-Python input, an unresolvable baseline, an empty
+    candidate set, a failing coverage run, and a run that never touches the
+    changed lines all return ``proven=False`` with a distinguishing reason.
     """
+    from mcloop.change_class import is_no_test_needed_input
+
     project_dir = Path(project_dir)
 
     if not src.endswith(".py"):
+        if is_no_test_needed_input(src):
+            return CoverageVerdict(
+                True,
+                "non-code input (dependency manifest, tool config, lock, "
+                "or data file) carries no executable logic and needs no test",
+                (),
+            )
         return CoverageVerdict(
             False,
             "non-Python behavior input has no executable coverage lines",
