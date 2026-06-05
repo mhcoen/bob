@@ -366,10 +366,38 @@ def get_batch_children(task: Task) -> list[Task]:
     return batch
 
 
+_RUN_CLI_BACKTICK_RE = re.compile(r"`([^`]+)`")
+
+
 def parse_auto_task(task: Task) -> tuple[str, str]:
     if task.action_tag is None:
         return ("", "")
+    action, args = task.action_tag
+    if action == "run_cli":
+        return _parse_run_cli_action(args)
     return task.action_tag
+
+
+def _parse_run_cli_action(args: str) -> tuple[str, str]:
+    """Extract the single backtick-delimited command from a run_cli task.
+
+    A ``run_cli`` task must execute exactly one backtick-quoted command, not
+    its surrounding prose description. When the task text holds exactly one
+    backtick-delimited command, run that command verbatim. When it holds none
+    (or is ambiguous with several), return an ``error`` action carrying a clear
+    message so the loop reports a failure instead of passing prose to the
+    shell.
+    """
+    commands = [m.group(1).strip() for m in _RUN_CLI_BACKTICK_RE.finditer(args)]
+    commands = [c for c in commands if c]
+    if len(commands) == 1:
+        return ("run_cli", commands[0])
+    if not commands:
+        return ("error", f"run_cli task has no backtick-delimited command: {args!r}")
+    return (
+        "error",
+        f"run_cli task has multiple backtick-delimited commands; expected one: {args!r}",
+    )
 
 
 def task_label(tasks: list[Task], target: Task) -> str:

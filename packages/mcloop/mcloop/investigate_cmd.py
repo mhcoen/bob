@@ -496,6 +496,9 @@ def _dispatch_auto_action(action: str, args: str) -> str:
     """
     from mcloop import app_interact, process_monitor
 
+    if action == "error":
+        return f"ERROR: {args}"
+
     if action == "run_cli":
         cli_result = process_monitor.run_cli(args)
         parts = [f"exit_code: {cli_result.exit_code}"]

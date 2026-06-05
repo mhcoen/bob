@@ -28,7 +28,7 @@ def test_auto_user_helpers_are_planfile_tag_backed(tmp_path: Path) -> None:
         "## Stage 1: Core\n\n"
         "- [ ] [USER] Inspect app\n"
         "  Keep this line.\n"
-        "- [ ] [AUTO:run_cli] ./verify.sh --fast\n"
+        "- [ ] [AUTO:run_cli] Smoke test the verifier by running `./verify.sh --fast`\n"
     )
     tasks = shim.parse(path)
 
@@ -37,6 +37,51 @@ def test_auto_user_helpers_are_planfile_tag_backed(tmp_path: Path) -> None:
     assert shim.user_task_instructions(user) == "Inspect app\n  Keep this line."
     assert shim.is_auto_task(auto)
     assert shim.parse_auto_task(auto) == ("run_cli", "./verify.sh --fast")
+
+
+def test_parse_auto_run_cli_extracts_only_backtick_command(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Stage 1: Core\n\n"
+        "- [ ] [AUTO:run_cli] Verify the build still works by running `make build`\n"
+    )
+    auto = shim.parse(path)[0]
+    # Only the backtick-quoted command runs, never the surrounding prose.
+    assert shim.parse_auto_task(auto) == ("run_cli", "make build")
+
+
+def test_parse_auto_run_cli_without_backticks_returns_error(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n## Stage 1: Core\n\n- [ ] [AUTO:run_cli] Make sure the app launches cleanly\n"
+    )
+    auto = shim.parse(path)[0]
+    action, message = shim.parse_auto_task(auto)
+    # No command to run: fail clearly instead of shelling out the prose.
+    assert action == "error"
+    assert "no backtick-delimited command" in message
+
+
+def test_parse_auto_run_cli_multiple_backticks_returns_error(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Stage 1: Core\n\n"
+        "- [ ] [AUTO:run_cli] Run `make build` and then `make test`\n"
+    )
+    auto = shim.parse(path)[0]
+    action, message = shim.parse_auto_task(auto)
+    assert action == "error"
+    assert "multiple backtick-delimited commands" in message
+
+
+def test_parse_auto_non_run_cli_action_is_unchanged(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text("# Demo\n\n## Stage 1: Core\n\n- [ ] [AUTO:run_gui] open -a Foo | Foo\n")
+    auto = shim.parse(path)[0]
+    # Backtick extraction must not touch other automated actions.
+    assert shim.parse_auto_task(auto) == ("run_gui", "open -a Foo | Foo")
 
 
 def test_parse_description_empty_when_first_line_is_checkbox(tmp_path: Path) -> None:

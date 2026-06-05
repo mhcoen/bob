@@ -2,6 +2,17 @@
 
 ## Observations
 
+### [1] [T-000001] `run_cli` AUTO tasks now require a backtick-delimited command (2026-06-04)
+`parse_auto_task` no longer hands the full `[AUTO:run_cli]` prose to the shell.
+For the `run_cli` action it extracts the single backtick-quoted command from
+the task text and runs exactly that. Zero commands or several (ambiguous)
+yield an `("error", <reason>)` tuple instead, which `_dispatch_auto_action`
+turns into an `ERROR:` line and `_auto_response_failed` flags as a run
+failure. Only `run_cli` parsing changed; other automated actions still pass
+their args through verbatim. Assumption worth revisiting: a literal backtick
+inside the intended command cannot be expressed, since extraction is a plain
+``` `([^`]+)` ``` match; no such use has appeared in practice.
+
 ### [4] [T-000004] `--retry-task` resolves a colliding id to BUGS.md first (2026-06-04)
 `--retry-task TASK_ID` (run_loop `retry_tasks=`) resets a single `[!]`-failed
 task back to `[ ]` via `_reset_failed_tasks`, which searches BUGS.md before

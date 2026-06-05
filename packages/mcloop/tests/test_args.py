@@ -4391,6 +4391,13 @@ def test_dispatch_unknown_action():
     assert "unknown auto action" in result
 
 
+def test_dispatch_error_action_surfaces_message():
+    """The 'error' pseudo-action reports its message as a clear failure."""
+    result = _dispatch_auto_action("error", "run_cli task has no backtick-delimited command")
+    assert result.startswith("ERROR:")
+    assert "no backtick-delimited command" in result
+
+
 # --- run_loop with [AUTO] tasks ---
 
 
@@ -4398,7 +4405,10 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
     """[AUTO] tasks execute automatically and skip Claude Code session."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        canonical_plan_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+        canonical_plan_text(
+            "- [ ] [AUTO:run_cli] Smoke test the app by running `./my_app --test`\n"
+            "- [ ] Fix the bug\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
@@ -4450,7 +4460,10 @@ def test_run_loop_auto_task_nonzero_fails_and_leaves_task_unchecked(tmp_path):
     """Defect B regression: a nonzero AUTO run_cli result fails the run."""
     plan = tmp_path / "PLAN.md"
     plan.write_text(
-        canonical_plan_text("- [ ] [AUTO:run_cli] ./my_app --test\n- [ ] Fix the bug\n")
+        canonical_plan_text(
+            "- [ ] [AUTO:run_cli] Smoke test the app by running `./my_app --test`\n"
+            "- [ ] Fix the bug\n"
+        )
     )
     (tmp_path / ".git").mkdir()
 
