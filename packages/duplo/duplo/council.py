@@ -87,6 +87,7 @@ from bob_tools.planfile import (
 )
 
 from duplo import call_log
+from duplo.batch_coverage import ensure_batch_test_coverage
 from duplo.canonical_consistency import (
     validate_spec_pyproject_runsh_consistency,
 )
@@ -438,6 +439,11 @@ def typed_plan_from_synthesizer_text(
         bugs=None,
         source_path=None,
     )
+    # Co-locate each module-creating batch's covering test as a sibling
+    # task within the same batch, before ids are assigned, so the batch is
+    # self-contained for mcloop's coverage gate (created code and its
+    # exercising test are accepted together).
+    constructed = ensure_batch_test_coverage(constructed)
     migrated = migrate(constructed)
     validate_plan(migrated, constructed=True)
     assert_mcloop_canonical(migrated)
