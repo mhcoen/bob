@@ -604,6 +604,91 @@ def test_run_checks_coverage_unproven_python_change_fails(tmp_path):
     assert "pkg/zzwidget.py" in result.output
 
 
+# --- regression: non-code inputs exempt, executable code still gated (T-000002) ---
+#
+# These pin the two halves of the no-test-needed change class together so a
+# future edit cannot relax one without the other catching it: a non-code
+# input (manifest / tool config / data) clears the gate with NO mapped test
+# and NO logged waiver, while a behavioral .py change with no exercising test
+# still fails. The exemption must never leak onto executable source.
+
+
+def test_regression_pyproject_dependency_edit_passes_unwaived(tmp_path):
+    """A pyproject.toml dependency edit clears the gate with no mapped test
+    and no waiver: a manifest carries no executable line to cover, so it must
+    not be treated as a behavioral change and blocked."""
+    _gate_project(
+        tmp_path,
+        "pyproject.toml",
+        '[project]\ndependencies = ["requests>=2.32", "httpx"]\n'
+        "[tool.ruff]\n[tool.pytest.ini_options]\n",
+    )
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+    result = run_checks(tmp_path, changed_files=["pyproject.toml"])
+
+    assert result.passed
+
+
+def test_regression_ruff_and_mypy_config_edits_pass(tmp_path):
+    """Tool-configuration edits (ruff.toml, mypy.ini) are non-code inputs and
+    clear the gate with no mapped test and no waiver."""
+    for i, rel in enumerate(("ruff.toml", "mypy.ini")):
+        root = tmp_path / f"cfg{i}"
+        root.mkdir()
+        _gate_project(root, rel, "line-length = 100\n")
+        (root / ".mcloop").mkdir(exist_ok=True)
+        (root / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+        result = run_checks(root, changed_files=[rel])
+
+        assert result.passed, rel
+
+
+def test_regression_data_file_edit_passes(tmp_path):
+    """A plain data-file edit (CSV) carries no executable logic and clears the
+    gate with no mapped test and no waiver."""
+    _gate_project(tmp_path, "data/cities.csv", "name,pop\nBoston,700000\n")
+    (tmp_path / ".mcloop").mkdir(exist_ok=True)
+    (tmp_path / ".mcloop" / "task-baseline").write_text("base-sha\n")
+
+    result = run_checks(tmp_path, changed_files=["data/cities.csv"])
+
+    assert result.passed
+
+
+def test_regression_behavioral_py_without_test_still_gated(tmp_path):
+    """The non-code exemption must NOT leak onto executable source. A
+    behavioral .py change with no namesake test and no dependent test that
+    exercises it still fails the gate -- proven end-to-end against a real git
+    baseline, with no mocked classifier or coverage verdict."""
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n[tool.pytest.ini_options]\n")
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "widget.py").write_text("def f():\n    return 1\n")
+    (tmp_path / "tests").mkdir()
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=tmp_path, check=True)
+    base = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout.strip()
+    (tmp_path / ".mcloop").mkdir()
+    (tmp_path / ".mcloop" / "task-baseline").write_text(base + "\n")
+    # Behavioral edit with no test_widget.py and no dependent test.
+    (pkg / "widget.py").write_text("def f():\n    return 2\n")
+
+    result = run_checks(tmp_path, changed_files=["pkg/widget.py"])
+
+    assert not result.passed
+    assert "pkg/widget.py" in result.output
+    assert "no mapped test" in result.output
+
+
 def test_phase_boundary_full_suite_has_no_coverage_instrumentation(tmp_path):
     """Coverage instrumentation lives only on the scoped per-task path.
 
