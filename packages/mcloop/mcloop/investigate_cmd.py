@@ -489,6 +489,24 @@ def _handle_auto_task(label: str, action: str, args: str) -> str:
     return result
 
 
+def _bashify_sh_command(command: str) -> str:
+    """Rewrite a run_cli command so a ``.sh`` script runs via ``bash``.
+
+    When the command's first token is a path ending in ``.sh``, prefix it
+    with ``bash`` so a non-executable (mode 644) script runs instead of
+    failing with exit 126. Trailing arguments are preserved unchanged.
+    Commands whose first token does not end in ``.sh`` (including an already
+    ``bash <path>`` invocation) are returned verbatim.
+    """
+    stripped = command.lstrip()
+    if not stripped:
+        return command
+    first = stripped.split(None, 1)[0]
+    if first.endswith(".sh"):
+        return f"bash {stripped}"
+    return command
+
+
 def _dispatch_auto_action(action: str, args: str) -> str:
     """Dispatch an auto task action to the appropriate module.
 
@@ -500,7 +518,7 @@ def _dispatch_auto_action(action: str, args: str) -> str:
         return f"ERROR: {args}"
 
     if action == "run_cli":
-        cli_result = process_monitor.run_cli(args)
+        cli_result = process_monitor.run_cli(_bashify_sh_command(args))
         parts = [f"exit_code: {cli_result.exit_code}"]
         if cli_result.hung:
             parts.append("STATUS: HUNG (killed)")

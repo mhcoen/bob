@@ -42,6 +42,7 @@ from mcloop.install_cmd import (
 from mcloop.investigate_cmd import (
     MAX_VERIFICATION_ROUNDS,
     _append_verification_failure,
+    _bashify_sh_command,
     _copy_project_settings,
     _dispatch_auto_action,
     _handle_auto_task,
@@ -4281,6 +4282,54 @@ def test_dispatch_run_cli():
     mock.assert_called_once_with("./my_app --flag")
     assert "OK" in result
     assert "hello world" in result
+
+
+def test_bashify_sh_command_bare_path():
+    """A path ending in .sh is invoked via bash."""
+    assert _bashify_sh_command("./verify.sh") == "bash ./verify.sh"
+
+
+def test_bashify_sh_command_preserves_trailing_args():
+    """Trailing arguments survive the bash rewrite unchanged."""
+    assert _bashify_sh_command("scripts/run.sh --fast a b") == "bash scripts/run.sh --fast a b"
+
+
+def test_bashify_sh_command_non_sh_untouched():
+    """Commands whose first token does not end in .sh are returned verbatim."""
+    assert _bashify_sh_command("pytest -q") == "pytest -q"
+
+
+def test_bashify_sh_command_already_bash_untouched():
+    """An explicit 'bash <path>' invocation is not double-wrapped."""
+    assert _bashify_sh_command("bash verify.sh") == "bash verify.sh"
+
+
+def test_dispatch_run_cli_sh_via_bash():
+    """A run_cli .sh command reaches the shell wrapped in 'bash'."""
+    mock_result = MagicMock()
+    mock_result.exit_code = 0
+    mock_result.hung = False
+    mock_result.output = "ok"
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
+        _dispatch_auto_action("run_cli", "./verify.sh --check")
+
+    mock.assert_called_once_with("bash ./verify.sh --check")
+
+
+def test_dispatch_run_cli_non_sh_unchanged():
+    """A non-.sh run_cli command is passed through unchanged."""
+    mock_result = MagicMock()
+    mock_result.exit_code = 0
+    mock_result.hung = False
+    mock_result.output = "ok"
+    mock_result.sample_output = None
+
+    with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
+        _dispatch_auto_action("run_cli", "./my_app --flag")
+
+    mock.assert_called_once_with("./my_app --flag")
 
 
 def test_dispatch_run_cli_crash():
