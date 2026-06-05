@@ -102,6 +102,41 @@ def test_parse_auto_non_run_cli_action_is_unchanged(tmp_path: Path) -> None:
     assert shim.parse_auto_task(auto) == ("run_gui", "open -a Foo | Foo")
 
 
+def test_run_cli_all_three_arg_shapes_regression(tmp_path: Path) -> None:
+    """Regression: ``parse_auto_task`` handles all three run_cli arg shapes.
+
+    (1) prose with a backtick-quoted command runs exactly that command;
+    (2) a bare path/command with no backticks runs as-is;
+    (3) prose with no extractable command errors with a clear message.
+
+    The per-shape tests above each assert one case in isolation; this locks
+    all three together so a future change cannot fix one shape by breaking
+    another (the exact failure mode that produced T-000003/T-000004).
+    """
+    script = tmp_path / "verify.sh"
+    script.write_text("#!/bin/sh\n")
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Stage 1: Core\n\n"
+        "- [ ] [AUTO:run_cli] Run `make build` to confirm the build\n"
+        "- [ ] [AUTO:run_cli] pytest\n"
+        f"- [ ] [AUTO:run_cli] {script} --fast\n"
+        "- [ ] [AUTO:run_cli] Make sure the app launches cleanly\n"
+    )
+    backtick, bare_token, bare_path, prose = shim.parse(path)
+
+    # (1) Prose with a backtick-quoted command: only that command runs.
+    assert shim.parse_auto_task(backtick) == ("run_cli", "make build")
+    # (2) Bare command/path with no backticks: runs verbatim.
+    assert shim.parse_auto_task(bare_token) == ("run_cli", "pytest")
+    assert shim.parse_auto_task(bare_path) == ("run_cli", f"{script} --fast")
+    # (3) Prose with no extractable command: clear error, never shell the prose.
+    action, message = shim.parse_auto_task(prose)
+    assert action == "error"
+    assert "no backtick-delimited command" in message
+
+
 def test_parse_description_empty_when_first_line_is_checkbox(tmp_path: Path) -> None:
     path = tmp_path / "tasks.md"
     path.write_text("- [ ] First task\n- [ ] Second task\n")
