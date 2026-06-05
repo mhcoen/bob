@@ -2336,6 +2336,86 @@ def run_loop(
                 run_autofix(project_dir)
                 changed_files = _changed_files(project_dir)
                 if not changed_files and _has_uncommitted_changes(project_dir):
+                    cumulative_committed = _committed_files_since(
+                        project_dir,
+                        task_start_sha,
+                    )
+                    if cumulative_committed:
+                        _lifecycle._current_phase = "checks"
+                        cumulative_check = run_checks(
+                            project_dir,
+                            changed_files=cumulative_committed,
+                        )
+                        if cumulative_check.passed:
+                            elapsed = _format_elapsed(
+                                time.monotonic() - task_start,
+                            )
+                            check_off(active_file, task)
+                            if active_file == plan_path and active_phase_name:
+                                acceptance_evidence_phases.add(active_phase_name)
+                            completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                            task_entries.append(
+                                TaskEntry(
+                                    label=label,
+                                    text=task.text,
+                                    outcome="success",
+                                    elapsed=round(
+                                        time.monotonic() - task_start,
+                                        2,
+                                    ),
+                                    model=task_model or "",
+                                    attempts=attempt,
+                                    success=True,
+                                    exit_code=result.exit_code,
+                                    log_path=(str(result.log_path) if result.log_path else ""),
+                                    changed_files=list(cumulative_committed),
+                                    task_id=task.task_id or "",
+                                )
+                            )
+                            print(
+                                formatting.system_msg(
+                                    "Task already complete from earlier"
+                                    " attempt; cumulative commits pass"
+                                    " the gate"
+                                ),
+                                flush=True,
+                            )
+                            print(
+                                formatting.task_complete(label, elapsed),
+                                flush=True,
+                            )
+                            ctx.add(
+                                label,
+                                task.text,
+                                elapsed,
+                                result.output,
+                                changed_files=cumulative_committed,
+                            )
+                            _ledger_settle(
+                                label,
+                                TaskOutcome(
+                                    success=True,
+                                    abandoned=False,
+                                    summary=task.text[:200],
+                                    changed_files=tuple(cumulative_committed),
+                                ),
+                            )
+                            success = True
+                            break
+                        last_error = (
+                            "Earlier attempt landed work but the"
+                            " cumulative state fails the gate:"
+                            f" {cumulative_check.command}"
+                        )
+                        print(
+                            formatting.error_msg(
+                                f"Cumulative-commit gate failed: {cumulative_check.command}"
+                            ),
+                            flush=True,
+                        )
+                        _print_error_tail(cumulative_check.output)
+                        terminal_task_failure = True
+                        break
                     last_error = "Autofix modified metadata-only files"
                     print(
                         formatting.error_msg(

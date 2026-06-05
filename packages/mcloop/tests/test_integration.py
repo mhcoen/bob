@@ -1,5 +1,6 @@
 """Integration tests. Exercise the full loop with mocked subprocesses."""
 
+import subprocess
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -34,6 +35,19 @@ def _make_project(tmp_path, checklist_text):
     (tmp_path / "PLAN.md").write_text(canonical_plan_text(checklist_text))
     (tmp_path / "logs").mkdir()
     return md
+
+
+def _init_repo(root: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=root,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
+    (root / "BUGS.md").write_text("## Bugs\n\n")
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=root, check=True)
 
 
 def _ok_run_result(**overrides):
@@ -642,6 +656,96 @@ def test_noop_with_prior_commit_marks_task_successful(
 
     calls = _notify_calls(mock_notify)
     assert calls == [("All tasks completed!", "info")]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_autofix")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_metadata_only_autofix_guard_accepts_committed_task_work(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_autofix,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """Committed task work since the task baseline must beat metadata-only
+    residue in the working tree."""
+    md = _make_project(tmp_path, "- [ ] Land work via checkpoint\n")
+    _init_repo(tmp_path)
+
+    def _commit_work_then_dirty_metadata(*args, **kwargs):
+        project_dir = args[2]
+        src_dir = project_dir / "src"
+        src_dir.mkdir(exist_ok=True)
+        (src_dir / "feature.py").write_text("VALUE = 1\n")
+        subprocess.run(["git", "add", "src/feature.py"], cwd=project_dir, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "work"], cwd=project_dir, check=True)
+        (project_dir / "PLAN.md").write_text((project_dir / "PLAN.md").read_text() + "\n")
+        return _ok_run_result()
+
+    mock_run.side_effect = _commit_work_then_dirty_metadata
+
+    result = run_loop(md, max_retries=3, no_audit=True)
+
+    assert result.ok
+    assert mock_run.call_count == 1
+    mock_commit.assert_not_called()
+    first_call = mock_checks.call_args_list[0]
+    assert first_call.kwargs.get("changed_files") == ["src/feature.py"]
+    content = md.read_text()
+    assert_canonical_checkbox(content, "x", "Land work via checkpoint")
+
+    calls = _notify_calls(mock_notify)
+    assert calls == [("All tasks completed!", "info")]
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main.run_autofix")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_metadata_only_autofix_guard_still_retries_without_committed_work(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_autofix,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+):
+    """Metadata-only residue with no cumulative committed work still burns
+    attempts under the original retry behavior."""
+    md = _make_project(tmp_path, "- [ ] Only metadata changes\n")
+    _init_repo(tmp_path)
+
+    def _dirty_metadata_only(*args, **kwargs):
+        project_dir = args[2]
+        (project_dir / "PLAN.md").write_text((project_dir / "PLAN.md").read_text() + "\n")
+        return _ok_run_result()
+
+    mock_run.side_effect = _dirty_metadata_only
+
+    result = run_loop(md, max_retries=2, no_audit=True)
+
+    assert not result.ok
+    assert mock_run.call_count == 2
+    mock_checks.assert_not_called()
+    mock_commit.assert_not_called()
+    assert mock_run.call_args_list[1].kwargs["prior_errors"] == (
+        "Autofix modified metadata-only files"
+    )
+    content = md.read_text()
+    assert_canonical_checkbox(content, "!", "Only metadata changes")
 
 
 @patch("mcloop.main.notify")
