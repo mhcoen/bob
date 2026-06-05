@@ -284,9 +284,11 @@ def _resolve_flagged(
 
     A flagged (unmapped, not-provably-inert) change is cleared when:
 
-      * an explicit waiver exists for it at the task's pre-edit baseline
+      * an explicit waiver exists for it under the current task identity
         (the auditable bypass recorded in
-        ``.mcloop/test-verification-waivers.jsonl``), or
+        ``.mcloop/test-verification-waivers.jsonl``); the waiver survives a
+        mid-task baseline/commit change because it is keyed on the task,
+        not solely the pre-edit SHA, or
       * the coverage gate proves it clean -- either it is a no-test-needed
         non-code input (dependency manifest, tool config, lock, or data
         file: nothing to cover), or it is a Python change whose diff-hunk
@@ -303,16 +305,19 @@ def _resolve_flagged(
     Returns the sub-list of *flagged* sources that remain unresolved and
     must fail the gate.
     """
+    import os
+
     from mcloop.coverage_verify import verify_change_covered
     from mcloop.git_ops import _read_task_baseline
     from mcloop.waivers import has_waiver
 
     baseline = _read_task_baseline(project_dir)
+    task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
     by_source = {getattr(a, "source", None): a for a in accounts}
 
     unresolved: list[str] = []
     for src in flagged:
-        if has_waiver(project_dir, src, baseline):
+        if has_waiver(project_dir, src, baseline, task_label=task_label):
             continue
         # The coverage gate decides every flagged input: a no-test-needed
         # non-code input is proven exempt with no run, a Python change is

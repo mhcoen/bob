@@ -4,8 +4,12 @@ When the coverage-proven verification fallback cannot prove an unmapped
 behavioral change is exercised -- a non-Python behavior input (which has
 no executable coverage lines), a Python change with no scoped candidate
 test, or a change no scoped test executes -- the gate fails closed unless
-an *explicit* waiver exists for that exact (changed input, baseline SHA)
-pair.
+an *explicit* waiver exists for that changed input under the current
+task. A waiver is keyed on the changed input plus the task identity so a
+commit or checkpoint that advances the pre-edit baseline SHA mid-task
+does not silently nullify a waiver the user already recorded; the exact
+baseline SHA is still matched as a fallback for environments that run
+without a task label.
 
 Waivers are never written silently by the gate. They are recorded only
 through a deliberate action (the ``mcloop waive`` subcommand or a direct
@@ -99,20 +103,30 @@ def load_waivers(project_dir: str | Path) -> list[dict]:
 def has_waiver(
     project_dir: str | Path,
     changed_input: str,
-    baseline_sha: str,
+    baseline_sha: str = "",
+    *,
+    task_label: str = "",
 ) -> bool:
-    """Return True if an explicit waiver exists for this input + baseline.
+    """Return True if an explicit waiver covers this input for this task.
 
-    A waiver is matched on both the changed input and the pre-edit
-    baseline SHA so a waiver granted for one snapshot of a file does not
-    silently carry forward to a later, different edit of the same file.
-    An empty *baseline_sha* never matches: the gate must not treat a
-    missing baseline as a waivable state.
+    Task identity is the durable key: a waiver recorded for a task's work
+    on *changed_input* is matched whenever the current *task_label*
+    matches, so a commit or checkpoint that advances the pre-edit baseline
+    SHA mid-task does not silently nullify a waiver the user already
+    recorded. The exact pre-edit *baseline_sha* is matched as a fallback,
+    which keeps waivers working in environments that leave the task label
+    unset (e.g. native models with no ``MCLOOP_TASK_LABEL``).
+
+    Matching is scoped: an empty *task_label* and an empty *baseline_sha*
+    together never match, so the gate cannot treat a missing baseline and
+    a missing task identity as a blanket waivable state.
     """
-    if not baseline_sha:
-        return False
     for rec in load_waivers(project_dir):
-        if rec.get("changed_input") == changed_input and rec.get("baseline_sha") == baseline_sha:
+        if rec.get("changed_input") != changed_input:
+            continue
+        if task_label and rec.get("task_label") == task_label:
+            return True
+        if baseline_sha and rec.get("baseline_sha") == baseline_sha:
             return True
     return False
 

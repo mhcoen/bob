@@ -2,6 +2,21 @@
 
 ## Observations
 
+### [3] [T-000003] `has_waiver` now keys on task identity, with baseline as a fallback (2026-06-04)
+`waivers.has_waiver` no longer requires exact `baseline_sha` equality. It
+matches a recorded waiver when `changed_input` matches AND either the
+current `task_label` matches the record's (the durable key — survives a
+mid-task commit/checkpoint that advances `.mcloop/task-baseline`) OR the
+exact `baseline_sha` matches (fallback for environments that leave
+`MCLOOP_TASK_LABEL` unset, e.g. native Anthropic models — see
+`code_edit.py:419`). The call site `checks._resolve_flagged` reads
+`MCLOOP_TASK_LABEL` and passes it through. Empty task_label + empty
+baseline still never matches, so the gate cannot be blanket-bypassed.
+Assumption worth revisiting: an empty `task_label` recorded by `mcloop
+waive` (unset env) can only ever be matched by baseline equality, so such
+waivers do NOT survive a baseline change — the survival guarantee holds
+only when a real task label is present at both record and check time.
+
 ### [1] [T-000001] No-test-needed class draws the line at "carries executable logic", not "is non-.py" (2026-06-04)
 `change_class.is_no_test_needed_input` exempts dependency manifests, tool
 config, requirement/lock files, and plain data/docs (by suffix + a few

@@ -79,8 +79,56 @@ def test_has_waiver_matches_input_and_baseline(tmp_path: Path) -> None:
 
 def test_has_waiver_empty_baseline_never_matches(tmp_path: Path) -> None:
     record_waiver(tmp_path, task_label="T", changed_input="x.py", baseline_sha="", reason="r")
-    # A missing baseline must never be treated as a waivable state.
+    # A missing baseline and a missing task identity together never match.
     assert has_waiver(tmp_path, "x.py", "") is False
+
+
+def test_has_waiver_survives_baseline_change_via_task_identity(tmp_path: Path) -> None:
+    # A user records a waiver for this task's work on x.py at baseline A.
+    record_waiver(
+        tmp_path,
+        task_label="T-000003",
+        changed_input="x.py",
+        baseline_sha="base-A",
+        reason="manual inspection",
+    )
+    # A commit/checkpoint lands mid-task, advancing the pre-edit baseline
+    # to a different SHA. The waiver must NOT be silently nullified: it is
+    # keyed on the task identity, so it still matches under the new SHA.
+    assert has_waiver(tmp_path, "x.py", "base-B", task_label="T-000003") is True
+    # It even matches with no baseline at all, purely on task identity.
+    assert has_waiver(tmp_path, "x.py", "", task_label="T-000003") is True
+
+
+def test_has_waiver_does_not_carry_across_tasks(tmp_path: Path) -> None:
+    record_waiver(
+        tmp_path,
+        task_label="T-000003",
+        changed_input="x.py",
+        baseline_sha="base-A",
+        reason="r",
+    )
+    # A different task identity at a different baseline must not inherit
+    # the waiver -- task scoping is preserved.
+    assert has_waiver(tmp_path, "x.py", "base-B", task_label="T-000004") is False
+    # A different input under the same task does not match either.
+    assert has_waiver(tmp_path, "y.py", "base-A", task_label="T-000003") is False
+
+
+def test_has_waiver_empty_task_label_falls_back_to_baseline(tmp_path: Path) -> None:
+    # When no task identity is available (e.g. native models leave
+    # MCLOOP_TASK_LABEL unset), exact baseline matching still works.
+    record_waiver(
+        tmp_path,
+        task_label="",
+        changed_input="x.py",
+        baseline_sha="base-A",
+        reason="r",
+    )
+    assert has_waiver(tmp_path, "x.py", "base-A") is True
+    assert has_waiver(tmp_path, "x.py", "base-A", task_label="") is True
+    # A different baseline with no task identity still does not match.
+    assert has_waiver(tmp_path, "x.py", "base-B") is False
 
 
 def test_load_waivers_missing_file(tmp_path: Path) -> None:
