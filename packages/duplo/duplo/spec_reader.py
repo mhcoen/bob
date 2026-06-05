@@ -995,6 +995,9 @@ def format_contracts_as_verification(spec: ProductSpec) -> list[Task]:
     has no contracts. This helper does not emit PLAN.md markdown.
     """
     return [
-        make_task(f"Verify: type `{contract.input}`, expect result `{contract.expected}`")
+        make_task(
+            f"Verify: type `{contract.input}`, expect result `{contract.expected}`",
+            flag_tags=("USER",),
+        )
         for contract in spec.behavior_contracts
     ]

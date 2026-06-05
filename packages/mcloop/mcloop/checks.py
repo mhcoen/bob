@@ -8,8 +8,12 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
+from bob_tools.planfile.validation import AcceptKind as PlanAcceptKind
+from bob_tools.planfile.validation import AcceptParseError, parse_accept_value
+
+from mcloop._planfile_compat import Task
 from mcloop.test_runner import (
     NoTestRunnerAvailableError,
     resolve_test_command,
@@ -42,6 +46,17 @@ class CheckResult:
     command: str
 
 
+AcceptanceKindName = Literal["pytest", "command-exit", "coverage", "waived"]
+
+
+@dataclass(frozen=True)
+class AcceptanceKind:
+    kind: AcceptanceKindName
+    command: str = ""
+    reason: str = ""
+    covered_by: str = ""
+
+
 def _load_config(project_dir: Path) -> dict[str, Any]:
     """Return parsed mcloop.json if present, else empty dict."""
     config = project_dir / "mcloop.json"
@@ -54,6 +69,79 @@ def _load_config(project_dir: Path) -> dict[str, Any]:
     if not isinstance(loaded, dict):
         return {}
     return loaded
+
+
+def check_timeout(project_dir: str | Path) -> int:
+    """Return this project's configured check timeout in seconds."""
+    try:
+        return int(_load_config(Path(project_dir)).get("check_timeout", 300))
+    except (TypeError, ValueError):
+        return 300
+
+
+def acceptance_kind(task: Task) -> AcceptanceKind | None:
+    """Return the declared acceptance kind for ``task``, if one exists."""
+    values = [value for key, value in task.annotations if key == "accept"]
+    if not values:
+        return None
+    if len(values) > 1:
+        raise ValueError("more than one accept annotation")
+
+    parsed = parse_accept_value(values[0])
+    if isinstance(parsed, AcceptParseError):
+        raise ValueError(parsed.message)
+    if not isinstance(parsed, PlanAcceptKind):
+        raise ValueError("invalid accept annotation")
+
+    return AcceptanceKind(
+        kind=parsed.kind,
+        command=parsed.command or "",
+        reason=parsed.reason or "",
+        covered_by=parsed.covered_by or "",
+    )
+
+
+def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult:
+    """Run a declared ``command-exit`` acceptance command without a shell."""
+    project_path = Path(project_dir)
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return CheckResult(
+            passed=False,
+            output="Malformed command (unmatched quotes)",
+            command=command,
+        )
+    if not parts:
+        return CheckResult(passed=False, output="Empty command", command=command)
+
+    timeout = check_timeout(project_path)
+    try:
+        result = subprocess.run(
+            parts,
+            shell=False,
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return CheckResult(
+            passed=False,
+            output=f"TIMEOUT after {timeout}s",
+            command=command,
+        )
+    except FileNotFoundError:
+        return CheckResult(
+            passed=False,
+            output=f"Command not found: {parts[0]}",
+            command=command,
+        )
+    return CheckResult(
+        passed=result.returncode == 0,
+        output=f"{result.stdout}{result.stderr}",
+        command=command,
+    )
 
 
 def _normalize_pytest(cmd: str) -> str:
@@ -434,11 +522,7 @@ def run_checks(
             command="(none)",
         )
 
-    config = _load_config(project_dir)
-    try:
-        check_timeout = int(config.get("check_timeout", 300))
-    except (TypeError, ValueError):
-        check_timeout = 300
+    timeout_seconds = check_timeout(project_dir)
 
     def _run_one(cmd: str) -> tuple[bool, str]:
         try:
@@ -453,10 +537,10 @@ def run_checks(
                 cwd=project_dir,
                 capture_output=True,
                 text=True,
-                timeout=check_timeout,
+                timeout=timeout_seconds,
             )
         except subprocess.TimeoutExpired:
-            return False, f"TIMEOUT after {check_timeout}s"
+            return False, f"TIMEOUT after {timeout_seconds}s"
         except FileNotFoundError:
             return False, f"Command not found: {parts[0]}"
         output = f"{result.stdout}{result.stderr}"

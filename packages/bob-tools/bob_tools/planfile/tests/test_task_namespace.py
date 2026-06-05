@@ -34,8 +34,8 @@ def _plan_with_namespace(ns: str = "AB") -> str:
         "<!-- phase_id: phase_001 -->\n"
         "\n"
         f"- [ ] T-{ns}-000001: parent\n"
-        f"  - [ ] T-{ns}-000002: child a\n"
-        f"- [x] T-{ns}-000003: done thing\n"
+        f"  - [ ] T-{ns}-000002: child a [accept: pytest]\n"
+        f"- [x] T-{ns}-000003: done thing [accept: pytest]\n"
     )
 
 
@@ -147,9 +147,9 @@ class TestCanonicalValidatorWarns:
             "## Stage 1: Bootstrap\n"
             "<!-- phase_id: phase_001 -->\n"
             "\n"
-            "- [ ] T-AB-000001: namespaced\n"
-            "- [ ] T-000002: legacy\n"
-            "- [ ] T-000003: also legacy\n"
+            "- [ ] T-AB-000001: namespaced [accept: pytest]\n"
+            "- [ ] T-000002: legacy [accept: pytest]\n"
+            "- [ ] T-000003: also legacy [accept: pytest]\n"
         )
         plan = parse_plan(text)
         validate_plan(plan, constructed=True)

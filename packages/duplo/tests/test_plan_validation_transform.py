@@ -24,7 +24,9 @@ from duplo.plan_validation_transform import (
     register_validate_plan_body,
 )
 
-CANONICAL_BODY = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
+CANONICAL_BODY = (
+    "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing [accept: command-exit: true]\n"
+)
 
 
 def _run(body: str, required_phase_id: str = "phase_001") -> dict:
@@ -60,7 +62,12 @@ def test_malformed_checklist_returns_not_ok_with_feedback() -> None:
 def test_bugs_section_returns_not_ok_with_feedback() -> None:
     # A canonical phase body must contain phases only; a ``## Bugs``
     # section is an mcloop convention the synthesizer may not emit.
-    body = "## Phase phase_001: x\n\n- [ ] do the thing\n\n## Bugs\n\n- [ ] fix it\n"
+    body = (
+        "## Phase phase_001: x\n\n"
+        "- [ ] do the thing [accept: command-exit: true]\n\n"
+        "## Bugs\n\n"
+        "- [ ] fix it [accept: command-exit: true]\n"
+    )
     result = _run(body)
     assert result["validation_ok"] is False
     assert "## Bugs" in result["validation_feedback"]
@@ -72,7 +79,10 @@ def test_transform_never_raises_for_invalid_body() -> None:
     # return a not-ok gate result.
     for body in (
         "just prose, not a plan at all",
-        "## Phase phase_001: A\n\n- [ ] a\n\n## Phase phase_001: B\n\n- [ ] b\n",
+        "## Phase phase_001: A\n\n"
+        "- [ ] a [accept: command-exit: true]\n\n"
+        "## Phase phase_001: B\n\n"
+        "- [ ] b [accept: command-exit: true]\n",
         "",
     ):
         result = _run(body)

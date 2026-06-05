@@ -47,6 +47,7 @@ class Task:
     task_id: str | None = None
     flag_tags: tuple[str, ...] = ()
     action_tag: tuple[str, str] | None = None
+    annotations: tuple[tuple[str, str], ...] = ()
 
 
 # Alias so callers that historically caught
@@ -102,6 +103,7 @@ def _convert_task(task: PlanTask, stage: str) -> Task:
         task_id=task.task_id,
         flag_tags=task.flag_tags,
         action_tag=task.action_tag,
+        annotations=task.annotations,
     )
 
 

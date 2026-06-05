@@ -58,7 +58,9 @@ class _StubResult:
         *,
         run_id: str = "test-run-1",
         terminal: str = "done",
-        plan_text: str = ("## Phase phase_001: Core Auth\n\n- [ ] Set up.\n"),
+        plan_text: str = (
+            "## Phase phase_001: Core Auth\n\n- [ ] Set up. [accept: command-exit: true]\n"
+        ),
         verdict: dict[str, Any] | None = None,
         proposals: dict[str, str] | None = None,
         brief: str = "COUNCIL BRIEF: how to author phase 1.",
@@ -167,7 +169,10 @@ class TestAuthorPhasePlan:
         from bob_tools.planfile import Plan
 
         monkeypatch.chdir(tmp_path)
-        body = "## Phase phase_001: synthesized plan body\n\n- [ ] do the thing\n"
+        body = (
+            "## Phase phase_001: synthesized plan body\n\n"
+            "- [ ] do the thing [accept: command-exit: true]\n"
+        )
         result = _StubResult(plan_text=body)
         with _patch_run_workflow(result):
             plan = council.author_phase_plan(
@@ -445,7 +450,7 @@ class TestRequiredPhaseIdInjection:
         # _StubResult default returns phase_001 — but the validator
         # now requires phase_002 (since PLAN.md already has phase_001).
         # Provide a stub plan that satisfies the new constraint.
-        body = "## Phase phase_002: Second\n\n- [ ] do the thing\n"
+        body = "## Phase phase_002: Second\n\n- [ ] do the thing [accept: command-exit: true]\n"
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(plan_text=body), captured=captured):
             council.author_phase_plan(prompt="p", system="s", phase_num=2, project_dir=tmp_path)
@@ -470,7 +475,7 @@ class TestCanonicalPlanFormatValidator:
     def test_passes_on_valid_plan(self) -> None:
         body = (
             "## Phase phase_001: Setup\n\n"
-            "- [ ] Initialize package\n"
+            "- [ ] Initialize package [accept: command-exit: true]\n"
             "- [ ] Add smoke test\n\n"
             "## Phase phase_002: Tests\n\n"
             "- [ ] Add unit tests\n"
@@ -482,14 +487,14 @@ class TestCanonicalPlanFormatValidator:
         ]
 
     def test_passes_with_required_phase_id_match(self) -> None:
-        body = "## Phase phase_003: Third\n\n- [ ] task\n"
+        body = "## Phase phase_003: Third\n\n- [ ] task [accept: command-exit: true]\n"
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_003")
         assert [phase.phase_id for phase in plan.phases] == ["phase_003"]
 
     def test_check5_rejects_required_phase_id_mismatch(self) -> None:
         from bob_tools.planfile import PlanValidationError
 
-        body = "## Phase phase_001: First\n\n- [ ] task\n"
+        body = "## Phase phase_001: First\n\n- [ ] task [accept: command-exit: true]\n"
         with pytest.raises(
             PlanValidationError,
             match=r"required_phase_id 'phase_002' not present",
@@ -502,7 +507,12 @@ class TestCanonicalPlanFormatValidator:
         # Plan body has multiple phases; required_phase_id need only be
         # one of them (the synthesizer's authoring of THIS invocation's
         # new phase is the load-bearing one).
-        body = "## Phase phase_002: Second\n\n- [ ] a\n\n## Phase phase_003: Third\n\n- [ ] b\n"
+        body = (
+            "## Phase phase_002: Second\n\n"
+            "- [ ] a [accept: command-exit: true]\n\n"
+            "## Phase phase_003: Third\n\n"
+            "- [ ] b [accept: command-exit: true]\n"
+        )
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_002")
         assert "phase_002" in [phase.phase_id for phase in plan.phases]
 
@@ -515,7 +525,7 @@ class TestCanonicalPlanFormatValidator:
         :func:`parse_plan` because it is a single identifier word
         following the ``## Phase`` keyword.
         """
-        body = "## Phase phase1: First\n\n- [ ] task\n"
+        body = "## Phase phase1: First\n\n- [ ] task [accept: command-exit: true]\n"
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase1")
         assert [phase.phase_id for phase in plan.phases] == ["phase1"]
 
@@ -525,14 +535,19 @@ class TestCanonicalPlanFormatValidator:
         zero-padded suffixes are a duplo runtime CONVENTION (what
         ``compute_required_phase_id`` emits), not a validation rule.
         """
-        body = "## Phase phase_1: First\n\n- [ ] task\n"
+        body = "## Phase phase_1: First\n\n- [ ] task [accept: command-exit: true]\n"
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_1")
         assert [phase.phase_id for phase in plan.phases] == ["phase_1"]
 
     def test_check4_rejects_duplicate_phase_id(self) -> None:
         from bob_tools.planfile import PlanValidationError
 
-        body = "## Phase phase_001: First\n\n- [ ] a\n\n## Phase phase_001: Duplicate\n\n- [ ] b\n"
+        body = (
+            "## Phase phase_001: First\n\n"
+            "- [ ] a [accept: command-exit: true]\n\n"
+            "## Phase phase_001: Duplicate\n\n"
+            "- [ ] b [accept: command-exit: true]\n"
+        )
         with pytest.raises(
             PlanValidationError,
             match="duplicate phase_id",
@@ -543,10 +558,10 @@ class TestCanonicalPlanFormatValidator:
         from bob_tools.planfile import PlanValidationError
 
         body = (
-            "## Phase phase_001: A\n\n- [ ] a\n\n"
-            "## Phase phase_001: B\n\n- [ ] b\n\n"
-            "## Phase phase_002: C\n\n- [ ] c\n\n"
-            "## Phase phase_002: D\n\n- [ ] d\n"
+            "## Phase phase_001: A\n\n- [ ] a [accept: command-exit: true]\n\n"
+            "## Phase phase_001: B\n\n- [ ] b [accept: command-exit: true]\n\n"
+            "## Phase phase_002: C\n\n- [ ] c [accept: command-exit: true]\n\n"
+            "## Phase phase_002: D\n\n- [ ] d [accept: command-exit: true]\n"
         )
         # The typed validator surfaces every duplicate id pair, in
         # whichever order ``validate_plan`` walks the phases.
@@ -569,9 +584,9 @@ class TestCanonicalPlanFormatValidator:
         synthesizer-side check no longer fires.
         """
         body = (
-            "## Phase phase_001: A\n\n- [ ] a\n\n"
-            "## Phase phase_003: C\n\n- [ ] c\n\n"
-            "## Phase phase_002: B\n\n- [ ] b\n"
+            "## Phase phase_001: A\n\n- [ ] a [accept: command-exit: true]\n\n"
+            "## Phase phase_003: C\n\n- [ ] c [accept: command-exit: true]\n\n"
+            "## Phase phase_002: B\n\n- [ ] b [accept: command-exit: true]\n"
         )
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == [
@@ -582,9 +597,9 @@ class TestCanonicalPlanFormatValidator:
 
     def test_strictly_increasing_phase_ids_accepted(self) -> None:
         body = (
-            "## Phase phase_001: A\n\n- [ ] a\n\n"
-            "## Phase phase_002: B\n\n- [ ] b\n\n"
-            "## Phase phase_005: C\n\n- [ ] c\n"
+            "## Phase phase_001: A\n\n- [ ] a [accept: command-exit: true]\n\n"
+            "## Phase phase_002: B\n\n- [ ] b [accept: command-exit: true]\n\n"
+            "## Phase phase_005: C\n\n- [ ] c [accept: command-exit: true]\n"
         )
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == [
@@ -594,7 +609,10 @@ class TestCanonicalPlanFormatValidator:
         ]
 
     def test_passes_on_single_phase_single_task(self) -> None:
-        body = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
+        body = (
+            "## Phase phase_001: Bring up scaffold\n\n"
+            "- [ ] do the thing [accept: command-exit: true]\n"
+        )
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert len(plan.phases) == 1
         assert len(plan.phases[0].tasks) == 1
@@ -642,7 +660,7 @@ class TestCanonicalPlanFormatValidator:
         survive the typed boundary as long as the auto-assigned id
         matches the caller-supplied ``required_phase_id``.
         """
-        body = "# Phase 1: legacy form\n\n- [ ] task\n"
+        body = "# Phase 1: legacy form\n\n- [ ] task [accept: command-exit: true]\n"
         plan = council.typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
         assert [phase.phase_id for phase in plan.phases] == ["phase_001"]
 
@@ -788,7 +806,9 @@ class TestPlannerCouncilBranch:
         with (
             patch(
                 "duplo.planner.run_plan_author",
-                return_value="## Phase phase_001: legacy\n\n- [ ] task\n",
+                return_value=(
+                    "## Phase phase_001: legacy\n\n- [ ] task [accept: command-exit: true]\n"
+                ),
             ) as mock_author,
             patch("duplo.planner.council.author_phase_plan") as mock_council,
         ):
@@ -809,7 +829,9 @@ class TestPlannerCouncilBranch:
         with (
             patch(
                 "duplo.planner.run_plan_author",
-                return_value="## Phase phase_001: legacy\n\n- [ ] task\n",
+                return_value=(
+                    "## Phase phase_001: legacy\n\n- [ ] task [accept: command-exit: true]\n"
+                ),
             ) as mock_author,
             patch("duplo.planner.council.author_phase_plan") as mock_council,
         ):

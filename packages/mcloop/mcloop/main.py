@@ -44,11 +44,14 @@ from mcloop._planfile_precondition import (
 )
 from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checks import (
+    CheckResult,
+    acceptance_kind,
     detect_build,
     detect_run,
     get_check_commands,
     run_autofix,
     run_checks,
+    run_command_acceptance,
     try_salvage_style_failures,
 )
 from mcloop.claude_md_sync import handle_sync, reconcile_pending
@@ -75,6 +78,7 @@ from mcloop.git_ops import (
     _has_meaningful_changes,
     _has_uncommitted_changes,
     _push_or_die,
+    _read_task_baseline,
     _snapshot_worktree,
     _stage_safe,
     _worktree_status,
@@ -148,6 +152,7 @@ from mcloop.runner import (
 )
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
+from mcloop.waivers import record_waiver
 
 
 @dataclasses.dataclass(frozen=True)
@@ -2072,6 +2077,195 @@ def run_loop(
                     )
                     _print_error_tail(result.output)
                     continue
+
+                try:
+                    declared_acceptance = acceptance_kind(task)
+                except ValueError as exc:
+                    last_error = f"Invalid accept annotation: {exc}"
+                    print(formatting.error_msg(last_error), flush=True)
+                    terminal_task_failure = True
+                    break
+
+                if declared_acceptance is None:
+                    print(
+                        formatting.system_msg(
+                            "Task has no declared acceptance; using legacy inference"
+                        ),
+                        flush=True,
+                    )
+                else:
+                    _lifecycle._current_phase = "checks"
+                    acceptance_check: CheckResult
+                    pre_check_status = ""
+
+                    if declared_acceptance.kind in ("pytest", "coverage"):
+                        run_autofix(project_dir)
+                        changed_files = _changed_files(project_dir)
+                        pre_check_status = _worktree_status(project_dir)
+                        acceptance_check = run_checks(
+                            project_dir,
+                            changed_files=changed_files,
+                        )
+                    elif declared_acceptance.kind == "command-exit":
+                        changed_files = _changed_files(project_dir)
+                        acceptance_check = run_command_acceptance(
+                            project_dir,
+                            declared_acceptance.command,
+                        )
+                    else:
+                        changed_files = _changed_files(project_dir)
+                        known_ids = {
+                            candidate.task_id
+                            for candidate in _all_tasks(tasks)
+                            if candidate.task_id is not None
+                        }
+                        if declared_acceptance.covered_by not in known_ids:
+                            last_error = (
+                                "Declared acceptance waiver references unknown "
+                                f"task id: {declared_acceptance.covered_by}"
+                            )
+                            print(formatting.error_msg(last_error), flush=True)
+                            terminal_task_failure = True
+                            break
+                        baseline = _read_task_baseline(project_dir) or task_start_sha
+                        record_waiver(
+                            project_dir,
+                            task_label=task.task_id or label,
+                            changed_input=f"accept:{declared_acceptance.covered_by}",
+                            baseline_sha=baseline,
+                            reason=(
+                                declared_acceptance.reason
+                                or f"covered by {declared_acceptance.covered_by}"
+                            ),
+                        )
+                        acceptance_check = CheckResult(
+                            passed=True,
+                            output=(
+                                "Declared acceptance waiver covered by "
+                                f"{declared_acceptance.covered_by}"
+                            ),
+                            command=f"accept:waived:{declared_acceptance.covered_by}",
+                        )
+
+                    if not acceptance_check.passed:
+                        last_error = (
+                            f"Declared acceptance failed: {acceptance_check.command}\n"
+                            + _tail(acceptance_check.output, 50)
+                        )
+                        print(
+                            formatting.error_msg(
+                                f"Declared acceptance failed: {acceptance_check.command}"
+                            ),
+                            flush=True,
+                        )
+                        _print_error_tail(acceptance_check.output)
+                        terminal_task_failure = True
+                        break
+
+                    if declared_acceptance.kind in ("pytest", "coverage"):
+                        post = set(_worktree_status(project_dir).splitlines())
+                        pre = set(pre_check_status.splitlines()) if pre_check_status else set()
+                        if post != pre:
+                            last_error = "Checker introduced uncommitted changes"
+                            print(
+                                formatting.error_msg(
+                                    f"Checker introduced uncommitted changes"
+                                    f" (attempt {attempt}/{max_retries})"
+                                ),
+                                flush=True,
+                            )
+                            continue
+
+                    if changed_files:
+                        try:
+                            task_hash = _commit(
+                                project_dir,
+                                f"{format_task_id(task)}{task.text}",
+                            )
+                        except RuntimeError as exc:
+                            print(formatting.error_msg(str(exc)), flush=True)
+                            task_entries.append(
+                                TaskEntry(
+                                    label=label,
+                                    text=task.text,
+                                    outcome="failed",
+                                    elapsed=round(time.monotonic() - task_start, 2),
+                                    model=task_model or "",
+                                    attempts=attempt,
+                                    success=False,
+                                    exit_code=result.exit_code,
+                                    log_path=(str(result.log_path) if result.log_path else ""),
+                                    changed_files=list(changed_files),
+                                    task_id=task.task_id or "",
+                                )
+                            )
+                            failed_task = f"{label}) {format_task_id(task)}{task.text}"
+                            failed_reason = str(exc)
+                            terminal_failure = f"Commit failed: {exc}"
+                            _ledger_settle(
+                                label,
+                                TaskOutcome(
+                                    success=False,
+                                    abandoned=False,
+                                    summary=f"commit failed: {exc}",
+                                    changed_files=tuple(changed_files),
+                                    failure_kind="commit_failed",
+                                ),
+                            )
+                            break
+                        if task_hash:
+                            commit_hashes.append(task_hash)
+                        handle_sync(project_dir, task_hash or "", task_label=label)
+                        if reviewer_config:
+                            _spawn_reviewer(project_dir)
+                        _maybe_auto_wrap(project_dir)
+                        _reinject_wrappers(project_dir)
+                    check_off(active_file, task)
+                    if active_file == plan_path and active_phase_name:
+                        acceptance_evidence_phases.add(active_phase_name)
+                    elapsed = _format_elapsed(time.monotonic() - task_start)
+                    task_entries.append(
+                        TaskEntry(
+                            label=label,
+                            text=task.text,
+                            outcome="success",
+                            elapsed=round(time.monotonic() - task_start, 2),
+                            model=task_model or "",
+                            attempts=attempt,
+                            commit_hash=task_hash if changed_files else "",
+                            success=True,
+                            exit_code=result.exit_code,
+                            log_path=str(result.log_path) if result.log_path else "",
+                            changed_files=list(changed_files or []),
+                            task_id=task.task_id or "",
+                        )
+                    )
+                    completed.append(f"{label}) {format_task_id(task)}{task.text}")
+                    print(
+                        formatting.system_msg(
+                            f"Declared acceptance passed: {acceptance_check.command}"
+                        ),
+                        flush=True,
+                    )
+                    print(formatting.task_complete(label, elapsed), flush=True)
+                    ctx.add(
+                        label,
+                        task.text,
+                        elapsed,
+                        result.output,
+                        changed_files=changed_files,
+                    )
+                    _ledger_settle(
+                        label,
+                        TaskOutcome(
+                            success=True,
+                            abandoned=False,
+                            summary=task.text[:200],
+                            changed_files=tuple(changed_files or ()),
+                        ),
+                    )
+                    success = True
+                    break
 
                 if not _has_meaningful_changes(project_dir):
                     cumulative_committed = _committed_files_since(

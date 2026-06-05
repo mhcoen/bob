@@ -66,7 +66,7 @@ _CANONICAL_PLAN = (
     "## Stage 1: Smoke\n"
     "<!-- phase_id: phase_001 -->\n"
     "\n"
-    "- [ ] T-000001: only task\n"
+    "- [ ] T-000001: only task [accept: pytest]\n"
 )
 
 

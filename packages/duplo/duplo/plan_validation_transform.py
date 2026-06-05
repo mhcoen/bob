@@ -33,6 +33,7 @@ from typing import Any
 
 from bob_tools.planfile import PlanSyntaxError, PlanValidationError
 
+from duplo.acceptance import AcceptanceAuthoringError
 from duplo.council import typed_plan_from_synthesizer_text
 
 TRANSFORM_NAME = "validate_plan_body"
@@ -58,7 +59,7 @@ def make_validate_plan_body(required_phase_id: str) -> Callable[..., dict[str, A
         body = inputs["proposal"]
         try:
             typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
-        except (PlanSyntaxError, PlanValidationError) as exc:
+        except (AcceptanceAuthoringError, PlanSyntaxError, PlanValidationError) as exc:
             return {"validation_ok": False, "validation_feedback": str(exc)}
         return {"validation_ok": True, "validation_feedback": ""}
 

@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
+
 from bob_tools.planfile._shared import (
+    _ACCEPT_KINDS,
     _ANNOTATION_KEY_RE,
     _ANNOTATION_OK_RE,
     _KNOWN_LEADING_FLAGS,
@@ -33,6 +37,76 @@ from bob_tools.planfile.model import (
     Subsection,
     Task,
 )
+
+AcceptKindName = Literal["pytest", "command-exit", "coverage", "waived"]
+AcceptParseErrorCode = Literal["unknown_kind", "malformed_waived"]
+
+
+@dataclass(frozen=True)
+class AcceptKind:
+    kind: AcceptKindName
+    command: str | None = None
+    reason: str | None = None
+    covered_by: str | None = None
+
+
+@dataclass(frozen=True)
+class AcceptParseError:
+    code: AcceptParseErrorCode
+    message: str
+
+
+def parse_accept_value(value: str) -> AcceptKind | AcceptParseError:
+    """Classify an ``accept`` annotation value into the closed vocabulary."""
+    if value == "pytest":
+        return AcceptKind(kind="pytest")
+    if value == "coverage":
+        return AcceptKind(kind="coverage")
+
+    command_prefix = "command-exit: "
+    if value.startswith(command_prefix):
+        command = value.removeprefix(command_prefix)
+        if command:
+            return AcceptKind(kind="command-exit", command=command)
+        return AcceptParseError(
+            code="unknown_kind",
+            message="unknown accept kind",
+        )
+
+    waived_prefix = "waived: "
+    if value.startswith(waived_prefix):
+        body = value.removeprefix(waived_prefix)
+        reason, separator, covered_by = body.rpartition("; covered-by=")
+        if (
+            not separator
+            or not covered_by
+            or _TASK_REF_RE.fullmatch(covered_by) is None
+        ):
+            return AcceptParseError(
+                code="malformed_waived",
+                message="waived accept has no covered-by= or malformed covered-by",
+            )
+        return AcceptKind(kind="waived", reason=reason, covered_by=covered_by)
+
+    kind = value.split(":", 1)[0]
+    if kind == "waived":
+        return AcceptParseError(
+            code="malformed_waived",
+            message="waived accept has no covered-by= or malformed covered-by",
+        )
+    if kind in _ACCEPT_KINDS:
+        return AcceptParseError(code="unknown_kind", message="unknown accept kind")
+    return AcceptParseError(code="unknown_kind", message="unknown accept kind")
+
+
+def accept_annotation(task: Task) -> tuple[str | None, str | None]:
+    """Return the single raw ``accept`` annotation value for ``task``."""
+    values = [value for key, value in task.annotations if key == "accept"]
+    if len(values) > 1:
+        return None, "more than one accept annotation"
+    if values:
+        return values[0], None
+    return None, None
 
 
 def _check_leading_bracket_tag(task: Task, errors: list[str]) -> None:
@@ -142,9 +216,11 @@ def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
     over every task plus the non-task scalars (``project_title``,
     ``preamble``, each ``Phase.title`` / ``Phase.prose``, each
     ``Subsection.title`` / ``Subsection.prose``) per the v4 R3 oracle.
-    ``constructed=False`` preserves the task-centric behavior above
-    exactly; the Stage 10 task field-stability harness is reused
-    for the per-task check rather than duplicated here.
+    Leaf implementation tasks must also declare one well-formed
+    ``accept`` annotation. ``constructed=False`` preserves the
+    task-centric behavior above exactly; the Stage 10 task
+    field-stability harness is reused for the per-task check rather
+    than duplicated here.
     """
     errors: list[str] = []
 
@@ -171,20 +247,23 @@ def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
                 errors.append(f"task {_task_ref(task)} references unknown dep {dep}")
 
     if constructed:
-        _check_constructed_invariants(plan, errors)
+        _check_constructed_invariants(plan, errors, known_ids)
 
     if errors:
         raise PlanValidationError(errors)
 
 
-def _check_constructed_invariants(plan: Plan, errors: list[str]) -> None:
+def _check_constructed_invariants(
+    plan: Plan, errors: list[str], known_ids: set[str]
+) -> None:
     """Add v4 Contract 4 ``constructed=True`` violations to ``errors``.
 
     Order matches the contract text so error output is stable across
     runs: magic_version, phase ordinals, per-phase keyword and
     phase_id, duplicate phase ids, per-task id and trailing_lines,
-    non-task scalar field-stability oracles (v4 R3), then per-task
-    field-stability via the Stage 10 harness.
+    non-task scalar field-stability oracles (v4 R3), per-task
+    field-stability via the Stage 10 harness, then acceptance
+    declarations for leaf implementation tasks.
     """
     if plan.magic_version != 1:
         errors.append(
@@ -231,6 +310,45 @@ def _check_constructed_invariants(plan: Plan, errors: list[str]) -> None:
 
     _check_non_task_scalar_field_stability(plan, errors)
     _check_each_task_field_stability(plan, errors)
+    _check_acceptance_invariants(plan, errors, known_ids)
+
+
+def _check_acceptance_invariants(
+    plan: Plan, errors: list[str], known_ids: set[str]
+) -> None:
+    """Require every constructed leaf implementation task to declare acceptance."""
+    for label, task in _iter_plan_tasks_with_label(plan):
+        if task.children or "USER" in task.flag_tags or task.action_tag is not None:
+            continue
+
+        raw_accept, annotation_error = accept_annotation(task)
+        if annotation_error is not None:
+            errors.append(f"{label} has {annotation_error}")
+            continue
+        if raw_accept is None:
+            errors.append(
+                f"{label} missing accept annotation on a leaf implementation task"
+            )
+            continue
+
+        parsed = parse_accept_value(raw_accept)
+        if isinstance(parsed, AcceptParseError):
+            if parsed.code == "malformed_waived":
+                errors.append(
+                    f"{label} has waived accept with no covered-by= / "
+                    f"malformed covered-by: {raw_accept!r}"
+                )
+            else:
+                errors.append(
+                    f"{label} has unknown accept kind: {raw_accept!r}"
+                )
+            continue
+
+        if parsed.kind == "waived" and parsed.covered_by not in known_ids:
+            errors.append(
+                f"{label} has waived accept whose covered-by id is not present "
+                f"in the plan: {parsed.covered_by}"
+            )
 
 
 def _check_non_task_scalar_field_stability(plan: Plan, errors: list[str]) -> None:

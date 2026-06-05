@@ -130,7 +130,10 @@ def format_verification_tasks(cases: list[VerificationCase]) -> list[Task]:
     This helper does not emit PLAN.md markdown.
     """
     return [
-        make_task(f"Verify: type `{case.input}`, expect result `{case.expected}`")
+        make_task(
+            f"Verify: type `{case.input}`, expect result `{case.expected}`",
+            flag_tags=("USER",),
+        )
         for case in cases
     ]
 

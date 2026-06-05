@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from bob_tools.planfile.backfill import (
     _epoch_to_iso_utc,
@@ -14,14 +16,16 @@ from bob_tools.planfile.backfill import (
 from bob_tools.planfile.parser import parse_plan
 
 
-def _fake_run(epoch_by_marker: dict[str, int]):
+def _fake_run(
+    epoch_by_marker: dict[str, int],
+) -> Callable[..., subprocess.CompletedProcess[str]]:
     """Build a fake ``subprocess.run`` keyed on the pickaxe ``-S`` marker.
 
     Returns ``%at`` epoch stdout for a known marker, empty otherwise so the
     resolver treats it as unresolved.
     """
 
-    def run(cmd, **kwargs):
+    def run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         marker = cmd[cmd.index("-S") + 1]
         epoch = epoch_by_marker.get(marker)
         stdout = f"{epoch}\n" if epoch is not None else ""

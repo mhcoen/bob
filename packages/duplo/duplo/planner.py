@@ -84,6 +84,12 @@ Rules for the plan:
   Tasks that fix bugs or issues use [fix: "description"] instead.
   Scaffolding or structural tasks that do not map to any feature
   use no annotation.
+- Every leaf implementation task must be provable when authored.
+  Prefer same-batch unit-test proof: put implementation subtasks and
+  the covering test subtask under one concrete parent. If a task is
+  proven by a command, name the exact backtick-quoted command in that
+  task. Do not emit vague implementation leaves with no file, test,
+  command, or downstream proof.
 
 Canonical Slice C form (the runtime owns phase identity):
 
@@ -136,6 +142,11 @@ Additional rules:
   scriptable form. Runnable verification must be expressed as a
   helper-script creation step plus an [AUTO:run_cli] step that
   invokes the helper with an absolute command path.
+- Every leaf implementation task must be concrete enough for duplo
+  to attach a proof annotation. Put implementation and covering tests
+  in the same batch, name exact commands in backticks when command
+  exit status is the proof, and avoid vague leaves with no file,
+  test, command, or downstream proof.
 """
 
 _PLAN_FILENAME = "PLAN.md"

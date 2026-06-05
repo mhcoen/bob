@@ -74,6 +74,7 @@ from bob_tools.planfile import PlanSyntaxError, PlanValidationError
 from orchestra import ErrorRecord, IterativeDesignResult
 from orchestra.api import WorkflowApiError
 
+from duplo.acceptance import AcceptanceAuthoringError
 from duplo.council import (
     _build_state_text,
     make_duplo_progress_callback,
@@ -284,7 +285,7 @@ def run_plan_author(
     capped_body: str = result.final_artifact
     try:
         typed_plan_from_synthesizer_text(capped_body, required_phase_id=required_phase_id)
-    except (PlanSyntaxError, PlanValidationError):
+    except (AcceptanceAuthoringError, PlanSyntaxError, PlanValidationError):
         _LOGGER.warning(
             "plan_author did not converge to a valid body within max_rounds "
             "(run_id=%s, rounds_completed=%d, transcript=%s); failing closed",

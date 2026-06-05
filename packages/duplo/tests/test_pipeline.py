@@ -1388,7 +1388,9 @@ class TestDetectAndAppendGaps:
     """Tests for _detect_and_append_gaps()."""
 
     @staticmethod
-    def _write_minimal_plan(path, body_line: str = "- [ ] Build UI") -> None:
+    def _write_minimal_plan(
+        path, body_line: str = "- [ ] Build UI [accept: command-exit: true]"
+    ) -> None:
         """Write a minimal canonical PLAN.md (one Stage with one task).
 
         Per T-000190 ``_detect_and_append_gaps`` flows through the
@@ -1513,9 +1515,9 @@ class TestDetectAndAppendGaps:
         )
         plan = (
             "## Stage 1: Core\n\n"
-            "- [x] Set up project scaffold\n"
-            "- [x] Implement basic routing\n"
-            "- [ ] Add error handling\n"
+            "- [x] Set up project scaffold [accept: command-exit: true]\n"
+            "- [x] Implement basic routing [accept: command-exit: true]\n"
+            "- [ ] Add error handling [accept: command-exit: true]\n"
         )
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
@@ -1548,9 +1550,9 @@ class TestDetectAndAppendGaps:
         )
         plan = (
             "## Stage 1: Features\n\n"
-            "- [ ] Build search bar\n"
-            "- [ ] Implement pagination\n"
-            "- [ ] Add dark mode toggle\n"
+            "- [ ] Build search bar [accept: command-exit: true]\n"
+            "- [ ] Implement pagination [accept: command-exit: true]\n"
+            "- [ ] Add dark mode toggle [accept: command-exit: true]\n"
         )
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
@@ -1583,10 +1585,10 @@ class TestDetectAndAppendGaps:
         )
         plan = (
             "## Stage 2: Polish\n\n"
-            "- [x] Set up CI pipeline\n"
-            "- [ ] Write integration tests\n"
-            "- [x] Deploy staging environment\n"
-            "- [ ] Performance audit\n"
+            "- [x] Set up CI pipeline [accept: command-exit: true]\n"
+            "- [ ] Write integration tests [accept: command-exit: true]\n"
+            "- [x] Deploy staging environment [accept: command-exit: true]\n"
+            "- [ ] Performance audit [accept: command-exit: true]\n"
         )
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
@@ -1628,7 +1630,11 @@ class TestDetectAndAppendGaps:
                 "features": [{"name": "API", "description": "REST API.", "category": "core"}],
             },
         )
-        plan = "## Stage 1: Setup\n\n- [x] Done task\n- [ ] Pending task\n"
+        plan = (
+            "## Stage 1: Setup\n\n"
+            "- [x] Done task [accept: command-exit: true]\n"
+            "- [ ] Pending task [accept: command-exit: true]\n"
+        )
         (tmp_path / "PLAN.md").write_text(plan, encoding="utf-8")
 
         from duplo.gap_detector import GapResult, MissingFeature
@@ -1666,7 +1672,7 @@ class TestDetectAndAppendGaps:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult
@@ -1729,7 +1735,7 @@ class TestDetectAndAppendGaps:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult
@@ -2294,7 +2300,7 @@ class TestDetectGapsReturnsCounts:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult, MissingFeature
@@ -2325,7 +2331,7 @@ class TestDetectGapsReturnsCounts:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult
@@ -2362,7 +2368,7 @@ class TestDetectGapsReturnsCounts:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult
@@ -2398,7 +2404,7 @@ class TestDetectGapsReturnsCounts:
             },
         )
         (tmp_path / "PLAN.md").write_text(
-            "## Stage 1: Setup\n\n- [ ] Build UI\n", encoding="utf-8"
+            "## Stage 1: Setup\n\n- [ ] Build UI [accept: command-exit: true]\n", encoding="utf-8"
         )
 
         from duplo.gap_detector import GapResult
@@ -5549,13 +5555,15 @@ class TestVerificationTasksAppendToLastPhase:
     def _spec_vtasks():
         from bob_tools.planfile import make_task
 
-        return [make_task("Verify: type `1+1`, expect result `2`")]
+        # Match production format_verification_tasks, which USER-tags
+        # verify tasks (manual verification, acceptance-exempt).
+        return [make_task("Verify: type `1+1`, expect result `2`", flag_tags=("USER",))]
 
     @staticmethod
     def _frame_vtasks():
         from bob_tools.planfile import make_task
 
-        return [make_task("Verify: click submit")]
+        return [make_task("Verify: click submit", flag_tags=("USER",))]
 
     @staticmethod
     def _texts(tasks):
@@ -5711,7 +5719,8 @@ class TestVerificationTasksAppendToLastPhase:
             # the dummy task so the mock matches the planner contract.
             return (
                 f"## Phase {required_id}: Dummy\n\n"
-                f'- [ ] dummy task for phase {num} [feat: "Feature {num}"]\n'
+                f'- [ ] dummy task for phase {num} [feat: "Feature {num}"]'
+                " [accept: command-exit: true]\n"
             )
 
         with (

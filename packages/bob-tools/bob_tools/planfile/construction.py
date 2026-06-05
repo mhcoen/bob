@@ -1,4 +1,4 @@
-"""Task construction (``make_task``) and sentinel scaffolding for round-trip validation."""
+"""Task construction and sentinel scaffolding for round-trip validation."""
 
 from __future__ import annotations
 

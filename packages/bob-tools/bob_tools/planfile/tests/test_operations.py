@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from bob_tools.planfile._shared import _ACCEPT_KINDS
 from bob_tools.planfile.model import (
     BugsSection,
     Outcome,
@@ -61,6 +62,12 @@ from bob_tools.planfile.operations import (
     validate_plan,
 )
 from bob_tools.planfile.renderer import render_plan
+from bob_tools.planfile.validation import (
+    AcceptKind,
+    AcceptParseError,
+    accept_annotation,
+    parse_accept_value,
+)
 
 
 def _task(
@@ -74,6 +81,7 @@ def _task(
     status: TaskStatus = TaskStatus.TODO,
     flag_tags: tuple[str, ...] = (),
     action_tag: tuple[str, str] | None = None,
+    annotations: tuple[tuple[str, str], ...] = (("accept", "pytest"),),
 ) -> Task:
     return Task(
         task_id=task_id,
@@ -81,7 +89,7 @@ def _task(
         status=status,
         flag_tags=flag_tags,
         action_tag=action_tag,
-        annotations=(),
+        annotations=annotations,
         deps=deps,
         children=children,
         ruled_out=(),
@@ -114,7 +122,7 @@ def _plan(
         preamble="",
         phases=phases,
         bugs=bugs,
-        source_path=Path("/tmp/PLAN.md"),
+        source_path=Path("packages/bob-tools/.scratch/PLAN.md"),
     )
 
 
@@ -126,6 +134,45 @@ def test_package_root_exports_clear_failed_and_validate_plan() -> None:
     assert exported_clear_failed is clear_failed
     assert exported_purge_done_bug_tasks is purge_done_bug_tasks
     assert exported_validate_plan is validate_plan
+
+
+class TestAcceptAnnotationVocabulary:
+    def test_shared_accept_kinds_are_closed_vocabulary(self) -> None:
+        assert _ACCEPT_KINDS == frozenset(
+            {"pytest", "command-exit", "coverage", "waived"}
+        )
+
+    def test_parse_accept_value_classifies_valid_values(self) -> None:
+        assert parse_accept_value("pytest") == AcceptKind(kind="pytest")
+        assert parse_accept_value("coverage") == AcceptKind(kind="coverage")
+        assert parse_accept_value("command-exit: ./run.sh --help") == AcceptKind(
+            kind="command-exit",
+            command="./run.sh --help",
+        )
+        assert parse_accept_value(
+            "waived: proven by parser round-trip; covered-by=T-AB-000123"
+        ) == AcceptKind(
+            kind="waived",
+            reason="proven by parser round-trip",
+            covered_by="T-AB-000123",
+        )
+
+    def test_parse_accept_value_returns_structured_errors(self) -> None:
+        assert parse_accept_value("manual") == AcceptParseError(
+            code="unknown_kind",
+            message="unknown accept kind",
+        )
+        assert parse_accept_value("waived: external proof") == AcceptParseError(
+            code="malformed_waived",
+            message="waived accept has no covered-by= or malformed covered-by",
+        )
+
+    def test_accept_annotation_detects_ambiguity(self) -> None:
+        task = _task(
+            task_id="T-000001",
+            annotations=(("accept", "pytest"), ("accept", "coverage")),
+        )
+        assert accept_annotation(task) == (None, "more than one accept annotation")
 
 
 class TestValidatePlan:
@@ -523,14 +570,17 @@ class TestValidatePlanConstructed:
         trailing_lines: tuple[str, ...] = (),
         children: tuple[Task, ...] = (),
         deps: tuple[str, ...] = (),
+        flag_tags: tuple[str, ...] = (),
+        action_tag: tuple[str, str] | None = None,
+        annotations: tuple[tuple[str, str], ...] = (("accept", "pytest"),),
     ) -> Task:
         return Task(
             task_id=task_id,
             text=text,
             status=TaskStatus.TODO,
-            flag_tags=(),
-            action_tag=None,
-            annotations=(),
+            flag_tags=flag_tags,
+            action_tag=action_tag,
+            annotations=annotations,
             deps=deps,
             children=children,
             ruled_out=(),
@@ -586,6 +636,166 @@ class TestValidatePlanConstructed:
     def test_minimal_constructed_plan_validates(self) -> None:
         validate_plan(self._cplan(), constructed=True)
 
+    def test_accept_annotations_round_trip_without_field_drift(self) -> None:
+        from bob_tools.planfile.parser import parse_plan
+
+        tasks = (
+            self._ctask(
+                task_id="T-000001",
+                text="scoped test",
+                annotations=(("accept", "pytest"),),
+            ),
+            self._ctask(
+                task_id="T-000002",
+                text="command proof",
+                annotations=(("accept", "command-exit: ./run.sh --help"),),
+            ),
+        )
+        plan = self._cplan(phases=(self._cphase(tasks=tasks),))
+
+        reparsed = parse_plan(render_plan(plan))
+        reparsed_tasks = reparsed.phases[0].tasks
+
+        assert reparsed_tasks[0].annotations == (("accept", "pytest"),)
+        assert reparsed_tasks[1].annotations == (
+            ("accept", "command-exit: ./run.sh --help"),
+        )
+
+    def test_all_accept_kinds_validate_on_leaf_implementation_tasks(self) -> None:
+        tasks = (
+            self._ctask(task_id="T-000001", annotations=(("accept", "pytest"),)),
+            self._ctask(
+                task_id="T-000002",
+                annotations=(("accept", "command-exit: ./run.sh --help"),),
+            ),
+            self._ctask(task_id="T-000003", annotations=(("accept", "coverage"),)),
+            self._ctask(
+                task_id="T-000004",
+                annotations=(
+                    ("accept", "waived: covered by first task; covered-by=T-000001"),
+                ),
+            ),
+        )
+        plan = self._cplan(phases=(self._cphase(tasks=tasks),))
+
+        validate_plan(plan, constructed=True)
+
+    def test_missing_accept_rejected_on_leaf_implementation_task(self) -> None:
+        plan = self._cplan(
+            phases=(self._cphase(tasks=(self._ctask(annotations=()),)),)
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].tasks[0] missing accept annotation on a leaf implementation task"
+            in m
+            for m in exc_info.value.messages
+        )
+
+    def test_duplicate_accept_annotations_rejected(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(
+                        self._ctask(
+                            annotations=(
+                                ("accept", "pytest"),
+                                ("accept", "coverage"),
+                            )
+                        ),
+                    ),
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].tasks[0] has more than one accept annotation" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_unknown_accept_kind_rejected(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(self._ctask(annotations=(("accept", "manual"),)),)
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].tasks[0] has unknown accept kind" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_waived_accept_missing_covered_by_rejected(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(
+                        self._ctask(
+                            annotations=(("accept", "waived: external proof"),)
+                        ),
+                    ),
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].tasks[0] has waived accept with no covered-by= / "
+            "malformed covered-by" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_waived_accept_unknown_covered_by_rejected(self) -> None:
+        plan = self._cplan(
+            phases=(
+                self._cphase(
+                    tasks=(
+                        self._ctask(
+                            annotations=(
+                                (
+                                    "accept",
+                                    "waived: external proof; covered-by=T-999999",
+                                ),
+                            )
+                        ),
+                    ),
+                ),
+            )
+        )
+        with pytest.raises(PlanValidationError) as exc_info:
+            validate_plan(plan, constructed=True)
+        assert any(
+            "phases[0].tasks[0] has waived accept whose covered-by id is not "
+            "present in the plan: T-999999" in m
+            for m in exc_info.value.messages
+        )
+
+    def test_accept_not_required_for_parent_user_or_action_tasks(self) -> None:
+        child = self._ctask(task_id="T-000002", annotations=(("accept", "pytest"),))
+        parent = self._ctask(
+            task_id="T-000001",
+            children=(child,),
+            annotations=(),
+        )
+        user = self._ctask(
+            task_id="T-000003",
+            flag_tags=("USER",),
+            annotations=(),
+        )
+        action = self._ctask(
+            task_id="T-000004",
+            text="",
+            action_tag=("run_cli", "./run.sh --dry-run"),
+            annotations=(),
+        )
+        plan = self._cplan(phases=(self._cphase(tasks=(parent, user, action)),))
+
+        validate_plan(plan, constructed=True)
+
     def test_default_mode_unchanged_with_legacy_inputs(self) -> None:
         # A plan with magic_version=None, ordinal mismatch, no phase_id,
         # and trailing_lines passes the default validator unchanged —
@@ -606,6 +816,13 @@ class TestValidatePlanConstructed:
             source_path=None,
         )
         validate_plan(plan)
+
+    def test_default_mode_does_not_require_accept_on_leaf_tasks(self) -> None:
+        plan = self._cplan(
+            magic_version=None,
+            phases=(self._cphase(tasks=(self._ctask(annotations=()),)),),
+        )
+        validate_plan(plan, constructed=False)
 
     def test_magic_version_must_be_one(self) -> None:
         plan = self._cplan(magic_version=None)
@@ -1022,7 +1239,7 @@ class TestAssertMcloopCanonical:
 
         monkeypatch.setattr(ops, "parse_plan", spy_parse)
         plan = self._cplan()
-        marker = Path("/tmp/some-plan-file.md")
+        marker = Path("packages/bob-tools/.scratch/some-plan-file.md")
         assert_mcloop_canonical(plan, source_path=marker)
         assert captured["source_path"] == marker
 
@@ -1043,7 +1260,7 @@ class TestAssertMcloopCanonical:
         from bob_tools.planfile.parser import parse_plan as _real_parse
 
         plan = self._cplan()
-        marker = Path("/tmp/v3-leak-marker.md")
+        marker = Path("packages/bob-tools/.scratch/v3-leak-marker.md")
 
         def divergent_parse(
             text: str,
@@ -1079,7 +1296,7 @@ class TestAssertMcloopCanonical:
         from bob_tools.planfile.parser import parse_plan as _real_parse
 
         plan = self._cplan()
-        marker = Path("/tmp/r1-leak-marker.md")
+        marker = Path("packages/bob-tools/.scratch/r1-leak-marker.md")
 
         def dropping_parse(
             text: str,
@@ -2603,19 +2820,23 @@ class TestAddPhaseTask:
             source_path=None,
         )
 
+    def _task(self, text: str, **kwargs: Any) -> Task:
+        annotations = kwargs.pop("annotations", (("accept", "pytest"),))
+        return make_task(text, annotations=annotations, **kwargs)
+
     def test_appends_to_phase_root_when_no_placement_given(self) -> None:
-        existing = make_task("first", task_id="T-000001")
+        existing = self._task("first", task_id="T-000001")
         plan = self._plan_constructed(_phase_with_tasks(tasks=(existing,)))
-        new_plan, assigned_id = add_phase_task(plan, "phase_001", make_task("second"))
+        new_plan, assigned_id = add_phase_task(plan, "phase_001", self._task("second"))
         assert assigned_id == "T-000002"
         assert [t.text for t in new_plan.phases[0].tasks] == ["first", "second"]
         assert new_plan.phases[0].tasks[1].task_id == "T-000002"
 
     def test_nests_under_parent_id_in_phase_root(self) -> None:
-        parent = make_task("parent", task_id="T-000001")
+        parent = self._task("parent", task_id="T-000001")
         plan = self._plan_constructed(_phase_with_tasks(tasks=(parent,)))
         new_plan, assigned_id = add_phase_task(
-            plan, "phase_001", make_task("child"), parent_id="T-000001"
+            plan, "phase_001", self._task("child"), parent_id="T-000001"
         )
         assert assigned_id == "T-000002"
         nested = new_plan.phases[0].tasks[0].children
@@ -2626,15 +2847,15 @@ class TestAddPhaseTask:
     def test_nests_under_parent_id_in_subsection(self) -> None:
         # parent_id resolution must fall through to subsection tasks
         # after exhausting phase root tasks.
-        sub_parent = make_task("sub parent", task_id="T-000010")
+        sub_parent = self._task("sub parent", task_id="T-000010")
         sub = Subsection(title="Manual", prose="", tasks=(sub_parent,), line_number=0)
         phase = _phase_with_tasks(
-            tasks=(make_task("root", task_id="T-000001"),),
+            tasks=(self._task("root", task_id="T-000001"),),
             subsections=(sub,),
         )
         plan = self._plan_constructed(phase)
         new_plan, assigned_id = add_phase_task(
-            plan, "phase_001", make_task("manual step"), parent_id="T-000010"
+            plan, "phase_001", self._task("manual step"), parent_id="T-000010"
         )
         assert assigned_id == "T-000011"
         sub_after = new_plan.phases[0].subsections[0]
@@ -2642,17 +2863,17 @@ class TestAddPhaseTask:
         assert sub_after.tasks[0].children[-1].task_id == "T-000011"
 
     def test_appends_to_named_subsection_root(self) -> None:
-        sub_existing = make_task("sub first", task_id="T-000010")
+        sub_existing = self._task("sub first", task_id="T-000010")
         sub = Subsection(title="Manual", prose="", tasks=(sub_existing,), line_number=0)
         phase = _phase_with_tasks(
-            tasks=(make_task("root", task_id="T-000001"),),
+            tasks=(self._task("root", task_id="T-000001"),),
             subsections=(sub,),
         )
         plan = self._plan_constructed(phase)
         new_plan, assigned_id = add_phase_task(
             plan,
             "phase_001",
-            make_task("sub second"),
+            self._task("sub second"),
             subsection_title="Manual",
         )
         assert assigned_id == "T-000011"
@@ -2664,7 +2885,7 @@ class TestAddPhaseTask:
 
     def test_returns_tuple_of_new_plan_and_assigned_id(self) -> None:
         plan = self._plan_constructed(_phase_with_tasks(tasks=()))
-        result = add_phase_task(plan, "phase_001", make_task("only"))
+        result = add_phase_task(plan, "phase_001", self._task("only"))
         assert isinstance(result, tuple)
         assert len(result) == 2
         new_plan, assigned_id = result
@@ -2673,15 +2894,15 @@ class TestAddPhaseTask:
         assert new_plan is not plan
 
     def test_assigns_id_based_on_global_max_plus_one(self) -> None:
-        a = make_task("a", task_id="T-000003")
-        b = make_task("b", task_id="T-000007")
+        a = self._task("a", task_id="T-000003")
+        b = self._task("b", task_id="T-000007")
         plan = self._plan_constructed(_phase_with_tasks(tasks=(a, b)))
-        _, assigned_id = add_phase_task(plan, "phase_001", make_task("c"))
+        _, assigned_id = add_phase_task(plan, "phase_001", self._task("c"))
         assert assigned_id == "T-000008"
 
     def test_caller_supplied_task_id_is_honored(self) -> None:
         plan = self._plan_constructed(_phase_with_tasks(tasks=()))
-        task = make_task("explicit", task_id="T-000777")
+        task = self._task("explicit", task_id="T-000777")
         new_plan, assigned_id = add_phase_task(plan, "phase_001", task)
         assert assigned_id == "T-000777"
         assert new_plan.phases[0].tasks[0].task_id == "T-000777"
@@ -2689,15 +2910,20 @@ class TestAddPhaseTask:
     def test_unknown_phase_raises_validation_error(self) -> None:
         plan = self._plan_constructed(_phase_with_tasks(tasks=()))
         with pytest.raises(PlanValidationError) as exc_info:
-            add_phase_task(plan, "phase_999", make_task("x"))
+            add_phase_task(plan, "phase_999", self._task("x"))
         assert any("phase_999" in m for m in exc_info.value.messages)
 
     def test_unknown_parent_id_raises_validation_error(self) -> None:
         plan = self._plan_constructed(
-            _phase_with_tasks(tasks=(make_task("only", task_id="T-000001"),))
+            _phase_with_tasks(tasks=(self._task("only", task_id="T-000001"),))
         )
         with pytest.raises(PlanValidationError) as exc_info:
-            add_phase_task(plan, "phase_001", make_task("orphan"), parent_id="T-000999")
+            add_phase_task(
+                plan,
+                "phase_001",
+                self._task("orphan"),
+                parent_id="T-000999",
+            )
         assert any("T-000999" in m for m in exc_info.value.messages)
 
     def test_unknown_subsection_raises_validation_error(self) -> None:
@@ -2706,7 +2932,7 @@ class TestAddPhaseTask:
             add_phase_task(
                 plan,
                 "phase_001",
-                make_task("x"),
+                self._task("x"),
                 subsection_title="No Such Section",
             )
         assert any("No Such Section" in m for m in exc_info.value.messages)
@@ -2715,11 +2941,11 @@ class TestAddPhaseTask:
         sub = Subsection(
             title="Manual",
             prose="",
-            tasks=(make_task("inside", task_id="T-000010"),),
+            tasks=(self._task("inside", task_id="T-000010"),),
             line_number=0,
         )
         phase = _phase_with_tasks(
-            tasks=(make_task("root", task_id="T-000001"),),
+            tasks=(self._task("root", task_id="T-000001"),),
             subsections=(sub,),
         )
         plan = self._plan_constructed(phase)
@@ -2727,24 +2953,24 @@ class TestAddPhaseTask:
             add_phase_task(
                 plan,
                 "phase_001",
-                make_task("x"),
+                self._task("x"),
                 parent_id="T-000010",
                 subsection_title="Manual",
             )
 
     def test_caller_supplied_duplicate_id_raises_validation_error(self) -> None:
         plan = self._plan_constructed(
-            _phase_with_tasks(tasks=(make_task("first", task_id="T-000001"),))
+            _phase_with_tasks(tasks=(self._task("first", task_id="T-000001"),))
         )
         with pytest.raises(PlanValidationError) as exc_info:
-            add_phase_task(plan, "phase_001", make_task("dup", task_id="T-000001"))
+            add_phase_task(plan, "phase_001", self._task("dup", task_id="T-000001"))
         assert any("T-000001" in m for m in exc_info.value.messages)
 
     def test_unknown_dep_raises_validation_error(self) -> None:
         plan = self._plan_constructed(
-            _phase_with_tasks(tasks=(make_task("first", task_id="T-000001"),))
+            _phase_with_tasks(tasks=(self._task("first", task_id="T-000001"),))
         )
-        bad = make_task("with dep", deps=("T-009999",))
+        bad = self._task("with dep", deps=("T-009999",))
         with pytest.raises(PlanValidationError) as exc_info:
             add_phase_task(plan, "phase_001", bad)
         assert any("T-009999" in m for m in exc_info.value.messages)
@@ -2758,7 +2984,7 @@ class TestAddPhaseTask:
             status=TaskStatus.TODO,
             flag_tags=(),
             action_tag=None,
-            annotations=(),
+            annotations=(("accept", "pytest"),),
             deps=(),
             children=(),
             ruled_out=(),
@@ -2799,13 +3025,25 @@ class TestCreatedAt:
         assert task.text == "hello"
 
     def test_round_trip_preserves_created_at(self) -> None:
-        task = make_task("hello", created_at="2026-05-26T12:34:56Z")
+        task = make_task(
+            "hello",
+            annotations=(("accept", "pytest"),),
+            created_at="2026-05-26T12:34:56Z",
+        )
         plan = Plan(
             magic_version=1,
             project_title="Project",
             preamble="",
             phases=(
-                _phase_with_tasks(tasks=(make_task("anchor", task_id="T-000001"),)),
+                _phase_with_tasks(
+                    tasks=(
+                        make_task(
+                            "anchor",
+                            task_id="T-000001",
+                            annotations=(("accept", "pytest"),),
+                        ),
+                    ),
+                ),
             ),
             bugs=None,
             source_path=None,
@@ -2839,7 +3077,7 @@ class TestCreatedAt:
             source_path=None,
         )
         rendered = render_plan(plan)
-        line = [ln for ln in rendered.splitlines() if "build menu" in ln][0]
+        line = next(ln for ln in rendered.splitlines() if "build menu" in ln)
         assert "[feat: menu wired]" in line
         assert "<!-- created_at: 2026-05-26T12:34:56Z -->" in line
         assert line.index("[feat: menu wired]") < line.index("<!-- created_at:")
@@ -2864,7 +3102,11 @@ class TestCreatedAt:
             bugs=None,
             source_path=None,
         )
-        new_plan, _ = add_phase_task(plan, "phase_001", make_task("fresh"))
+        new_plan, _ = add_phase_task(
+            plan,
+            "phase_001",
+            make_task("fresh", annotations=(("accept", "pytest"),)),
+        )
         appended = new_plan.phases[0].tasks[-1]
         assert appended.created_at is not None
         assert _re.fullmatch(self._ISO_RE, appended.created_at) is not None
@@ -2878,7 +3120,11 @@ class TestCreatedAt:
             bugs=None,
             source_path=None,
         )
-        task = make_task("imported", created_at="2024-01-01T00:00:00Z")
+        task = make_task(
+            "imported",
+            annotations=(("accept", "pytest"),),
+            created_at="2024-01-01T00:00:00Z",
+        )
         new_plan, _ = add_phase_task(plan, "phase_001", task)
         appended = new_plan.phases[0].tasks[-1]
         assert appended.created_at == "2024-01-01T00:00:00Z"

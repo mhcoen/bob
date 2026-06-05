@@ -230,7 +230,7 @@ def test_integration_through_typed_plan_from_synthesizer_text():
         '- [ ] [BATCH] Build scanner [feat: "Scanner"]\n'
         "  - [ ] Create scanner.py with scan()\n"
         "  - [ ] Create orchestrator.py with run()\n"
-        "- [ ] Wire entry point\n"
+        "- [ ] Wire entry point [accept: command-exit: true]\n"
     )
     plan = typed_plan_from_synthesizer_text(body, required_phase_id="phase_001")
 
@@ -279,7 +279,7 @@ def test_every_module_batch_in_generated_plan_has_a_sibling_covering_test():
         "  - [ ] Add tests/test_widget.py exercising widget.py\n"
         '- [ ] [BATCH] Configure project [feat: "Config"]\n'
         "  - [ ] Add an entry to pyproject.toml\n"
-        "- [ ] Wire entry point\n\n"
+        "- [ ] Wire entry point [accept: command-exit: true]\n\n"
         "### Extras\n\n"
         '- [ ] [BATCH] Build loader [feat: "Loader"]\n'
         "  - [ ] Create loader.py with load()\n"

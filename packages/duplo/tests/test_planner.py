@@ -78,7 +78,7 @@ def _canonical_body(
     if phase_prose:
         lines.extend(phase_prose.rstrip("\n").split("\n"))
         lines.append("")
-    lines.append("- [ ] Set up project structure")
+    lines.append("- [ ] Set up project structure [accept: command-exit: true]")
     for extra in extra_tasks:
         lines.append(extra)
     lines.append("")
@@ -883,12 +883,12 @@ _SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
 _ANNOTATED_PHASE_PLAN = """\
 ## Phase phase_001: Core
 
-- [ ] Set up project structure and build system
+- [ ] [USER] Set up project structure and build system
 - [ ] Add user login form [feat: "User auth"]
-  - [ ] Create login page template
-  - [ ] Wire up authentication backend [feat: "User auth"]
-- [ ] Build activity overview [feat: "Dashboard"]
-- [ ] Fix email validation on signup [fix: "email format not checked"]
+  - [ ] Create login page template [accept: command-exit: true]
+  - [ ] Wire up authentication backend [feat: "User auth"] [accept: command-exit: true]
+- [ ] Build activity overview [feat: "Dashboard"] [accept: command-exit: true]
+- [ ] Fix email validation on signup [fix: "email format not checked"] [accept: command-exit: true]
 """
 
 _ANNOTATED_NEXT_PLAN = """\
@@ -1596,7 +1596,9 @@ class TestStripAndRenderEndToEnd:
         # Synthesizer body uses the wrong phase_id; runtime expects
         # ``phase_003`` (compute_required_phase_id reads the seed
         # above and returns ``phase_003``).
-        wrong_body = "## Phase phase_007: Wrong\n\n- [ ] Phase real task\n"
+        wrong_body = (
+            "## Phase phase_007: Wrong\n\n- [ ] Phase real task [accept: command-exit: true]\n"
+        )
 
         phase = {
             "phase": 2,
@@ -1642,7 +1644,9 @@ class TestStripAndRenderEndToEnd:
         plan_path = tmp_path / _PLAN_FILENAME
         plan_path.write_text(seed, encoding="utf-8")
 
-        right_body = "## Phase phase_003: Polish\n\n- [ ] Phase 3 real task\n"
+        right_body = (
+            "## Phase phase_003: Polish\n\n- [ ] Phase 3 real task [accept: command-exit: true]\n"
+        )
         phase = {
             "phase": 2,
             "title": "Polish",
@@ -1721,7 +1725,7 @@ class TestSavePlanH1OrdinalValidation:
             encoding="utf-8",
         )
 
-        wrong_body = "## Phase phase_001: Dup\n\n- [ ] dup\n"
+        wrong_body = "## Phase phase_001: Dup\n\n- [ ] dup [accept: command-exit: true]\n"
         with patch("duplo.planner.run_plan_author", return_value=wrong_body):
             with pytest.raises(PlanValidationError):
                 generate_phase_plan(
@@ -2157,9 +2161,9 @@ class TestStripTrailingCommentary:
             "```markdown\n"
             "## Phase phase_001: Core\n"
             "\n"
-            "- [ ] First task\n"
-            "- [ ] Second task\n"
-            "- [ ] Third task\n"
+            "- [ ] First task [accept: command-exit: true]\n"
+            "- [ ] Second task [accept: command-exit: true]\n"
+            "- [ ] Third task [accept: command-exit: true]\n"
             "```\n"
             "\n"
             "---\n"
@@ -2329,7 +2333,7 @@ class TestStripFences:
         typed Plan; fence-stripping now lives only on the
         :func:`generate_next_phase_plan` path.
         """
-        clean = "## Phase phase_001: Core\n\n- [ ] Task\n"
+        clean = "## Phase phase_001: Core\n\n- [ ] Task [accept: command-exit: true]\n"
         with patch("duplo.planner.run_plan_author", return_value=clean):
             result = generate_phase_plan(
                 "https://example.com",

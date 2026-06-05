@@ -51,9 +51,11 @@ _WORKFLOWS_SRC = Path(duplo.__file__).resolve().parent / "workflows"
 # A wrong-phase-id body: the runtime computes ``phase_001`` for an empty
 # project, so this fails the canonical-validation gate and triggers the
 # feedback loop. The fragment ``phase_999`` is what the gate echoes back.
-_WRONG_BODY = "## Phase phase_999: Wrong\n\n- [ ] do the thing\n"
+_WRONG_BODY = "## Phase phase_999: Wrong\n\n- [ ] do the thing [accept: command-exit: true]\n"
 # A canonical body that uses the runtime-supplied phase id and validates.
-_VALID_BODY = "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing\n"
+_VALID_BODY = (
+    "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing [accept: command-exit: true]\n"
+)
 
 # Substring of the gate's wrong-phase-id feedback. It cannot appear in
 # the proposer's first-round prompt (it is produced only after a draft

@@ -15,12 +15,20 @@ def fake_hook(tmp_path: Path) -> Path:
     return src
 
 
-def _run_install(home: Path, hook: Path, capsys) -> int:
+def _run_install(
+    home: Path,
+    hook: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> int:
     rc = bob_cli.main(["install", "--home", str(home), "--hook", str(hook)])
     return rc
 
 
-def test_install_copies_hook_and_registers(tmp_path, fake_hook, capsys):
+def test_install_copies_hook_and_registers(
+    tmp_path: Path,
+    fake_hook: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     home = tmp_path / "home"
     rc = _run_install(home, fake_hook, capsys)
     assert rc == 0
@@ -38,7 +46,11 @@ def test_install_copies_hook_and_registers(tmp_path, fake_hook, capsys):
     assert f"python3 {dst}" in cmds
 
 
-def test_install_is_idempotent(tmp_path, fake_hook, capsys):
+def test_install_is_idempotent(
+    tmp_path: Path,
+    fake_hook: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     home = tmp_path / "home"
     assert _run_install(home, fake_hook, capsys) == 0
     assert _run_install(home, fake_hook, capsys) == 0
@@ -56,7 +68,11 @@ def test_install_is_idempotent(tmp_path, fake_hook, capsys):
     assert "already registered" in out
 
 
-def test_install_preserves_existing_hooks_and_backs_up(tmp_path, fake_hook, capsys):
+def test_install_preserves_existing_hooks_and_backs_up(
+    tmp_path: Path,
+    fake_hook: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     home = tmp_path / "home"
     claude = home / ".claude"
     claude.mkdir(parents=True)
@@ -85,7 +101,11 @@ def test_install_preserves_existing_hooks_and_backs_up(tmp_path, fake_hook, caps
     assert (claude / "settings.json.bak").exists()  # backup made
 
 
-def test_install_dedupes_prior_hook_at_other_path(tmp_path, fake_hook, capsys):
+def test_install_dedupes_prior_hook_at_other_path(
+    tmp_path: Path,
+    fake_hook: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     # Simulate a prior `mcloop install` that registered the hook at ~/.mcloop/hooks/,
     # plus an unrelated hook. `bob install` must consolidate to a single hook entry.
     home = tmp_path / "home"
@@ -102,7 +122,10 @@ def test_install_dedupes_prior_hook_at_other_path(tmp_path, fake_hook, capsys):
                             "hooks": [
                                 {
                                     "type": "command",
-                                    "command": "python3 ~/.mcloop/hooks/telegram-permission-hook.py",
+                                    "command": (
+                                        "python3 "
+                                        "~/.mcloop/hooks/telegram-permission-hook.py"
+                                    ),
                                 }
                             ],
                         },
@@ -127,7 +150,10 @@ def test_install_dedupes_prior_hook_at_other_path(tmp_path, fake_hook, capsys):
     assert "replaced 1" in capsys.readouterr().out
 
 
-def test_install_missing_hook_errors(tmp_path, capsys):
+def test_install_missing_hook_errors(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     home = tmp_path / "home"
     rc = bob_cli.main(
         ["install", "--home", str(home), "--hook", str(tmp_path / "nope.py")]
@@ -136,7 +162,7 @@ def test_install_missing_hook_errors(tmp_path, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-def test_default_hook_points_at_repo_mcloop_copy():
+def test_default_hook_points_at_repo_mcloop_copy() -> None:
     # The default hook path resolves to the real repo artifact.
     assert bob_cli._default_hook().name == "telegram-permission-hook.py"
     assert bob_cli._default_hook().parent.name == "mcloop"

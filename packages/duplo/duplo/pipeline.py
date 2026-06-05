@@ -1258,17 +1258,31 @@ def _detect_and_append_gaps(
 
 
 def _append_gap_tasks_to_plan(plan_path: Path, gap_tasks: list) -> int:
-    """Append each typed gap task to the plan's last phase via
-    :func:`add_phase_task`.
+    """Append each gap as a provable unit to the plan's last phase.
 
-    Returns the number of tasks actually appended. When the plan has
-    no phases (e.g. preamble-only), the tasks are dropped: gaps only
-    make sense once a phase exists to attach them to.
+    Returns the number of gaps actually appended (one per gap task;
+    the paired proof task is bookkeeping and is not counted). When the
+    plan has no phases (e.g. preamble-only), the tasks are dropped:
+    gaps only make sense once a phase exists to attach them to.
 
-    Uses ``validation="unchecked"`` for the same reason
-    :func:`duplo.planner.save_plan` does — user-facing PLAN.md files
-    going through gap detection may not yet be in mcloop's canonical
-    form.
+    The gap detector knows only a feature name and a one-sentence
+    reason, so it cannot author a real covering test. Each gap is
+    therefore authored as the waived+covered-by unit the declared-
+    acceptance contract was designed for: a ``[USER]`` downstream
+    proof task (a manual verification, contract-exempt) is appended
+    first so its assigned id can back the autonomous implementation
+    task, whose acceptance is declared ``waived: …; covered-by=<that
+    id>``. The implementation task stays untagged so it flows to the
+    loop as real work. Every intermediate plan passes
+    ``validate_plan(constructed=True)`` (run by :func:`add_phase_task`),
+    so no canonical-validation bypass is needed — the output is a plan
+    that already satisfies the constructed-mode invariant.
+
+    Uses ``validation="unchecked"`` on the surrounding
+    :func:`bob_tools.planfile.update` for the same reason
+    :func:`duplo.planner.save_plan` does — the prior on-disk PLAN.md a
+    user is gap-checking may predate the canonical form — but the
+    appended gap unit is itself fully acceptance-annotated.
     """
     appended = 0
 
@@ -1281,7 +1295,23 @@ def _append_gap_tasks_to_plan(plan_path: Path, gap_tasks: list) -> int:
         if last_phase_id is None:
             return new_plan
         for task in gap_tasks:
-            new_plan, _assigned = add_phase_task(new_plan, last_phase_id, task)
+            proof = make_task(
+                f"Verify gap-detected work is present: {task.text}",
+                flag_tags=("USER",),
+            )
+            new_plan, proof_id = add_phase_task(new_plan, last_phase_id, proof)
+            proven = dataclasses.replace(
+                task,
+                annotations=task.annotations
+                + (
+                    (
+                        "accept",
+                        "waived: gap-detected, proof via downstream "
+                        f"verification; covered-by={proof_id}",
+                    ),
+                ),
+            )
+            new_plan, _assigned = add_phase_task(new_plan, last_phase_id, proven)
             appended += 1
         return new_plan
 

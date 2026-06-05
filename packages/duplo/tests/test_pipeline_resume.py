@@ -33,6 +33,7 @@ def _typed_phase(phase_id: str, ordinal: int, title: str, *, done: bool = False)
     task = make_task(
         "do work",
         status=TaskStatus.DONE if done else TaskStatus.TODO,
+        annotations=(("accept", "command-exit: true"),),
     )
     return Phase(
         phase_id=phase_id,

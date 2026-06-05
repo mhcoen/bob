@@ -1,4 +1,4 @@
-"""Shared constants, regexes, and tiny utilities used across planfile operations modules.
+"""Shared constants, regexes, and utilities used across planfile operations modules.
 
 Imported by ``construction``, ``iteration``, ``validation``, ``semantic_diff``,
 ``canonical``, ``scheduling``, ``status``, ``task_addition``, and ``migration``;
@@ -50,6 +50,8 @@ _ANNOTATION_OK_RE = re.compile(r"^[A-Za-z_]\w*:\s+\S.*$", re.DOTALL)
 _ANNOTATION_KEY_RE = re.compile(r"^[A-Za-z_]\w*:")
 
 _KNOWN_LEADING_FLAGS = frozenset({"USER", "BATCH"})
+
+_ACCEPT_KINDS = frozenset({"pytest", "command-exit", "coverage", "waived"})
 
 # Bracket forms reserved by the grammar for non-task-tag constructs.
 # Per design doc section 4.3 (planfile.md:415-417), ``[RULEDOUT]`` is

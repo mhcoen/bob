@@ -53,8 +53,9 @@ from bob_tools.planfile import (
     Task,
     make_task,
     migrate,
-    replace_phase_validated,
 )
+
+from duplo.acceptance import ensure_acceptance_annotations
 
 
 class ReauthorAssemblyError(RuntimeError):
@@ -219,18 +220,26 @@ def assemble_reauthored_plan(
     After the walk, every ``"new"`` lineage entry (no prior id
     consumed) is appended at the end in synthesizer-declared order.
 
-    The 1:1 supersede substitution is materialized via
-    :func:`bob_tools.planfile.replace_phase_validated`, which assigns
-    missing task ids, normalizes the ordinal to the replaced slot, and
-    validates the surrounding plan in constructed mode. Split, merge,
-    new, and abandoned cases are not 1:1 and compose around the
-    primitive by direct phases-tuple manipulation; the final plan is
-    re-numbered and handed back for the caller to gate through
+    All substitutions (supersede / split / merge), drops (abandoned),
+    and appends (new) compose by direct phases-tuple manipulation. The
+    fully-assembled plan is then re-numbered, migrated (so every task
+    carries a stable id in whole-plan context), and given declared
+    acceptance annotations via
+    :func:`duplo.acceptance.ensure_acceptance_annotations` before it is
+    handed back. Acceptance runs after ``migrate`` because waived
+    annotations must name a concrete downstream proof task by id; the
+    reauthor path honors the same declared-acceptance contract the
+    council authoring path does rather than bypassing it. The caller
+    gates the result through
     :func:`bob_tools.planfile.assert_mcloop_canonical`.
 
     Returned plan carries ``magic_version=1`` so the canonical gate
     accepts it. Project title, preamble, and the bugs section are
     inherited verbatim from ``prior_plan``.
+
+    Raises :class:`duplo.acceptance.AcceptanceAuthoringError` when a
+    leaf implementation task in the assembled plan has no provable
+    acceptance signal (and is not already annotated or ``USER``-tagged).
 
     Raises
     ------
@@ -344,31 +353,16 @@ def assemble_reauthored_plan(
         # The canonical reauthor output is a constructed plan; the
         # magic line is required for strict-mode parse on read-back.
         working_plan = dataclasses.replace(working_plan, magic_version=1)
-    working_plan = migrate(working_plan)
 
-    one_to_one_supersedes: dict[str, str] = {}
-    for prior_id, new_ids in replacement_at_prior.items():
-        if len(new_ids) == 1 and merge_first_source.get(new_ids[0]) is None:
-            # Genuine 1:1 supersede (or a single-source split or a
-            # single-source 'merge' that the validator rejects later;
-            # we treat all of these uniformly here since the lineage
-            # validator catches the malformed cases elsewhere).
-            one_to_one_supersedes[prior_id] = new_ids[0]
-
-    for prior_id, new_id in one_to_one_supersedes.items():
-        working_plan = replace_phase_validated(
-            working_plan,
-            prior_id,
-            synth_by_id[new_id],
-            assign_missing_ids=True,
-            preserve_position=True,
-        )
-
-    # After 1:1 supersedes have run, walk the (partially substituted)
-    # plan and apply the remaining transformations: drop abandoned
-    # priors; expand multi-branch substitutions (split, merge); skip
-    # already-substituted priors (handled by replace_phase_validated
-    # above); preserve everything else verbatim.
+    # Walk the prior plan in order and apply every transformation by
+    # phases-tuple manipulation: drop abandoned priors; substitute the
+    # synthesized phase(s) at each consumed prior slot (supersede /
+    # split / merge — all keyed uniformly through
+    # ``replacement_at_prior``); preserve everything else verbatim.
+    # Id assignment, acceptance authoring, and constructed-mode
+    # validation all run ONCE on the fully-assembled plan below, so no
+    # per-substitution validation is needed here (and acceptance, which
+    # needs task ids, can only be attached after the final migrate).
     out_phases: list[Phase] = []
     emitted_merge_targets: set[str] = set()
     for phase in working_plan.phases:
@@ -377,11 +371,6 @@ def assemble_reauthored_plan(
             out_phases.append(phase)
             continue
         if pid in abandoned_ids:
-            continue
-        if pid in one_to_one_supersedes:
-            # The replace_phase_validated call above already swapped
-            # this slot; the phase we're iterating IS the new one.
-            out_phases.append(phase)
             continue
         replacements = replacement_at_prior.get(pid, [])
         if replacements:
@@ -405,15 +394,16 @@ def assemble_reauthored_plan(
 
     assembled = dataclasses.replace(working_plan, phases=renumbered)
 
-    # Assign stable T-NNNNNN ids to any task that came through the
-    # preserve path without one (legacy PLAN.md inputs do not carry
-    # ids on every task). ``migrate`` preserves existing ids; tasks
-    # already assigned by ``replace_phase_validated`` above are left
-    # untouched. After migrate the plan satisfies the
-    # constructed-mode requirement that every task has a stable id,
-    # which the canonical gate (``assert_mcloop_canonical``) enforces
-    # via its R2 equivalent.
-    return migrate(assembled)
+    # Assign stable T-NNNNNN ids to every task (preserved priors and
+    # freshly substituted synth phases alike) in whole-plan context, so
+    # there are no id collisions, then author declared acceptance on the
+    # assembled plan. ``ensure_acceptance_annotations`` requires ids
+    # (waived entries name a concrete downstream proof), which is why it
+    # runs after ``migrate``. Reauthor is a second authoring route into
+    # mcloop's canonical input, so it must honor the same declared-
+    # acceptance contract the council path does rather than bypassing it.
+    migrated = migrate(assembled)
+    return ensure_acceptance_annotations(migrated)
 
 
 __all__ = [

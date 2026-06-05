@@ -14,6 +14,7 @@ than the mcloop wrapper.
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 from plan_fixtures import canonical_plan_text
@@ -37,6 +38,22 @@ def test_auto_user_helpers_are_planfile_tag_backed(tmp_path: Path) -> None:
     assert shim.user_task_instructions(user) == "Inspect app\n  Keep this line."
     assert shim.is_auto_task(auto)
     assert shim.parse_auto_task(auto) == ("run_cli", "./verify.sh --fast")
+
+
+def test_parse_preserves_structured_annotations() -> None:
+    scratch = Path(".scratch/tests/planfile-compat-annotations")
+    shutil.rmtree(scratch, ignore_errors=True)
+    scratch.mkdir(parents=True)
+    path = scratch / "PLAN.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Stage 1: Core\n\n"
+        "- [ ] T-000001: Run scoped proof [accept: command-exit: true]\n"
+    )
+
+    task = shim.parse(path)[0]
+
+    assert task.annotations == (("accept", "command-exit: true"),)
 
 
 def test_parse_auto_run_cli_extracts_only_backtick_command(tmp_path: Path) -> None:

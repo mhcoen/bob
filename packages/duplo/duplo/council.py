@@ -87,6 +87,7 @@ from bob_tools.planfile import (
 )
 
 from duplo import call_log
+from duplo.acceptance import ensure_acceptance_annotations
 from duplo.batch_coverage import ensure_batch_test_coverage
 from duplo.canonical_consistency import (
     validate_spec_pyproject_runsh_consistency,
@@ -445,6 +446,8 @@ def typed_plan_from_synthesizer_text(
     # exercising test are accepted together).
     constructed = ensure_batch_test_coverage(constructed)
     migrated = migrate(constructed)
+    validate_plan(migrated)
+    migrated = ensure_acceptance_annotations(migrated)
     validate_plan(migrated, constructed=True)
     assert_mcloop_canonical(migrated)
 

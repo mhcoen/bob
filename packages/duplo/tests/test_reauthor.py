@@ -57,16 +57,36 @@ needs_bob_tools = pytest.mark.skipif(
 
 
 def _wrap_synth_plan(text: str) -> str:
-    """Return ``text`` unchanged as a bob_tools.planfile-canonical synth body.
+    """Return ``text`` as a bob_tools.planfile-canonical synth body.
 
     Before T-000192, this helper prepended an ``# {project} — Phase N:
     {title}`` envelope above each H2 because the legacy reauthor parser
     required H1-wrapped phase units. Phase C Increment 12
     migrated reauthor onto :mod:`bob_tools.planfile`, which parses
-    bare ``## Phase phase_NNN: ...`` fragments natively. The helper is
-    retained so existing call sites read clearly; it is now a no-op.
+    bare ``## Phase phase_NNN: ...`` fragments natively.
+
+    The reauthor path now authors declared acceptance over the
+    assembled plan, so each id-less leaf TODO line must carry a
+    provable acceptance signal. Real synthesizer output references
+    files, commands, or sibling tests; these toy fixtures use opaque
+    placeholder text, so this helper attaches an explicit
+    ``[accept: command-exit: true]`` annotation to any ``- [ ]`` leaf
+    that does not already declare acceptance and is not ``[BATCH]`` /
+    ``[USER]`` tagged. Annotation text is appended, so substring
+    assertions on the task body still hold.
     """
-    return text
+    out_lines: list[str] = []
+    for line in text.split("\n"):
+        stripped = line.strip()
+        if (
+            stripped.startswith("- [ ] ")
+            and "[accept:" not in stripped
+            and "[BATCH]" not in stripped
+            and "[USER]" not in stripped
+        ):
+            line = f"{line.rstrip()} [accept: command-exit: true]"
+        out_lines.append(line)
+    return "\n".join(out_lines)
 
 
 # ---------------------------------------------------------------------
@@ -594,7 +614,12 @@ class TestReauthorPlan:
         for pid in phase_ids:
             body_lines.append(f"## Phase {pid}: {pid} title")
             body_lines.append("")
-            body_lines.append(f"- [ ] do {pid} thing")
+            # Carry an explicit declared-acceptance annotation: the
+            # reauthor path now authors acceptance over the assembled
+            # plan (preserved priors included), so a prior leaf task with
+            # no provable signal would be refused. A real prior PLAN.md
+            # authored under the contract already carries this.
+            body_lines.append(f"- [ ] do {pid} thing [accept: command-exit: true]")
             body_lines.append("")
         plan_path.write_text("\n".join(body_lines), encoding="utf-8")
 
@@ -725,11 +750,11 @@ class TestReauthorPlan:
             "\n"
             "## Phase phase_006: Adopted CLI Surface\n"
             "\n"
-            "- [ ] pin parser smoke\n"
+            "- [ ] pin parser smoke [accept: command-exit: true]\n"
             "\n"
             "## Phase phase_007: Runtime Loop\n"
             "\n"
-            "- [ ] wire observer\n"
+            "- [ ] wire observer [accept: command-exit: true]\n"
         )
         verdict = {
             "decision": "accept",
@@ -2134,7 +2159,10 @@ class TestLedgerSliceShape:
         emitted = record_crossings(storage, crossings, run_id="seed")
 
         plan_path = tmp_path / "PLAN.md"
-        plan_path.write_text("# proj\n## Phase phase_001: Phase phase_001 title\n\n- [ ] x\n")
+        plan_path.write_text(
+            "# proj\n## Phase phase_001: Phase phase_001 title\n\n"
+            "- [ ] x [accept: command-exit: true]\n"
+        )
 
         monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured))
 

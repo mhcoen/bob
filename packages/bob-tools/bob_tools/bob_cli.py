@@ -17,7 +17,9 @@ import argparse
 import json
 import shutil
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any, cast
 
 HOOK_NAME = "telegram-permission-hook.py"
 HOOK_REL = Path("packages") / "mcloop" / HOOK_NAME
@@ -32,7 +34,7 @@ def _default_hook() -> Path:
     return _repo_root() / HOOK_REL
 
 
-def _entry_refs_hook(entry: dict) -> bool:
+def _entry_refs_hook(entry: dict[str, Any]) -> bool:
     """True if a PreToolUse entry has any hook command referencing the hook file."""
     return any(HOOK_NAME in (h.get("command") or "") for h in entry.get("hooks", []))
 
@@ -116,14 +118,18 @@ def main(argv: list[str] | None = None) -> int:
 
     install = sub.add_parser(
         "install",
-        help="install the combined Telegram + RTK Claude Code hook into ~/.claude/hooks/",
+        help=(
+            "install the combined Telegram + RTK Claude Code hook into "
+            "~/.claude/hooks/"
+        ),
     )
     install.add_argument("--home", help="override home directory (for testing)")
     install.add_argument("--hook", help="path to the hook file (default: repo copy)")
     install.set_defaults(func=cmd_install)
 
     args = parser.parse_args(argv)
-    return args.func(args)
+    func = cast(Callable[[argparse.Namespace], int], args.func)
+    return func(args)
 
 
 if __name__ == "__main__":

@@ -42,8 +42,17 @@ from duplo.reauthor_assemble import (
 
 
 def _task(text: str) -> Task:
-    """Return a constructed-mode Task for assembly fixtures."""
-    return make_task(text, status=TaskStatus.TODO)
+    """Return a constructed-mode Task for assembly fixtures.
+
+    The assembled plan now passes through
+    ``ensure_acceptance_annotations`` (the reauthor path honors the
+    declared-acceptance contract), so each leaf task must carry a
+    provable acceptance signal. A single backtick command makes the
+    task command-exit provable without changing the fixture's
+    structural intent; the original ``text`` is preserved verbatim as a
+    prefix so substring assertions on phase/task content still hold.
+    """
+    return make_task(f"{text} (verify with `true`)", status=TaskStatus.TODO)
 
 
 def _phase(phase_id: str, title: str, *tasks: Task) -> Phase:
