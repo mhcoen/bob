@@ -1178,6 +1178,8 @@ def _print_stream_event(line: str) -> bool:
         data = _json.loads(line)
     except (ValueError, TypeError):
         return False
+    if not isinstance(data, dict):
+        return False
 
     if data.get("type") == "assistant":
         for block in data.get("message", {}).get("content", []):

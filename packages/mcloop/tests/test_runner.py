@@ -667,6 +667,43 @@ def test_print_stream_event_invalid_json(capsys):
     assert captured.out == ""
 
 
+def test_print_stream_event_json_integer(capsys):
+    """Bare JSON integer lines should be silently ignored."""
+    assert _print_stream_event("9\n") is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_json_string(capsys):
+    """Bare JSON string lines should be silently ignored."""
+    assert _print_stream_event('"hello"') is False
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_print_stream_event_visible_tool_use_regression(capsys, monkeypatch):
+    """Well-formed assistant tool_use events should still parse normally."""
+    import json
+
+    monkeypatch.setattr("mcloop.runner._SUPPRESS_ALL_TOOLS", False)
+    event = {
+        "type": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "Bash",
+                    "input": {"command": "ruff check ."},
+                }
+            ]
+        },
+    }
+
+    assert _print_stream_event(json.dumps(event)) is True
+    captured = capsys.readouterr()
+    assert captured.out == "  Bash: ruff check .\n"
+
+
 # --- run_task prompt content ---
 
 
