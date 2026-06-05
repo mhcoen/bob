@@ -4332,6 +4332,39 @@ def test_dispatch_run_cli_non_sh_unchanged():
     mock.assert_called_once_with("./my_app --flag")
 
 
+def test_dispatch_run_cli_644_sh_runs_via_bash(tmp_path):
+    """Regression: a mode-644 (non-executable) .sh script runs via bash.
+
+    Executes a real script end-to-end (no mock). Direct exec of a 644 file
+    would fail with 126; bash-wrapping the .sh path lets it exit 0.
+    """
+    script = tmp_path / "verify.sh"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o644)
+
+    result = _dispatch_auto_action("run_cli", str(script))
+
+    assert "exit_code: 0" in result
+    assert "STATUS: OK" in result
+    assert "126" not in result
+
+
+def test_dispatch_run_cli_non_sh_invoked_directly(tmp_path):
+    """Regression: a non-.sh command is invoked directly, not bash-wrapped.
+
+    A mode-644 extensionless script is not rewritten, so the shell execs it
+    directly and fails with 126 (permission denied). A bash wrap would have
+    made it exit 0, so 126 proves the command was left unchanged.
+    """
+    script = tmp_path / "verify"
+    script.write_text("#!/bin/sh\nexit 0\n")
+    script.chmod(0o644)
+
+    result = _dispatch_auto_action("run_cli", str(script))
+
+    assert "exit_code: 126" in result
+
+
 def test_dispatch_run_cli_crash():
     """run_cli reports CRASHED on non-zero exit."""
     mock_result = MagicMock()
