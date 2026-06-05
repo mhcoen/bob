@@ -32,6 +32,7 @@ from mcloop._planfile_compat import (
     parse_auto_task,
     parse_description,
     purge_completed_bugs,
+    reset_task,
     user_task_instructions,
 )
 from mcloop._planfile_compat import (
@@ -332,6 +333,7 @@ def _enforce_canonical_inputs(plan_path: Path, bugs_path: Path) -> None:
     Runs at ``run_loop`` entry, before pre-loop mutation sites:
 
       * the ``--retry`` ``clear_failed_markers`` calls
+      * the ``--retry-task`` ``reset_task`` calls
       * the ``_check_interrupted`` skip / describe mutation
         (lifecycle.py)
 
@@ -721,6 +723,7 @@ def _main() -> None:
         stop_after_one=args.stop_after_one,
         task_timeout=args.timeout,
         retry=args.retry,
+        retry_tasks=getattr(args, "retry_task", None),
         no_plan_ledger=getattr(args, "no_plan_ledger", False),
         no_auto_reauthor=getattr(args, "no_auto_reauthor", False),
     )
@@ -1037,6 +1040,43 @@ def _build_and_write_summary(
         return None
 
 
+def _reset_failed_tasks(
+    task_ids: list[str],
+    plan_path: Path,
+    bugs_path: Path,
+) -> tuple[list[str], list[str]]:
+    """Reset each ``[!]``-failed task named by id back to pending.
+
+    Searches BUGS.md before PLAN.md (the loop's task-selection priority) for a
+    failed task whose ``task_id`` matches, and flips the first match to ``[ ]``
+    via :func:`reset_task`. Returns ``(reset_ids, missing_ids)``: ids that were
+    reset and ids with no matching failed task (already pending, completed, or
+    absent). Duplicate ids in the request are de-duplicated.
+    """
+    reset_ids: list[str] = []
+    missing_ids: list[str] = []
+    seen: set[str] = set()
+    for task_id in task_ids:
+        if task_id in seen:
+            continue
+        seen.add(task_id)
+        matched = False
+        for path in (bugs_path, plan_path):
+            if not path.exists():
+                continue
+            for task in _all_tasks(parse(path)):
+                if task.failed and task.task_id == task_id:
+                    reset_task(path, task)
+                    reset_ids.append(task_id)
+                    matched = True
+                    break
+            if matched:
+                break
+        if not matched:
+            missing_ids.append(task_id)
+    return reset_ids, missing_ids
+
+
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
@@ -1051,6 +1091,7 @@ def run_loop(
     stop_after_one: bool = False,
     task_timeout: int | None = None,
     retry: bool = False,
+    retry_tasks: list[str] | None = None,
     no_plan_ledger: bool = False,
     no_auto_reauthor: bool = False,
 ) -> RunStatus:
@@ -1106,6 +1147,32 @@ def run_loop(
                 formatting.system_msg(
                     f"--retry: reset {cleared_total} failed task marker"
                     f"{'s' if cleared_total != 1 else ''}"
+                ),
+                flush=True,
+            )
+
+    # --retry-task TASK_ID: reset only the named failed task(s) back to
+    # pending, leaving every other [!] marker intact. This is the targeted
+    # retry path for a single task whose blocking condition (a missing mapped
+    # test, an absent waiver, a stale baseline) has since been cleared, so the
+    # operator does not have to un-fail the whole plan with --retry. Runs in
+    # the same window as --retry: after the canonical gate, before the
+    # interrupt check.
+    if retry_tasks:
+        reset_ids, missing_ids = _reset_failed_tasks(retry_tasks, plan_path, bugs_path)
+        if reset_ids:
+            print(
+                formatting.system_msg(
+                    f"--retry-task: reset {len(reset_ids)} failed task"
+                    f"{'s' if len(reset_ids) != 1 else ''} to pending"
+                    f" ({', '.join(reset_ids)})"
+                ),
+                flush=True,
+            )
+        if missing_ids:
+            print(
+                formatting.system_msg(
+                    f"--retry-task: no failed task found for {', '.join(missing_ids)}"
                 ),
                 flush=True,
             )
@@ -2865,6 +2932,18 @@ def _parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--retry-task",
+        dest="retry_task",
+        action="append",
+        metavar="TASK_ID",
+        help=(
+            "Reset only the named failed task ([!] back to [ ]) to pending"
+            " before starting the loop, leaving other failed markers intact."
+            " Repeatable. Use to retry one task whose blocking condition has"
+            " been cleared."
+        ),
+    )
+    parser.add_argument(
         "--no-plan-ledger",
         dest="no_plan_ledger",
         action="store_true",
@@ -2984,6 +3063,7 @@ def _parse_args() -> argparse.Namespace:
         "stop_after_one": ("--stop-after-one", False),
         "timeout": ("--timeout", None),
         "retry": ("--retry", False),
+        "retry_task": ("--retry-task", None),
         "no_plan_ledger": ("--no-plan-ledger", False),
         "no_auto_reauthor": ("--no-auto-reauthor", False),
     }

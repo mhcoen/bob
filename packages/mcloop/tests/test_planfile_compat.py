@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from plan_fixtures import canonical_plan_text
+
 from mcloop import _planfile_compat as shim
 
 
@@ -111,3 +113,67 @@ def test_mark_failed_marks_idless_bugs_task_by_source_position(tmp_path: Path) -
     shim.mark_failed(path, task)
 
     assert path.read_text() == "## Bugs\n\n- [!] Fix crash in loose bug queue\n"
+
+
+def test_reset_task_flips_failed_task_back_to_pending_by_id(tmp_path: Path) -> None:
+    """A [!]-failed migrated task is reset to [ ] and becomes selectable again."""
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        canonical_plan_text("## Stage 1: Core\n\n- [ ] First task\n- [ ] Second task\n")
+    )
+    first = shim.parse(path)[0]
+    assert first.task_id is not None
+    shim.mark_failed(path, first)
+
+    failed = next(t for t in shim.parse(path) if t.failed)
+    # A failed task is skipped by the scheduler, so the next task is the other one.
+    assert shim.find_next(shim.parse(path)).text == "Second task"
+
+    shim.reset_task(path, failed)
+
+    reset = shim.parse(path)[0]
+    assert not reset.failed
+    assert not reset.checked
+    # Now runnable again: it is the first actionable task once more.
+    assert shim.find_next(shim.parse(path)).text == "First task"
+
+
+def test_reset_task_resets_idless_bugs_task_by_source_position(tmp_path: Path) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [!] Fix crash in loose bug queue\n")
+    failed = next(t for t in shim.parse(path) if t.failed)
+    assert failed.task_id is None
+
+    shim.reset_task(path, failed)
+
+    assert path.read_text() == "## Bugs\n\n- [ ] Fix crash in loose bug queue\n"
+
+
+def test_reset_task_is_idempotent_on_pending_task(tmp_path: Path) -> None:
+    """Resetting a task that is already pending is a no-op, not an error."""
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [ ] Already pending\n")
+    task = shim.find_next(shim.parse(path))
+    assert task is not None
+
+    shim.reset_task(path, task)
+
+    assert path.read_text() == "## Bugs\n\n- [ ] Already pending\n"
+
+
+def test_reset_task_leaves_other_failed_markers_intact(tmp_path: Path) -> None:
+    """Resetting one failed task does not touch a sibling's [!] marker."""
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        canonical_plan_text("## Stage 1: Core\n\n- [ ] First task\n- [ ] Second task\n")
+    )
+    tasks = shim.parse(path)
+    shim.mark_failed(path, tasks[0])
+    shim.mark_failed(path, tasks[1])
+
+    first_failed = next(t for t in shim.parse(path) if t.failed and t.text == "First task")
+    shim.reset_task(path, first_failed)
+
+    after = {t.text: t for t in shim.parse(path)}
+    assert not after["First task"].failed
+    assert after["Second task"].failed

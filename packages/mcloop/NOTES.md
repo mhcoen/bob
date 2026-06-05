@@ -2,6 +2,20 @@
 
 ## Observations
 
+### [4] [T-000004] `--retry-task` resolves a colliding id to BUGS.md first (2026-06-04)
+`--retry-task TASK_ID` (run_loop `retry_tasks=`) resets a single `[!]`-failed
+task back to `[ ]` via `_reset_failed_tasks`, which searches BUGS.md before
+PLAN.md and stops at the first failed match for that id. PLAN.md and BUGS.md
+are migrated independently, so the same `T-NNNNNN` can name a task in each
+file (both files start numbering at T-000001). When an operator passes such a
+colliding id, only the BUGS.md task is reset; the PLAN.md namesake keeps its
+`[!]` marker. This matches the loop's task-selection priority (bugs first) and
+is covered by `test_reset_failed_tasks_resets_named_and_reports_missing`, but
+it means an operator wanting the PLAN.md task reset for a colliding id has no
+way to disambiguate today. Acceptable for now since within a single run the
+ids the operator sees in one file are the ones they act on; revisit if
+cross-file id collisions become user-visible.
+
 ### [3] [T-000003] `has_waiver` now keys on task identity, with baseline as a fallback (2026-06-04)
 `waivers.has_waiver` no longer requires exact `baseline_sha` equality. It
 matches a recorded waiver when `changed_input` matches AND either the

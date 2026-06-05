@@ -65,6 +65,7 @@ from mcloop.main import (
     _maybe_auto_wrap,
     _parse_args,
     _reinject_wrappers,
+    _reset_failed_tasks,
     _run_batch,
     _run_build,
     _save_interrupt_state,
@@ -10346,6 +10347,109 @@ def test_run_loop_retry_false_leaves_failed_markers(tmp_path):
     # The [!] markers must survive when --retry is not passed.
     assert_canonical_checkbox(current.read_text(), "!", "failed feature")
     assert_canonical_checkbox(bugs.read_text(), "!", "failed bug")
+
+
+def test_parse_args_retry_task():
+    """--retry-task collects task ids into a list and is repeatable."""
+    args = _parse("--retry-task", "T-000004")
+    assert args.retry_task == ["T-000004"]
+    args = _parse("--retry-task", "T-000004", "--retry-task", "T-000007")
+    assert args.retry_task == ["T-000004", "T-000007"]
+
+
+def test_parse_args_retry_task_default_none():
+    args = _parse()
+    assert args.retry_task is None
+
+
+def test_reset_failed_tasks_resets_named_and_reports_missing(tmp_path):
+    """_reset_failed_tasks flips only the named failed task and reports unmatched ids."""
+    from mcloop._planfile_compat import mark_failed, parse
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(canonical_plan_text("# Plan\n\n## Stage 1: Core\n- [ ] First\n- [ ] Second\n"))
+    bugs = tmp_path / "BUGS.md"
+    bugs.write_text(canonical_plan_text("## Bugs\n- [ ] Loose bug\n"))
+
+    # Fail both plan tasks and the bug so there are markers to reset.
+    plan_tasks = _all_tasks(parse(plan))
+    for t in plan_tasks:
+        mark_failed(plan, t)
+    bug_task = _all_tasks(parse(bugs))[0]
+    mark_failed(bugs, bug_task)
+
+    # Each file is migrated independently, so PLAN's "First" and BUGS' "Loose
+    # bug" both get the first id (T-000001). Target PLAN's "Second" (a distinct
+    # id) plus the bug so the requested ids do not collide, and rely on the
+    # colliding "First"/"Loose bug" pair to prove the BUGS-before-PLAN search
+    # order: the bug id resolves to the bug, leaving PLAN's "First" untouched.
+    second_id = next(t.task_id for t in _all_tasks(parse(plan)) if t.text == "Second")
+    bug_id = next(t.task_id for t in _all_tasks(parse(bugs)) if t.text == "Loose bug")
+
+    reset_ids, missing_ids = _reset_failed_tasks([second_id, bug_id, "T-999999"], plan, bugs)
+
+    assert set(reset_ids) == {second_id, bug_id}
+    assert missing_ids == ["T-999999"]
+
+    plan_after = {t.text: t for t in _all_tasks(parse(plan))}
+    assert not plan_after["Second"].failed
+    # "First" shares the bug's id but is searched after BUGS, so it keeps [!].
+    assert plan_after["First"].failed
+    assert not _all_tasks(parse(bugs))[0].failed
+
+
+def test_run_loop_retry_task_resets_only_named_marker(tmp_path):
+    """run_loop(retry_tasks=[id]) resets just that task; other [!] markers survive."""
+    from mcloop._planfile_compat import parse
+
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        canonical_plan_text(
+            "# Plan\n\n## Stage 1: Core\n- [!] failed feature\n- [!] other failed\n"
+            "- [ ] next feature\n"
+        )
+    )
+    (tmp_path / ".git").mkdir()
+
+    target_id = next(t.task_id for t in _all_tasks(parse(plan)) if t.text == "failed feature")
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._commit", return_value=""),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["bugfix.txt"]),
+        patch("mcloop.main._worktree_status", return_value=" M bugfix.txt"),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main._run_audit_fix_cycle"),
+    ):
+        mock_checks.return_value = MagicMock(passed=True)
+
+        def runner_side_effect(*a, **kw):
+            (tmp_path / "bugfix.txt").write_text("done")
+            content = plan.read_text()
+            content = content.replace(
+                f"- [ ] {target_id}: failed feature",
+                f"- [x] {target_id}: failed feature",
+                1,
+            )
+            plan.write_text(content)
+            return MagicMock(success=True, output="done", exit_code=0)
+
+        mock_run.side_effect = runner_side_effect
+
+        run_loop(plan, max_retries=3, stop_after_one=True, retry_tasks=[target_id])
+
+    text = plan.read_text()
+    # The named task was reset (and then worked); the other failed task survives.
+    assert_canonical_checkbox(text, "!", "other failed")
 
 
 def test_stop_after_one_exits_after_single_task(tmp_path):

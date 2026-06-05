@@ -28,6 +28,9 @@ from bob_tools.planfile import (
     update,
 )
 from bob_tools.planfile import Task as PlanTask
+from bob_tools.planfile import (
+    reset_task as _reset_task_op,
+)
 
 
 @dataclass
@@ -502,6 +505,65 @@ def mark_failed(path: str | Path, task: Task) -> None:
         return
     task_id = _require_task_id(task, "mark_failed")
     _update_with_retry(Path(path), lambda plan: fail_task(plan, task_id, "failed")[0])
+
+
+def _reset_failed_idless(path: Path, task: Task) -> None:
+    """Flip an id-less loose BUGS.md task from ``[!]`` back to ``[ ]`` by position."""
+    lines = path.read_text().splitlines(keepends=True)
+    candidate_indexes = [task.line_number]
+    candidate_indexes.extend(
+        idx
+        for idx, line in enumerate(lines)
+        if idx != task.line_number
+        and (match := CHECKBOX_RE.match(_split_line_ending(line)[0]))
+        and match.group(2) == "!"
+        and match.group(3) == task.text
+    )
+
+    for idx in candidate_indexes:
+        if idx < 0 or idx >= len(lines):
+            continue
+        body, ending = _split_line_ending(lines[idx])
+        match = CHECKBOX_RE.match(body)
+        if match is None:
+            continue
+        if match.group(3) != task.text:
+            continue
+        state = match.group(2)
+        if state == " ":
+            # Already pending; reset is idempotent.
+            return
+        if state != "!":
+            # Never demote a [x] DONE task to pending via this path.
+            continue
+        lines[idx] = f"{match.group(1)}- [ ] {match.group(3)}{ending}"
+        path.write_text("".join(lines))
+        return
+
+    raise ValueError(
+        f"reset_task could not locate id-less failed task at line {task.line_number + 1}"
+    )
+
+
+def reset_task(path: str | Path, task: Task) -> None:
+    """Flip a ``[!]``-failed ``task`` back to ``[ ]`` pending so it can be retried.
+
+    The inverse of :func:`mark_failed`. A failed task is otherwise skipped
+    permanently by the scheduler (``_search_tasks`` treats ``[!]`` as a hard
+    stop); resetting it to pending makes it eligible again once whatever
+    blocked it — a missing mapped test, an absent waiver, a stale baseline —
+    has been cleared. By task id this delegates to planfile's ``reset_task``,
+    which records a ``none``-kind settlement because retry is an operator
+    decision, not new evidence about the implementation. Id-less loose
+    BUGS.md tasks are flipped by source position, mirroring :func:`mark_failed`.
+    The operation is idempotent: a task that is already pending is left
+    untouched.
+    """
+    if task.task_id is None:
+        _reset_failed_idless(Path(path), task)
+        return
+    task_id = _require_task_id(task, "reset_task")
+    _update_with_retry(Path(path), lambda plan: _reset_task_op(plan, task_id)[0])
 
 
 def clear_failed_markers(path: str | Path) -> int:
