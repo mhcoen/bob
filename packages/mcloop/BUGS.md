@@ -3,7 +3,7 @@
 ## Bugs
 
 - [x] T-000001: In `mcloop/coverage_verify.py` (using an AST check, consistent with `change_class.py`), add detection of a coverage-exempt Python file class: a `.py` file whose classes are all `typing.Protocol` subclasses or ABCs with only abstract/`...`/`pass`/docstring-only method bodies, and/or whose module body is solely imports and re-exports with no executable statements. When a changed `.py` file is in this class, the coverage gate passes it without requiring an executed-line/mapped-test proof and without forcing a waiver. Files containing any executable logic remain gated as today. [fix: "coverage gate exempts Protocol/ABC/re-export-only Python files"] <!-- completed_at: 2026-06-05T04:39:05Z -->
-- [ ] T-000002: Add tests: a Protocol-only module, an ABC-only module, and an import-and-re-export-only `__init__.py` each pass the gate with no mapped test and no waiver; a module with real executable logic and no exercising test still fails the gate; a module mixing a Protocol with one real executable function is NOT exempt (still gated). [fix: "regression: un-coverable Python exempt, real logic still gated"]
+- [x] T-000002: Add tests: a Protocol-only module, an ABC-only module, and an import-and-re-export-only `__init__.py` each pass the gate with no mapped test and no waiver; a module with real executable logic and no exercising test still fails the gate; a module mixing a Protocol with one real executable function is NOT exempt (still gated). [fix: "regression: un-coverable Python exempt, real logic still gated"] <!-- completed_at: 2026-06-05T04:40:30Z -->
 
 ### `parse_auto_task` now over-rejects: a bare-path/bare-command run_cli task with no backticks errors instead of running
 
