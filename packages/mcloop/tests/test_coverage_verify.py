@@ -14,6 +14,7 @@ from mcloop.coverage_verify import (
     _parse_diff_new_lines,
     changed_new_lines,
     dependent_test_files,
+    is_coverage_exempt_python,
     verify_change_covered,
 )
 
@@ -213,6 +214,149 @@ def test_run_coverage_failing_tests_returns_none(tmp_path: Path) -> None:
     with patch("mcloop.coverage_verify.subprocess.run", side_effect=fake):
         executed, reason = _run_coverage(tmp_path, ["tests/test_mod.py"], "mod.py", 60)
     assert executed is None
+
+
+# --- is_coverage_exempt_python (AST interface/re-export detection) ----------
+
+
+def test_exempt_pure_reexport_module() -> None:
+    src = (
+        '"""Public API surface."""\n'
+        "from __future__ import annotations\n\n"
+        "from pkg.widget import Widget\n"
+        "from pkg.engine import Engine\n\n"
+        '__all__ = ["Widget", "Engine"]\n'
+    )
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_exempt_annotated_all_reexport() -> None:
+    src = 'from pkg.a import A\n\n__all__: list[str] = ["A"]\n'
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_exempt_protocol_with_ellipsis_bodies() -> None:
+    src = (
+        "from typing import Protocol\n\n\n"
+        "class Reader(Protocol):\n"
+        '    """A reader."""\n'
+        "    name: str\n\n"
+        "    def read(self, n: int) -> bytes: ...\n\n"
+        "    def close(self) -> None: ...\n"
+    )
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_exempt_typing_dotted_protocol_and_generic() -> None:
+    src = (
+        "import typing\n\n\n"
+        "class Store(typing.Protocol[typing.TypeVar('T')]):\n"
+        "    def get(self, k: str): ...\n"
+    )
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_exempt_abc_with_abstractmethods() -> None:
+    src = (
+        "import abc\nfrom abc import ABC, abstractmethod\n\n\n"
+        "class Base(ABC):\n"
+        "    @abstractmethod\n"
+        "    def run(self) -> int:\n"
+        "        raise NotImplementedError\n\n"
+        "    @abstractmethod\n"
+        "    def stop(self) -> None:\n"
+        "        pass\n"
+    )
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_exempt_abcmeta_metaclass() -> None:
+    src = "from abc import ABCMeta\n\n\nclass Base(metaclass=ABCMeta):\n    def go(self): ...\n"
+    assert is_coverage_exempt_python(src) is True
+
+
+def test_not_exempt_module_with_function_def() -> None:
+    src = "def helper(x):\n    return x + 1\n"
+    assert is_coverage_exempt_python(src) is False
+
+
+def test_not_exempt_module_level_executable_statement() -> None:
+    src = "import os\n\nVALUE = os.getcwd()\n"
+    assert is_coverage_exempt_python(src) is False
+
+
+def test_not_exempt_plain_class_without_interface_base() -> None:
+    # A concrete (non-Protocol/ABC) class is gated even with a trivial body.
+    src = "class Thing:\n    def do(self): ...\n"
+    assert is_coverage_exempt_python(src) is False
+
+
+def test_not_exempt_protocol_with_concrete_method() -> None:
+    src = (
+        "from typing import Protocol\n\n\n"
+        "class Calc(Protocol):\n"
+        "    def add(self, a, b):\n"
+        "        return a + b\n"
+    )
+    assert is_coverage_exempt_python(src) is False
+
+
+def test_not_exempt_syntax_error() -> None:
+    assert is_coverage_exempt_python("def (:\n") is False
+
+
+def test_not_exempt_empty_module() -> None:
+    # Nothing inert to point at -- fall through to the normal gate.
+    assert is_coverage_exempt_python("") is False
+    assert is_coverage_exempt_python('"""docs only."""\n') is False
+
+
+def test_not_exempt_conditional_import_block() -> None:
+    # A try/except around imports is executable control flow -> gated.
+    src = (
+        "try:\n    from fast import Thing\n"
+        "except ImportError:\n    from slow import Thing\n\n"
+        '__all__ = ["Thing"]\n'
+    )
+    assert is_coverage_exempt_python(src) is False
+
+
+def test_verify_exempt_interface_file_passes_without_coverage(tmp_path: Path) -> None:
+    """A changed Protocol/ABC/re-export file is proven without a coverage run
+    and without resolving changed lines."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "ports.py").write_text(
+        "from typing import Protocol\n\n\n"
+        "class Port(Protocol):\n"
+        "    def send(self, data: bytes) -> None: ...\n"
+    )
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines") as changed,
+        patch("mcloop.coverage_verify._run_coverage") as run_cov,
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/ports.py", [])
+    assert verdict.proven is True
+    assert "interface-only" in verdict.reason
+    assert verdict.candidate_nodes == ()
+    # The exemption short-circuits before any line/coverage work.
+    changed.assert_not_called()
+    run_cov.assert_not_called()
+
+
+def test_verify_logic_bearing_py_file_still_gated(tmp_path: Path) -> None:
+    """An ordinary .py file with executable logic is not exempt and still
+    goes through the coverage path."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "widget.py").write_text("def widget():\n    return 42\n")
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines", return_value={1}),
+        patch("mcloop.coverage_verify.dependent_test_files", return_value=[]),
+    ):
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/widget.py", [])
+    assert verdict.proven is False
+    assert "no scoped candidate" in verdict.reason
 
 
 # --- verify_change_covered (orchestrator) -----------------------------------

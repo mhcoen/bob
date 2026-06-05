@@ -2,6 +2,21 @@
 
 ## Observations
 
+### [1] [T-000001] Coverage-exemption AST check is deliberately conservative (2026-06-04)
+`is_coverage_exempt_python` in `mcloop/coverage_verify.py` exempts a changed
+`.py` file from the coverage gate only when every top-level statement is inert:
+a docstring, an import, an `__all__` re-export assignment, or a Protocol/ABC
+interface class whose members are abstract stubs (`...`/`pass`/docstring/
+`raise NotImplementedError`). Two common interface-module idioms are NOT
+exempted and stay gated: a `try/except ImportError:` import guard and an
+`if TYPE_CHECKING:` block, because both are executable control flow. This
+keeps the check fail-closed (consistent with `change_class.py`), but means a
+genuinely logic-free Protocol/re-export module that uses either idiom will
+still require a mapped test or waiver. Worth revisiting only if such files
+show up in practice and the busywork is real. A bare class-level annotation
+(`name: str`, AnnAssign with no value) IS allowed inside an interface class;
+an annotation with a value is not.
+
 ### [1] [T-000001] `run_cli` AUTO tasks now require a backtick-delimited command (2026-06-04)
 `parse_auto_task` no longer hands the full `[AUTO:run_cli]` prose to the shell.
 For the `run_cli` action it extracts the single backtick-quoted command from

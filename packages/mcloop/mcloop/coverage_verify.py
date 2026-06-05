@@ -57,6 +57,171 @@ class CoverageVerdict:
 
 
 # --------------------------------------------------------------------------
+# Coverage-exempt Python file class (interface / re-export only).
+# --------------------------------------------------------------------------
+#
+# Some changed ``.py`` files carry no executable application logic and so
+# have no coverage line a test could meaningfully execute:
+#
+#   * pure *interface* modules -- every class is a ``typing.Protocol``
+#     subclass or an ABC whose method bodies are only abstract stubs
+#     (``...`` / ``pass`` / a docstring / ``raise NotImplementedError``),
+#     and
+#   * pure *re-export* modules -- the module body is solely imports and an
+#     ``__all__`` re-export list, with no executable statements.
+#
+# A change confined to such a file cannot be proven by coverage (there is
+# nothing to cover) and forcing a mapped test or a waiver for it is
+# busywork. Detection is a conservative AST check, consistent in spirit
+# with :mod:`mcloop.change_class`: anything carrying real executable logic
+# (a function definition with a body, a module-level call, an ``if`` block,
+# a concrete class) makes the file NON-exempt, so the gate fails closed.
+
+# Bare-class-name bases that mark a class as an interface (Protocol/ABC).
+_INTERFACE_BASE_NAMES = frozenset({"Protocol", "ABC"})
+_INTERFACE_METACLASS_NAMES = frozenset({"ABCMeta"})
+
+
+def _is_docstring_stmt(stmt: ast.stmt) -> bool:
+    """True iff *stmt* is a bare string-literal expression (a docstring)."""
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and isinstance(stmt.value.value, str)
+    )
+
+
+def _is_ellipsis_stmt(stmt: ast.stmt) -> bool:
+    """True iff *stmt* is a bare ``...`` expression."""
+    return (
+        isinstance(stmt, ast.Expr)
+        and isinstance(stmt.value, ast.Constant)
+        and stmt.value.value is Ellipsis
+    )
+
+
+def _is_not_implemented_raise(stmt: ast.stmt) -> bool:
+    """True iff *stmt* is ``raise NotImplementedError`` (with or without call)."""
+    if not isinstance(stmt, ast.Raise) or stmt.exc is None:
+        return False
+    exc = stmt.exc
+    if isinstance(exc, ast.Call):
+        exc = exc.func
+    return isinstance(exc, ast.Name) and exc.id == "NotImplementedError"
+
+
+def _is_trivial_stub_body(body: list[ast.stmt]) -> bool:
+    """True iff every statement in *body* is an abstract/no-op stub.
+
+    A stub body contains only docstrings, ``pass``, ``...``, and
+    ``raise NotImplementedError`` -- the conventional bodies of abstract
+    or Protocol methods. Any real statement makes the body non-trivial.
+    """
+    return all(
+        _is_docstring_stmt(s)
+        or isinstance(s, ast.Pass)
+        or _is_ellipsis_stmt(s)
+        or _is_not_implemented_raise(s)
+        for s in body
+    )
+
+
+def _base_simple_name(node: ast.expr) -> str | None:
+    """Return the trailing identifier of a base/metaclass expression.
+
+    Unwraps a generic subscript (``Protocol[T]`` -> ``Protocol``) and
+    resolves both bare names (``Protocol``) and dotted attributes
+    (``typing.Protocol`` -> ``Protocol``).
+    """
+    if isinstance(node, ast.Subscript):
+        node = node.value
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _is_interface_class(cls: ast.ClassDef) -> bool:
+    """True iff *cls* is a Protocol/ABC interface with only stub members.
+
+    The class must derive from ``Protocol``/``typing.Protocol`` or
+    ``ABC``/``abc.ABC`` (or declare ``metaclass=ABCMeta``), and every
+    statement in its body must be a docstring, ``pass``, ``...``, a bare
+    attribute annotation (``name: str``), or a method whose body is an
+    abstract/no-op stub. A concrete method body or any other class-level
+    statement disqualifies it.
+    """
+    is_interface = any(_base_simple_name(base) in _INTERFACE_BASE_NAMES for base in cls.bases)
+    if not is_interface:
+        for kw in cls.keywords:
+            if kw.arg == "metaclass" and _base_simple_name(kw.value) in _INTERFACE_METACLASS_NAMES:
+                is_interface = True
+                break
+    if not is_interface:
+        return False
+
+    for stmt in cls.body:
+        if _is_docstring_stmt(stmt) or isinstance(stmt, ast.Pass) or _is_ellipsis_stmt(stmt):
+            continue
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if _is_trivial_stub_body(stmt.body):
+                continue
+            return False
+        if isinstance(stmt, ast.AnnAssign) and stmt.value is None:
+            # A bare type annotation (``name: str``) is a Protocol member
+            # declaration, not executable.
+            continue
+        return False
+    return True
+
+
+def _is_all_reexport(stmt: ast.stmt) -> bool:
+    """True iff *stmt* is an ``__all__ = [...]`` re-export assignment."""
+    if isinstance(stmt, ast.Assign):
+        return any(isinstance(t, ast.Name) and t.id == "__all__" for t in stmt.targets)
+    if isinstance(stmt, ast.AnnAssign):
+        return isinstance(stmt.target, ast.Name) and stmt.target.id == "__all__"
+    return False
+
+
+def is_coverage_exempt_python(source: str) -> bool:
+    """True iff *source* is an interface-only or re-export-only module.
+
+    A module is coverage-exempt when every top-level statement is inert:
+    a docstring, an import, an ``__all__`` re-export assignment, or a
+    Protocol/ABC interface class whose members are abstract stubs. Such a
+    file has no executable line a test could cover. The check is
+    conservative -- a module-level function definition, call, conditional,
+    concrete class, or any unparseable input returns False so the gate
+    keeps requiring a mapped test or waiver.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+
+    saw_exempt_content = False
+    for stmt in tree.body:
+        if _is_docstring_stmt(stmt):
+            continue
+        if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            saw_exempt_content = True
+            continue
+        if _is_all_reexport(stmt):
+            saw_exempt_content = True
+            continue
+        if isinstance(stmt, ast.ClassDef):
+            if _is_interface_class(stmt):
+                saw_exempt_content = True
+                continue
+            return False
+        # Any other top-level statement carries executable logic.
+        return False
+    return saw_exempt_content
+
+
+# --------------------------------------------------------------------------
 # Changed-line discovery (against the task's pre-edit baseline).
 # --------------------------------------------------------------------------
 
@@ -364,6 +529,18 @@ def verify_change_covered(
             (),
         )
 
+    try:
+        source_text = (project_dir / src).read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        source_text = None
+    if source_text is not None and is_coverage_exempt_python(source_text):
+        return CoverageVerdict(
+            True,
+            "interface-only Python file (Protocol/ABC abstract stubs and/or "
+            "import re-exports) carries no executable logic to cover",
+            (),
+        )
+
     changed = changed_new_lines(project_dir, baseline_sha, src)
     if changed is None:
         return CoverageVerdict(
@@ -408,5 +585,6 @@ __all__ = [
     "CoverageVerdict",
     "changed_new_lines",
     "dependent_test_files",
+    "is_coverage_exempt_python",
     "verify_change_covered",
 ]
