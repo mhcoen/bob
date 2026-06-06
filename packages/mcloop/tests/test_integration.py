@@ -1,11 +1,14 @@
 """Integration tests. Exercise the full loop with mocked subprocesses."""
 
+import dataclasses
 import subprocess
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
+from bob_tools.planfile import load as _bt_load
+from bob_tools.planfile import render_plan as _bt_render
 from plan_fixtures import assert_canonical_checkbox, canonical_plan_text
 
 from mcloop.audit import AuditResult, _run_audit_fix_cycle
@@ -20,6 +23,26 @@ def _isolated_git_state():
     stack.enter_context(patch("mcloop.main._has_uncommitted_changes", return_value=False))
     stack.enter_context(patch("mcloop.main._worktree_status", return_value=""))
     return stack
+
+
+def _dirty_plan_metadata(plan_md: Path) -> None:
+    """Leave metadata-only residue in PLAN.md that stays canonical.
+
+    Stamps a ``created_at`` on the first task — a real, git-detectable
+    edit that ``_changed_files`` excludes (PLAN.md is metadata) but
+    ``_has_uncommitted_changes`` sees. Unlike a raw ``+ "\\n"`` append it
+    keeps PLAN.md constructed, so the later strict-canonical check-off
+    save succeeds. Simulates residue without corrupting the plan.
+    """
+    plan_obj = _bt_load(plan_md)
+    phase = plan_obj.phases[0]
+    touched = dataclasses.replace(phase.tasks[0], created_at="2020-01-01T00:00:00Z")
+    new_phase = dataclasses.replace(phase, tasks=(touched,) + phase.tasks[1:])
+    # write_text (not save) so no PLAN.md.lock sidecar is created — that
+    # sidecar would otherwise show up in _changed_files as real work.
+    plan_md.write_text(
+        _bt_render(dataclasses.replace(plan_obj, phases=(new_phase,) + plan_obj.phases[1:]))
+    )
 
 
 def _make_project(tmp_path, checklist_text):
@@ -45,7 +68,11 @@ def _init_repo(root: Path) -> None:
         check=True,
     )
     subprocess.run(["git", "config", "user.name", "Test"], cwd=root, check=True)
-    (root / "BUGS.md").write_text("## Bugs\n\n")
+    # Constructed (magic-line) empty bugs section so the run-loop preflight
+    # no-ops BUGS.md instead of migrating it — a migration would otherwise
+    # leave BUGS.md uncommitted and pollute the real-git change detection
+    # the metadata-only guard tests rely on.
+    (root / "BUGS.md").write_text("<!-- bob-plan-format: 1 -->\n\n## Bugs\n")
     subprocess.run(["git", "add", "-A"], cwd=root, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "baseline"], cwd=root, check=True)
 
@@ -687,7 +714,7 @@ def test_metadata_only_autofix_guard_accepts_committed_task_work(
         (src_dir / "feature.py").write_text("VALUE = 1\n")
         subprocess.run(["git", "add", "src/feature.py"], cwd=project_dir, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "work"], cwd=project_dir, check=True)
-        (project_dir / "PLAN.md").write_text((project_dir / "PLAN.md").read_text() + "\n")
+        _dirty_plan_metadata(project_dir / "PLAN.md")
         return _ok_run_result()
 
     mock_run.side_effect = _commit_work_then_dirty_metadata
@@ -730,7 +757,7 @@ def test_metadata_only_autofix_guard_still_retries_without_committed_work(
 
     def _dirty_metadata_only(*args, **kwargs):
         project_dir = args[2]
-        (project_dir / "PLAN.md").write_text((project_dir / "PLAN.md").read_text() + "\n")
+        _dirty_plan_metadata(project_dir / "PLAN.md")
         return _ok_run_result()
 
     mock_run.side_effect = _dirty_metadata_only

@@ -21,10 +21,25 @@ Plan.
 
 Per v4 Decision 4, both ``save`` and ``update`` take a keyword-only
 ``validation`` argument whose literal value is either ``"canonical"``
-(the default) or ``"unchecked"``. ``canonical`` runs
-:func:`bob_tools.planfile.operations.assert_mcloop_canonical` against
-the plan and writes the exact rendered text the validator approved,
-so a non-canonical plan cannot reach disk through the default path.
+(the default) or ``"unchecked"``. ``canonical`` is the storage-integrity
+gate: it runs ``validate_plan(plan, constructed=True,
+require_acceptance=False)`` followed by
+:func:`bob_tools.planfile.operations.assert_mcloop_canonical`, and
+writes the exact rendered text the latter approved. So ``canonical``
+guarantees the mcloop canonical-input contract (R1/R2 + semantic
+round-trip), no duplicate task ids, AND the constructed-mode STRUCTURAL
+invariants (``magic_version == 1``, contiguous ordinals, phase
+keyword/phase_id, no duplicate phase ids, task id presence/format, no
+``trailing_lines``, scalar field-stability INCLUDING the embedded-newline
+preamble check, per-task field-stability) — a plan violating any of
+those cannot reach disk through the default path. ``canonical`` does
+NOT enforce declared-acceptance completeness: acceptance is a proof
+contract enforced at the AUTHORING layer (duplo authoring paths /
+:func:`add_phase_task` / mcloop enforce, all at the default
+``require_acceptance=True``), not at the save gate. This split exists
+for the legacy-migration window, where a pre-acceptance PLAN.md must be
+repairable and re-saveable structurally without first backfilling
+acceptance onto every legacy leaf task.
 ``unchecked`` falls back to a plain :func:`render_plan` and is
 intended only for low-level tests of atomic-write, lock, and crash
 behavior — call sites outside ``bob_tools.planfile.tests`` are gated
@@ -54,7 +69,11 @@ from pathlib import Path
 from typing import Literal
 
 from bob_tools.planfile.model import Plan, Task
-from bob_tools.planfile.operations import _iter_plan_tasks, assert_mcloop_canonical
+from bob_tools.planfile.operations import (
+    _iter_plan_tasks,
+    assert_mcloop_canonical,
+    validate_plan,
+)
 from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.renderer import render_plan
 
@@ -179,19 +198,31 @@ def _render_for_validation(
 ) -> str:
     """Return the bytes to commit for ``plan`` under the given ``validation``.
 
-    Per v4 Decision 4: ``canonical`` delegates to
-    :func:`assert_mcloop_canonical`, which validates the plan against
-    the mcloop canonical-input contract and returns the exact rendered
-    text it inspected — so the bytes on disk equal the bytes the
-    validator approved. ``unchecked`` skips validation and returns a
-    plain :func:`render_plan` of the input. ``path`` is forwarded to
-    the validator so a re-parse syntax error names the file.
+    Per v4 Decision 4: ``canonical`` runs the constructed-mode
+    STRUCTURAL invariants via ``validate_plan(constructed=True,
+    require_acceptance=False)`` (acceptance deferred to the authoring
+    layer), then delegates to :func:`assert_mcloop_canonical`, which
+    validates the plan against the mcloop canonical-input contract and
+    returns the exact rendered text it inspected — so the bytes on disk
+    equal the bytes the validator approved. ``unchecked`` skips
+    validation and returns a plain :func:`render_plan` of the input.
+    ``path`` is forwarded to the validator so a re-parse syntax error
+    names the file.
 
     Centralizing the choice here keeps :func:`save` and the in-lock
     save inside :func:`update` honoring the same mode without
     duplicating the branch.
     """
     if validation == "canonical":
+        # Storage-integrity gate: enforce the constructed-mode STRUCTURAL
+        # invariants (magic_version, contiguous ordinals, phase keyword/
+        # id, duplicate phase ids, task id presence/format, trailing_lines,
+        # scalar field-stability INCLUDING the embedded-newline preamble
+        # check, per-task field-stability) but NOT acceptance-completeness.
+        # Acceptance is a proof contract enforced at the authoring layer
+        # (duplo authoring / add_phase_task / mcloop enforce) during the
+        # legacy-migration window, not at the save gate.
+        validate_plan(plan, constructed=True, require_acceptance=False)
         return assert_mcloop_canonical(plan, source_path=path)
     if validation == "unchecked":
         return render_plan(plan)
@@ -248,11 +279,15 @@ def save(
     Per v4 Decision 4, ``validation`` selects how the bytes-to-commit
     are produced:
 
-    * ``"canonical"`` (default) — run
+    * ``"canonical"`` (default) — run the constructed-mode structural
+      invariants (``validate_plan(constructed=True,
+      require_acceptance=False)``) then
       :func:`assert_mcloop_canonical` against ``plan`` and write the
-      exact rendered text the validator returned. A plan that fails
-      the mcloop canonical-input contract raises
-      :class:`PlanValidationError` and never reaches disk.
+      exact rendered text the validator returned. A plan that fails the
+      structural invariants or the mcloop canonical-input contract
+      raises :class:`PlanValidationError` and never reaches disk.
+      Declared-acceptance completeness is NOT checked here; it is an
+      authoring-layer contract (see the module docstring).
     * ``"unchecked"`` — render with :func:`render_plan` and write the
       result without validation. Reserved for low-level tests of
       atomic-write, lock, and crash behavior; non-test call sites are

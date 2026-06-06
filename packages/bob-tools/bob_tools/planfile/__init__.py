@@ -52,6 +52,10 @@ from bob_tools.planfile.plan_artifact import (
     PlanArtifactRejected,
     sanitize_plan_artifact,
 )
+from bob_tools.planfile.preflight import (
+    PlanPreflightError,
+    preflight_runtime_plan,
+)
 from bob_tools.planfile.renderer import canonicalize, render_plan
 from bob_tools.planfile.scheduling import next_tasks
 from bob_tools.planfile.status import (
@@ -80,6 +84,7 @@ __all__ = [
     "Plan",
     "PlanArtifactRejected",
     "PlanInconsistencyError",
+    "PlanPreflightError",
     "PlanSyntaxError",
     "PlanValidationError",
     "RuledOut",
@@ -104,6 +109,7 @@ __all__ = [
     "migrate",
     "next_tasks",
     "parse_plan",
+    "preflight_runtime_plan",
     "purge_done_bug_tasks",
     "render_plan",
     "replace_phase",

@@ -2237,9 +2237,9 @@ class TestLedgerSliceShape:
             "# proj\n"
             "## Phase phase_001: Phase phase_001 title\n"
             "\n"
-            "## Constraints\n"
+            "### Constraints\n"
             "\n"
-            "Network access is restricted.\n"
+            "network access is restricted.\n"
         )
 
         monkeypatch.setattr(reauthor, "_invoke_council_for_reauthor", _captured_invoke(captured))

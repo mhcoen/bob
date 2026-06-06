@@ -50,6 +50,10 @@ from bob_tools.planfile.operations import (
     next_tasks,
     validate_plan,
 )
+from bob_tools.planfile.preflight import (
+    PlanPreflightError,
+    preflight_runtime_plan,
+)
 
 EXIT_OK = 0
 EXIT_INVALID_PLAN = 1
@@ -146,18 +150,16 @@ def cmd_fmt(args: argparse.Namespace) -> int:
 def cmd_done(args: argparse.Namespace) -> int:
     path = Path(args.path)
     try:
-        plan = load(path)
+        plan = preflight_runtime_plan(path, notice=lambda m: print(m, file=sys.stderr))
     except PlanSyntaxError as exc:
         _print_parse_error(exc, sys.stderr)
+        return EXIT_INVALID_PLAN
+    except PlanPreflightError as exc:
+        print(str(exc), file=sys.stderr)
         return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
-    try:
-        validate_plan(plan)
-    except PlanValidationError as exc:
-        _print_validation_errors(exc, sys.stderr)
-        return EXIT_INVALID_PLAN
     try:
         new_plan, settlements = complete_task(plan, args.task_id)
     except ValueError as exc:
@@ -175,18 +177,16 @@ def cmd_done(args: argparse.Namespace) -> int:
 def cmd_fail(args: argparse.Namespace) -> int:
     path = Path(args.path)
     try:
-        plan = load(path)
+        plan = preflight_runtime_plan(path, notice=lambda m: print(m, file=sys.stderr))
     except PlanSyntaxError as exc:
         _print_parse_error(exc, sys.stderr)
+        return EXIT_INVALID_PLAN
+    except PlanPreflightError as exc:
+        print(str(exc), file=sys.stderr)
         return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
-    try:
-        validate_plan(plan)
-    except PlanValidationError as exc:
-        _print_validation_errors(exc, sys.stderr)
-        return EXIT_INVALID_PLAN
     try:
         new_plan, settlements = fail_task(plan, args.task_id, args.reason)
     except ValueError as exc:

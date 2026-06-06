@@ -11,6 +11,11 @@ import sys
 import time
 from pathlib import Path
 
+from bob_tools.planfile import (
+    PlanPreflightError,
+    preflight_runtime_plan,
+)
+
 import mcloop.lifecycle as _lifecycle
 from mcloop import formatting
 from mcloop._planfile_compat import (
@@ -40,7 +45,6 @@ from mcloop._planfile_compat import (
 )
 from mcloop._planfile_precondition import (
     PlanNotCanonicalError,
-    enforce_canonical,
 )
 from mcloop.audit import _run_audit_fix_cycle
 from mcloop.checks import (
@@ -333,32 +337,40 @@ _READONLY_TASK_PHRASES: tuple[str, ...] = (
 
 
 def _enforce_canonical_inputs(plan_path: Path, bugs_path: Path) -> None:
-    """B3 increment-3 wire-in: canonical-plan precondition gate.
+    """Runtime-mutation preflight: the single canonical-plan entry gate.
 
-    Runs at ``run_loop`` entry, before pre-loop mutation sites:
+    Runs once at ``run_loop`` entry, before every pre-loop mutation site:
 
       * the ``--retry`` ``clear_failed_markers`` calls
       * the ``--retry-task`` ``reset_task`` calls
       * the ``_check_interrupted`` skip / describe mutation
         (lifecycle.py)
+      * the per-task ``check_off`` / ``fail`` saves in the loop
 
-    Validates each plan-bearing file that exists on disk at the moment of the
-    gate. ``bugs_path`` is checked only if it exists; the loop creates it later
-    with a canonical ``## Bugs`` header on first run.
+    For each plan-bearing file that exists on disk, runs
+    :func:`bob_tools.planfile.preflight_runtime_plan`: an already-canonical
+    plan is left untouched; a cleanly-migratable legacy plan
+    (no magic line, id-less tasks, gappy ordinals) is migrated ONCE to the
+    constructed canonical form and written back (with a one-line notice) so
+    every subsequent strict-canonical save in the loop succeeds; a corrupt
+    plan (e.g. duplicate task ids) raises
+    :class:`bob_tools.planfile.PlanPreflightError`. ``bugs_path`` is checked
+    only if it exists; the loop creates it later with a canonical
+    ``## Bugs`` header on first run.
 
-    Raises ``PlanNotCanonicalError`` on the first non-canonical input,
-    which the top-level ``main()`` handler catches and translates to
-    exit code 3 (distinct from 1 = terminal failure, 2 = parser
-    corruption, 5 = Plan-Ledger pause).
+    ``PlanPreflightError`` (and the legacy ``PlanNotCanonicalError``) are
+    caught by the top-level ``main()`` handler and translated to exit code 3
+    (distinct from 1 = terminal failure, 2 = parser corruption, 5 =
+    Plan-Ledger pause).
     """
-    from bob_tools.planfile import parse_plan as _bt_parse_plan
-
     for path in (plan_path, bugs_path):
         if not path.exists():
             continue
-        text = path.read_text()
-        plan = _bt_parse_plan(text, source_path=path)
-        enforce_canonical(text, plan, source_path=path)
+        preflight_runtime_plan(
+            path,
+            notice=lambda message: print(formatting.system_msg(f"mcloop: {message}"), flush=True),
+            label=path.name,
+        )
 
 
 def _ensure_bugs_file(bugs_path: Path) -> None:
@@ -622,12 +634,14 @@ def main() -> None:
             except OSError:
                 pass  # Logging is best-effort; never let it mask the real error.
             sys.exit(2)
-        except PlanNotCanonicalError as exc:
-            # B3 increment 3: canonical-plan precondition rejected the
-            # input. Exit code 3 is reserved for this class so callers
-            # (CI, scripts) can distinguish "PLAN.md not migrated yet"
-            # from a generic run failure (1), a parser corruption (2),
-            # or a Plan-Ledger pause (5).
+        except (PlanNotCanonicalError, PlanPreflightError) as exc:
+            # B3 increment 3 + runtime preflight: the canonical-plan
+            # precondition gate rejected the input. Exit code 3 is
+            # reserved for this class so callers (CI, scripts) can
+            # distinguish "PLAN.md not migrated yet / corrupt" from a
+            # generic run failure (1), a parser corruption (2), or a
+            # Plan-Ledger pause (5). PlanPreflightError carries the
+            # constructed-validator messages naming what to fix by hand.
             print(f"\n!!! {exc}\n", file=sys.stderr)
             sys.exit(3)
         except SubscriptionPreflightError as exc:

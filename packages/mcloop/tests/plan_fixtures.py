@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-from bob_tools.planfile import migrate, parse_plan, render_plan
+from bob_tools.planfile import parse_plan, render_plan
+from bob_tools.planfile.preflight import _normalize_to_constructed
 
 _ACTIONABLE_CHECKBOX_RE = re.compile(r"^\s*- \[[ !]\] ", re.MULTILINE)
 _CHECKBOX_RE = re.compile(r"^\s*- \[[ xX!]\] ", re.MULTILINE)
@@ -43,10 +44,10 @@ def canonical_plan_text(text: str) -> str:
         if _CHECKBOX_RE.search(text) and (
             _PHASE_HEADER_RE.search(text) or _BUGS_HEADER_RE.search(text)
         ):
-            return render_plan(migrate(parse_plan(text)))
+            return render_plan(_normalize_to_constructed(parse_plan(text)))
         return text
     if _PHASE_HEADER_RE.search(text) or _BUGS_HEADER_RE.search(text):
-        return render_plan(migrate(parse_plan(text)))
+        return render_plan(_normalize_to_constructed(parse_plan(text)))
 
     lines = text.splitlines(keepends=True)
     first_task = next(
@@ -67,4 +68,4 @@ def canonical_plan_text(text: str) -> str:
     parts.append("<!-- phase_id: phase_001 -->\n")
     parts.append("\n")
     parts.append(task_body)
-    return render_plan(migrate(parse_plan("".join(parts))))
+    return render_plan(_normalize_to_constructed(parse_plan("".join(parts))))

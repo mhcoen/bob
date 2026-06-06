@@ -6,6 +6,8 @@ import subprocess
 import time
 from unittest.mock import MagicMock, patch
 
+from plan_fixtures import canonical_plan_text
+
 import mcloop.lifecycle as lifecycle_mod
 from mcloop.lifecycle import (
     _all_tasks,
@@ -910,7 +912,7 @@ def test_check_interrupted_skip_marks_plan(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1\n- [ ] T-000001: Fix something\n")
+    plan.write_text(canonical_plan_text("## Stage 1: Core\n\n- [ ] T-000001: Fix something\n"))
     bugs = tmp_path / "BUGS.md"
     bugs.write_text("## Bugs\n\n")
 
@@ -936,9 +938,9 @@ def test_check_interrupted_skip_marks_bugs_over_current(tmp_path, monkeypatch):
     }
     (mcloop_dir / "interrupted.json").write_text(json.dumps(state))
     plan = tmp_path / "PLAN.md"
-    plan.write_text("## Stage 1\n- [ ] T-000001: Other\n")
+    plan.write_text(canonical_plan_text("## Stage 1: Core\n\n- [ ] T-000001: Other\n"))
     bugs = tmp_path / "BUGS.md"
-    bugs.write_text("## Bugs\n\n- [ ] T-000002: Crash on startup\n")
+    bugs.write_text(canonical_plan_text("## Bugs\n\n- [ ] T-000002: Crash on startup\n"))
 
     monkeypatch.setattr("builtins.input", lambda _="": "s")
     result = _check_interrupted(

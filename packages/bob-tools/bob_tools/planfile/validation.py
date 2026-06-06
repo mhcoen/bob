@@ -173,7 +173,9 @@ def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
     errors.append(f"task {_task_ref(task)} has malformed annotation [{content}]")
 
 
-def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
+def validate_plan(
+    plan: Plan, *, constructed: bool = False, require_acceptance: bool = True
+) -> None:
     """Validate structural and referential integrity of ``plan``.
 
     Raises :class:`PlanValidationError` carrying one message per problem
@@ -221,6 +223,15 @@ def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
     task-centric behavior above exactly; the Stage 10 task
     field-stability harness is reused for the per-task check rather
     than duplicated here.
+
+    ``require_acceptance`` only takes effect under ``constructed=True``.
+    When ``False`` it suppresses ONLY the leaf-acceptance check; every
+    other constructed-mode invariant (magic_version, ordinals,
+    phase_id, duplicate ids, task id/format, trailing_lines, scalar
+    field-stability incl. the embedded-newline preamble check) still
+    runs. It exists solely for legacy-corruption repair where the
+    declared-acceptance migration is intentionally incomplete; default
+    ``True`` preserves every existing caller exactly.
     """
     errors: list[str] = []
 
@@ -247,14 +258,20 @@ def validate_plan(plan: Plan, *, constructed: bool = False) -> None:
                 errors.append(f"task {_task_ref(task)} references unknown dep {dep}")
 
     if constructed:
-        _check_constructed_invariants(plan, errors, known_ids)
+        _check_constructed_invariants(
+            plan, errors, known_ids, require_acceptance=require_acceptance
+        )
 
     if errors:
         raise PlanValidationError(errors)
 
 
 def _check_constructed_invariants(
-    plan: Plan, errors: list[str], known_ids: set[str]
+    plan: Plan,
+    errors: list[str],
+    known_ids: set[str],
+    *,
+    require_acceptance: bool = True,
 ) -> None:
     """Add v4 Contract 4 ``constructed=True`` violations to ``errors``.
 
@@ -310,7 +327,8 @@ def _check_constructed_invariants(
 
     _check_non_task_scalar_field_stability(plan, errors)
     _check_each_task_field_stability(plan, errors)
-    _check_acceptance_invariants(plan, errors, known_ids)
+    if require_acceptance:
+        _check_acceptance_invariants(plan, errors, known_ids)
 
 
 def _check_acceptance_invariants(
@@ -339,9 +357,7 @@ def _check_acceptance_invariants(
                     f"malformed covered-by: {raw_accept!r}"
                 )
             else:
-                errors.append(
-                    f"{label} has unknown accept kind: {raw_accept!r}"
-                )
+                errors.append(f"{label} has unknown accept kind: {raw_accept!r}")
             continue
 
         if parsed.kind == "waived" and parsed.covered_by not in known_ids:

@@ -374,25 +374,27 @@ def test_save_default_canonical_rejects_non_canonical_plan(tmp_path: Path) -> No
     )
 
 
-def test_save_default_canonical_accepts_mcloop_canonical_legacy_plan(
+def test_save_default_canonical_rejects_non_constructed_plan(
     tmp_path: Path,
 ) -> None:
-    """Missing magic/phase-id metadata alone is not a save-time reject.
+    """The default canonical save gate is the storage-integrity gate.
 
-    Those are constructed=True concerns. The default canonical save
-    gate tracks mcloop's R1/R2 precondition so bob-plan can operate on
-    canonical inputs regardless of provenance.
+    It enforces the constructed-mode STRUCTURAL invariants (here a
+    missing ``magic_version``), so a non-constructed legacy plan is
+    rejected and never reaches disk through the default path. Migrating
+    a legacy plan to constructed form is the runtime preflight's job
+    (``preflight_runtime_plan``), not the save gate's. Acceptance
+    completeness, by contrast, is deferred to the authoring layer and
+    is NOT checked here.
     """
     path = tmp_path / "PLAN.md"
     _write(path, _MINIMAL_PLAN)
     plan = load(path)
+    assert plan.magic_version is None
     new_plan = dataclasses.replace(plan, project_title="Legacy Canonical")
 
-    save(path, new_plan)
-
-    reloaded = load(path)
-    assert reloaded.project_title == "Legacy Canonical"
-    assert reloaded.magic_version is None
+    with pytest.raises(PlanValidationError):
+        save(path, new_plan)
 
 
 def test_save_unchecked_writes_non_canonical_plan(tmp_path: Path) -> None:

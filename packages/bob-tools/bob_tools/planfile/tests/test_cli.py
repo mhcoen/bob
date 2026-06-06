@@ -45,9 +45,7 @@ MCLOOP_CANONICAL_NON_CONSTRUCTED_PLAN = """# McLoop Canonical Fixture
 ## Stage 1: Bootstrap
 <!-- phase_id: phase_001 -->
 
-First paragraph.
-
-Second paragraph.
+First paragraph. Second paragraph.
 
 - [ ] T-000001: first task
 - [ ] T-000002: second task
@@ -196,7 +194,10 @@ class TestDone:
         text = mcloop_canonical_non_constructed_path.read_text()
         assert "[x] T-000001" in text
         assert "Second paragraph." in text
-        assert "<!-- bob-plan-format: 1 -->" not in text
+        # The runtime preflight migrates the legacy plan to constructed
+        # form (magic line + ids + ordinals) on first touch before the
+        # mutation, so the saved file now carries the magic line.
+        assert "<!-- bob-plan-format: 1 -->" in text
 
     def test_unknown_task_exits_two(
         self, strict_plan_path: Path, capsys: pytest.CaptureFixture[str]
@@ -251,7 +252,9 @@ class TestFail:
         text = mcloop_canonical_non_constructed_path.read_text()
         assert "[!] T-000002" in text
         assert "Second paragraph." in text
-        assert "<!-- bob-plan-format: 1 -->" not in text
+        # Runtime preflight migrated the legacy plan to constructed form
+        # on first touch, so the magic line is now present.
+        assert "<!-- bob-plan-format: 1 -->" in text
 
     def test_unknown_task_exits_two(
         self, strict_plan_path: Path, capsys: pytest.CaptureFixture[str]
