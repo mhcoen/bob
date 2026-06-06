@@ -367,7 +367,7 @@ def _resolve_flagged(
     project_dir: Path,
     flagged: list[str],
     accounts: list[Any],
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Decide which flagged changes still block the gate.
 
     A flagged (unmapped, not-provably-inert) change is cleared when:
@@ -390,8 +390,11 @@ def _resolve_flagged(
     can only be cleared by a named-test mapping (handled upstream) or a
     waiver -- otherwise they remain blocking.
 
-    Returns the sub-list of *flagged* sources that remain unresolved and
-    must fail the gate.
+    Returns ``(source, reason)`` pairs for the *flagged* sources that
+    remain unresolved and must fail the gate. The reason is the
+    distinguishing :class:`CoverageVerdict.reason` (collision,
+    not-executed, no-candidate, baseline-unresolved, non-Python, ...) so
+    the gate can tell the model exactly why each change blocked.
     """
     import os
 
@@ -403,7 +406,7 @@ def _resolve_flagged(
     task_label = os.environ.get("MCLOOP_TASK_LABEL", "")
     by_source = {getattr(a, "source", None): a for a in accounts}
 
-    unresolved: list[str] = []
+    unresolved: list[tuple[str, str]] = []
     for src in flagged:
         if has_waiver(project_dir, src, baseline, task_label=task_label):
             continue
@@ -416,7 +419,7 @@ def _resolve_flagged(
         verdict = verify_change_covered(project_dir, baseline, src, mapped)
         if verdict.proven:
             continue
-        unresolved.append(src)
+        unresolved.append((src, verdict.reason))
     return unresolved
 
 
@@ -480,16 +483,18 @@ def run_checks(
         # exists. Coverage is scoped to a dependent-test candidate set --
         # the full suite is never run as the fallback.
         flagged = _unaccounted_behavioral_changes(project_dir, accounts)
+        unresolved: list[tuple[str, str]] = []
         if flagged:
-            flagged = _resolve_flagged(project_dir, flagged, accounts)
-        if flagged:
-            listed = ", ".join(sorted(flagged))
+            unresolved = _resolve_flagged(project_dir, flagged, accounts)
+        if unresolved:
+            lines = "\n".join(f"  - {src}: {reason}" for src, reason in sorted(unresolved))
             return CheckResult(
                 passed=False,
                 output=(
                     "Gate failed: unaccounted behavioral change(s) with no "
-                    f"mapped test and no coverage-proven exercise: {listed}. "
-                    "Add a test that exercises the change, or record an "
+                    "mapped test and no coverage-proven exercise:\n"
+                    f"{lines}\n"
+                    "Add a test that exercises each change, or record an "
                     "explicit waiver (`mcloop waive`) so the bypass is logged."
                 ),
                 command="(gate: unaccounted behavioral change)",

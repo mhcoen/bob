@@ -47,6 +47,20 @@ from pathlib import Path
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
 
+class _ModuleNameCollision(Exception):
+    """Two distinct project files resolve to the same dotted module name.
+
+    e.g. ``pkg/lint.py`` and ``pkg/lint/__init__.py`` both map to
+    ``pkg.lint``. Such a pair makes the import-graph module->file map
+    ambiguous, so dependent-test discovery cannot be trusted.
+    """
+
+    def __init__(self, name: str, paths: list[str]):
+        self.module_name = name
+        self.paths = paths
+        super().__init__(f"{name}: {', '.join(paths)}")
+
+
 @dataclass(frozen=True)
 class CoverageVerdict:
     """Outcome of attempting to prove a change is exercised by tests."""
@@ -319,6 +333,32 @@ def _iter_py_files(project_dir: Path) -> list[Path]:
     return out
 
 
+def _build_module_index(py_files: list[Path], project_dir: Path) -> dict[str, Path]:
+    """Map dotted-name -> Path over *py_files*.
+
+    Raise :class:`_ModuleNameCollision` if two distinct files share a
+    dotted name (e.g. ``pkg/lint.py`` and ``pkg/lint/__init__.py`` both
+    resolve to ``pkg.lint``). Collision detection is deterministic so the
+    failure no longer depends on rglob iteration order.
+    """
+    index: dict[str, Path] = {}
+    collisions: dict[str, list[Path]] = {}
+    for f in py_files:
+        rel = f.relative_to(project_dir).as_posix()
+        name = _module_dotted(rel)
+        if name in index and index[name] != f:
+            collisions.setdefault(name, [index[name]]).append(f)
+        else:
+            index[name] = f
+    if collisions:
+        # Deterministic ordering -- the whole point is killing rglob-order
+        # dependence; report the lexicographically first colliding name.
+        first = sorted(collisions)[0]
+        paths = sorted(str(p) for p in collisions[first])
+        raise _ModuleNameCollision(name=first, paths=paths)
+    return index
+
+
 def _resolve_imports(
     file_path: Path,
     file_module: str,
@@ -375,10 +415,7 @@ def dependent_test_files(project_dir: Path, src: str) -> list[str]:
     target = _module_dotted(src)
 
     py_files = _iter_py_files(project_dir)
-    module_to_file: dict[str, Path] = {}
-    for f in py_files:
-        rel = f.relative_to(project_dir).as_posix()
-        module_to_file[_module_dotted(rel)] = f
+    module_to_file = _build_module_index(py_files, project_dir)
     known = set(module_to_file)
     if target not in known:
         # The changed module is not a recognizable project module; no
@@ -555,7 +592,19 @@ def verify_change_covered(
             (),
         )
 
-    candidates = sorted(set(mapped_test_files) | set(dependent_test_files(project_dir, src)))
+    try:
+        dependent = dependent_test_files(project_dir, src)
+    except _ModuleNameCollision as e:
+        return CoverageVerdict(
+            proven=False,
+            reason=(
+                f"coverage import graph collision for {e.module_name}: "
+                f"{' and '.join(e.paths)} -- remove or rename one; "
+                "package/module twins make dependent-test discovery ambiguous"
+            ),
+            candidate_nodes=(),
+        )
+    candidates = sorted(set(mapped_test_files) | set(dependent))
     if not candidates:
         return CoverageVerdict(
             False,

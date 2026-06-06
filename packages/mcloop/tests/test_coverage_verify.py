@@ -7,9 +7,14 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from mcloop.coverage_verify import (
     CoverageVerdict,
+    _build_module_index,
+    _iter_py_files,
     _module_dotted,
+    _ModuleNameCollision,
     _parse_coverage_json,
     _parse_diff_new_lines,
     changed_new_lines,
@@ -125,6 +130,67 @@ def test_dependent_test_files_finds_transitive_importer(tmp_path: Path) -> None:
 def test_dependent_test_files_unknown_module(tmp_path: Path) -> None:
     _make_dependent_project(tmp_path)
     assert dependent_test_files(tmp_path, "pkg/nonexistent.py") == []
+
+
+# --- module/package dotted-name collision -----------------------------------
+
+
+def _make_collision_project(root: Path) -> None:
+    """A module/package twin: ``pkg/lint.py`` and ``pkg/lint/__init__.py``
+    both resolve to the dotted name ``pkg.lint``."""
+    pkg = root / "pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("")
+    (pkg / "lint.py").write_text("def check():\n    return 1\n")
+    lint_pkg = pkg / "lint"
+    lint_pkg.mkdir()
+    (lint_pkg / "__init__.py").write_text("def run():\n    return 2\n")
+
+
+def test_build_module_index_detects_collision(tmp_path: Path) -> None:
+    """Two distinct files sharing a dotted name raise _ModuleNameCollision
+    with both backing paths, sorted/stable -- not rglob-order dependent."""
+    _make_collision_project(tmp_path)
+    py_files = _iter_py_files(tmp_path)
+    with pytest.raises(_ModuleNameCollision) as exc:
+        _build_module_index(py_files, tmp_path)
+    assert exc.value.module_name == "pkg.lint"
+    assert len(exc.value.paths) == 2
+    # Stable, deterministic ordering regardless of filesystem iteration order.
+    assert exc.value.paths == sorted(exc.value.paths)
+    assert any(p.endswith("pkg/lint.py") for p in exc.value.paths)
+    assert any(p.endswith("pkg/lint/__init__.py") for p in exc.value.paths)
+
+
+def test_build_module_index_no_collision_returns_map(tmp_path: Path) -> None:
+    """A clean project (no dotted-name twins) builds a full module index."""
+    _make_dependent_project(tmp_path)
+    index = _build_module_index(_iter_py_files(tmp_path), tmp_path)
+    assert index["pkg.widget"] == tmp_path / "pkg" / "widget.py"
+    assert index["pkg.engine"] == tmp_path / "pkg" / "engine.py"
+
+
+def test_verify_collision_blocks_with_reason_and_no_coverage(tmp_path: Path) -> None:
+    """A module/package collision in the import graph fails the verdict with a
+    distinguishing reason naming the dotted name and both files, and the raw
+    exception never escapes -- no coverage run is attempted."""
+    _make_collision_project(tmp_path)
+    with (
+        patch("mcloop.coverage_verify.changed_new_lines") as changed,
+        patch("mcloop.coverage_verify._run_coverage") as run_cov,
+    ):
+        # Nonempty changed lines so we get past line resolution into the
+        # candidate-test graph build where the collision is detected.
+        changed.return_value = {1}
+        verdict = verify_change_covered(tmp_path, "base-sha", "pkg/lint.py", [])
+    assert verdict.proven is False
+    assert "collision" in verdict.reason
+    assert "pkg.lint" in verdict.reason
+    assert "pkg/lint.py" in verdict.reason
+    assert "pkg/lint/__init__.py" in verdict.reason
+    assert verdict.candidate_nodes == ()
+    # The collision short-circuits before any coverage subprocess.
+    run_cov.assert_not_called()
 
 
 # --- _run_coverage (subprocess mocked, JSON written) ------------------------
