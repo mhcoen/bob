@@ -42,6 +42,12 @@ def _decode_subprocess_output(value: bytes | str | None) -> str:
 DEFAULT_TASK_TIMEOUT = 3600  # 60 minutes; override with --timeout
 SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
 SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
+# Session exit-code sentinels. Negative values double as "killed by signal N"
+# in Popen.returncode, so a custom sentinel must stay out of the POSIX/RT
+# signal range (-1..-64) to avoid colliding with a signal-killed child.
+TIMEOUT_EXIT_CODE = -2  # wall-clock timeout
+STALL_EXIT_CODE = -200  # repeated-identical-action stall (out of signal range)
+STALL_REPEAT_THRESHOLD = 4  # consecutive identical tool signatures before abort
 
 
 @dataclass
@@ -1034,9 +1040,39 @@ def _run_session(
         )
         return "".join(head_lines) + marker + "".join(tail_lines)
 
+    def _kill_session_and_cleanup() -> None:
+        """Kill the session process group and tear down watchdog + PID file.
+
+        Mirrors the cleanup the timeout path used inline; shared by the
+        timeout and stall abort paths so the two can't drift apart.
+        """
+        global _active_process
+        try:
+            os.killpg(os.getpgid(process.pid), 9)
+        except OSError:
+            process.kill()
+        process.wait()
+        _active_process = None
+        try:
+            _watchdog.kill()
+            _watchdog.wait()
+        except OSError:
+            pass
+        try:
+            (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
+        except OSError:
+            pass
+
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
     last_dot = time.monotonic()
+    # Stall guard: abort if the agent repeats the identical tool call K times
+    # in a row (a no-progress loop that still emits stream bytes, so the
+    # wall-clock timeout would otherwise let it burn the full hour).
+    # TODO: only the claude stream shape is parsed today; codex needs its own
+    # parser (parse_tool_signatures returns [] for non-claude, leaving codex
+    # sessions explicitly unguarded rather than mis-parsed).
+    stall = StallTracker()
     global _interrupted
     while True:
         if _interrupted:
@@ -1048,22 +1084,8 @@ def _run_session(
                 f"\n!!! Task timed out after {elapsed_m:.0f}m. Killing session.",
                 flush=True,
             )
-            try:
-                os.killpg(os.getpgid(process.pid), 9)
-            except OSError:
-                process.kill()
-            process.wait()
-            _active_process = None
-            try:
-                _watchdog.kill()
-                _watchdog.wait()
-            except OSError:
-                pass
-            try:
-                (cwd / ".mcloop" / "active-pid").unlink(missing_ok=True)
-            except OSError:
-                pass
-            return _assemble_output(), -2
+            _kill_session_and_cleanup()
+            return _assemble_output(), TIMEOUT_EXIT_CODE
         try:
             line = line_q.get(
                 timeout=PROGRESS_DOT_INTERVAL,
@@ -1136,6 +1158,20 @@ def _run_session(
                 dropped_count += 1
             tail_lines.append(line)
         _last_output_lines.append(line.rstrip("\n"))
+        # Stall detection: parse tool-call signatures straight from the raw
+        # line (independent of _print_stream_event's display suppression) and
+        # feed each to the tracker. Only parsed tool_use signatures are fed --
+        # text deltas / partial messages / tool_result lines yield none and so
+        # never reset the consecutive-repeat counter.
+        for sig in parse_tool_signatures(line, backend="claude"):
+            if stall.observe(sig):
+                print(
+                    f"\n!!! Stalled: identical action repeated {stall.count}x: "
+                    f"{sig.name}: {sig.command}. Killing session.",
+                    flush=True,
+                )
+                _kill_session_and_cleanup()
+                return _assemble_output(), STALL_EXIT_CODE
         printed_visible = _print_stream_event(line)
         shown_waiting = False
         now = time.monotonic()
@@ -1192,6 +1228,100 @@ def _print_stream_event(line: str) -> bool:
                     print(f"  {label}", flush=True)
                     return True
     return False
+
+
+@dataclass(frozen=True)
+class ToolSignature:
+    """A structured identity for one tool call, used for stall detection.
+
+    ``name`` is the tool name; ``command`` is the canonicalized Bash command
+    (for Bash) or a stable JSON dump of the tool input (for everything else),
+    so a repeated non-Bash tool call is also detectable.
+    """
+
+    name: str
+    command: str
+
+
+def _canon(s: str) -> str:
+    """Canonicalize a command string for stall comparison.
+
+    Minimal on purpose -- only trailing/surrounding whitespace is stripped.
+    No path, timestamp, or shell normalization: two calls are "the same" only
+    if they are byte-identical apart from edge whitespace, which keeps the
+    guard conservative (it would rather miss a stall than abort real progress).
+    """
+    return s.strip()
+
+
+def parse_tool_signatures(line: str, backend: str) -> list[ToolSignature]:
+    """Extract tool-call signatures from one stream-json line.
+
+    Claude: an ``assistant`` message -> ``tool_use`` blocks -> (name, command).
+    A single message may carry multiple ``tool_use`` blocks; they are returned
+    in order. Bash keys on ``input.command``; every other tool keys on a stable
+    ``json.dumps(input, sort_keys=True)`` so non-Bash repeats are also caught.
+
+    Codex: KNOWN GAP -- its stream-json schema is unverified, so this returns
+    ``[]`` for any non-claude backend. That leaves codex sessions explicitly
+    unguarded rather than silently mis-parsed; implement a codex parser later.
+    """
+    if backend != "claude":
+        return []
+    import json as _json
+
+    try:
+        data = _json.loads(line)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(data, dict) or data.get("type") != "assistant":
+        return []
+    sigs: list[ToolSignature] = []
+    for block in data.get("message", {}).get("content", []):
+        if isinstance(block, dict) and block.get("type") == "tool_use":
+            name = block.get("name", "")
+            inp = block.get("input", {}) or {}
+            command = (
+                inp.get("command", "")
+                if name == "Bash"
+                else _json.dumps(inp, sort_keys=True)
+            )
+            sigs.append(ToolSignature(name=name, command=_canon(command)))
+    return sigs
+
+
+class StallTracker:
+    """Detect a no-progress loop: the same tool call repeated K times running.
+
+    Fed ONLY parsed ``tool_use`` signatures (never text deltas, partial
+    messages, or tool_result lines), so streaming chatter between two
+    identical calls does not reset the counter.
+    """
+
+    def __init__(self, threshold: int = STALL_REPEAT_THRESHOLD):
+        self._threshold = threshold
+        self._last: ToolSignature | None = None
+        self._count = 0
+
+    def observe(self, sig: ToolSignature) -> bool:
+        """Feed one signature; return True iff the stall threshold is reached.
+
+        Consecutive-identical only: a different signature resets the count.
+        """
+        if sig == self._last:
+            self._count += 1
+        else:
+            self._last = sig
+            self._count = 1
+        return self._count >= self._threshold
+
+    @property
+    def repeated(self) -> ToolSignature | None:
+        return self._last
+
+    @property
+    def count(self) -> int:
+        return self._count
 
 
 def run_sync(

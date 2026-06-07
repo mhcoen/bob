@@ -148,6 +148,8 @@ from mcloop.run_summary import (
 from mcloop.runner import (
     DEFAULT_TASK_TIMEOUT,
     INVESTIGATION_TOOLS,
+    STALL_EXIT_CODE,
+    TIMEOUT_EXIT_CODE,
     RunResult,
     SubscriptionPreflightError,
     run_audit,
@@ -2075,10 +2077,21 @@ def run_loop(
 
                 if not result.success:
                     last_error = _tail(result.output, 50)
-                    if result.exit_code == -2:
+                    if result.exit_code == TIMEOUT_EXIT_CODE:
                         timeout_m = (task_timeout or DEFAULT_TASK_TIMEOUT) // 60
                         notify(
                             f"Task {label} timed out after {timeout_m}m.",
+                            level="warning",
+                        )
+                    elif result.exit_code == STALL_EXIT_CODE:
+                        print(
+                            formatting.error_msg(
+                                f"Task {label} stalled (repeated identical action)."
+                            ),
+                            flush=True,
+                        )
+                        notify(
+                            f"Task {label} stalled (repeated identical action).",
                             level="warning",
                         )
                     print(
