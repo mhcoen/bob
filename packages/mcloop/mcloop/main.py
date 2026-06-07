@@ -349,30 +349,46 @@ def _enforce_canonical_inputs(plan_path: Path, bugs_path: Path) -> None:
         (lifecycle.py)
       * the per-task ``check_off`` / ``fail`` saves in the loop
 
-    For each plan-bearing file that exists on disk, runs
+    ``plan_path`` (and only it) runs
     :func:`bob_tools.planfile.preflight_runtime_plan`: an already-canonical
     plan is left untouched; a cleanly-migratable legacy plan
     (no magic line, id-less tasks, gappy ordinals) is migrated ONCE to the
     constructed canonical form and written back (with a one-line notice) so
     every subsequent strict-canonical save in the loop succeeds; a corrupt
     plan (e.g. duplicate task ids) raises
-    :class:`bob_tools.planfile.PlanPreflightError`. ``bugs_path`` is checked
-    only if it exists; the loop creates it later with a canonical
-    ``## Bugs`` header on first run.
+    :class:`bob_tools.planfile.PlanPreflightError`.
+
+    ``bugs_path`` is a loose bug queue, NOT a canonical plan, and must stay
+    out of the canonical pipeline: its writes deliberately drop the magic
+    line (``magic=False``) and allow id-less entries, so a canonical
+    preflight would both crash on a legitimate id-less entry (the magic
+    line force-enables strict parsing) and — worse — re-stamp the magic
+    line and T-ids via the migration path on every startup, oscillating
+    against the loose write path forever. Instead, if it exists, it gets a
+    TOLERANT corruption check: :func:`mcloop._planfile_compat.parse` (the
+    magic-blanking bug-queue reader) still raises
+    :class:`PlanSyntaxError` on genuine structural corruption (duplicate
+    Bugs sections, duplicate H1s, duplicate stage ordinals), which the
+    top-level ``main()`` handler reports as parser corruption (exit code
+    2). No migration, no rewrite, no stamp. The loop creates ``bugs_path``
+    later with a plain ``## Bugs`` header on first run.
 
     ``PlanPreflightError`` (and the legacy ``PlanNotCanonicalError``) are
     caught by the top-level ``main()`` handler and translated to exit code 3
     (distinct from 1 = terminal failure, 2 = parser corruption, 5 =
     Plan-Ledger pause).
     """
-    for path in (plan_path, bugs_path):
-        if not path.exists():
-            continue
+    if plan_path.exists():
         preflight_runtime_plan(
-            path,
+            plan_path,
             notice=lambda message: print(formatting.system_msg(f"mcloop: {message}"), flush=True),
-            label=path.name,
+            label=plan_path.name,
         )
+    if bugs_path.exists():
+        # Tolerant read only; PlanSyntaxError propagates to the
+        # parser-corruption handler (exit 2). Never canonical-preflight
+        # the loose queue.
+        parse(bugs_path)
 
 
 def _ensure_bugs_file(bugs_path: Path) -> None:

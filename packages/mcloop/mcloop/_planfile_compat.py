@@ -22,7 +22,6 @@ from bob_tools.planfile import (
     clear_failed,
     complete_task,
     fail_task,
-    load,
     parse_plan,
     purge_done_bug_tasks,
     update,
@@ -658,7 +657,17 @@ def clear_failed_markers(path: str | Path) -> int:
     p = Path(path)
     if not p.exists():
         return 0
-    before = load(p)
+    # Tolerant pre-count. BUGS.md is a loose queue that may carry id-less
+    # entries (plus a stray magic line that would force strict parsing), so
+    # the raw strict ``load()`` crashed on it. Reuse the bug-queue read
+    # path's magic-blanking, then count on the parsed Plan exactly as
+    # before; PLAN.md text is never altered, so its strict parse is
+    # unchanged. The subsequent ``_update_with_retry`` is already
+    # magic-aware (``magic=False`` for BUGS.md).
+    text = p.read_text()
+    if p.name == _BUGS_QUEUE_FILENAME:
+        text = _strip_magic_line(text)
+    before = parse_plan(text, source_path=p)
     count = _count_failed(before)
     if count == 0:
         return 0
