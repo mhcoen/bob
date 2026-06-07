@@ -528,15 +528,20 @@ def _update_with_retry(
 def _require_task_id(task: Task, operation: str) -> str:
     if task.task_id is None:
         raise ValueError(
-            f"{operation} requires migrated PLAN.md task ids; "
-            "read/select/classify support compat plans, but mutation is "
-            "ID-targeted per planfile.complete_task/fail_task/reset_task"
+            f"{operation} requires a task id for the ID-targeted planfile "
+            "mutation path; id-less loose-queue (BUGS.md) tasks are mutated "
+            "by source position instead, and the public mutators "
+            "(check_off/mark_failed/reset_task) dispatch to that positional "
+            "path before reaching this guard"
         )
     return task.task_id
 
 
 def check_off(path: str | Path, task: Task) -> None:
     """Complete ``task`` by id; derived parent completion has no event (§2(e))."""
+    if task.task_id is None:
+        _check_off_idless(Path(path), task)
+        return
     task_id = _require_task_id(task, "check_off")
     _update_with_retry(Path(path), lambda plan: complete_task(plan, task_id)[0])
 
@@ -547,6 +552,37 @@ def _split_line_ending(line: str) -> tuple[str, str]:
     if line.endswith("\n"):
         return line[:-1], "\n"
     return line, ""
+
+
+def _check_off_idless(path: Path, task: Task) -> None:
+    """Complete an id-less loose BUGS.md task by source position."""
+    lines = path.read_text().splitlines(keepends=True)
+    candidate_indexes = [task.line_number]
+    candidate_indexes.extend(
+        idx
+        for idx, line in enumerate(lines)
+        if idx != task.line_number
+        and (match := CHECKBOX_RE.match(_split_line_ending(line)[0]))
+        and match.group(2) not in ("x", "X")
+        and match.group(3) == task.text
+    )
+
+    for idx in candidate_indexes:
+        if idx < 0 or idx >= len(lines):
+            continue
+        body, ending = _split_line_ending(lines[idx])
+        match = CHECKBOX_RE.match(body)
+        if match is None:
+            continue
+        if match.group(2) in ("x", "X"):
+            return
+        if match.group(3) != task.text:
+            continue
+        lines[idx] = f"{match.group(1)}- [x] {match.group(3)}{ending}"
+        path.write_text("".join(lines))
+        return
+
+    raise ValueError(f"check_off could not locate id-less task at line {task.line_number + 1}")
 
 
 def _mark_failed_idless(path: Path, task: Task) -> None:

@@ -14,6 +14,7 @@ than the mcloop wrapper.
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 from pathlib import Path
 
@@ -205,18 +206,20 @@ def test_purge_completed_bugs_no_done_entries_does_not_create_resolved_file(
     assert not (tmp_path / "BUGS-resolved.md").exists()
 
 
-def test_mutation_requires_migrated_task_ids(tmp_path: Path) -> None:
+def test_check_off_completes_idless_task_by_source_position(tmp_path: Path) -> None:
+    """Id-less tasks are completed positionally, mirroring mark_failed /
+    reset_task. (This replaces the retired contract that check_off rejects
+    id-less tasks — it was the last mutator without the positional branch,
+    which crashed bug-only mode completing a loose BUGS.md entry.)"""
     path = tmp_path / "PLAN.md"
     path.write_text("# Demo\n\n## Stage 1: Core\n\n- [ ] No id yet\n")
     task = shim.find_next(shim.parse(path))
     assert task is not None
     assert task.task_id is None
-    try:
-        shim.check_off(path, task)
-    except ValueError as exc:
-        assert "requires migrated PLAN.md task ids" in str(exc)
-    else:
-        raise AssertionError("check_off accepted an ID-less task")
+
+    shim.check_off(path, task)
+
+    assert path.read_text() == "# Demo\n\n## Stage 1: Core\n\n- [x] No id yet\n"
 
 
 def test_mark_failed_marks_idless_bugs_task_by_source_position(tmp_path: Path) -> None:
@@ -276,6 +279,92 @@ def test_reset_task_is_idempotent_on_pending_task(tmp_path: Path) -> None:
     shim.reset_task(path, task)
 
     assert path.read_text() == "## Bugs\n\n- [ ] Already pending\n"
+
+
+def test_check_off_completes_idless_bugs_task_by_source_position(tmp_path: Path) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text(
+        "## Bugs\n\n- [ ] Fix crash in loose bug queue\n- [ ] Another open bug\n"
+    )
+    task = shim.find_next(shim.parse(path))
+    assert task is not None
+    assert task.task_id is None
+
+    shim.check_off(path, task)
+
+    assert path.read_text() == (
+        "## Bugs\n\n- [x] Fix crash in loose bug queue\n- [ ] Another open bug\n"
+    )
+
+
+def test_check_off_is_idempotent_on_completed_idless_task(tmp_path: Path) -> None:
+    """Completing an already-[x] id-less task is a no-op, not an error."""
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [ ] Fix crash in loose bug queue\n")
+    task = shim.find_next(shim.parse(path))
+    assert task is not None
+    shim.check_off(path, task)
+    after_first = path.read_text()
+
+    shim.check_off(path, task)
+
+    assert path.read_text() == after_first
+
+
+def test_check_off_raises_when_idless_task_not_locatable(tmp_path: Path) -> None:
+    path = tmp_path / "BUGS.md"
+    path.write_text("## Bugs\n\n- [ ] Fix crash in loose bug queue\n")
+    task = shim.find_next(shim.parse(path))
+    assert task is not None
+    ghost = dataclasses.replace(task, text="text that matches no checkbox line")
+
+    with pytest.raises(ValueError, match="could not locate id-less task"):
+        shim.check_off(path, ghost)
+
+
+def test_check_off_by_id_still_routes_through_planfile(tmp_path: Path) -> None:
+    """A task WITH an id keeps the migrated planfile.complete_task path."""
+    path = tmp_path / "PLAN.md"
+    path.write_text(canonical_plan_text("## Stage 1: Core\n\n- [ ] First task\n"))
+    task = shim.parse(path)[0]
+    assert task.task_id is not None
+
+    shim.check_off(path, task)
+
+    done = shim.parse(path)[0]
+    assert done.checked
+    assert not done.failed
+
+
+def test_check_off_then_purge_archives_idless_magic_lined_bug(tmp_path: Path) -> None:
+    """End-to-end run_loop:2747 regression: bug-only mode completes the
+    id-less bug entry (still carrying a stray magic line) positionally, then
+    the end-of-run purge archives it and leaves BUGS.md clean."""
+    path = tmp_path / "BUGS.md"
+    path.write_text(
+        "<!-- bob-plan-format: 1 -->\n"
+        "\n"
+        "## Bugs\n"
+        "- [ ] Fix issue reported during task 11.8 (see observation below):\n"
+        "```\n"
+        "extract a corpus of 1 file containing two sentences of 10 and 20 words\n"
+        "```\n"
+    )
+    task = shim.find_next(shim.parse(path))
+    assert task is not None
+    assert task.task_id is None
+
+    shim.check_off(path, task)  # crashed at run_loop:2747 before the id-less branch
+
+    assert "- [x] Fix issue reported during task 11.8" in path.read_text()
+
+    shim.purge_completed_bugs(path)
+
+    remaining = path.read_text()
+    assert "Fix issue reported during task 11.8" not in remaining
+    assert "<!-- bob-plan-format:" not in remaining
+    resolved = (tmp_path / shim.RESOLVED_BUGS_FILENAME).read_text()
+    assert "Fix issue reported during task 11.8" in resolved
 
 
 def test_reset_task_leaves_other_failed_markers_intact(tmp_path: Path) -> None:
