@@ -29,6 +29,7 @@ import pytest
 from bob_tools.planfile import (
     ConcurrentUpdateError,
     Plan,
+    PlanSyntaxError,
     PlanValidationError,
     fileio,
     load,
@@ -472,3 +473,54 @@ def test_fileio_module_has_no_save_unlocked_bypass() -> None:
         "fileio must not expose a Plan-taking _save_unlocked helper; "
         "atomic-write should run on already-validated text only"
     )
+
+
+# --- magic= opt-out (loose-queue writes drop the magic line) ----------------
+
+# A magic-lined, id-less loose queue (mcloop's BUGS.md after the bug-filer
+# appends an entry without a T-id).
+_MAGIC_IDLESS_QUEUE = "<!-- bob-plan-format: 1 -->\n\n## Bugs\n- [ ] loose bug, no id\n"
+
+
+def test_save_magic_false_drops_magic_line(tmp_path: Path) -> None:
+    """save(magic=False) clears the magic line for a loose queue.
+
+    Rendered for a loose queue (validation='unchecked'): the
+    ``<!-- bob-plan-format: 1 -->`` preamble must not appear.
+    """
+    path = tmp_path / "BUGS.md"
+    plan = parse_plan(_CANONICAL_PLAN)
+    assert plan.magic_version == 1
+    save(path, plan, validation="unchecked", magic=False)
+    assert "<!-- bob-plan-format:" not in path.read_text()
+
+
+def test_save_magic_true_keeps_magic_line(tmp_path: Path) -> None:
+    """Default magic=True is unchanged: a canonical plan keeps its magic line."""
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_CANONICAL_PLAN)
+    save(path, plan)  # default magic=True, default validation=canonical
+    assert "<!-- bob-plan-format: 1 -->" in path.read_text()
+
+
+def test_update_magic_false_tolerates_idless_magic_lined_queue(tmp_path: Path) -> None:
+    """update(magic=False) on a magic-lined id-less queue does NOT raise on
+    the in-lock pre-parse, applies the op, and rewrites WITHOUT the magic
+    line — closing the loop so subsequent strict reads become moot."""
+    path = tmp_path / "BUGS.md"
+    path.write_text(_MAGIC_IDLESS_QUEUE)
+    # Identity op: we only care that the pre-parse + render survive.
+    returned = update(path, lambda plan: plan, validation="unchecked", magic=False)
+    assert returned is not None
+    text = path.read_text()
+    assert "<!-- bob-plan-format:" not in text
+    assert "loose bug, no id" in text  # the id-less entry is preserved
+
+
+def test_update_default_magic_true_still_strict_on_idless(tmp_path: Path) -> None:
+    """GUARD (PLAN.md unchanged): with default magic=True the in-lock pre-parse
+    still force-enables strict on a magic-lined id-less file and raises."""
+    path = tmp_path / "PLAN.md"
+    path.write_text(_MAGIC_IDLESS_QUEUE)
+    with pytest.raises(PlanSyntaxError):
+        update(path, lambda plan: plan, validation="unchecked")

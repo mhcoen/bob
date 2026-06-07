@@ -508,9 +508,18 @@ def _update_with_retry(
     contention.
     """
     last_exc: ConcurrentUpdateError | None = None
+    # BUGS.md is a loose queue: write it without the canonical magic line,
+    # re-parse it non-strict (id-less entries allowed), and skip canonical
+    # structural validation. A loose queue is not a canonical plan -- the
+    # constructed-mode validator requires magic_version==1, which we drop
+    # here -- so the canonical gate does not apply to it. PLAN.md keeps both.
+    magic = path.name != _BUGS_QUEUE_FILENAME
+    effective_validation = validation if magic else "unchecked"
     for _attempt in range(_UPDATE_RETRIES + 1):
         try:
-            return update(path, operation, validation=validation)
+            return update(
+                path, operation, validation=effective_validation, magic=magic
+            )
         except ConcurrentUpdateError as exc:
             last_exc = exc
     assert last_exc is not None
@@ -749,10 +758,14 @@ def purge_completed_bugs(path: str | Path) -> None:
     archived_text = ""
     if p.exists():
         original_text = p.read_text()
-        plan = parse_plan(original_text, source_path=p)
+        # Loose queue: don't let a stray magic line force strict (id-less
+        # bug entries are legal here).
+        plan = parse_plan(
+            original_text, source_path=p, force_strict_from_magic=False
+        )
         archived_text = _collect_done_bug_text(plan, original_text)
 
-    update(p, purge_done_bug_tasks, validation="unchecked")
+    update(p, purge_done_bug_tasks, validation="unchecked", magic=False)
 
     if archived_text:
         resolved_path = p.parent / RESOLVED_BUGS_FILENAME

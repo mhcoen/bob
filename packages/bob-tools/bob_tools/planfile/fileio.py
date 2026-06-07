@@ -60,6 +60,7 @@ without observing the lock, which is precisely the case
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import fcntl
 import os
 import re
@@ -273,6 +274,7 @@ def save(
     plan: Plan,
     *,
     validation: ValidationMode = "canonical",
+    magic: bool = True,
 ) -> None:
     """Atomically write ``plan`` to ``path`` under an exclusive lock.
 
@@ -302,7 +304,14 @@ def save(
     after the rename leaves the new file intact. The tempfile is
     removed on any pre-rename failure so failed writes do not litter
     the directory.
+
+    ``magic`` (default ``True``) keeps the canonical magic line. Pass
+    ``False`` for a loose queue (mcloop's BUGS.md) so the magic line is
+    dropped before render — ``magic_version`` is cleared, which
+    ``render_plan`` and ``assert_mcloop_canonical`` both accept.
     """
+    if not magic:
+        plan = dataclasses.replace(plan, magic_version=None)
     text = _render_for_validation(plan, validation, path)
     with _acquire_exclusive_lock(path):
         _atomic_write_text(path, text)
@@ -313,6 +322,7 @@ def update(
     operation: Callable[[Plan], Plan],
     *,
     validation: ValidationMode = "canonical",
+    magic: bool = True,
 ) -> Plan:
     """Safe-mutation entry point: load, lock, re-parse, apply, save.
 
@@ -345,14 +355,24 @@ def update(
     disk through the default path. Validation runs inside the lock
     because the input plan is the re-parsed on-disk state at that
     moment.
+
+    ``magic`` (default ``True``) keeps today's behavior: the in-lock
+    re-parse forces strict on a magic-lined file and the render re-emits
+    the magic line. Pass ``False`` for a loose queue (mcloop's BUGS.md):
+    the re-parse does not force strict (id-less entries survive) and the
+    magic line is dropped from the written bytes.
     """
     pre_text = path.read_text()
     with _acquire_exclusive_lock(path):
         post_text = path.read_text()
         if pre_text != post_text:
             raise ConcurrentUpdateError(path)
-        plan = parse_plan(post_text, source_path=path)
+        plan = parse_plan(
+            post_text, source_path=path, force_strict_from_magic=magic
+        )
         new_plan = operation(plan)
+        if not magic:
+            new_plan = dataclasses.replace(new_plan, magic_version=None)
         text = _render_for_validation(new_plan, validation, path)
         _atomic_write_text(path, text)
         return new_plan

@@ -156,6 +156,7 @@ def parse_plan(
     text: str,
     *,
     strict: bool = False,
+    force_strict_from_magic: bool = True,
     source_path: Path | None = None,
 ) -> Plan:
     """Parse PLAN.md ``text`` into a typed :class:`Plan`.
@@ -216,10 +217,16 @@ def parse_plan(
     without the caller having to coordinate the two flags. Absence of
     the magic line keeps the caller's value (default ``False``); an
     explicit ``strict=True`` is honored regardless.
+    ``force_strict_from_magic`` (default ``True``) controls that coupling:
+    pass ``False`` to let a magic-lined file parse under the caller's
+    ``strict`` value anyway. This is for loose queues (e.g. mcloop's
+    BUGS.md) that may carry the magic line but legitimately hold id-less
+    entries; ``force_strict_from_magic=False`` with ``strict=False`` parses
+    them with ``task_id=None`` instead of raising. PLAN.md keeps the default.
     """
     lines = text.splitlines()
     magic_version = _detect_magic_line(lines, source_path)
-    if magic_version is not None:
+    if magic_version is not None and force_strict_from_magic:
         strict = True
     _check_structural_sanity(lines, source_path)
 

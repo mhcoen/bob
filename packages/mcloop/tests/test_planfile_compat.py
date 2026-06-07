@@ -359,3 +359,29 @@ def test_parse_plan_md_stays_strict_on_idless_entry(tmp_path: Path) -> None:
     )
     with pytest.raises(PlanSyntaxError):
         shim.parse(path)
+
+
+def test_purge_completed_bugs_strips_magic_line_from_idless_queue(
+    tmp_path: Path,
+) -> None:
+    """Change 2 root fix: purging a magic-lined id-less BUGS.md must NOT raise
+    and must rewrite the file WITHOUT the magic line, so subsequent strict
+    readers (the direct parse_plan callers) become moot."""
+    path = tmp_path / "BUGS.md"
+    path.write_text(
+        "<!-- bob-plan-format: 1 -->\n"
+        "\n"
+        "## Bugs\n"
+        "- [ ] Fix issue reported during task 11.8 (see observation below):\n"
+        "```\n"
+        "extract a corpus of 1 file containing two sentences of 10 and 20 words\n"
+        "```\n"
+    )
+    shim.purge_completed_bugs(path)  # must not raise
+    text = path.read_text()
+    assert "<!-- bob-plan-format:" not in text  # magic line dropped
+    # The unresolved (TODO) bug entry is preserved.
+    assert "Fix issue reported during task 11.8" in text
+    # And the rewritten file now parses cleanly as a loose queue.
+    tasks = shim.parse(path)
+    assert any(not t.checked and t.task_id is None for t in tasks)

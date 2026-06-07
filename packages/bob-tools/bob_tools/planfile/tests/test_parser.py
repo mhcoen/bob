@@ -1753,3 +1753,15 @@ class TestMagicLineForcesStrict:
         plan = parse_plan(text)
         assert plan.magic_version == 1
         assert plan.phases[0].tasks[0].task_id == "T-000001"
+
+    def test_force_strict_from_magic_false_lets_caller_strict_win(self) -> None:
+        # A loose queue (e.g. mcloop's BUGS.md) may carry the magic line yet
+        # legitimately hold id-less entries. force_strict_from_magic=False
+        # makes the magic line NOT upgrade strict, so strict=False (default)
+        # parses the id-less task as task_id=None instead of raising.
+        text = "<!-- bob-plan-format: 1 -->\n## Stage 1: Core\n- [ ] no id\n"
+        plan = parse_plan(text, force_strict_from_magic=False)
+        assert plan.phases[0].tasks[0].task_id is None
+        # The magic version is still detected/recorded (only the strict
+        # upgrade is suppressed).
+        assert plan.magic_version == 1
