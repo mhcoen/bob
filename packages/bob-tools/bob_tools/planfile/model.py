@@ -270,8 +270,9 @@ class PlanSyntaxError(Exception):
         self.path = path
 
     def __str__(self) -> str:
+        name = self.path.name if self.path is not None else "PLAN.md"
         return (
-            f"PLAN.md invalid at line {self.line}, column {self.column}: {self.message}"
+            f"{name} invalid at line {self.line}, column {self.column}: {self.message}"
         )
 
 

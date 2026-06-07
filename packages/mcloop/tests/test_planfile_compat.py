@@ -17,6 +17,8 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import pytest
+from bob_tools.planfile.model import PlanSyntaxError
 from plan_fixtures import canonical_plan_text
 
 from mcloop import _planfile_compat as shim
@@ -320,3 +322,40 @@ def test_reset_makes_previously_failed_task_runnable_again(tmp_path: Path) -> No
     assert selected.text == "Fix the blocked bug"
     assert not selected.failed
     assert not selected.checked
+
+
+def test_parse_bugs_md_tolerates_idless_entry_with_magic_line(tmp_path: Path) -> None:
+    """Regression: a magic-lined BUGS.md (loose queue) with an id-less bug
+    entry plus a fenced block — exactly what the bug-filer wrote in the 11.8
+    crash — must parse without raising. The entry surfaces as an unchecked
+    ``task_id=None`` Task so the run-summary/scheduler count paths work."""
+    path = tmp_path / "BUGS.md"
+    path.write_text(
+        "<!-- bob-plan-format: 1 -->\n"
+        "\n"
+        "## Bugs\n"
+        "- [ ] Fix issue reported during task 11.8 (see observation below):\n"
+        "```\n"
+        "extract a corpus of 1 file containing two sentences of 10 and 20 words\n"
+        "```\n"
+    )
+    tasks = shim.parse(path)
+    unchecked = [t for t in tasks if not t.checked]
+    assert len(unchecked) == 1
+    assert unchecked[0].task_id is None
+    assert (
+        unchecked[0].text
+        == "Fix issue reported during task 11.8 (see observation below):"
+    )
+
+
+def test_parse_plan_md_stays_strict_on_idless_entry(tmp_path: Path) -> None:
+    """The BUGS.md tolerance must NOT weaken PLAN.md: a magic-lined PLAN.md
+    with an id-less checkbox still raises (the magic line is only stripped for
+    the BUGS.md bug-queue read path, keyed on the filename)."""
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        "<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] no id here\n"
+    )
+    with pytest.raises(PlanSyntaxError):
+        shim.parse(path)

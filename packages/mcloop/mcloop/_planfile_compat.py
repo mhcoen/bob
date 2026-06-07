@@ -119,6 +119,25 @@ def _tasks_from_plan(plan: Plan) -> list[Task]:
     return tasks
 
 
+_MAGIC_LINE_RE = re.compile(r"^<!--\s*bob-plan-format:\s*\d+\s*-->\s*$")
+_BUGS_QUEUE_FILENAME = "BUGS.md"
+
+
+def _strip_magic_line(text: str) -> str:
+    """Blank any ``bob-plan-format`` magic line, preserving line numbers.
+
+    ``BUGS.md`` is a loose bug queue that may carry id-less entries. The
+    magic line force-enables strict parsing in :func:`parse_plan` (which
+    rejects id-less checkboxes), so it is blanked for the bug-queue read
+    path. Lines are blanked rather than removed so ``PlanTask.line_number``
+    stays aligned with the on-disk file (the id-less ``mark_failed`` /
+    ``reset_task`` paths key on that position).
+    """
+    return "\n".join(
+        "" if _MAGIC_LINE_RE.match(line) else line for line in text.split("\n")
+    )
+
+
 def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
     """Read a plan file and return checklist-shaped tasks.
 
@@ -126,10 +145,18 @@ def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
     ``mcloop.checklist.parse``. ``bob_tools.planfile.parse_plan`` always runs
     its structural sanity check, so ``False`` cannot suppress corruption checks
     in this adapter.
+
+    ``BUGS.md`` is a loose bug queue (id-less entries allowed). If it carries
+    the ``<!-- bob-plan-format: N -->`` magic line that would force strict
+    parsing, the line is blanked first so id-less checkboxes parse as
+    ``task_id=None`` tasks instead of raising. PLAN.md is never altered.
     """
     _ = check_structure
     p = Path(path)
-    return _tasks_from_plan(parse_plan(p.read_text(), source_path=p))
+    text = p.read_text()
+    if p.name == _BUGS_QUEUE_FILENAME:
+        text = _strip_magic_line(text)
+    return _tasks_from_plan(parse_plan(text, source_path=p))
 
 
 def parse_description(path: str | Path) -> str:

@@ -1056,6 +1056,15 @@ class TestParsePlanCompatModeSyntaxErrors:
         assert rendered.startswith("PLAN.md invalid at line 1, column 1: ")
         assert "@deps T-000001" in rendered
 
+    def test_syntax_error_str_names_source_path_file(self) -> None:
+        # When source_path is set, the message names that file (e.g. BUGS.md),
+        # not a hardcoded "PLAN.md" — so a BUGS.md parse error is not
+        # mislabeled as a PLAN.md error.
+        path = Path("/tmp/BUGS.md")
+        with pytest.raises(PlanSyntaxError) as exc_info:
+            parse_plan("@deps T-000001\n", source_path=path)
+        assert str(exc_info.value).startswith("BUGS.md invalid at line 1, column 1: ")
+
 
 class TestCheckStructuralSanity:
     """Pre-parse corruption check rejects three anomalies (mcloop parity).
