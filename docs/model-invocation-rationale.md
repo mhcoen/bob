@@ -230,34 +230,80 @@ of the following is to be built until the skeleton is reliable and robust.
   start-cheap policy is a deferred optimization; the unblocking work is fixing
   the availability/capability conflation first.
 
-## 9. Candidate changes implied by this analysis (deferred unless noted)
+## 9. Candidate changes implied by this analysis (status noted per item)
 
-Recorded as candidates, not a work order. Each is a real fix surface; none is
-authorized here.
+Recorded as candidates. Three coverage-gate fixes in the same family were
+implemented this session (marked DONE); the rest remain deferred.
 
 1. **Failure classification layer** — implement the A/B/C/inconclusive predicate
    of section 6 and demote the fallover chain to availability-only, so capability
    failures escalate (and stop), availability events substitute-and-restore, and
-   timeouts do neither. *The core structural fix.*
-2. **Sub-session stall guard** — detect non-progress *within* a single agent
-   session keyed on **repeated identical command invocations** (reliable signal,
-   robust to noisy/trimmed/timestamped output), and/or no worktree/checkpoint
-   progress over N actions; trip well before the session wall-clock. Optionally,
-   make permission denials **non-retryable hard signals** so denial-driven loops
-   cannot start. *Addresses the multi-minute stuck-poll loops; couples to
-   section 6 inconclusive handling.*
+   timeouts do neither. *The core structural fix. DEFERRED — adjacent to the
+   model-selection rabbit hole (section 8); wants its own SPEC and blast-radius
+   assessment.* A build run on 2026-06-07 reproduced the symptom this would fix:
+   a gate failure that no model could resolve drove a pointless
+   opus→kimi→deepseek descent, exactly the capability/availability conflation
+   described in section 6.
+2. **Sub-session stall guard** — DONE (commit `5764f83d`). Detects non-progress
+   within a single agent session keyed on **repeated identical tool-call
+   signatures** (robust to noisy/trimmed/timestamped output), aborting at
+   `STALL_REPEAT_THRESHOLD=4` consecutive identical signatures with a distinct
+   `STALL_EXIT_CODE=-200` (out of the POSIX signal range so it cannot collide
+   with a signal-killed child's passthrough returncode). Only parsed `tool_use`
+   signatures feed the tracker, so interleaved text/partial/tool_result chatter
+   does not reset the counter. Claude stream shape implemented; **codex is an
+   explicit known gap** (`parse_tool_signatures` returns `[]` for non-claude
+   backends) — a follow-up once codex's stream-json schema is verified. The
+   optional "make permission denials non-retryable" idea remains unbuilt.
 3. **Effort observability** — make the effort/thinking level explicit and
    **logged** per invocation rather than relying on silent config inheritance,
    so failures are interpretable. Specifying (the ability to set it) is distinct
-   from tuning (choosing the value).
+   from tuning (choosing the value). *DEFERRED.*
 4. **Richer retry context** — feed the prior attempt's **diff**, not only a
-   ~50-line output tail, into the retry prompt.
-5. **Incidental, independent of the above:**
+   ~50-line output tail, into the retry prompt. *DEFERRED.*
+5. **Coverage-gate edge cases (same family) — two DONE, one DEFERRED:**
+   - **Dotted-name collision** — DONE (commit `f6fbbb4e`). The import-graph
+     module→file map used last-write-wins, so a package and a sibling module
+     sharing a dotted name (`pkg/lint.py` and `pkg/lint/__init__.py` → `pkg.lint`)
+     silently clobbered each other, making dependent-test discovery
+     nondeterministic and able to drop a real dependent test. `_build_module_index`
+     now fails closed with a verdict naming both paths; per-source failure reasons
+     are now threaded into the gate output instead of one generic line.
+   - **Untracked-file invisibility** — DONE (commit `9ac16b87`). The gate runs
+     before the per-task commit, so a file the editor just created is still
+     untracked; `changed_new_lines` diffed the committed baseline with
+     `git diff <baseline> -- <src>`, which omits untracked files, yielding an
+     empty changed-line set treated as a hard failure. It is now untracked-aware
+     (mirrors `_changed_files`): an untracked file is modeled as a new-file diff
+     (lines 1..N). Untracked files are made **visible, not exempt** — coverage is
+     still required, and an untracked empty file still fails.
+   - **Behavioral-line free-pass (gate-hardening)** — DEFERRED. `verify_change_covered`
+     passes when `covered = changed & executed` is non-empty, i.e. when *any*
+     changed line executed. For a new file, import/`def`/module-level lines
+     trivially execute on import, so a file can pass while its function bodies
+     go untested. This is a pre-existing property of the "any changed line
+     executed" semantics, not introduced by the untracked fix, but the untracked
+     fix makes it reachable for new files. Tightening the gate to require
+     *behavioral*-line coverage is a consequential gate-policy change (it would
+     newly fail an unknown number of currently-passing tasks across all projects)
+     and needs its own SPEC, blast-radius assessment, and a behavioral-line
+     classifier — the same deliberate treatment the stall guard received, not a
+     rider on a bugfix. Pinned by `test_..._import_executed_passes_DOCUMENTED_LIMITATION`
+     in `tests/test_coverage_verify.py`.
+6. **Incidental, independent of the above (DEFERRED):**
    - codex `--full-auto` is deprecated (warns, steers to
      `--sandbox workspace-write`); `_build_command` still emits it.
    - Config dir-name discrepancy: mcloop config references a Kimi
      `CLAUDE_CONFIG_DIR` that may not match the working `~/.claude-kimi-fast`
      used by the shell function — verify the Kimi tier reads the intended dir.
+   - **duplo acceptance emission** — nearly every task this session logged
+     "Task has no declared acceptance; using legacy inference," so duplo is not
+     emitting declared acceptance predicates for most leaf tasks and mcloop
+     falls back to coverage inference. duplo's `acceptance.py` is meant to attach
+     acceptance on every leaf implementation task. Separate from (and not fixed
+     by) the gate fixes above. Fixing duplo's emission does not replace fixing
+     mcloop's legacy fallback — both must work, since hand-authored and legacy
+     plans will always exist.
 
 ---
 
