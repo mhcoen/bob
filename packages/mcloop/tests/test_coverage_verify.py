@@ -572,3 +572,89 @@ def test_verify_missing_baseline_fails_closed(tmp_path: Path) -> None:
     verdict = verify_change_covered(tmp_path, "", "pkg/widget.py", [])
     assert verdict.proven is False
     assert "could not resolve changed lines" in verdict.reason
+
+
+# --- untracked-aware changed_new_lines (real git) ---------------------------
+
+
+def _init_repo_committing_all(root: Path) -> str:
+    """git init + config + commit everything currently on disk; return HEAD.
+
+    Mirrors the inline real-git setup used by
+    ``test_changed_new_lines_against_real_baseline``.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "t@t.t"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=root, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=root, check=True)
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True
+    ).stdout.strip()
+
+
+def test_changed_new_lines_untracked_file_returns_all_lines(tmp_path: Path) -> None:
+    """A brand-new UNTRACKED file is invisible to ``git diff <baseline>``;
+    the untracked fallback models it as a new-file diff so every physical
+    line 1..N is reported as added."""
+    (tmp_path / "base.py").write_text("x = 1\n")
+    base = _init_repo_committing_all(tmp_path)
+    pkg = tmp_path / "writer" / "lint" / "checks"
+    pkg.mkdir(parents=True)
+    # 5 physical lines, including a def and a module-level call.
+    (pkg / "__init__.py").write_text(
+        "import os\n\n\ndef go():\n    return os.getpid()\n"
+    )
+    # splitlines() -> ['import os','','','def go():','    return os.getpid()'] = 5
+    changed = changed_new_lines(tmp_path, base, "writer/lint/checks/__init__.py")
+    assert changed == {1, 2, 3, 4, 5}
+
+
+def test_changed_new_lines_untracked_empty_file_still_empty(tmp_path: Path) -> None:
+    """An untracked but EMPTY file has nothing to prove: the fallback yields
+    an empty set, so the gate still fails it (no free pass)."""
+    (tmp_path / "base.py").write_text("x = 1\n")
+    base = _init_repo_committing_all(tmp_path)
+    pkg = tmp_path / "writer" / "lint" / "checks"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    assert changed_new_lines(tmp_path, base, "writer/lint/checks/__init__.py") == set()
+
+
+def test_verify_change_covered_untracked_file_with_uncovered_lines_fails(
+    tmp_path: Path,
+) -> None:
+    """An untracked file is made VISIBLE, not EXEMPT: its lines are resolved
+    via the fallback, but if no candidate test executes them the gate still
+    fails (coverage is still required)."""
+    _make_dependent_project(tmp_path)
+    base = _init_repo_committing_all(tmp_path)
+    # New untracked module with real executable content (2 lines).
+    (tmp_path / "pkg" / "newcheck.py").write_text("def check():\n    return 7\n")
+    with patch("mcloop.coverage_verify._run_coverage", return_value=({999}, "")):
+        verdict = verify_change_covered(
+            tmp_path, base, "pkg/newcheck.py", ["tests/test_engine.py"]
+        )
+    assert verdict.proven is False
+    assert "not executed" in verdict.reason
+
+
+def test_verify_change_covered_untracked_file_import_executed_passes_DOCUMENTED_LIMITATION(
+    tmp_path: Path,
+) -> None:
+    """An untracked file whose changed lines are (partly) executed passes.
+
+    DOCUMENTED LIMITATION: the gate passes when ANY changed line executed
+    (``covered = changed & executed``, coverage_verify.py:619); import/def-line
+    execution suffices. Tightening this to require behavioral-line coverage is
+    deferred gate-hardening (rationale doc §9), not closed here.
+    """
+    _make_dependent_project(tmp_path)
+    base = _init_repo_committing_all(tmp_path)
+    (tmp_path / "pkg" / "newcheck.py").write_text("def check():\n    return 7\n")
+    # Only line 1 (the def line) is reported executed -- enough to pass.
+    with patch("mcloop.coverage_verify._run_coverage", return_value=({1}, "")):
+        verdict = verify_change_covered(
+            tmp_path, base, "pkg/newcheck.py", ["tests/test_engine.py"]
+        )
+    assert verdict.proven is True

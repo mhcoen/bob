@@ -287,6 +287,15 @@ def changed_new_lines(
     Returns ``None`` (fail-closed) when the baseline is empty or the git
     diff cannot be produced. An empty set means the diff resolved but no
     added/changed lines were found on the new side.
+
+    ``git diff`` against a committed baseline omits *untracked* files, so a
+    brand-new file the editor just created would otherwise read as zero
+    changed lines and fail the gate spuriously. To stay consistent with
+    mcloop's file-level change detectors (``_changed_files`` /
+    ``_changed_files_since``, which are untracked-aware via
+    ``git ls-files --others``), an empty diff is re-checked: if *src* is
+    untracked it is modeled as a new file whose every physical line (1..N)
+    is added.
     """
     if not baseline_sha:
         return None
@@ -302,7 +311,56 @@ def changed_new_lines(
         return None
     if result.returncode != 0:
         return None
-    return _parse_diff_new_lines(result.stdout)
+    parsed = _parse_diff_new_lines(result.stdout)
+    if parsed:
+        return parsed
+    # Empty diff: git diff against a committed baseline omits UNTRACKED files.
+    # Mirror _changed_files / _changed_files_since (untracked-aware via
+    # `git ls-files --others`) so the line-level prover agrees with the
+    # file-level detectors. A brand-new untracked file is modeled as a
+    # new-file diff: every physical line 1..N is an added line. Downstream
+    # the change&executed intersection means non-executable lines
+    # (blank/docstring/import) simply won't be in the intersection, so
+    # returning all lines is safe and matches how git numbers a real
+    # new-file diff.
+    if _is_untracked(project_dir, src):
+        return _all_file_lines(project_dir, src)
+    return parsed  # genuinely tracked-but-unchanged -> empty set (unchanged)
+
+
+def _is_untracked(project_dir: Path, src: str) -> bool:
+    """True if *src* is an untracked, non-ignored file under *project_dir*.
+
+    Mirrors the ``git ls-files --others --exclude-standard`` pattern the
+    git_ops change detectors use; *src* is project-relative and ``cwd`` is
+    the project, so no ``--relative`` is needed.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--others", "--exclude-standard", "--", src],
+            cwd=Path(project_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _all_file_lines(project_dir: Path, src: str) -> set[int]:
+    """Every physical line number (1..N) of *src*; empty set if unreadable.
+
+    An empty file yields an empty set, so an untracked empty file still
+    fails the gate ("no added/changed lines") -- there is nothing to prove.
+    """
+    path = Path(project_dir) / src
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return set()
+    n = len(text.splitlines())
+    return set(range(1, n + 1))
 
 
 # --------------------------------------------------------------------------
