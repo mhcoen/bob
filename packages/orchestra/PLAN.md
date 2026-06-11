@@ -2,46 +2,12 @@
 
 # Orchestra
 
-Orchestra controls how multiple LLMs interact. A workflow declares who
-drafts, who critiques, who reconciles, who acts; the models, prompts,
-and parameters are configuration. Orchestra is embedded as a library
-(`orchestra.run_workflow`, `orchestra.run_role`) by other bob packages
-(McLoop for per-edit invocations, Duplo for plan authoring) and has a
-CLI for direct use.
-
-Python 3.11+. Ruff for linting, pytest for tests. Orchestra must not
-depend on consumer packages (no `bob_tools`/`duplo`/`mcloop` imports);
-extension points are exposed as caller-supplied hooks so consumers
-inject their own behavior without inverting the dependency.
-
-This is Orchestra's first PLAN.md; prior development was done by hand
-and is captured in `design/`. New work is authored here and built
-through McLoop.
+Orchestra controls how multiple LLMs interact. A workflow declares who drafts, who critiques, who reconciles, who acts; the models, prompts, and parameters are configuration. Orchestra is embedded as a library (`orchestra.run_workflow`, `orchestra.run_role`) by other bob packages (McLoop for per-edit invocations, Duplo for plan authoring) and has a CLI for direct use. Python 3.11+. Ruff for linting, pytest for tests. Orchestra must not depend on consumer packages (no `bob_tools`/`duplo`/`mcloop` imports); extension points are exposed as caller-supplied hooks so consumers inject their own behavior without inverting the dependency. This is Orchestra's first PLAN.md; prior development was done by hand and is captured in `design/`. New work is authored here and built through McLoop.
 
 ## Phase 1: Role-scoped criteria and caller-supplied transform registration
 <!-- phase_id: phase_001 -->
 
-Two extension points are missing that block consumers (Duplo's
-iterative plan-authoring loop in particular) from running a workflow
-with its own acceptance criteria and its own validation transform.
-Both must be additive so existing callers (`run_verb`, Duplo council
-at `council.py`, Duplo reauthor at `reauthor.py`) are unaffected.
-
-Extension point A — role-scoped criteria. Today `criteria` is
-top-level on `OrchestraConfig` only; `CompoundRoleBinding` has no
-criteria field, `run_role` builds its derived config without criteria,
-and `_merge_configs` drops top-level criteria on merge. A compound
-role cannot carry its own acceptance criteria.
-
-Extension point B — caller-supplied transform registration. Today
-`run_workflow` builds both the pre-load and runtime registries
-internally and exposes no way for a caller to register a custom
-`actor transform`. Built-in transform registration is fixed. A
-consumer cannot supply a validation transform (e.g. one that checks an
-authored plan body) without dropping below the stable API. The
-registration hook must NOT introduce an Orchestra dependency on any
-consumer package: Orchestra exposes a callback; the caller supplies a
-callback that registers a caller-owned transform.
+Two extension points are missing that block consumers (Duplo's iterative plan-authoring loop in particular) from running a workflow with its own acceptance criteria and its own validation transform. Both must be additive so existing callers (`run_verb`, Duplo council at `council.py`, Duplo reauthor at `reauthor.py`) are unaffected. Extension point A — role-scoped criteria. Today `criteria` is top-level on `OrchestraConfig` only; `CompoundRoleBinding` has no criteria field, `run_role` builds its derived config without criteria, and `_merge_configs` drops top-level criteria on merge. A compound role cannot carry its own acceptance criteria. Extension point B — caller-supplied transform registration. Today `run_workflow` builds both the pre-load and runtime registries internally and exposes no way for a caller to register a custom `actor transform`. Built-in transform registration is fixed. A consumer cannot supply a validation transform (e.g. one that checks an authored plan body) without dropping below the stable API. The registration hook must NOT introduce an Orchestra dependency on any consumer package: Orchestra exposes a callback; the caller supplies a callback that registers a caller-owned transform.
 
 - [x] T-000001: Add an optional `criteria` field to `CompoundRoleBinding` in `orchestra/config.py` (default empty/None so existing bindings are unchanged). Parse it in `CompoundRoleBinding.from_dict` and reserve the `criteria` key alongside `pattern` and `max_rounds` so it is not swept into `extra`. Use the same criteria shape the top-level `OrchestraConfig.criteria` parser already accepts, reusing that parsing path rather than duplicating it. Unit tests in the orchestra config tests: a compound binding with criteria round-trips through `from_dict`; a binding without criteria still parses and carries empty/None criteria; the `criteria` key no longer appears in `extra`. <!-- created_at: 2026-06-03T00:00:00Z --> <!-- completed_at: 2026-06-04T04:32:07Z -->
 - [x] T-000002: Fix `_merge_configs` in `orchestra/config.py` so it preserves and merges top-level `criteria` instead of reconstructing `OrchestraConfig` without it. Define the merge rule explicitly (later config's criteria override earlier per-criterion by id; non-overlapping criteria union) and document it in the function docstring. Unit tests: merging two configs each with distinct criteria yields the union; merging where both define the same criterion id takes the later; merging a config that has criteria with one that does not preserves the criteria. This corrects a current latent bug (criteria silently dropped on merge), independent of the rest of this phase. <!-- created_at: 2026-06-03T00:00:00Z --> <!-- completed_at: 2026-06-04T04:33:28Z -->
