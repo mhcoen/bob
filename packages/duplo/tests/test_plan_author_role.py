@@ -114,7 +114,7 @@ def test_role_resolves_with_distinct_enough_bindings():
     # proposer=opus, judge=opus, reviewer=codex.
     assert proposer == ("claude_code_text", "opus")
     assert judge == ("claude_code_text", "opus")
-    assert reviewer == ("codex_text", "gpt-5-codex")
+    assert reviewer == ("codex_text", "gpt-5.5")
 
     # The reviewer is a distinct actor from the judge (independence).
     assert reviewer != judge

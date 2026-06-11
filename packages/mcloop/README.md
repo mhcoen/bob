@@ -1672,7 +1672,7 @@ Worked three-tier example:
       "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
       "enabled": true,
       "cli": "codex",
-      "model": "gpt-5-codex"
+      "model": "gpt-5.5"
     },
     {
       "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
@@ -1721,7 +1721,7 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
       "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
       "enabled": false,
       "cli": "codex",
-      "model": "gpt-5-codex"
+      "model": "gpt-5.5"
     },
     {
       "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",

@@ -17,6 +17,20 @@ _TESTS_DIR = str(Path(__file__).resolve().parent)
 if _TESTS_DIR not in sys.path:
     sys.path.insert(0, _TESTS_DIR)
 
+# Pin the repo root ahead of site-packages so the suite always tests
+# the working-tree ``orchestra`` package. Without this, a stale
+# non-editable orchestra installed in whatever venv happens to be
+# active shadows the working tree and the suite tests the wrong code.
+_REPO_ROOT = str(Path(__file__).resolve().parent.parent)
+if _REPO_ROOT in sys.path:
+    sys.path.remove(_REPO_ROOT)
+sys.path.insert(0, _REPO_ROOT)
+for _mod_name in [m for m in list(sys.modules) if m == "orchestra" or m.startswith("orchestra.")]:
+    _mod = sys.modules[_mod_name]
+    _file = getattr(_mod, "__file__", None)
+    if _file is not None and not str(_file).startswith(_REPO_ROOT):
+        del sys.modules[_mod_name]
+
 # mcloop:llm-guard
 # Auto-injected by mcloop. Blocks real claude/codex subprocess calls
 # during pytest so unmocked LLM paths fail fast instead of silently

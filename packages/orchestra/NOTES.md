@@ -123,6 +123,44 @@
   code changed; the assertions about routing and per-child outcome are
   unchanged. Re-run is green.
 
+- 2026-06-10 [1] Codex default model fix. `BUILTIN_MODEL_IDENTIFIERS["codex"]`
+  in `orchestra/registry/registry.py` now resolves to `gpt-5.5` (the model
+  ChatGPT-account Codex serves). `gpt-5-codex` was kept selectable as its own
+  explicit identifier for accounts whose Codex access permits it, so it is
+  opt-in and never the value behind the bare `codex` identifier. The shipped
+  `design` binding (`orchestra/config.py:497`) names the `codex` identifier
+  and inherits the fix with no change. Remaining `gpt-5-codex` literals in
+  orchestra's adapter tests are explicit pass-through arguments testing
+  verbatim model forwarding and were intentionally left.
+- 2026-06-10 [1] Cross-package audit results. mcloop's
+  `settings.example.json` tier 2 and both README chain examples shipped
+  `gpt-5-codex` and were updated to `gpt-5.5`. The live `~/.mcloop/config.json`
+  already carried `gpt-5.5` for tier 2 (hand-fixed previously), so the
+  preflight skip recurs only for fresh copies of the example. mcloop's
+  known-good model list in `mcloop/runner.py` deliberately retains
+  `gpt-5-codex` because it is a validity list, not a default. duplo's
+  `tests/test_plan_author_role.py` pinned the old resolution
+  (`("codex_text", "gpt-5-codex")`) and was updated to `gpt-5.5`. duplo's
+  suite was not run in this session (check commands are scoped to orchestra),
+  so its next CI run should confirm.
+- 2026-06-10 [1] The session shell had `/Users/mhcoen/proj/writer/.venv/bin`
+  on PATH, and that venv contains a stale non-editable orchestra 0.0.1
+  snapshot. Because pytest only puts `tests/` on `sys.path`, `import
+  orchestra` resolved to the stale snapshot and the first `pytest` run had
+  44 failures plus four modules failing collection, including the two new
+  regression tests (which failed against the stale table exactly as
+  designed). Fixed by pinning the repo root ahead of site-packages in
+  `tests/conftest.py`, which also purges any already-imported stale
+  orchestra modules. Second run: 701 passed, 8 skipped, 0 failed.
+- 2026-06-10 [1] `mypy .` fails in this session's environment with one
+  error: missing `types-jsonschema` stubs for the `jsonschema` import at
+  `tests/test_workflows_council.py:583` (a file this task did not touch).
+  The active writer venv lacks the stub package and installing is not
+  permitted in this session. mypy was whole-repo green on 2026-06-04 under
+  the proper environment (see the T-000006 note above), so this is an
+  environment artifact, not a regression. Installing `types-jsonschema`
+  in the venv that runs verification resolves it.
+
 ## Hypotheses
 
 - 2026-06-03 [1.1] [T-000001] The effective lint/type gate appears to be

@@ -68,3 +68,25 @@ def test_register_actor_backing_invalidates_cache():
     # Re-registration of the same backing is a conflict, not a swap.
     with pytest.raises(RegistryConflict):
         reg.register_actor_backing("k", B)
+
+
+def test_bare_codex_identifier_resolves_to_a_chatgpt_account_model():
+    """The bare ``codex`` identifier must not resolve to gpt-5-codex.
+    ChatGPT-account Codex rejects that model with a 400, so anything
+    defaulting through the identifier table would break ecosystem-wide.
+    The default is the model the account-tier CLI serves."""
+    reg = with_core()
+    ident = reg.model_identifiers["codex"]
+    assert ident.adapter == "codex_text"
+    assert ident.model == "gpt-5.5"
+    assert ident.model != "gpt-5-codex"
+
+
+def test_gpt_5_codex_remains_selectable_as_an_explicit_identifier():
+    """Accounts whose Codex access does serve gpt-5-codex can still
+    select it, but only by naming it explicitly. It is opt-in, never
+    the value behind the bare ``codex`` identifier."""
+    reg = with_core()
+    ident = reg.model_identifiers["gpt-5-codex"]
+    assert ident.adapter == "codex_text"
+    assert ident.model == "gpt-5-codex"

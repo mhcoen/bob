@@ -577,7 +577,7 @@ def test_resolve_compound_model_identifiers_fills_in_adapter_and_model() -> None
     assert resolved["judge_role"].adapter == "claude_code_text"
     assert resolved["judge_role"].model == "opus"
     assert resolved["reviewer"].adapter == "codex_text"
-    assert resolved["reviewer"].model == "gpt-5-codex"
+    assert resolved["reviewer"].model == "gpt-5.5"
 
 
 def test_resolve_compound_model_identifiers_preserves_explicit_bindings() -> None:

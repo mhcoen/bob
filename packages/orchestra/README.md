@@ -100,7 +100,7 @@ drafter, anything, binds to either by name. Set `adapter` to
 binding:
 
 ```json
-{"roles": {"proposer": {"adapter": "codex_text", "model": "gpt-5-codex"}}}
+{"roles": {"proposer": {"adapter": "codex_text", "model": "gpt-5.5"}}}
 ```
 
 The `*_text` adapters are read-only and used for synthesis or
@@ -676,28 +676,29 @@ available identifiers, so a typo never reaches the executor.
 
 The identifiers shipped today are:
 
-| Identifier | Adapter                        | Model            |
-| ---------- | ------------------------------ | ---------------- |
-| `opus`     | `claude_code_text`             | `opus`           |
-| `sonnet`   | `claude_code_text`             | `sonnet`         |
-| `haiku`    | `claude_code_text`             | `haiku`          |
-| `kimi`     | `claude_code_text_kimi`        | `kimi-k2.6`      |
-| `deepseek` | `claude_code_text_deepseek`    | `deepseek-v4-pro`|
-| `codex`    | `codex_text`                   | `gpt-5-codex`    |
+| Identifier    | Adapter                        | Model            |
+| ------------- | ------------------------------ | ---------------- |
+| `opus`        | `claude_code_text`             | `opus`           |
+| `sonnet`      | `claude_code_text`             | `sonnet`         |
+| `haiku`       | `claude_code_text`             | `haiku`          |
+| `kimi`        | `claude_code_text_kimi`        | `kimi-k2.6`      |
+| `deepseek`    | `claude_code_text_deepseek`    | `deepseek-v4-pro`|
+| `codex`       | `codex_text`                   | `gpt-5.5`        |
+| `gpt-5-codex` | `codex_text`                   | `gpt-5-codex`    |
 
 Long-form bindings (`{"adapter": "...", "model": "..."}`) still
 work and bypass the lookup; the short form is a convenience for
 the common cases. Both forms compose with the same `parameters`,
 `tools`, and `instruction_template` keys.
 
-The `codex` identifier (and any role bound to a `codex_*` adapter)
-requires an account whose Codex access permits the named model.
-The shipped `design` compound binding defaults its reviewer to
-`codex`; on a plain ChatGPT account where the Codex model is
-rejected, rebind that role to a model the account can use (e.g.
-`opus` or a `deepseek`/`kimi` identifier) before relying on the
-`design` role. The independence check still applies: the judge and
-reviewer must not resolve to the same actor.
+The bare `codex` identifier resolves to `gpt-5.5`, a model that
+ChatGPT-account Codex serves. `gpt-5-codex` is rejected by
+ChatGPT-account Codex with a 400, so it is never the value behind
+the bare identifier. Accounts whose Codex access does permit it can
+opt in by naming the `gpt-5-codex` identifier (or any explicit
+long-form binding) directly. The shipped `design` compound binding
+defaults its reviewer to `codex`. The independence check still
+applies: the judge and reviewer must not resolve to the same actor.
 
 ## Choosing model bindings
 
