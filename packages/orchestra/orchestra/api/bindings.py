@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from orchestra.adapters._subprocess import get_current_activity
 from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
@@ -21,6 +22,7 @@ from orchestra.spine import Workflow
 def _wrap_progress_callback(
     user_callback: ProgressCallback | None,
     role_bindings: dict[str, RoleBinding],
+    invocation_options: dict[str, Any] | None = None,
 ) -> (
     Callable[
         [
@@ -38,7 +40,12 @@ def _wrap_progress_callback(
 ):
     """Adapt the user-facing ``ProgressCallback`` to the executor's
     callback signature, enriching each event with the resolved adapter
-    and model from the role binding.
+    and the EFFECTIVE model: the role binding's model overridden by
+    ``invocation_options["model"]`` when one is in effect. The executor
+    folds the same override into ``backing_options`` at invoke time
+    (see ``_executor_state_exec``), so without applying it here the
+    progress label would name the binding's configured model while the
+    adapter actually runs the override.
 
     For ``fan_out_start`` events the wrapper expands the executor's
     ``children`` tuple of ``(state_name, role)`` pairs into a tuple of
@@ -51,13 +58,17 @@ def _wrap_progress_callback(
     if user_callback is None:
         return None
 
+    opt_model = (invocation_options or {}).get("model")
+    model_override = opt_model if isinstance(opt_model, str) and opt_model else None
+
     def _resolve(role: str | None) -> tuple[str | None, str | None]:
         if role is None:
             return (None, None)
         binding = role_bindings.get(role)
         if binding is None:
             return (None, None)
-        return (binding.adapter, binding.model)
+        model = model_override if model_override is not None else binding.model
+        return (binding.adapter, model)
 
     def _inner(
         kind: str,

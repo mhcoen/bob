@@ -261,6 +261,78 @@ def test_wrap_progress_callback_swallows_user_exceptions() -> None:
     inner("state_enter", "x", None, 1, 1, None, None)
 
 
+def test_wrap_progress_callback_applies_invocation_model_override() -> None:
+    """An invocation_options model override changes the model the
+    adapter actually runs (the executor folds it into backing_options),
+    so the progress label must name the override, not the binding's
+    configured model."""
+    bindings = {
+        "editor": RoleBinding(adapter="claude_code_agent", model="opus"),
+    }
+    received: list[ProgressEvent] = []
+    inner = _wrap_progress_callback(
+        lambda e: received.append(e),
+        bindings,
+        invocation_options={"model": "fable"},
+    )
+    assert inner is not None
+    inner("state_enter", "work", "editor", 1, 1, None, None)
+
+    assert received[0].model == "fable"
+    assert received[0].adapter == "claude_code_agent"
+    rendered = format_event(received[0])
+    assert "claude_code_agent:fable" in rendered
+    assert "opus" not in rendered
+
+
+def test_wrap_progress_callback_ignores_non_string_model_override() -> None:
+    """The executor only honors a non-empty string model override.
+    The wrapper applies the same guard so the label never diverges
+    from what the adapter receives."""
+    bindings = {
+        "editor": RoleBinding(adapter="claude_code_agent", model="opus"),
+    }
+    for options in ({}, {"model": ""}, {"model": 7}, None):
+        received: list[ProgressEvent] = []
+        inner = _wrap_progress_callback(
+            received.append,
+            bindings,
+            invocation_options=options,
+        )
+        assert inner is not None
+        inner("state_enter", "work", "editor", 1, 1, None, None)
+        assert received[0].model == "opus"
+
+
+def test_wrap_progress_callback_override_reaches_fan_out_children() -> None:
+    """The executor applies the model override to every invocation,
+    fan-out children included, so each ChildBinding must carry the
+    override too."""
+    bindings = {
+        "framer": RoleBinding(adapter="claude_code_text", model="opus"),
+        "contrarian": RoleBinding(adapter="claude_code_text", model="kimi-k2.6"),
+    }
+    received: list[ProgressEvent] = []
+    inner = _wrap_progress_callback(
+        lambda e: received.append(e),
+        bindings,
+        invocation_options={"model": "fable"},
+    )
+    assert inner is not None
+    inner(
+        "fan_out_start",
+        "frame",
+        "framer",
+        1,
+        3,
+        None,
+        (("contrarian_advise", "contrarian"),),
+    )
+    children = received[0].children
+    assert children is not None
+    assert children[0].model == "fable"
+
+
 # --------------------------------------------------------------------
 # Executor fires the callback once per state_enter and once per
 # state_exit. End-to-end through the ask_council workflow under the
@@ -389,6 +461,7 @@ def _run_executor(
     adapter: _RecordingModelAdapter,
     progress_callback: Any,
     watchdog_factory: Any,
+    invocation_options: dict[str, Any] | None = None,
 ) -> str:
     registry = ProfileRegistry()
     registry.actor_backings["model"] = lambda: adapter
@@ -408,6 +481,7 @@ def _run_executor(
             run_dir=run_dir,
             run_id=rid,
             external_inputs={},
+            invocation_options=invocation_options,
             progress_callback=progress_callback,
             progress_watchdog_factory=watchdog_factory,
         )
@@ -519,6 +593,45 @@ def test_progress_callback_exceptions_remain_non_fatal(
     )
 
     assert terminal == "done"
+
+
+def test_progress_labels_show_invocation_model_override(
+    tmp_path: Path,
+) -> None:
+    """Regression for the stale-model progress label. A workflow run
+    with a role bound to model A and invocation_options {"model": "B"}
+    must surface B in every ProgressEvent and rendered line, because
+    the executor hands the adapter the override, not the binding's
+    configured model. Composes the api wrapper with the executor the
+    same way run_workflow does, with the same invocation_options on
+    both sides."""
+    bindings = {
+        "worker": RoleBinding(adapter="stub_adapter", model="A"),
+    }
+    inv_opts: dict[str, Any] = {"model": "B"}
+    received: list[ProgressEvent] = []
+    wrapped = _wrap_progress_callback(
+        lambda e: received.append(e),
+        bindings,
+        invocation_options=inv_opts,
+    )
+    adapter = _RecordingModelAdapter({"work": "DONE"})
+    terminal = _run_executor(
+        tmp_path=tmp_path,
+        workflow=_single_state_workflow(tmp_path),
+        adapter=adapter,
+        progress_callback=wrapped,
+        watchdog_factory=None,
+        invocation_options=inv_opts,
+    )
+
+    assert terminal == "done"
+    assert received, "expected progress events from the run"
+    for event in received:
+        assert event.model == "B", f"{event.kind} carries stale model {event.model!r}"
+        rendered = format_event(event)
+        assert "stub_adapter:B" in rendered
+        assert ":A" not in rendered
 
 
 def test_executor_fires_callback_once_per_state_enter_and_exit(

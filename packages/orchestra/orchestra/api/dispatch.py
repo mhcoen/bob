@@ -276,7 +276,9 @@ def run_workflow(
     )
 
     resolved_progress = _resolve_progress_callback(progress_callback, quiet)
-    executor_progress = _wrap_progress_callback(resolved_progress, role_bindings)
+    executor_progress = _wrap_progress_callback(
+        resolved_progress, role_bindings, invocation_options=inv_opts
+    )
     transcript_path = run_dir / "transcript.jsonl"
     transcript_writer = _IncrementalTranscriptWriter(transcript_path, run_dir, workflow)
     executor = Executor(

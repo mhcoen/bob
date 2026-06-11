@@ -161,6 +161,41 @@
   environment artifact, not a regression. Installing `types-jsonschema`
   in the venv that runs verification resolves it.
 
+- 2026-06-10 [2] Progress-label model override fix. The stale label had
+  one production cause, not two independent code paths in the progress
+  layer: every event (sequential and fan-out child alike) is enriched by
+  the single `_resolve` closure in `_wrap_progress_callback`
+  (`orchestra/api/bindings.py`), which read `binding.model` and never
+  consulted `invocation_options`. `_format_backing`
+  (`orchestra/progress.py`) renders whatever the event carries, so fixing
+  `_resolve` to apply the override fixes every rendering path at once.
+  The wrapper now takes `invocation_options` and substitutes the
+  effective model with the same guard the executor uses at
+  `_executor_state_exec.py:97-98` (non-empty `str` only), so the label
+  can never diverge from what the adapter receives. The only production
+  call site (`orchestra/api/dispatch.py`) passes the same `inv_opts`
+  dict it hands the Executor; `run_role` flows through `run_workflow`
+  and inherits the fix.
+- 2026-06-10 [2] Scope note: the override is applied only when the role
+  has a resolved binding. A role with no binding still surfaces
+  `(None, None)` even when an override is in effect, because such states
+  (transforms, unbound roles) have no adapter to attribute the model to
+  and `_resolve_workflow_role_bindings` only resolves model/agent
+  states. The executor does fold `invocation_options` into
+  `backing_options` for every state, but for non-model states the
+  `model_override` key is inert, so labeling them with the override
+  would be wrong in the other direction.
+- 2026-06-10 [2] Check results: `ruff check .` clean, `ruff format
+  --check .` clean (108 files), `pytest` 705 passed 8 skipped 0 failed
+  (run twice, second run after a mypy-driven test edit). `mypy .` was
+  run twice: first run had one real error in the new test (a lambda
+  with a default-arg binding, replaced with `received.append`) plus the
+  pre-existing `types-jsonschema` artifact at
+  `tests/test_workflows_council.py:583`; second run shows only the
+  artifact, identical to the 2026-06-10 [1] note above. Installing
+  packages is not permitted in this session, so it remains an
+  environment issue, not a regression.
+
 ## Hypotheses
 
 - 2026-06-03 [1.1] [T-000001] The effective lint/type gate appears to be
