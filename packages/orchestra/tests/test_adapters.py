@@ -354,6 +354,30 @@ def test_extract_final_text_handles_empty_input() -> None:
     assert extract_final_text("") == ""
 
 
+def test_extract_final_text_control_only_stream_returns_empty_not_chrome() -> None:
+    """A stream-json transcript carrying only control records (a session-init
+    handshake, no result and no text deltas -- observed from a kimi call that
+    produced no completion) must yield empty, NOT the raw init record. Returning
+    the init JSON would leak CLI chrome downstream as if it were the model's
+    answer (it is valid JSON, so a JSON consumer cannot reject it as garbage)."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    init = json.dumps(
+        {
+            "type": "system",
+            "subtype": "init",
+            "cwd": "/Users/x/proj/writer",
+            "session_id": "e3c3cc56-0000",
+            "tools": ["Read", "Glob"],
+            "model": "kimi-k2.6",
+            "permissionMode": "default",
+        }
+    )
+    assert extract_final_text(init) == ""
+
+
 def test_extract_final_text_falls_through_when_result_is_empty_string() -> None:
     """Some vendor builds of the inner CLI (kimi via moonshot/Parasail
     has been observed) emit a final ``result`` record where the
@@ -499,12 +523,11 @@ def test_empty_result_falls_through_to_deltas() -> None:
     assert extract_final_text(transcript) == answer_text
 
 
-def test_empty_result_with_no_deltas_falls_through_to_raw() -> None:
-    """When the final result.result is empty AND no
-    content_block_delta events emitted any text, the resolver falls
-    through to rule 3 (raw passthrough). Confirms the empty-result-
-    treated-as-missing behavior is consistent across both fallback
-    rules."""
+def test_empty_result_with_no_deltas_returns_empty_not_raw_transcript() -> None:
+    """When the final result.result is empty AND no content_block_delta events
+    emitted any text, the resolver returns empty (the run produced no answer),
+    NOT the raw stream-json transcript. The empty result is treated as missing,
+    and a control-only stream never leaks its records downstream as the answer."""
     import json
 
     from orchestra.adapters._subprocess import extract_final_text
@@ -522,9 +545,13 @@ def test_empty_result_with_no_deltas_falls_through_to_raw() -> None:
         ),
     ]
     transcript = "\n".join(lines) + "\n"
-    # No deltas to fall back to. Rule 3 returns the raw input so the
-    # caller still has something to inspect.
-    assert extract_final_text(transcript) == transcript
+    # The output WAS stream-json (init + result records parsed) but carried no
+    # answer text, so the resolver returns empty rather than the raw transcript.
+    # Returning the transcript would leak CLI control records downstream as if
+    # they were the model's answer (the kimi session-init leak class). The
+    # raw-passthrough last resort is reserved for output that is not stream-json
+    # at all (a traceback).
+    assert extract_final_text(transcript) == ""
 
 
 def test_extract_final_text_ignores_non_text_deltas() -> None:

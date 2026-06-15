@@ -492,6 +492,7 @@ def extract_final_text(stream_json_output: str) -> str:
         return ""
     last_result_text: str | None = None
     deltas: list[str] = []
+    saw_stream_json_record = False
     for line in stream_json_output.splitlines():
         line = line.strip()
         if not line:
@@ -502,6 +503,7 @@ def extract_final_text(stream_json_output: str) -> str:
             continue
         if not isinstance(record, dict):
             continue
+        saw_stream_json_record = True
         rtype = record.get("type")
         if rtype == "result":
             result = record.get("result")
@@ -534,9 +536,15 @@ def extract_final_text(stream_json_output: str) -> str:
         return last_result_text
     if deltas:
         return "".join(deltas)
-    # Neither summary nor deltas appeared. Returning the raw stream is
-    # more useful than an empty string for debugging, whether or not the
-    # output was stream-json shaped.
+    # Neither a result record nor text deltas appeared. If the output WAS
+    # stream-json (we parsed at least one record, e.g. only a session-init or
+    # other control record), the run produced no answer text -- return empty so
+    # CLI control chrome (a {"type":"system","subtype":"init",...} handshake)
+    # never leaks downstream as if it were the model's answer. Only when the
+    # output was not stream-json at all (a traceback before any JSON) do we fall
+    # back to the raw text, which is the genuine debugging last resort.
+    if saw_stream_json_record:
+        return ""
     return stream_json_output
 
 
