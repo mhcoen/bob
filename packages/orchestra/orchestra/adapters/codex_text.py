@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -137,29 +138,49 @@ class CodexTextAdapter:
             stdin_arg = prompt_bytes_raw
         else:
             stdin_arg = None
+        # Capture ONLY the model's final message via ``--output-last-message``.
+        # codex 0.138 changed ``exec`` stdout to prepend a startup banner and
+        # echo the stdin prompt back ("Reading prompt from stdin...\nOpenAI Codex
+        # v...\n...\nuser\n<prompt>") before the completion, so the raw stdout is
+        # no longer "just the answer" the way it was on 0.128. Routing the final
+        # message to a file and reading that gives the clean completion
+        # regardless of banner/echo changes. stdout is kept only as a fallback.
+        fd, last_message_path = tempfile.mkstemp(prefix="codex_last_", suffix=".txt")
+        os.close(fd)
+        run_cmd = list(inner["cmd"]) + ["--output-last-message", last_message_path]
         output, exit_code = run_session(
-            inner["cmd"],
+            run_cmd,
             inner["cwd"],
             env=inner["env"],
             timeout=int(inner["timeout_s"]),
             silent=True,
             stdin_bytes=stdin_arg,
         )
+        last_message = ""
+        try:
+            last_message = Path(last_message_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            last_message = ""
+        finally:
+            try:
+                os.unlink(last_message_path)
+            except OSError:
+                pass
+        # Prefer the clean final message. Fall back to raw stdout only if codex
+        # wrote nothing to the file (e.g. an early error before any completion).
+        answer = last_message if last_message else output
         log_path = write_log(
             inner["log_dir"],
             inner["task_label"],
-            inner["cmd"],
+            run_cmd,
             output,
             exit_code,
             state_id=prepared.request.state_id,
             attempt=prepared.request.attempt,
         )
-        # Codex emits the final assistant text on stdout (not
-        # stream-json), so the captured output is the answer. Pass it
-        # through unchanged.
         verdict = _verdict_for_exit_code(exit_code)
         return {
-            "output": output,
+            "output": answer,
             "verdict": verdict,
             "fields": {
                 "exit_code": exit_code,

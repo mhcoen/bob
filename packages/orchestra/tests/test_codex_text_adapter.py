@@ -288,8 +288,41 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
-    # Output is the raw fake_stdout, not "would-be-extracted".
+    # No --output-last-message file was written by the mock, so the adapter
+    # falls back to raw stdout unchanged.
     assert payload["output"] == fake_stdout
+
+
+def test_invoke_prefers_output_last_message_over_banner_stdout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """codex 0.138 exec prepends a startup banner and echoes the stdin prompt
+    onto stdout before the completion, so raw stdout is no longer just the
+    answer. The adapter must return the clean final message codex writes to the
+    --output-last-message file, NOT the banner+echo stdout."""
+    banner_stdout = (
+        "Reading prompt from stdin...\nOpenAI Codex v0.138.0\n--------\n"
+        'user\n{"ai_probability": <number 0..1>, "confidence": <number 0..1>}\n'
+    )
+    clean_completion = '{"ai_probability": 0.42, "confidence": 0.6}'
+
+    def fake_run_session(cmd, cwd, env, timeout, silent, **kw):
+        idx = cmd.index("--output-last-message")
+        Path(cmd[idx + 1]).write_text(clean_completion, encoding="utf-8")
+        return banner_stdout, 0
+
+    monkeypatch.setattr(codex_text_mod, "run_session", fake_run_session)
+    monkeypatch.setattr(
+        codex_text_mod,
+        "write_log",
+        lambda log_dir, task_label, cmd, output, exit_code, **kw: tmp_path / "log",
+    )
+    adapter = CodexTextAdapter()
+    prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
+    payload = adapter.invoke(prepared)
+    # The clean completion, not the banner/echo (which carries the rubric's
+    # decoy JSON shape that broke the judge parser).
+    assert payload["output"] == clean_completion
 
 
 def test_invoke_returns_complete_verdict_on_zero_exit(
