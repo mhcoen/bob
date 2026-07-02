@@ -208,7 +208,7 @@ def _legacy_chain(
     model: str | None,
     fallback_model: str | None,
 ) -> list[ChainEntry]:
-    primary_model = model or "opus"
+    primary_model = model or "fable"
     chain = [ChainEntry(cli=cli, model=primary_model)]
     if fallback_model and fallback_model != primary_model:
         chain.append(ChainEntry(cli=cli, model=fallback_model))
@@ -3199,7 +3199,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--file", default="PLAN.md", help="Checklist file (default: PLAN.md)")
     parser.add_argument("--dry-run", action="store_true", help="Parse and show what would run")
     parser.add_argument("--max-retries", type=int, default=3, help="Max retries per task")
-    parser.add_argument("--model", default=None, help="Model to use (e.g., opus, sonnet, gpt-5.4)")
+    parser.add_argument("--model", default=None, help="Model to use (e.g., fable, opus, gpt-5.4)")
     parser.add_argument(
         "--cli",
         default=None,
@@ -3313,7 +3313,7 @@ def _parse_args() -> argparse.Namespace:
     maintain_parser.add_argument(
         "--model",
         default=None,
-        help="Model to use (e.g., opus, sonnet, gpt-5.4)",
+        help="Model to use (e.g., fable, opus, gpt-5.4)",
     )
     maintain_parser.add_argument(
         "--stop-after-one",

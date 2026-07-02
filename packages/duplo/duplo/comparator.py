@@ -21,7 +21,7 @@ def compare_screenshots(
     current: Path,
     references: list[Path],
     *,
-    model: str = "opus",
+    model: str = "fable",
 ) -> ComparisonResult:
     """Compare *current* screenshot against *references* using ``claude -p``.
 

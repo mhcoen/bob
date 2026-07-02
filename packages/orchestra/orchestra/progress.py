@@ -13,9 +13,9 @@ opting in to a custom reporter).
 
 Sequential states render one line per phase:
 
-    [1/7] framer (claude_code_text:opus) ... starting
-    [1/7] framer (claude_code_text:opus) ... still running, 15.0s elapsed
-    [1/7] framer (claude_code_text:opus) ... done in 3.2s
+    [1/7] framer (claude_code_text:fable) ... starting
+    [1/7] framer (claude_code_text:fable) ... still running, 15.0s elapsed
+    [1/7] framer (claude_code_text:fable) ... done in 3.2s
 
 Parallel groups (fan-out) render a header listing every child binding
 up front, individual completion lines as each child finishes (in
@@ -25,10 +25,10 @@ sum:
 
     [2-6/7] 5 advisors starting in parallel:
        contrarian (claude_code_text:kimi-k2.6)
-       first_principles (claude_code_text:opus)
+       first_principles (claude_code_text:fable)
        expansionist (claude_code_text:sonnet)
        outsider (claude_code_text:kimi-k2.6)
-       executor_lens (claude_code_text:opus)
+       executor_lens (claude_code_text:fable)
     [2-6/7] contrarian done in 4.1s
     [2-6/7] expansionist done in 4.8s
     [2-6/7] all 5 still running, 30.0s elapsed

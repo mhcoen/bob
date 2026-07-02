@@ -278,25 +278,25 @@ Create `~/.orchestra/config.json`:
     "pair":      { "workflow": "ask_draft_then_adjudicate" }
   },
   "roles": {
-    "responder":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "responder":   { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
     "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
     "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "synthesizer": { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
     "framer":          { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "contrarian":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "first_principles":{ "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "first_principles":{ "adapter": "claude_code_text", "model": "fable", "parameters": {} },
     "expansionist":    { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "outsider":        { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "executor_lens":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "chairman":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "panelist_1":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "executor_lens":   { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
+    "chairman":        { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
+    "panelist_1":      { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
     "panelist_2":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
     "panelist_3":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "panelist_4":      { "adapter": "claude_code_text", "model": "deepseek-v4-pro", "parameters": {} },
-    "panelist_5":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
-    "reviewer":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
+    "panelist_5":      { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
+    "reviewer":        { "adapter": "claude_code_text", "model": "fable", "parameters": {} }
   },
   "workflows": {
     "ask_single":                       { "pattern": "ask_single" },
@@ -347,22 +347,22 @@ each sequential state starts and finishes:
 
 ```
 $ orchestra council should I rewrite this service in rust
-[1/7] framer (claude_code_text:opus) ... starting
-[1/7] framer (claude_code_text:opus) ... done in 2.4s
+[1/7] framer (claude_code_text:fable) ... starting
+[1/7] framer (claude_code_text:fable) ... done in 2.4s
 [2-6/7] 5 framer children starting in parallel:
    contrarian (claude_code_text:kimi-k2.6)
-   first_principles (claude_code_text:opus)
+   first_principles (claude_code_text:fable)
    expansionist (claude_code_text:sonnet)
    outsider (claude_code_text:kimi-k2.6)
-   executor_lens (claude_code_text:opus)
+   executor_lens (claude_code_text:fable)
 [2-6/7] contrarian done in 4.1s
 [2-6/7] expansionist done in 4.8s
 [2-6/7] outsider done in 5.2s
 [2-6/7] first_principles done in 6.0s
 [2-6/7] executor_lens done in 6.3s
 [2-6/7] all 5 done, parallel wall-clock 6.3s
-[7/7] chairman (claude_code_text:opus) ... starting
-[7/7] chairman (claude_code_text:opus) ... done in 5.1s
+[7/7] chairman (claude_code_text:fable) ... starting
+[7/7] chairman (claude_code_text:fable) ... done in 5.1s
 [final answer prints here on stdout]
 ```
 
@@ -485,7 +485,7 @@ result = run_workflow(
     },
     config=load_config(Path("/path/to/project")),
     invocation_options={
-        "model": "opus",
+        "model": "fable",
         "timeout": 1800,
         "log_dir": "/path/to/project/logs",
     },
@@ -548,8 +548,8 @@ any other consumer runs against picks up the same bindings.
 ```json
 {
   "roles": {
-    "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
-    "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
+    "responder": { "adapter": "claude_code_text",  "model": "fable", "parameters": {} },
+    "editor":    { "adapter": "claude_code_agent", "model": "fable", "tools": "default", "parameters": {} }
   },
   "workflows": {
     "code_edit": { "pattern": "draft_then_adjudicate" }
@@ -611,8 +611,8 @@ A role binding has three required keys (plus an optional fourth):
   `claude_code_text` (read-only Claude Code, used for text-role
   states) and `claude_code_agent` (full edit-capable Claude Code,
   used for edit-agent states).
-- `model` — model name passed to the adapter (`opus`, `sonnet`,
-  `kimi-k2.6`, `deepseek-v4-pro`, etc.).
+- `model` — model name passed to the adapter (`fable`, `opus`,
+  `sonnet`, `kimi-k2.6`, `deepseek-v4-pro`, etc.).
 - `parameters` — adapter-specific extras, usually `{}`.
 - `tools` — edit-agent roles only. Tool restriction for the agent,
   e.g. `"default"` for the standard McLoop tool set.
@@ -625,8 +625,8 @@ colliding under one binding. A single config can define both:
 
 ```json
 "roles": {
-  "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
-  "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
+  "responder": { "adapter": "claude_code_text",  "model": "fable", "parameters": {} },
+  "editor":    { "adapter": "claude_code_agent", "model": "fable", "tools": "default", "parameters": {} }
 }
 ```
 
@@ -643,7 +643,7 @@ per-role actors are policy.
 "role_bindings": {
   "design": {
     "pattern": "design_loop",
-    "judge_role": { "model": "opus" },
+    "judge_role": { "model": "fable" },
     "reviewer":   { "model": "codex" },
     "max_rounds": 4
   }
@@ -651,7 +651,7 @@ per-role actors are policy.
 ```
 
 The shipped `design` binding wraps the `design_loop` workflow. The
-judge defaults to a strong model (`opus`) for judgement-shaped
+judge defaults to a strong model (`fable`) for judgement-shaped
 calls; the reviewer defaults to a different model (`codex`) so the
 critique is independent of the judge's training data. Workflow
 start refuses to run when both bindings resolve to the same actor,
@@ -664,7 +664,7 @@ A compound role binding leaf may name a short model identifier in
 place of spelling out `adapter` and `model` separately:
 
 ```json
-"judge_role": { "model": "opus" }
+"judge_role": { "model": "fable" }
 ```
 
 Each identifier resolves to an `(adapter, model)` tuple through
@@ -678,6 +678,7 @@ The identifiers shipped today are:
 
 | Identifier    | Adapter                        | Model            |
 | ------------- | ------------------------------ | ---------------- |
+| `fable`       | `claude_code_text`             | `fable`          |
 | `opus`        | `claude_code_text`             | `opus`           |
 | `sonnet`      | `claude_code_text`             | `sonnet`         |
 | `haiku`       | `claude_code_text`             | `haiku`          |

@@ -2053,7 +2053,7 @@ def test_arg_model_overrides_config(tmp_path):
 
 
 def test_default_chain_checks_default_model(tmp_path):
-    """No configured model defaults to the explicit claude/opus tier."""
+    """No configured model defaults to the explicit claude/fable tier."""
     from mcloop.main import run_loop
 
     plan = tmp_path / "PLAN.md"
@@ -2072,7 +2072,7 @@ def test_default_chain_checks_default_model(tmp_path):
         patch("mcloop.main.warn_unknown_model") as mock_warn,
     ):
         run_loop(plan, model=None)
-    mock_warn.assert_called_once_with("claude", "opus")
+    mock_warn.assert_called_once_with("claude", "fable")
 
 
 # --- PID file writing ---

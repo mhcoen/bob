@@ -85,6 +85,7 @@ class ModelIdentifier:
 
 BUILTIN_MODEL_IDENTIFIERS: dict[str, ModelIdentifier] = {
     # Anthropic Claude family via Claude Code CLI (read-only, text role).
+    "fable": ModelIdentifier(name="fable", adapter="claude_code_text", model="fable"),
     "opus": ModelIdentifier(name="opus", adapter="claude_code_text", model="opus"),
     "sonnet": ModelIdentifier(name="sonnet", adapter="claude_code_text", model="sonnet"),
     "haiku": ModelIdentifier(name="haiku", adapter="claude_code_text", model="haiku"),

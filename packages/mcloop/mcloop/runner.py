@@ -107,6 +107,8 @@ _BILLING_KEY = {
 _KNOWN_MODELS = {
     "claude": frozenset(
         {
+            "fable",
+            "claude-fable-5",
             "opus",
             "sonnet",
             "haiku",

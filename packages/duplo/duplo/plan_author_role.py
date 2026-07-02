@@ -16,7 +16,7 @@ Distinct from the shared ``design`` role
 ----------------------------------------
 Orchestra ships a *shared* ``design`` compound role in
 ``orchestra.config.default_config`` (pattern ``design_loop``,
-judge-first, judge=opus / reviewer=codex, no proposer, no criteria).
+judge-first, judge=fable / reviewer=codex, no proposer, no criteria).
 ``plan_author`` is a DISTINCT role: it binds a different workflow
 pattern (``plan_author``), declares its own proposer/reviewer/judge
 leaf bindings, and -- unlike ``design`` -- carries a set of
@@ -28,7 +28,7 @@ Leaf bindings
 The leaf-binding keys are the workflow's own role names
 (``proposer``, ``reviewer``, ``judge_role`` in ``plan_author.orc``).
 The reviewer is bound to a different actor (``codex``) than the
-proposer and judge (``opus``) so the review is independent of the
+proposer and judge (``fable``) so the review is independent of the
 authoring/judging model's training data -- the same independence
 rationale the shared ``design`` role uses for its judge/reviewer
 split.
@@ -69,10 +69,10 @@ MAX_ROUNDS = 6
 
 # Leaf-binding model identifiers, resolved through Orchestra's
 # ProfileRegistry at workflow start. Reviewer is ``codex`` so its
-# critique is independent of the ``opus`` proposer/judge.
-PROPOSER_MODEL = "opus"
+# critique is independent of the ``fable`` proposer/judge.
+PROPOSER_MODEL = "fable"
 REVIEWER_MODEL = "codex"
-JUDGE_MODEL = "opus"
+JUDGE_MODEL = "fable"
 
 PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
     {

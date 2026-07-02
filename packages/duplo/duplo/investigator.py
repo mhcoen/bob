@@ -125,7 +125,7 @@ def investigate(
     counter_example_sources: list[SourceEntry] | None = None,
     docs_text: str = "",
     behavior_contracts: list[BehaviorContract] | None = None,
-    model: str = "opus",
+    model: str = "fable",
 ) -> InvestigationResult:
     """Run an intelligent product-level investigation.
 
@@ -141,7 +141,7 @@ def investigate(
         counter_example_sources: Source entries with counter-example role.
         docs_text: Combined text from docs-role reference files.
         behavior_contracts: Ground-truth input/output pairs from the spec.
-        model: Claude model alias (default ``"opus"``).
+        model: Claude model alias (default ``"fable"``).
 
     Returns:
         An :class:`InvestigationResult` with structured diagnoses.

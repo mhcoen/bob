@@ -672,7 +672,7 @@ def test_default_config_carries_design_role_binding() -> None:
     # identities are documented in orchestra/README.md; the test
     # captures the contract that the defaults satisfy the
     # same-actor rule.
-    assert judge.model == "opus"
+    assert judge.model == "fable"
     assert reviewer.model == "codex"
     assert judge.model != reviewer.model
 

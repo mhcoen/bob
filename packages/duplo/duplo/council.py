@@ -22,11 +22,11 @@ Hardcoded fallback role bindings, used when the project has no
 ``.orchestra/config.json`` (or one without the council roles):
 
   framer:             claude_code_text          (haiku)
-  proposer_code:      claude_code_text          (opus)
+  proposer_code:      claude_code_text          (fable)
   proposer_codex:     codex_text                (gpt-5.5)
   proposer_kimi:      claude_code_text_kimi     (kimi-k2.6)
   proposer_deepseek:  claude_code_text_deepseek (deepseek-v4-pro)
-  synthesizer:        claude_code_text          (opus)
+  synthesizer:        claude_code_text          (fable)
 
 The four proposers resolve to pairwise distinct (adapter, model)
 tuples (the council fan-out value). The synthesizer shares a model
@@ -99,7 +99,7 @@ _CONFIG_PATH_ENV = "DUPLO_COUNCIL_CONFIG"
 
 _FALLBACK_ROLE_BINDINGS: dict[str, dict[str, Any]] = {
     "framer": {"adapter": "claude_code_text", "model": "haiku"},
-    "proposer_code": {"adapter": "claude_code_text", "model": "opus"},
+    "proposer_code": {"adapter": "claude_code_text", "model": "fable"},
     "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
     "proposer_kimi": {
         "adapter": "claude_code_text_kimi",
@@ -109,7 +109,7 @@ _FALLBACK_ROLE_BINDINGS: dict[str, dict[str, Any]] = {
         "adapter": "claude_code_text_deepseek",
         "model": "deepseek-v4-pro",
     },
-    "synthesizer": {"adapter": "claude_code_text", "model": "opus"},
+    "synthesizer": {"adapter": "claude_code_text", "model": "fable"},
 }
 
 _COUNCIL_REQUIRED_ROLES: tuple[str, ...] = (
