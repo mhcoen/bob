@@ -420,6 +420,43 @@ def test_noop_nonbug_task_accepted_when_checks_pass(
     assert calls == [("All tasks completed!", "info")]
 
 
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._run_audit_fix_cycle")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_audit_phase_uses_chain_primary_model(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_audit,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """The post-loop audit runs on the chain's primary model.
+
+    Regression: run_loop's ``model`` param is ``None`` on the normal CLI
+    path (callers pass ``chain=`` and leave ``model`` unset). Forwarding
+    that ``None`` to ``_run_audit_fix_cycle`` silently ran the audit on the
+    default model instead of the configured one. The audit must receive
+    ``chain[0].model``.
+    """
+    md = _make_project(tmp_path, "- [ ] Already done task\n")
+    mock_run.return_value = _ok_run_result()
+    mock_audit.return_value = AuditResult.no_bugs
+
+    run_loop(md, max_retries=3, chain=[ChainEntry(cli="claude", model="opus")])
+
+    mock_audit.assert_called_once()
+    assert mock_audit.call_args.kwargs["model"] == "opus"
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit")
@@ -1070,37 +1107,24 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
 
     _checkpoint(tmp_path)
 
+    from mcloop.git_ops import _GIT_TIMEOUT_S
+
     assert mock_run.call_count == 5
-    assert mock_run.call_args_list[0] == call(
+    assert [c.args[0] for c in mock_run.call_args_list] == [
         ["git", "status", "--porcelain"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert mock_run.call_args_list[1] == call(
         ["git", "add", "-u"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert mock_run.call_args_list[2] == call(
         ["git", "ls-files", "--others", "--exclude-standard"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert mock_run.call_args_list[3] == call(
         ["git", "add", "--", "src/foo.py"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
-    assert mock_run.call_args_list[4] == call(
         ["git", "commit", "-m", "mcloop: checkpoint"],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
-    )
+    ]
+    # Every git call is bounded and non-interactive so a hung remote or a
+    # credential prompt cannot wedge the loop.
+    for c in mock_run.call_args_list:
+        assert c.kwargs["cwd"] == tmp_path
+        assert c.kwargs["capture_output"] is True
+        assert c.kwargs["text"] is True
+        assert c.kwargs["timeout"] == _GIT_TIMEOUT_S
+        assert c.kwargs["env"]["GIT_TERMINAL_PROMPT"] == "0"
 
 
 @patch("mcloop.main.subprocess.run")

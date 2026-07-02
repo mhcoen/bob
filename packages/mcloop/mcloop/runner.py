@@ -1337,14 +1337,20 @@ def run_sync(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_sync_prompt()
+    # Build and thread the session env through both _build_command (so
+    # _apply_provider_env routes third-party models) and _run_session, the
+    # same way run_task does. Passing no env skips provider routing.
+    session_env = _build_session_env(cli="claude")
     cmd = _build_command(
         "claude",
         prompt=prompt,
         model=model,
+        env=session_env,
     )
     output, returncode = _run_session(
         cmd,
         project_dir,
+        env=session_env,
     )
     log_path = _write_log(
         log_dir,
@@ -1374,14 +1380,17 @@ def run_audit(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_audit_prompt(existing_bugs=existing_bugs)
+    session_env = _build_session_env(cli="claude")
     cmd = _build_command(
         "claude",
         prompt=prompt,
         model=model,
+        env=session_env,
     )
     output, returncode = _run_session(
         cmd,
         project_dir,
+        env=session_env,
     )
     log_path = _write_log(
         log_dir,
@@ -1443,14 +1452,17 @@ def run_post_fix_review(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_post_fix_review_prompt(bug_descriptions, diff)
+    session_env = _build_session_env(cli="claude")
     cmd = _build_command(
         "claude",
         prompt=prompt,
         model=model,
+        env=session_env,
     )
     output, returncode = _run_session(
         cmd,
         project_dir,
+        env=session_env,
     )
     log_path = _write_log(
         log_dir,
@@ -1479,14 +1491,17 @@ def run_bug_fix(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_bug_fix_prompt()
+    session_env = _build_session_env(cli="claude")
     cmd = _build_command(
         "claude",
         prompt=prompt,
         model=model,
+        env=session_env,
     )
     output, returncode = _run_session(
         cmd,
         project_dir,
+        env=session_env,
     )
     log_path = _write_log(
         log_dir,
@@ -1518,13 +1533,15 @@ def run_diagnostic(
     log_dir.mkdir(parents=True, exist_ok=True)
 
     prompt = build_diagnostic_prompt(error_entry, source_content, git_log)
+    session_env = _build_session_env(cli="claude")
     cmd = _build_command(
         "claude",
         prompt=prompt,
         model=model,
         allowed_tools="Read,Glob,Grep",
+        env=session_env,
     )
-    output, returncode = _run_session(cmd, project_dir)
+    output, returncode = _run_session(cmd, project_dir, env=session_env)
     exc_type = error_entry.get("exception_type", "unknown")
     log_path = _write_log(
         log_dir,

@@ -94,6 +94,9 @@ def scan_directory(ref_dir: Path | str = ".") -> ScanResult:
     are sourced from SPEC.md's ``## Sources`` section, not extracted
     from file contents.
 
+    Only the top level of *ref_dir* is scanned; subdirectories are
+    ignored by design (pinned by ``test_subdirs_under_ref_ignored``).
+
     Returns a :class:`ScanResult` with categorised file lists.
     """
     root = Path(ref_dir).resolve()

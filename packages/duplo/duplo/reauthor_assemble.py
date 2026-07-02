@@ -285,7 +285,6 @@ def assemble_reauthored_plan(
 
     replacement_at_prior: dict[str, list[str]] = {}
     new_phase_ids: list[str] = []
-    merge_first_source: dict[str, str] = {}
 
     for entry in normalized_lineage.get("phases") or []:
         if not isinstance(entry, Mapping):
@@ -306,13 +305,11 @@ def assemble_reauthored_plan(
         elif action == "merge":
             string_sources = [s for s in from_field if isinstance(s, str)]
             if string_sources:
-                merge_first_source[new_id] = string_sources[0]
                 # Every merge source records the merge target as its
-                # replacement; only the first-source slot actually
-                # emits the target (tracked by ``merge_first_source``),
-                # while later-source slots see the target in
-                # ``emitted_merge_targets`` and drop themselves
-                # without leaking the consumed prior into the output.
+                # replacement. The assembly loop emits the target once,
+                # at whichever source it reaches first in plan order, and
+                # later-source slots see it in ``emitted_synth_ids`` and
+                # drop themselves without leaking the consumed prior.
                 for fid in string_sources:
                     replacement_at_prior.setdefault(fid, []).append(new_id)
         elif action == "new":
@@ -364,7 +361,12 @@ def assemble_reauthored_plan(
     # per-substitution validation is needed here (and acceptance, which
     # needs task ids, can only be attached after the final migrate).
     out_phases: list[Phase] = []
-    emitted_merge_targets: set[str] = set()
+    # A synth id shared by several prior sources (merge, or supersede with
+    # multiple ``from``) must be emitted exactly once, at the first source
+    # reached in plan order. Marking unconditionally on emit is what keeps
+    # a later source slot from emitting a duplicate ``phase_id`` (which
+    # would fail ``assert_mcloop_canonical`` and abort the whole reauthor).
+    emitted_synth_ids: set[str] = set()
     for phase in working_plan.phases:
         pid = phase.phase_id
         if pid is None:
@@ -375,11 +377,10 @@ def assemble_reauthored_plan(
         replacements = replacement_at_prior.get(pid, [])
         if replacements:
             for new_id in replacements:
-                if new_id in emitted_merge_targets:
+                if new_id in emitted_synth_ids:
                     continue
                 out_phases.append(synth_by_id[new_id])
-                if merge_first_source.get(new_id) == pid:
-                    emitted_merge_targets.add(new_id)
+                emitted_synth_ids.add(new_id)
             continue
         out_phases.append(phase)
 

@@ -95,8 +95,11 @@ class CodexAgentAdapter:
             backing.get("log_dir") or ext.get("log_dir") or project_dir / ".mcloop" / "logs"
         )
         task_label = str(backing.get("task_label") or ext.get("task_label") or "")
+        # Ceil-divide so a sub-second cap does not truncate to 0 (which the
+        # session loop treats as "no wall-clock timeout"), and guarantee at
+        # least 1s for any explicit non-None cap.
         timeout_s = (
-            int(request.timeout_ms / 1000)
+            max(1, (request.timeout_ms + 999) // 1000)
             if request.timeout_ms is not None
             else self._default_timeout_s
         )

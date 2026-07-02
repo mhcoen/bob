@@ -573,9 +573,20 @@ def _download_file(url: str, output_dir: Path) -> tuple[Path | None, bool]:
     _ALLOWED_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
     if suffix and suffix not in _ALLOWED_MEDIA_EXTS:
         return None, False
-    # Avoid collisions by prefixing with domain
+    # Preserve the URL path structure in the cache name so files that
+    # share a basename but live under different paths do not collide.
+    # Keying on domain + basename alone would map ``cdn/images/hero.png``
+    # and ``cdn/thumbs/hero.png`` to one file, so the second request would
+    # return the first image's bytes. A root-level path keeps the
+    # historical ``domain_filename`` layout, and the name is stable for a
+    # given URL so genuine cache hits still work.
     domain = parsed.netloc.replace(".", "_")
-    dest = output_dir / f"{domain}_{filename}"
+    rel = parsed.path.lstrip("/").replace("/", "_") or filename
+    name = f"{domain}_{rel}"
+    if parsed.query:
+        # Same path, different query (e.g. ?v=2) must not collide either.
+        name = f"{name}_{hashlib.sha1(parsed.query.encode('utf-8')).hexdigest()[:8]}"
+    dest = output_dir / name
     if dest.exists():
         return dest, False
     try:

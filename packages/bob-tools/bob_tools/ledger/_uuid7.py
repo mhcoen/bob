@@ -31,7 +31,12 @@ def uuid7() -> str:
     """Return a new UUIDv7 as a canonical hyphenated hex string."""
     global _last_ms, _last_seq12
     with _lock:
-        now_ms = int(time.time() * 1000)
+        # Clamp up to the last emitted timestamp so a backward wall-clock
+        # step (NTP adjustment) or a prior same-ms bump can never emit an
+        # id whose 48-bit timestamp prefix sorts *before* an earlier id.
+        # The event_id is the projector's primary replay key, so a
+        # regression here would reorder events from the same writer.
+        now_ms = max(int(time.time() * 1000), _last_ms)
         if now_ms == _last_ms:
             seq12 = (_last_seq12 + 1) & 0xFFF
             if seq12 == 0:

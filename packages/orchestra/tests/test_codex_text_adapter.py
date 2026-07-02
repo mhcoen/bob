@@ -257,6 +257,23 @@ def test_prepare_timeout_from_request_overrides_default() -> None:
     assert p.inner["timeout_s"] == 5
 
 
+def test_prepare_sub_second_timeout_does_not_truncate_to_zero() -> None:
+    """A sub-second cap must map to >= 1s, not 0.
+
+    Regression: ``int(timeout_ms / 1000)`` truncated any 0 < ms < 1000 to
+    0, which the session loop treats as "no wall-clock timeout" (0 is
+    falsy). Since this adapter also sets ``manages_own_timeout``, the
+    requested cap vanished entirely. The value must ceil-divide with a
+    floor of 1.
+    """
+    a = CodexTextAdapter(default_timeout_s=42)
+    for ms, expected in [(1, 1), (500, 1), (999, 1), (1000, 1), (1500, 2), (2001, 3)]:
+        p = a.prepare(_request(timeout_ms=ms))
+        assert p.summary["timeout_s"] == expected, f"timeout_ms={ms}"
+        assert p.inner["timeout_s"] == expected, f"timeout_ms={ms}"
+        assert p.summary["timeout_s"] >= 1
+
+
 def test_prepare_default_timeout_when_not_set() -> None:
     a = CodexTextAdapter(default_timeout_s=42)
     p = a.prepare(_request())

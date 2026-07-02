@@ -670,7 +670,8 @@ def _load_or_fallback_config(
     Order of preference:
 
     1. Explicit ``DUPLO_COUNCIL_CONFIG`` path (an .orchestra/config.json
-       file). Loaded from its parent dir.
+       file). Loaded via its project dir (two levels up, since
+       ``load_config`` re-appends ``.orchestra/config.json``).
     2. Project's ``.orchestra/config.json`` if present and contains
        all six required council role bindings (framer, four
        proposers, synthesizer).
@@ -686,7 +687,11 @@ def _load_or_fallback_config(
         if not explicit_path.exists():
             raise CouncilError(f"DUPLO_COUNCIL_CONFIG path does not exist: {explicit_path}")
         try:
-            cfg = load_config(project_dir=explicit_path.parent)
+            # load_config re-appends ``.orchestra/config.json`` to the
+            # project_dir, so pass the dir two levels above the explicit
+            # ``.orchestra/config.json`` file (its ``.parent`` is the
+            # ``.orchestra`` dir, not the project root).
+            cfg = load_config(project_dir=explicit_path.parent.parent)
         except config_error as exc:
             raise CouncilError(f"failed to load council config at {explicit_path}: {exc}") from exc
         return _ensure_council_workflow(cfg, config_cls=config_cls, workflow_cls=workflow_cls)

@@ -3061,7 +3061,12 @@ def run_loop(
                 audit_result = _run_audit_fix_cycle(
                     project_dir,
                     log_dir,
-                    model=model,
+                    # Use the chain's primary model, not the raw run_loop
+                    # ``model`` param: the CLI path passes ``chain=`` and
+                    # leaves ``model=None``, so forwarding ``model`` here
+                    # would silently run the audit on the default model
+                    # instead of the configured one.
+                    model=primary_model,
                 )
                 _summary_audit = audit_result.value
                 _audit_elapsed = _format_elapsed(time.monotonic() - _audit_start)

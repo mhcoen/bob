@@ -2138,3 +2138,80 @@ def test_run_session_pid_file_cmd_matches_command(tmp_path):
 
     data = json.loads(pid_content["data"])
     assert data["cmd"] == shlex.join(cmd)
+
+
+# --- Regression: sub-sessions apply third-party provider env routing ---
+
+
+def _run_sync_case(project_dir, log_dir, model):
+    from mcloop.runner import run_sync
+
+    run_sync(project_dir, log_dir, model=model)
+
+
+def _run_audit_case(project_dir, log_dir, model):
+    from mcloop.runner import run_audit
+
+    run_audit(project_dir, log_dir, model=model)
+
+
+def _run_post_fix_review_case(project_dir, log_dir, model):
+    from mcloop.runner import run_post_fix_review
+
+    run_post_fix_review(project_dir, log_dir, "bug description", "diff --git a b", model=model)
+
+
+def _run_bug_fix_case(project_dir, log_dir, model):
+    from mcloop.runner import run_bug_fix
+
+    run_bug_fix(project_dir, log_dir, model=model)
+
+
+def _run_diagnostic_case(project_dir, log_dir, model):
+    from mcloop.runner import run_diagnostic
+
+    run_diagnostic(project_dir, log_dir, {"exception_type": "ValueError"}, model=model)
+
+
+@pytest.mark.parametrize(
+    "invoke",
+    [
+        _run_sync_case,
+        _run_audit_case,
+        _run_post_fix_review_case,
+        _run_bug_fix_case,
+        _run_diagnostic_case,
+    ],
+    ids=["sync", "audit", "post_fix_review", "bug_fix", "diagnostic"],
+)
+def test_subsession_applies_third_party_provider_env(invoke, tmp_path):
+    """Every sub-session routes a third-party model to the provider endpoint.
+
+    Regression: run_audit / run_bug_fix / run_post_fix_review /
+    run_diagnostic / run_sync built their command with ``env=None`` and
+    called ``_run_session`` with no env, so ``_apply_provider_env`` was
+    skipped and a third-party model (kimi/deepseek) routed to the wrong
+    endpoint or billed the wrong account. They must thread one session env
+    through both ``_build_command`` and ``_run_session``.
+    """
+    log_dir = tmp_path / "logs"
+    captured: dict[str, object] = {}
+
+    def fake_run_session(cmd, cwd, env=None, timeout=None):
+        captured["env"] = env
+        return ("", 0)
+
+    with (
+        patch("mcloop.runner._run_session", side_effect=fake_run_session),
+        patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
+        # Force the executor config to defaults so routing is deterministic.
+        patch("mcloop.config.load_role_config", return_value=None),
+    ):
+        invoke(tmp_path, log_dir, "kimi-k2.6")
+
+    env = captured["env"]
+    assert env is not None, "sub-session passed no env to _run_session"
+    # _apply_provider_env routed the third-party model.
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
+    assert env["ANTHROPIC_API_KEY"] == ""

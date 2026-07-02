@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,12 @@ from mcloop import formatting
 from mcloop.notify import notify
 
 _SENSITIVE_PATTERNS = {".env", ".key", ".pem", "credentials.json", "secrets"}
+
+# Bound every git call so a hung remote or a credential/hook prompt cannot
+# wedge the autonomous loop forever. GIT_TERMINAL_PROMPT=0 turns an
+# interactive credential prompt into an immediate failure instead of a
+# silent block; the timeout catches slow-network / hung-hook cases.
+_GIT_TIMEOUT_S = 300
 
 
 def _git(
@@ -25,12 +32,24 @@ def _git(
     Telegram so the user is always aware of version control
     problems.
     """
-    result = subprocess.run(
-        args,
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial_out = exc.stdout if isinstance(exc.stdout, str) else ""
+        partial_err = exc.stderr if isinstance(exc.stderr, str) else ""
+        result = subprocess.CompletedProcess(
+            args,
+            returncode=124,
+            stdout=partial_out,
+            stderr=partial_err + f"\ngit command timed out after {_GIT_TIMEOUT_S}s",
+        )
     if result.returncode != 0:
         cmd_str = " ".join(args)
         context = f" ({label})" if label else ""

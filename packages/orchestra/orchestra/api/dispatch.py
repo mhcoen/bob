@@ -386,7 +386,12 @@ def run_verb(
     # history threads through only when the workflow asks for it.
     # The pre-load registry is enough to introspect declared inputs;
     # run_workflow does the real load again with the runtime registry.
-    workflow_path = resolve_workflow_path(workflow_name, project_dir=project_dir)
+    # Resolve via the workflow's ``pattern`` (what run_workflow itself
+    # runs), not the config key. The two differ whenever a workflows
+    # table entry names a pattern distinct from its key, and introspecting
+    # the wrong .orc would inject or omit ``history`` incorrectly.
+    workflow_pattern = config.workflow(workflow_name).pattern
+    workflow_path = resolve_workflow_path(workflow_pattern, project_dir=project_dir)
     workflow = load_workflow(workflow_path, _pre_load_registry())
     declared = {ext.name for ext in workflow.external_inputs}
     if "history" in declared:

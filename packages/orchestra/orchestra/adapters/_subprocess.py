@@ -815,21 +815,6 @@ def run_session(
         env=env,
         start_new_session=True,
     )
-    if stdin_bytes is not None and process.stdin is not None:
-        try:
-            process.stdin.write(stdin_bytes.decode("utf-8"))
-            process.stdin.flush()
-        except (BrokenPipeError, OSError):
-            # The CLI may close stdin early after consuming the
-            # prompt header. That is not an error condition; drop
-            # the remainder and let the regular timeout/output path
-            # finish.
-            pass
-        finally:
-            try:
-                process.stdin.close()
-            except (BrokenPipeError, OSError):
-                pass
     register_active_process(process, session=session)
     _last_output_lines.clear()
     _clear_current_activity()
@@ -865,6 +850,34 @@ def run_session(
 
     reader_thread = threading.Thread(target=_reader, daemon=True)
     reader_thread.start()
+
+    # Feed stdin from a dedicated thread that runs concurrently with the
+    # reader above. Writing the whole prompt inline before the reader
+    # started could deadlock: a prompt larger than the OS pipe buffer
+    # blocks the parent on write() while the child blocks writing to its
+    # own full stdout pipe, and no timeout in the loop below could break
+    # it because the loop had not been reached yet.
+    if stdin_bytes is not None and process.stdin is not None:
+        stdin_stream = process.stdin
+        stdin_text = stdin_bytes.decode("utf-8")
+
+        def _writer() -> None:
+            try:
+                stdin_stream.write(stdin_text)
+                stdin_stream.flush()
+            except (BrokenPipeError, OSError):
+                # The CLI may close stdin early after consuming the
+                # prompt header. That is not an error condition; drop
+                # the remainder and let the regular timeout/output path
+                # finish.
+                pass
+            finally:
+                try:
+                    stdin_stream.close()
+                except (BrokenPipeError, OSError):
+                    pass
+
+        threading.Thread(target=_writer, daemon=True).start()
 
     head_lines: list[str] = []
     tail_lines: deque[str] = deque(maxlen=_MAX_TAIL_LINES)
