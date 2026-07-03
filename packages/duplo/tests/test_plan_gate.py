@@ -66,6 +66,42 @@ def test_verify_without_build_repaired_in_one_pass() -> None:
     assert outcome.report_after is not None and outcome.report_after.ok
 
 
+def test_prose_verify_build_task_with_feat_survives_gate() -> None:
+    # T-000003 regression: a genuine build task phrased "Verify ..." that
+    # carries a [feat: ...] annotation must pass the gate untouched -- it
+    # was previously misclassified as an orphan verification task and
+    # silently deleted.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Verify the exporter handles empty input [feat: exporter]",
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert outcome.status == "clean"
+    assert outcome.plan_text == plan
+    assert "Verify the exporter handles empty input" in outcome.plan_text
+
+
+def test_repair_drops_only_strict_orphan_not_feat_annotated_build() -> None:
+    # A repair pass triggered by a machine-rendered orphan ("Verify: ...")
+    # must not take the feat-annotated prose-verify build task with it.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Verify the exporter handles empty input [feat: exporter]\n"
+            '- [ ] T-000002: Verify: currency converts [feat: "Currency exchange"]',
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert outcome.status == "repaired"
+    assert check_plan_sanity(outcome.plan_text).ok
+    assert "Verify the exporter handles empty input" in outcome.plan_text
+    assert "currency converts" not in outcome.plan_text
+
+
 def test_duplicate_phase_ids_repaired_in_one_pass() -> None:
     plan = _plan(
         _phase(1, "Core", '- [ ] T-000001: a [feat: "A"]', phase_id=1),

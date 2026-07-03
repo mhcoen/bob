@@ -264,6 +264,75 @@ def test_unannotated_verify_flagged_when_plan_builds_nothing() -> None:
     assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
 
 
+def test_prose_verify_task_with_feat_is_build_work_not_flagged() -> None:
+    # T-000003 regression: a real build task phrased "Verify ..." that
+    # carries a [feat: ...] annotation is a builder, not a verification
+    # task. Its feature counts as built and nothing is flagged.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Verify the exporter handles empty input [feat: exporter]",
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+    assert report.violations == []
+
+
+def test_prose_verify_feat_backs_a_strict_verification_task() -> None:
+    # The prose-verify builder's feature is in built_features, so a
+    # machine-rendered "Verify:" task mapping to it is not an orphan.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Verify the exporter handles empty input [feat: "exporter"]\n'
+            '- [ ] T-000002: Verify: export an empty file [feat: "exporter"]',
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+def test_test_that_phrasing_with_feat_is_build_work() -> None:
+    # The exemption covers every verify-ish prose prefix, not just "Verify".
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Test that exports round-trip losslessly [feat: "Export"]',
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert report.ok
+
+
+def test_prose_verify_without_feat_still_flagged_when_plan_builds_nothing() -> None:
+    # The exemption requires a feat annotation: an unannotated prose
+    # verify task keeps its verification classification.
+    plan = _plan(_phase(1, "Core", "- [ ] T-000001: Verify the exporter handles empty input"))
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
+
+
+def test_strict_colon_verify_with_orphan_feat_still_flagged() -> None:
+    # The machine-rendered "Verify:" form is always verification, feat
+    # annotation or not -- the T-000003 exemption must not silence it.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Add dark mode [feat: "Dark mode"]\n'
+            '- [ ] T-000002: Verify: exporter output [feat: "exporter"]',
+        )
+    )
+    report = check_plan_sanity(plan)
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
+
+
 def test_verify_mapping_ok_when_feature_built_elsewhere() -> None:
     plan = _plan(
         _phase(1, "Core", '- [ ] T-000001: Add unit conversion [feat: "Unit conversion"]'),

@@ -109,6 +109,11 @@ def _repair_verify_without_build(plan_text: str) -> tuple[str, list[str]]:
     verbatim. A verify task can never pass if nothing builds the feature
     it checks, so removing it is the only mechanical repair; the missing
     build, if real, surfaces as a scope-coverage problem the user owns.
+
+    Build tasks that merely *sound* like verification ("Verify the
+    exporter handles empty input") but carry a ``[feat: ...]``
+    annotation are classified as builders by the checker's shared parse
+    and therefore can never appear in the drop set (T-000003).
     """
     drop = set(orphan_verification_lines(plan_text))
     if not drop:

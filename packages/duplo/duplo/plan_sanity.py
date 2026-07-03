@@ -39,11 +39,15 @@ _TASK_LINE_RE = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\]\s*(?P<body>.*
 # A leading task id token (``T-000002:``) prefixing the description.
 _TASK_ID_RE = re.compile(r"^[A-Za-z]+-\d+:\s*")
 # Trailing run of [feat: "..."] / [fix: "..."] annotations on a task.
-_TRAILING_ANNO_RE = re.compile(r"(\s*\[(?:feat|fix):\s*\"[^\"]+\"(?:,\s*\"[^\"]+\")*\])+\s*$")
-_ANNO_RE = re.compile(r"\[(feat|fix):\s*((?:\"[^\"]+\")(?:,\s*\"[^\"]+\")*)\]")
+_TRAILING_ANNO_RE = re.compile(r"(\s*\[(?:feat|fix):\s*[^\]]+\])+\s*$")
+_ANNO_RE = re.compile(r"\[(feat|fix):\s*([^\]]+)\]")
 _QUOTED_RE = re.compile(r"\"([^\"]+)\"")
-# A task whose description is a behavior/verification check.
+# A task whose description is phrased like a behavior/verification check.
 _VERIFY_PREFIX_RE = re.compile(r"^(?:verify|verification|test that)\b", re.IGNORECASE)
+# The strict machine-rendered verification form ("Verify: type ..."), the
+# only phrasing duplo's own renderers emit (spec_reader's behavior
+# contracts, verification_extractor's video cases).
+_VERIFY_STRICT_RE = re.compile(r"^(?:verify|verification)\s*:", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -254,15 +258,39 @@ def _scope_item_covered(item: str, builders: list[_BuilderView]) -> bool:
     return False
 
 
+def _is_verification(body: str, feats: tuple[str, ...]) -> bool:
+    """Classify a task description as verification or build work.
+
+    The strict machine-rendered form (``Verify: type ...``) is always a
+    verification task -- it is exactly how behavior contracts and video
+    cases are rendered. A prose verify/test phrasing ("Verify the
+    exporter handles empty input") counts as verification only when the
+    task carries no ``[feat: ...]`` annotation: a feat annotation
+    declares the task *delivers* a feature, so such a task is real build
+    work that merely happens to start with "Verify". Misclassifying it
+    would keep its feature out of ``built_features`` and let the repair
+    gate silently delete genuine feature work (T-000003).
+    """
+    if _VERIFY_STRICT_RE.match(body):
+        return True
+    return bool(_VERIFY_PREFIX_RE.match(body)) and not feats
+
+
+def _annotation_values(raw: str) -> list[str]:
+    """Return feature/fix names from a raw annotation value list."""
+    quoted = _QUOTED_RE.findall(raw)
+    if quoted:
+        return quoted
+    return [part.strip() for part in raw.split(",") if part.strip()]
+
+
 def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
     """Extract every checkbox task (checked or unchecked) from the plan.
 
     Trailing ``[feat: "..."]`` / ``[fix: "..."]`` annotations are split
     off the description; only ``feat`` names are retained (fixes do not
-    name a built feature). A task is flagged as a verification task when
-    its remaining description begins with a verify/test phrasing, which
-    is exactly how behavior contracts and video cases are rendered
-    (``Verify: type ...``).
+    name a built feature). Verification classification is delegated to
+    :func:`_is_verification`.
     """
     tasks: list[_ParsedTask] = []
     for index, line in enumerate(plan_text.splitlines()):
@@ -276,14 +304,15 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
             tail = body[trailing.start() :]
             for anno in _ANNO_RE.finditer(tail):
                 if anno.group(1) == "feat":
-                    feats.extend(_QUOTED_RE.findall(anno.group(2)))
+                    feats.extend(_annotation_values(anno.group(2)))
             body = body[: trailing.start()].rstrip()
         body = _TASK_ID_RE.sub("", body)
+        feat_names = tuple(feats)
         tasks.append(
             _ParsedTask(
                 text=body,
-                feats=tuple(feats),
-                is_verification=bool(_VERIFY_PREFIX_RE.match(body)),
+                feats=feat_names,
+                is_verification=_is_verification(body, feat_names),
                 line_index=index,
             )
         )
