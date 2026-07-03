@@ -262,6 +262,33 @@ def test_run_checks_resolves_bare_config_command_to_project_venv(tmp_path, monke
     assert "venv pytest" in result.output
 
 
+def test_run_checks_resolves_bare_command_to_workspace_root_venv(tmp_path, monkeypatch):
+    """A package inside a workspace resolves tools from the root .venv.
+
+    Regression: `_resolve_project_venv_command` only checked
+    `<project>/.venv`, so a bare `mypy` (installed only in the
+    workspace-root venv, not on PATH) died with `Command not found: mypy`
+    for every package under `packages/<name>/`. The resolver must walk up
+    to the ancestor venv.
+    """
+    root = tmp_path
+    venv_bin = root / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    tool = venv_bin / "pytest"
+    tool.write_text("#!/bin/sh\nprintf 'root venv pytest\\n1 passed in 0.01s\\n'\n")
+    tool.chmod(0o755)
+
+    pkg = root / "packages" / "orchestra"
+    pkg.mkdir(parents=True)
+    (pkg / "mcloop.json").write_text(json.dumps({"checks": ["pytest -q"]}))
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    result = run_checks(pkg)
+
+    assert result.passed
+    assert "root venv pytest" in result.output
+
+
 def test_run_checks_no_commands(tmp_path):
     result = run_checks(tmp_path)
     assert result.passed

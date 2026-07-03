@@ -162,12 +162,25 @@ def _normalize_pytest(cmd: str) -> str:
 
 
 def _resolve_project_venv_command(project_dir: Path, parts: list[str]) -> list[str]:
-    """Prefer ``<project>/.venv/bin/<tool>`` for bare check executables."""
+    """Prefer a ``.venv/bin/<tool>`` for bare check executables.
+
+    Checks ``<project>/.venv`` first, then walks up the ancestors so a
+    package inside a consolidated workspace resolves the tool from the
+    workspace-root venv (e.g. ``packages/orchestra`` -> ``<root>/.venv``).
+    Without the ancestor walk a bare ``mypy`` that lives only in the
+    workspace venv is left unresolved and dies with
+    ``Command not found: mypy`` even though the tool is installed --
+    while a globally-installed ``ruff`` silently passes, hiding the gap.
+    Falls back to the bare name (resolved on PATH) when no venv on the
+    path to the filesystem root provides the tool.
+    """
     if not parts or "/" in parts[0]:
         return parts
-    candidate = project_dir / ".venv" / "bin" / parts[0]
-    if candidate.exists():
-        return [str(candidate), *parts[1:]]
+    tool = parts[0]
+    for base in (project_dir, *project_dir.parents):
+        candidate = base / ".venv" / "bin" / tool
+        if candidate.exists():
+            return [str(candidate), *parts[1:]]
     return parts
 
 
