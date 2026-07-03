@@ -10,8 +10,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from plan_fixtures import canonical_plan_text
 
+from mcloop import git_ops
 from mcloop.checks import CheckResult, acceptance_kind
 from mcloop.main import ChainEntry, RunStatus, run_loop
 from mcloop.runner import RunResult
@@ -105,6 +107,7 @@ def test_command_exit_acceptance_runs_without_shell_and_passes() -> None:
 
     with (
         _loop_patches(root),
+        patch("mcloop.main.run_autofix"),
         patch("mcloop.checks.subprocess.run", side_effect=fake_run),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main.parse_auto_task") as mock_parse_auto,
@@ -142,6 +145,7 @@ def test_command_exit_acceptance_fails_on_nonzero_exit() -> None:
 
     with (
         _loop_patches(root),
+        patch("mcloop.main.run_autofix"),
         patch("mcloop.checks.subprocess.run", side_effect=fake_run),
     ):
         result = _run_one(plan)
@@ -169,6 +173,129 @@ def test_pytest_acceptance_routes_to_scoped_run_checks() -> None:
     assert result.ok
     mock_autofix.assert_called_once_with(root)
     mock_checks.assert_called_once_with(root, changed_files=["pkg/widget.py"])
+
+
+def test_command_exit_acceptance_runs_autofix_before_the_check() -> None:
+    """T-000034: format-on-exit is mcloop's job, not a model habit. A
+    command-exit acceptance must run the auto-fixers before the
+    acceptance command, like the pytest/coverage kinds already do,
+    so the committed artifact does not depend on which model held
+    the editor seat.
+    """
+    root = _scratch_project("command-autofix")
+    plan = _write_plan(root, "- [ ] Run proof [accept: command-exit: true]\n")
+    order: list[str] = []
+
+    def fake_acceptance(*_args: object, **_kwargs: object) -> CheckResult:
+        order.append("acceptance")
+        return CheckResult(passed=True, output="ok", command="true")
+
+    with (
+        _loop_patches(root, changed_files=["pkg/widget.py"]),
+        patch(
+            "mcloop.main.run_autofix",
+            side_effect=lambda _dir: order.append("autofix"),
+        ),
+        patch("mcloop.main.run_command_acceptance", side_effect=fake_acceptance),
+    ):
+        result = _run_one(plan)
+
+    assert result.ok
+    assert order == ["autofix", "acceptance"]
+
+
+def test_waived_acceptance_runs_autofix() -> None:
+    """T-000034: even a waived acceptance commits the editor's files,
+    so the formatter must run before that commit too.
+    """
+    root = _scratch_project("waived-autofix")
+    plan = _write_plan(
+        root,
+        "## Stage 1: Test\n"
+        "<!-- phase_id: phase_001 -->\n\n"
+        "- [ ] T-000001: Logical proof [accept: waived: reason; covered-by=T-000010]\n"
+        "- [x] T-000010: Existing proof\n",
+    )
+
+    with (
+        _loop_patches(root),
+        patch("mcloop.main.run_autofix") as mock_autofix,
+    ):
+        result = _run_one(plan)
+
+    assert result.ok
+    mock_autofix.assert_called_once_with(root)
+
+
+def _init_git_repo(root: Path) -> None:
+    for args in (
+        ["init", "-q"],
+        ["config", "user.email", "test@example.com"],
+        ["config", "user.name", "Test"],
+        ["add", "-A"],
+        ["commit", "-q", "-m", "base"],
+    ):
+        subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+
+def test_misformatted_editor_output_still_commits_formatted(tmp_path: Path) -> None:
+    """Regression for T-000034: a stubbed editor session that writes a
+    deliberately misformatted file still yields a task commit that
+    passes ``ruff format --check``, even when the task's acceptance
+    (command-exit) never runs ruff itself.
+
+    Uses tmp_path rather than _scratch_project: this test runs real git
+    against the project directory, so it needs an absolute path outside
+    the repo tree (the relative .scratch location shifts with cwd under
+    xdist, and sandboxed environments can deny .git writes there).
+    """
+    if shutil.which("ruff") is None:
+        pytest.skip("ruff not available on PATH")
+    root = tmp_path / "format-on-exit"
+    root.mkdir()
+    (root / "logs").mkdir()
+    plan = _write_plan(root, "- [ ] Write module [accept: command-exit: true]\n")
+    (root / "pyproject.toml").write_text("[tool.ruff]\n")
+    _init_git_repo(root)
+
+    misformatted = "def add( a,b ):\n    return a+b\n"
+
+    def messy_editor(*_args: object, **_kwargs: object) -> RunResult:
+        log_path = root / "logs" / "agent.log"
+        log_path.write_text("done\n")
+        (root / "messy.py").write_text(misformatted)
+        return RunResult(success=True, output="done", exit_code=0, log_path=log_path)
+
+    with (
+        _loop_patches(root, changed_files=["messy.py"]),
+        patch("mcloop.main.run_task", side_effect=messy_editor),
+        patch("mcloop.main.handle_sync"),
+        patch("mcloop.main._maybe_auto_wrap"),
+        patch("mcloop.main._reinject_wrappers"),
+        # conftest's autouse guard stubs _commit to "" for repo safety;
+        # this project is a self-contained repo under tmp_path, so the
+        # real commit is safe and is exactly what the regression pins.
+        patch("mcloop.main._commit", git_ops._commit),
+    ):
+        result = _run_one(plan)
+
+    assert result.ok
+    committed = subprocess.run(
+        ["git", "show", "HEAD:messy.py"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    # The loop's formatter, not the editor model, produced the artifact.
+    assert committed != misformatted
+    fmt_check = subprocess.run(
+        ["ruff", "format", "--check", "."],
+        cwd=root,
+        capture_output=True,
+        text=True,
+    )
+    assert fmt_check.returncode == 0, fmt_check.stdout + fmt_check.stderr
 
 
 def test_waived_acceptance_records_ledger_when_covered_by_resolves() -> None:

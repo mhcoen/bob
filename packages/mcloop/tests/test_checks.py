@@ -769,6 +769,26 @@ def test_try_salvage_does_not_extend_noqa_like_comment(tmp_path):
 
 
 @patch("mcloop.checks.subprocess.run")
+def test_run_autofix_prefers_project_venv_ruff(mock_run, tmp_path):
+    """run_autofix resolves ruff through <project>/.venv/bin like run_checks.
+
+    Without this, a project whose ruff lives only in its venv gets NO
+    formatting from autofix (the bare "ruff" FileNotFoundError is
+    swallowed) while the verification commands still resolve the venv
+    ruff and enforce `ruff format --check` (T-000034).
+    """
+    venv_ruff = tmp_path / ".venv" / "bin" / "ruff"
+    venv_ruff.parent.mkdir(parents=True)
+    venv_ruff.write_text("")
+    ok = subprocess.CompletedProcess(args="", returncode=0, stdout="", stderr="")
+    mock_run.return_value = ok
+    run_autofix(tmp_path)
+    cmds = [call[0][0] for call in mock_run.call_args_list]
+    assert cmds[0] == [str(venv_ruff), "check", "--fix", "."]
+    assert cmds[1] == [str(venv_ruff), "format", "."]
+
+
+@patch("mcloop.checks.subprocess.run")
 def test_run_autofix_handles_missing_ruff(mock_run, tmp_path):
     """run_autofix must not crash if ruff is not installed (FileNotFoundError)."""
     mock_run.side_effect = FileNotFoundError(2, "No such file or directory: 'ruff'")

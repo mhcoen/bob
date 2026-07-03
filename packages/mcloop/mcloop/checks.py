@@ -199,9 +199,14 @@ def run_autofix(project_dir: str | Path) -> None:
     """
     project_dir = Path(project_dir)
     for fix_cmd in ["ruff check --fix .", "ruff format ."]:
+        # Resolve through the project venv exactly like run_checks does:
+        # if ruff is only installed in <project>/.venv/bin, a bare "ruff"
+        # would silently no-op here (FileNotFoundError is swallowed)
+        # while the verification commands still find and enforce it.
+        parts = _resolve_project_venv_command(project_dir, shlex.split(fix_cmd))
         try:
             subprocess.run(
-                shlex.split(fix_cmd),
+                parts,
                 cwd=project_dir,
                 capture_output=True,
                 timeout=120,

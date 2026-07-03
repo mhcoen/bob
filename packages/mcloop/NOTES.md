@@ -292,7 +292,54 @@ installed hook with the packaged copy, so local hand-edits to
 ~/.mcloop/hooks/* are clobbered by reinstall — intentional (the
 installed copies are managed artifacts), but worth knowing.
 
+[2026-07-03] [9] [T-000034] The format-on-exit hole was path-specific, not
+model-specific in mechanism: run_autofix already ran before the
+pytest/coverage declared-acceptance gate and the legacy-inference gate,
+but the command-exit and waived acceptance kinds committed the editor's
+files with no formatter pass at all. A pytest-shaped acceptance declared
+as `command-exit: pytest ...` therefore passed while shipping
+unformatted code that only failed at the phase boundary's unscoped
+`ruff format --check .`. Fixed by hoisting run_autofix above the
+acceptance-kind dispatch in main.py so every declared kind formats
+before its check. Second, independent determinism gap fixed in the same
+change: run_autofix built its ruff commands from bare "ruff" and
+swallowed FileNotFoundError, while run_checks resolves tools through
+<project>/.venv/bin via _resolve_project_venv_command — in a project
+whose ruff is venv-only, autofix silently did nothing while the check
+still enforced formatting. run_autofix now resolves through the venv
+the same way.
+
+[2026-07-03] [9] [T-000034] Test-harness facts learned while writing the
+regression test: (a) tests/conftest.py's autouse guard monkeypatches
+mcloop.main._commit to a stub returning "" for EVERY test — any test
+asserting on real committed content must re-patch
+mcloop.main._commit with git_ops._commit and use a self-contained repo
+under tmp_path. (b) The shared _scratch_project helper returns a
+RELATIVE path (.scratch/...), so its location follows the process cwd;
+during a full-suite run, scratch dirs from this file were found inside
+another test's pytest tmp dir (/private/tmp/.../test_codex_mode_no_stream_json0/.scratch/...),
+meaning some test on the same xdist worker changes cwd. Tests that only
+use the returned Path consistently are immune, but anything relying on
+a stable on-disk location is not. (c) In sandboxed Claude Code
+sessions, `git init` under the repo tree fails with exit 128
+("cannot copy ... templates/hooks/... Operation not permitted" — the
+.git write freeze), while `git init` under /tmp works; another reason
+real-git tests must live in tmp_path. A partial
+.scratch/gitprobe/.git from one such failed probe was left behind this
+session (file deletion is not permitted in loop sessions); it is inside
+the gitignored .scratch tree and safe to remove by hand.
+
 ## Hypotheses
+
+### [9] [T-000034] Why the 2026-06-11 incident's task-level pytest gate missed the misformatted file (2026-07-03)
+The observed incident says "task-level acceptance (pytest) passed" while
+the file failed the boundary's format check. If the task had used the
+declared `[accept: pytest]` kind, run_autofix would have formatted the
+file before the gate, so the most consistent explanations are: the task
+declared its pytest run as `command-exit` (no autofix, no ruff — the
+exact hole closed by this fix), or the writer project's ruff was
+venv-only so run_autofix silently no-oped (the second hole closed by
+this fix). Not confirmed against the writer run's logs.
 
 ### [14.6] [T-000389] docstring changes are classified non-behavioral even when `__doc__` is runtime-consumed (2026-06-01)
 `classify_change` strips the conventional leading docstring before

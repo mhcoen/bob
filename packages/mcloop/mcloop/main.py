@@ -2201,8 +2201,18 @@ def run_loop(
                     acceptance_check: CheckResult
                     pre_check_status = ""
 
+                    # Format-on-exit is mcloop's job, not a model habit:
+                    # run the project's auto-fixers for EVERY acceptance
+                    # kind, before the acceptance check, so the committed
+                    # artifact passes `ruff format --check` regardless of
+                    # which model held the editor seat. Previously only
+                    # the pytest/coverage branch ran autofix, so a
+                    # command-exit or waived acceptance could commit
+                    # unformatted code that surfaced a phase late at the
+                    # boundary's unscoped format check (T-000034).
+                    run_autofix(project_dir)
+
                     if declared_acceptance.kind in ("pytest", "coverage"):
-                        run_autofix(project_dir)
                         changed_files = _changed_files(project_dir)
                         pre_check_status = _worktree_status(project_dir)
                         acceptance_check = run_checks(
