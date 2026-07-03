@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 from duplo.hasher import HashDiff, compute_hashes, diff_hashes, load_hashes, save_hashes
 
@@ -60,6 +61,30 @@ def test_save_and_load_roundtrip(tmp_path: Path) -> None:
 
 def test_load_hashes_empty_when_missing(tmp_path: Path) -> None:
     assert load_hashes(tmp_path) == {}
+
+
+def test_load_hashes_corrupt_json_returns_empty(tmp_path: Path) -> None:
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "file_hashes.json").write_text("{not valid json")
+    assert load_hashes(tmp_path) == {}
+
+
+def test_load_hashes_binary_file_returns_empty(tmp_path: Path) -> None:
+    # Regression: a truncated/binary hashes file raised UnicodeDecodeError
+    # instead of falling back to the intended empty-dict behaviour.
+    (tmp_path / ".duplo").mkdir()
+    (tmp_path / ".duplo" / "file_hashes.json").write_bytes(b"\xff\xfe\x00\x01\x80")
+    assert load_hashes(tmp_path) == {}
+
+
+def test_load_hashes_unreadable_file_returns_empty(tmp_path: Path) -> None:
+    # Regression: an OSError while reading (e.g. permission/IO) crashed the
+    # run instead of degrading to an empty manifest.
+    (tmp_path / ".duplo").mkdir()
+    path = tmp_path / ".duplo" / "file_hashes.json"
+    path.write_text("{}")
+    with patch.object(Path, "read_text", side_effect=OSError("boom")):
+        assert load_hashes(tmp_path) == {}
 
 
 def test_diff_hashes_added() -> None:

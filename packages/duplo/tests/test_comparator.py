@@ -29,6 +29,24 @@ class TestParseResponse:
         assert result.similar is True
         assert result.summary == "Matches."
 
+    def test_similar_yes_with_trailing_period(self):
+        # Regression: "yes." failed the bare-token check and flipped a
+        # positive verdict to False.
+        text = "SIMILAR: yes.\nSUMMARY: Looks good."
+        result = _parse_response(text)
+        assert result.similar is True
+
+    def test_similar_yes_with_extra_words(self):
+        # Regression: "Yes, they match" was not the bare token "yes".
+        text = "SIMILAR: Yes, they match\nSUMMARY: Looks good."
+        result = _parse_response(text)
+        assert result.similar is True
+
+    def test_similar_no_with_punctuation(self):
+        text = "SIMILAR: No, missing sidebar.\nSUMMARY: Missing sidebar."
+        result = _parse_response(text)
+        assert result.similar is False
+
     def test_empty_details(self):
         text = "SIMILAR: yes\nSUMMARY: Perfect match."
         result = _parse_response(text)

@@ -105,10 +105,14 @@ def _parse_result(raw: str) -> ValidationResult:
             reason="Unexpected response format.",
         )
 
+    raw_products = data.get("products")
+    if not isinstance(raw_products, list):
+        raw_products = []
+
     return ValidationResult(
         single_product=bool(data.get("single_product", True)),
         product_name=str(data.get("product_name", "")),
-        products=[str(p) for p in (data.get("products") or [])],
+        products=[str(p) for p in raw_products],
         reason=str(data.get("reason", "")),
         unclear_boundaries=bool(data.get("unclear_boundaries", False)),
     )

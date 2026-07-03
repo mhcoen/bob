@@ -71,7 +71,9 @@ def _parse_response(text: str) -> ComparisonResult:
         upper = stripped.upper()
         if upper.startswith("SIMILAR:"):
             val = stripped.split(":", 1)[1].strip().lower()
-            similar = val in ("yes", "true", "1")
+            words = val.split()
+            token = words[0].strip(".,;:!?\"'") if words else ""
+            similar = token in ("yes", "true", "1")
             in_details = False
         elif upper.startswith("SUMMARY:"):
             summary = stripped.split(":", 1)[1].strip()

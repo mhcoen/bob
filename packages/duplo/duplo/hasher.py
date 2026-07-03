@@ -81,7 +81,7 @@ def load_hashes(directory: Path | str = ".") -> dict[str, str]:
         return {}
     try:
         loaded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
         return {}
     return dict(loaded) if isinstance(loaded, dict) else {}
 

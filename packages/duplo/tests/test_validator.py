@@ -98,6 +98,18 @@ class TestParseResult:
         assert result.reason == ""
         assert result.unclear_boundaries is False
 
+    def test_products_string_not_split_into_chars(self):
+        # Regression: a string "products" value was iterated character by
+        # character, turning "Foo" into ["F", "o", "o"].
+        raw = json.dumps({"single_product": False, "products": "Foo"})
+        result = _parse_result(raw)
+        assert result.products == []
+
+    def test_products_non_list_scalar_ignored(self):
+        raw = json.dumps({"products": 42})
+        result = _parse_result(raw)
+        assert result.products == []
+
 
 class TestParseResultRobustness:
     """Parser round-trips across fenced, prose-prefixed, and trailing-whitespace inputs."""

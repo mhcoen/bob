@@ -62,6 +62,17 @@ class TestExtractPdfText:
         result = extract_pdf_text([missing])
         assert result == ""
 
+    def test_file_handle_closed_after_extract(self, tmp_path: Path):
+        # Regression: PdfReader(path) leaked its file handle. With a context
+        # manager the file is closed once extraction returns, so the OS lets
+        # us unlink it immediately on every platform.
+        pdf = tmp_path / "doc.pdf"
+        pdf.write_bytes(_make_pdf("Closable content"))
+        result = extract_pdf_text([pdf])
+        assert "Closable content" in result
+        pdf.unlink()
+        assert not pdf.exists()
+
     def test_pdf_with_no_text(self, tmp_path: Path):
         blank = tmp_path / "blank.pdf"
         # Minimal valid PDF with no text content stream

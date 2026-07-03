@@ -28,12 +28,13 @@ def _extract_single(path: Path) -> str:
     Returns empty string if the file cannot be read or contains no text.
     """
     try:
-        reader = pypdf.PdfReader(path)
+        with open(path, "rb") as fh:
+            reader = pypdf.PdfReader(fh)
+            pages: list[str] = []
+            for page in reader.pages:
+                text = page.extract_text()
+                if text:
+                    pages.append(text)
+            return "\n".join(pages)
     except Exception:
         return ""
-    pages: list[str] = []
-    for page in reader.pages:
-        text = page.extract_text()
-        if text:
-            pages.append(text)
-    return "\n".join(pages)
