@@ -132,9 +132,7 @@ def _strip_magic_line(text: str) -> str:
     stays aligned with the on-disk file (the id-less ``mark_failed`` /
     ``reset_task`` paths key on that position).
     """
-    return "\n".join(
-        "" if _MAGIC_LINE_RE.match(line) else line for line in text.split("\n")
-    )
+    return "\n".join("" if _MAGIC_LINE_RE.match(line) else line for line in text.split("\n"))
 
 
 def parse(path: str | Path, check_structure: bool = True) -> list[Task]:
@@ -516,9 +514,7 @@ def _update_with_retry(
     effective_validation = validation if magic else "unchecked"
     for _attempt in range(_UPDATE_RETRIES + 1):
         try:
-            return update(
-                path, operation, validation=effective_validation, magic=magic
-            )
+            return update(path, operation, validation=effective_validation, magic=magic)
         except ConcurrentUpdateError as exc:
             last_exc = exc
     assert last_exc is not None
@@ -805,9 +801,7 @@ def purge_completed_bugs(path: str | Path) -> None:
         original_text = p.read_text()
         # Loose queue: don't let a stray magic line force strict (id-less
         # bug entries are legal here).
-        plan = parse_plan(
-            original_text, source_path=p, force_strict_from_magic=False
-        )
+        plan = parse_plan(original_text, source_path=p, force_strict_from_magic=False)
         archived_text = _collect_done_bug_text(plan, original_text)
 
     update(p, purge_done_bug_tasks, validation="unchecked", magic=False)

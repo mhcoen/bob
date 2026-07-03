@@ -780,7 +780,6 @@ def _run_batch(
     rate_state: RateLimitState,
     cli: str,
     current_model: str | None,
-    fallback_model: str | None,
     max_retries: int,
     project_checks: list[str],
     allowed_tools: str | None,
@@ -799,7 +798,12 @@ def _run_batch(
     children. On failure, returns ("failed", error_tail) so the
     caller can retry the batch with the error as prior_errors.
 
-    Returns ("success", "") or ("failed", error_tail).
+    A rate/session limit is not a failure: it returns ("limited",
+    output_tail) so the caller retries without consuming an attempt
+    and handles fallback-model fallover itself.
+
+    Returns ("success", ""), ("failed", error_tail), or
+    ("limited", output_tail).
     """
     n = len(batch_children)
     labels = []
@@ -1823,7 +1827,6 @@ def run_loop(
                         rate_state,
                         cli,
                         batch_model,
-                        fallback_model,
                         max_retries,
                         project_checks,
                         allowed_tools,

@@ -7285,7 +7285,6 @@ def _make_batch_args(tmp_path, children=None):
         "rate_state": rate_state,
         "cli": "claude",
         "current_model": None,
-        "fallback_model": None,
         "max_retries": 3,
         "project_checks": [],
         "allowed_tools": None,
@@ -7396,6 +7395,63 @@ def test_run_batch_task_failure_returns_failed(tmp_path):
         assert result[0] == "failed"
         mock_check_off.assert_not_called()
         assert len(args["completed"]) == 0
+
+
+def test_run_batch_rate_limit_text_returns_limited(tmp_path):
+    """Canned rate-limit batch output returns 'limited', not 'failed'.
+
+    Regression for T-000028: _run_batch used to return a plain 'failed'
+    on a limit hit, which the caller counted as a merit failure. The
+    limit must be detected on the output, the CLI marked limited so the
+    retry waits for reset, and no child checked off.
+    """
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.check_off") as mock_check_off,
+        patch("mcloop.main.notify"),
+    ):
+        mock_run.return_value = MagicMock(
+            success=False,
+            output='429 {"type":"rate_limit_error","message":"Too many requests"}',
+            exit_code=1,
+        )
+
+        status, detail = _run_batch(**args)
+
+    assert status == "limited"
+    assert "429" in detail
+    assert args["rate_state"].is_limited("claude")
+    mock_check_off.assert_not_called()
+    assert len(args["completed"]) == 0
+
+
+def test_run_batch_session_limit_text_returns_limited(tmp_path):
+    """Canned session-limit batch output returns 'limited', not 'failed'."""
+    args = _make_batch_args(tmp_path)
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main.check_off") as mock_check_off,
+        patch("mcloop.main.notify"),
+    ):
+        mock_run.return_value = MagicMock(
+            success=False,
+            output="You've hit your limit · resets 3am (America/Chicago)",
+            exit_code=1,
+        )
+
+        status, detail = _run_batch(**args)
+
+    assert status == "limited"
+    assert args["rate_state"].is_limited("claude")
+    mock_check_off.assert_not_called()
+    assert len(args["completed"]) == 0
 
 
 def test_run_batch_checks_fail_rolls_back(tmp_path):

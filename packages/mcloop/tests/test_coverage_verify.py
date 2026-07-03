@@ -602,9 +602,7 @@ def test_changed_new_lines_untracked_file_returns_all_lines(tmp_path: Path) -> N
     pkg = tmp_path / "writer" / "lint" / "checks"
     pkg.mkdir(parents=True)
     # 5 physical lines, including a def and a module-level call.
-    (pkg / "__init__.py").write_text(
-        "import os\n\n\ndef go():\n    return os.getpid()\n"
-    )
+    (pkg / "__init__.py").write_text("import os\n\n\ndef go():\n    return os.getpid()\n")
     # splitlines() -> ['import os','','','def go():','    return os.getpid()'] = 5
     changed = changed_new_lines(tmp_path, base, "writer/lint/checks/__init__.py")
     assert changed == {1, 2, 3, 4, 5}

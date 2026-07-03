@@ -1287,9 +1287,7 @@ def parse_tool_signatures(line: str, backend: str) -> list[ToolSignature]:
             name = block.get("name", "")
             inp = block.get("input", {}) or {}
             command = (
-                inp.get("command", "")
-                if name == "Bash"
-                else _json.dumps(inp, sort_keys=True)
+                inp.get("command", "") if name == "Bash" else _json.dumps(inp, sort_keys=True)
             )
             sigs.append(ToolSignature(name=name, command=_canon(command)))
     return sigs

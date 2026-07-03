@@ -70,9 +70,7 @@ def test_parse_bash_uses_command() -> None:
 
 
 def test_parse_non_bash_keys_on_sorted_json_input() -> None:
-    line = _assistant_line(
-        [{"type": "tool_use", "name": "Read", "input": {"b": 2, "a": 1}}]
-    )
+    line = _assistant_line([{"type": "tool_use", "name": "Read", "input": {"b": 2, "a": 1}}])
     sigs = parse_tool_signatures(line, backend="claude")
     assert sigs == [ToolSignature(name="Read", command='{"a": 1, "b": 2}')]
 
@@ -97,9 +95,7 @@ def test_parse_ignores_non_tool_lines() -> None:
     assert parse_tool_signatures("not json", backend="claude") == []
     # assistant message with only a text block (no tool_use)
     assert (
-        parse_tool_signatures(
-            _assistant_line([{"type": "text", "text": "hi"}]), backend="claude"
-        )
+        parse_tool_signatures(_assistant_line([{"type": "text", "text": "hi"}]), backend="claude")
         == []
     )
     # a tool_result / user line
@@ -113,9 +109,7 @@ def test_parse_ignores_non_tool_lines() -> None:
 
 def test_parse_codex_backend_yields_nothing() -> None:
     """Codex is an explicit known gap: even a claude-shaped line yields []."""
-    line = _assistant_line(
-        [{"type": "tool_use", "name": "Bash", "input": {"command": "x"}}]
-    )
+    line = _assistant_line([{"type": "tool_use", "name": "Bash", "input": {"command": "x"}}])
     assert parse_tool_signatures(line, backend="codex") == []
 
 
@@ -141,9 +135,7 @@ class _FakeProc:
 
 
 def _bash_line(cmd: str) -> str:
-    return _assistant_line(
-        [{"type": "tool_use", "name": "Bash", "input": {"command": cmd}}]
-    )
+    return _assistant_line([{"type": "tool_use", "name": "Bash", "input": {"command": cmd}}])
 
 
 def _text_line(text: str) -> str:
@@ -155,15 +147,11 @@ def _run_with_stream(lines: list[str], tmp_path: Path, killpg: MagicMock):
     main_proc = _FakeProc(lines)
     watchdog = MagicMock()
     with (
-        patch(
-            "mcloop.runner.subprocess.Popen", side_effect=[main_proc, watchdog]
-        ),
+        patch("mcloop.runner.subprocess.Popen", side_effect=[main_proc, watchdog]),
         patch("mcloop.runner.os.getpgid", return_value=4321),
         patch("mcloop.runner.os.killpg", killpg),
     ):
-        return _run_session(
-            ["claude", "-p"], tmp_path, env={"X": "1"}, timeout=3600
-        )
+        return _run_session(["claude", "-p"], tmp_path, env={"X": "1"}, timeout=3600)
 
 
 def test_run_session_aborts_on_repeated_identical_bash(tmp_path: Path) -> None:

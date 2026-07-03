@@ -283,9 +283,7 @@ def test_reset_task_is_idempotent_on_pending_task(tmp_path: Path) -> None:
 
 def test_check_off_completes_idless_bugs_task_by_source_position(tmp_path: Path) -> None:
     path = tmp_path / "BUGS.md"
-    path.write_text(
-        "## Bugs\n\n- [ ] Fix crash in loose bug queue\n- [ ] Another open bug\n"
-    )
+    path.write_text("## Bugs\n\n- [ ] Fix crash in loose bug queue\n- [ ] Another open bug\n")
     task = shim.find_next(shim.parse(path))
     assert task is not None
     assert task.task_id is None
@@ -432,10 +430,7 @@ def test_parse_bugs_md_tolerates_idless_entry_with_magic_line(tmp_path: Path) ->
     unchecked = [t for t in tasks if not t.checked]
     assert len(unchecked) == 1
     assert unchecked[0].task_id is None
-    assert (
-        unchecked[0].text
-        == "Fix issue reported during task 11.8 (see observation below):"
-    )
+    assert unchecked[0].text == "Fix issue reported during task 11.8 (see observation below):"
 
 
 def test_parse_plan_md_stays_strict_on_idless_entry(tmp_path: Path) -> None:
@@ -443,9 +438,7 @@ def test_parse_plan_md_stays_strict_on_idless_entry(tmp_path: Path) -> None:
     with an id-less checkbox still raises (the magic line is only stripped for
     the BUGS.md bug-queue read path, keyed on the filename)."""
     path = tmp_path / "PLAN.md"
-    path.write_text(
-        "<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] no id here\n"
-    )
+    path.write_text("<!-- bob-plan-format: 1 -->\n# P\n## Stage 1: Core\n- [ ] no id here\n")
     with pytest.raises(PlanSyntaxError):
         shim.parse(path)
 
