@@ -19,9 +19,3 @@ dev = [
     "pytest-xdist>=3.5",
     "pytest-timeout>=2.3",
 ]
-
-[project.optional-dependencies]
-dev = [
-    "pytest-xdist>=3.5",
-    "pytest-timeout>=2.3",
-]
