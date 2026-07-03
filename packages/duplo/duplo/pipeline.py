@@ -1776,8 +1776,9 @@ def _subsequent_run() -> None:
             existing_names=existing_names,
             spec_text=spec_prompt,
             scope_include=spec.scope_include if spec else None,
-            scope_exclude=spec.scope_exclude if spec else None,
         )
+        # scope_exclude is an orchestrator-level filter, not an
+        # extract_features parameter; apply it here after extraction.
         if new_features and spec and spec.scope_exclude:
             new_features = [
                 f for f in new_features if not _matches_excluded(f, spec.scope_exclude)

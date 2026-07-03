@@ -64,7 +64,6 @@ def extract_features(
     *,
     spec_text: str = "",
     scope_include: list[str] | None = None,
-    scope_exclude: list[str] | None = None,
 ) -> list[Feature]:
     """Return a structured feature list extracted from *scraped_text*.
 
@@ -85,15 +84,20 @@ def extract_features(
     so the LLM can use the user's stated intent to guide extraction.
 
     If *scope_include* is provided, unmatched required scope items are
-    synthesized as features. If *scope_exclude* is provided, matching
-    features are removed after include reconciliation.
+    synthesized as features so a required feature present in no scraped
+    Source is never dropped.
+
+    Exclusion is deliberately NOT handled here. ``scope_exclude`` is an
+    orchestrator-level concern: the caller filters excluded features via
+    :func:`_matches_excluded` after this function returns. Do not add a
+    ``scope_exclude`` parameter back to this signature -- a parameter that
+    silently does nothing is a trap for callers who trust it.
 
     Args:
         scraped_text: Combined text from all scrapeable product sources.
         existing_names: Feature names already in duplo.json (optional).
         spec_text: Product specification text (optional).
         scope_include: Feature names the user requires (optional).
-        scope_exclude: Feature names the user wants excluded (optional).
 
     Returns:
         List of :class:`Feature` objects. Empty list if nothing could
@@ -127,26 +131,16 @@ def extract_features(
     except ClaudeCliError:
         # Even when extraction fails entirely, user scope includes are
         # authoritative and must still surface as features.
-        return _apply_scope([], scope_include, scope_exclude)
+        return _reconcile_scope_include([], scope_include)
     features = _parse_features(raw)
 
     # User spec scope is authoritative; scraped Sources only add. Any
     # scope_include item the LLM did not surface is synthesized below so a
     # required feature present in no scraped Source is never dropped.
-    features = _apply_scope(features, scope_include, scope_exclude)
-
-    return features
-
-
-def _apply_scope(
-    features: list[Feature],
-    scope_include: list[str] | None,
-    scope_exclude: list[str] | None,
-) -> list[Feature]:
-    """Apply SPEC scope include/exclude rules to extracted features."""
+    # scope_exclude filtering is applied at the orchestrator level after
+    # this function returns; see _matches_excluded and its pipeline callers.
     features = _reconcile_scope_include(features, scope_include)
-    if scope_exclude:
-        features = [f for f in features if not _matches_excluded(f, scope_exclude)]
+
     return features
 
 

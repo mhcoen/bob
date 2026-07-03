@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import json as _json
 from unittest.mock import patch
+
+import pytest
 
 from duplo.claude_cli import ClaudeCliError
 from duplo.extractor import Feature, _matches_excluded, _parse_features, extract_features
@@ -228,10 +231,11 @@ class TestExtractFeaturesMultiSource:
             features = extract_features(
                 combined,
                 spec_text="Build a calculator app.",
-                scope_exclude=["CLI tool"],
+                scope_include=["CLI tool"],
             )
         system = mock_q.call_args.kwargs.get("system", "")
         assert "Build a calculator app." in system
+        # Both extracted features survive; extract_features never filters.
         assert len(features) == 2
 
 
@@ -248,17 +252,31 @@ class TestExtractFeaturesWithSpec:
         system = mock_query.call_args.kwargs.get("system", "")
         assert "product specification" not in system.lower()
 
-    def test_scope_exclude_not_applied_internally(self):
-        """scope_exclude filtering is applied at the orchestrator level, not here."""
+    def test_scope_exclude_is_not_a_parameter(self):
+        """extract_features must not accept a scope_exclude parameter.
+
+        Exclusion is an orchestrator-level responsibility, applied via
+        _matches_excluded after extraction returns. A scope_exclude
+        parameter here that silently did nothing was a trap for callers,
+        so it must stay off the signature.
+        """
+        sig = inspect.signature(extract_features)
+        assert "scope_exclude" not in sig.parameters
+
         raw = json_array(
             [
                 {"name": "Math", "description": "Basic math.", "category": "core"},
                 {"name": "CLI tool", "description": "Command line.", "category": "other"},
             ]
         )
+        # extract_features never drops features on its own.
         with patch("duplo.extractor.query", return_value=raw):
-            features = extract_features("content", scope_exclude=["CLI tool"])
+            features = extract_features("content")
         assert len(features) == 2
+
+        # Passing scope_exclude is rejected rather than silently ignored.
+        with pytest.raises(TypeError):
+            extract_features("content", scope_exclude=["CLI tool"])
 
     def test_scope_include_does_not_filter(self):
         """Scope includes never drop extracted features; they only add."""
