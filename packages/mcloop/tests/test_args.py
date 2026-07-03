@@ -7698,6 +7698,96 @@ def test_run_loop_batch_limit_does_not_consume_attempts_or_fail(tmp_path):
         mock_mark_failed.assert_not_called()
 
 
+def test_run_loop_batch_limit_falls_over_to_fallback_model(tmp_path):
+    """A batch limit hit falls over to the configured fallback model.
+
+    Regression for T-000028 (residual scope): the batch retry loop used to
+    ignore the fallback_model param entirely, so every limited retry re-ran
+    on the primary model. After a 'limited' return, the next _run_batch
+    entry must use the fallback model, mirroring the non-batch
+    chain-advance path.
+    """
+    md = (
+        "# Test project\n\n"
+        "- [ ] [BATCH] Build components\n"
+        "  - [ ] Add feature A\n"
+        "  - [ ] Add feature B\n"
+    )
+    md = canonical_plan_text(md)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(md)
+    current = plan
+
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._run_batch") as mock_batch,
+        patch("mcloop.main.mark_failed") as mock_mark_failed,
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_checks") as mock_full_checks,
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+    ):
+        mock_full_checks.return_value = MagicMock(passed=True)
+
+        models_used = []
+
+        def batch_side_effect(*a, **kw):
+            # current_model is the 11th positional arg at the call site.
+            models_used.append(a[10])
+            if len(models_used) == 1:
+                return ("limited", "429 you've hit your session limit")
+            content = current.read_text()
+            content = content.replace(
+                "- [ ] T-000001: Add feature A",
+                "- [x] T-000001: Add feature A",
+            )
+            content = content.replace(
+                "- [ ] T-000002: Add feature B",
+                "- [x] T-000002: Add feature B",
+            )
+            content = content.replace(
+                "- [ ] T-000003: [BATCH] Build components",
+                "- [x] T-000003: [BATCH] Build components",
+            )
+            current.write_text(content)
+            return ("success", "")
+
+        mock_batch.side_effect = batch_side_effect
+
+        run_loop(plan, max_retries=3, model="opus", fallback_model="sonnet")
+
+        # First entry ran on the primary model; the limited retry fell
+        # over to the fallback model instead of burning attempts on the
+        # limited primary.
+        assert models_used == ["opus", "sonnet"]
+        mock_mark_failed.assert_not_called()
+
+
 def test_run_loop_batch_disabled_by_config(tmp_path):
     """When config has "batch": false, _run_batch is never called."""
     md = (

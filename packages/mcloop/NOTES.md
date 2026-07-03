@@ -365,6 +365,23 @@ friendlier error here, the resolver should either coerce
 ``execution_cwd`` to ``workspace_root`` when ``scope == "root"`` in
 the consolidated case or raise a structured error pre-construction.
 
+[2026-07-03] [T-000028] The runtime fix for batch limit handling was
+already present when this task ran: ``_run_batch`` returns
+``("limited", tail)`` on ``is_rate_limited``/``is_session_limited``
+(main.py ~886-899) and the caller decrements ``batch_attempt``, skips
+``batch_prior_errors``, and falls over to ``fallback_model`` (main.py
+~1843-1860), with regression tests for limit detection
+(test_run_batch_rate_limit_text_returns_limited,
+test_run_batch_session_limit_text_returns_limited) and attempt budget
+(test_run_loop_batch_limit_does_not_consume_attempts_or_fail). The one
+uncovered piece of the task's scope was the fallback-model fallover at
+main.py ~1851; this session added
+test_run_loop_batch_limit_falls_over_to_fallback_model to pin it. Note
+the batch fallover swaps only ``current_model`` → ``fallback_model``
+(legacy two-tier semantics); it does not walk a longer ``chain`` the
+way the non-batch path does. If multi-tier chains should apply to
+batches too, that is a separate enhancement.
+
 ## Hypotheses
 
 ## Eliminated
