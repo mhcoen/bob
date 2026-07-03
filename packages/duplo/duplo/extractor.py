@@ -84,8 +84,9 @@ def extract_features(
     If *spec_text* is provided, it is injected into the system prompt
     so the LLM can use the user's stated intent to guide extraction.
 
-    If *scope_include* or *scope_exclude* are provided, the extracted
-    feature list is post-filtered accordingly.
+    If *scope_include* is provided, unmatched required scope items are
+    synthesized as features. If *scope_exclude* is provided, matching
+    features are removed after include reconciliation.
 
     Args:
         scraped_text: Combined text from all scrapeable product sources.
@@ -126,16 +127,26 @@ def extract_features(
     except ClaudeCliError:
         # Even when extraction fails entirely, user scope includes are
         # authoritative and must still surface as features.
-        return _reconcile_scope_include([], scope_include)
+        return _apply_scope([], scope_include, scope_exclude)
     features = _parse_features(raw)
 
     # User spec scope is authoritative; scraped Sources only add. Any
     # scope_include item the LLM did not surface is synthesized below so a
     # required feature present in no scraped Source is never dropped.
-    # scope_exclude filtering is applied at the orchestrator level
-    # (main.py) after this function returns.
-    features = _reconcile_scope_include(features, scope_include)
+    features = _apply_scope(features, scope_include, scope_exclude)
 
+    return features
+
+
+def _apply_scope(
+    features: list[Feature],
+    scope_include: list[str] | None,
+    scope_exclude: list[str] | None,
+) -> list[Feature]:
+    """Apply SPEC scope include/exclude rules to extracted features."""
+    features = _reconcile_scope_include(features, scope_include)
+    if scope_exclude:
+        features = [f for f in features if not _matches_excluded(f, scope_exclude)]
     return features
 
 
