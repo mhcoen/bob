@@ -7460,7 +7460,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
 
     def git_side_effect(cmd, cwd, **kwargs):
         if cmd[1:3] == ["diff", "--name-only"]:
-            return MagicMock(returncode=0, stdout="changed.py\n")
+            return MagicMock(returncode=0, stdout="changed.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
         return MagicMock(returncode=0, stdout="")
@@ -7875,8 +7875,8 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
 
 def test_snapshot_worktree_captures_modified_and_untracked(tmp_path):
     """_snapshot_worktree returns modified tracked files and untracked files."""
-    diff_out = MagicMock(returncode=0, stdout="src/main.py\nlib/utils.py\n")
-    ls_out = MagicMock(returncode=0, stdout="new_file.txt\ntmp.log\n")
+    diff_out = MagicMock(returncode=0, stdout="src/main.py\0lib/utils.py\0")
+    ls_out = MagicMock(returncode=0, stdout="new_file.txt\0tmp.log\0")
     with patch("mcloop.git_ops._git", side_effect=[diff_out, ls_out]):
         modified, untracked = _snapshot_worktree(tmp_path)
     assert modified == ["src/main.py", "lib/utils.py"]
@@ -8259,7 +8259,7 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
         if cmd[1:3] == ["diff", "--name-only"]:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
-            return MagicMock(returncode=0, stdout="scratch.txt\nnotes.md\nbatch_new.py\n")
+            return MagicMock(returncode=0, stdout="scratch.txt\0notes.md\0batch_new.py\0")
         return MagicMock(returncode=0, stdout="")
 
     with (
@@ -8303,7 +8303,7 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
         if cmd[1:3] == ["diff", "--name-only"]:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
-            return MagicMock(returncode=0, stdout="batch_output\n")
+            return MagicMock(returncode=0, stdout="batch_output\0")
         return MagicMock(returncode=0, stdout="")
 
     with (
@@ -8334,7 +8334,7 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
 
     def git_side_effect(cmd, cwd, **kwargs):
         if cmd[1:3] == ["diff", "--name-only"]:
-            return MagicMock(returncode=0, stdout="keep_dirty.py\nbatch_file.py\n")
+            return MagicMock(returncode=0, stdout="keep_dirty.py\0batch_file.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
         return MagicMock(returncode=0, stdout="")
@@ -8386,7 +8386,7 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
 
     def git_side_effect(cmd, cwd, **kwargs):
         if cmd[1:3] == ["diff", "--name-only"]:
-            return MagicMock(returncode=0, stdout="new_file.py\n")
+            return MagicMock(returncode=0, stdout="new_file.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
         return MagicMock(returncode=0, stdout="")
@@ -8439,9 +8439,9 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
     def git_side_effect(cmd, cwd, **kwargs):
         if cmd[1:3] == ["diff", "--name-only"]:
             # Both pre-dirty and batch-touched files show as modified
-            return MagicMock(returncode=0, stdout="pre_dirty.py\nbatch_touched.py\n")
+            return MagicMock(returncode=0, stdout="pre_dirty.py\0batch_touched.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
-            return MagicMock(returncode=0, stdout="user_notes.txt\nbatch_new.py\n")
+            return MagicMock(returncode=0, stdout="user_notes.txt\0batch_new.py\0")
         return MagicMock(returncode=0, stdout="")
 
     with (
@@ -8491,7 +8491,7 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
         if cmd[1:3] == ["diff", "--name-only"]:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
-            return MagicMock(returncode=0, stdout="new_output.py\n")
+            return MagicMock(returncode=0, stdout="new_output.py\0")
         return MagicMock(returncode=0, stdout="")
 
     with (
@@ -8544,7 +8544,7 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(
                 returncode=0,
-                stdout="scratch.txt\nlocal_config.ini\ngenerated_a.py\ngenerated_b.py\n",
+                stdout="scratch.txt\0local_config.ini\0generated_a.py\0generated_b.py\0",
             )
         return MagicMock(returncode=0, stdout="")
 
@@ -8576,6 +8576,167 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
         # Batch-created files removed
         assert not batch1.exists()
         assert not batch2.exists()
+
+
+def test_run_batch_rollback_restores_non_ascii_filename(tmp_path):
+    """Rollback restores a batch-modified file with a non-ASCII name.
+
+    Uses a real git repo with core.quotepath=true (the default): plain
+    --name-only output quotes such names into backslash-escaped octal
+    that matches nothing on disk, so the rollback must use the
+    NUL-delimited -z form to get the verbatim path back.
+    """
+    import subprocess
+
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "t@example.com"],
+        cwd=project_dir,
+        check=True,
+    )
+    subprocess.run(["git", "config", "user.name", "T"], cwd=project_dir, check=True)
+    subprocess.run(
+        ["git", "config", "core.quotepath", "true"],
+        cwd=project_dir,
+        check=True,
+    )
+    tracked = project_dir / "héllo.py"
+    tracked.write_text("original = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=project_dir, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "seed"], cwd=project_dir, check=True)
+    untracked = project_dir / "übersicht.txt"
+
+    def fake_run_task(*a, **k):
+        tracked.write_text("broken = 2\n")
+        untracked.write_text("batch created\n")
+        return MagicMock(success=True, output="done")
+
+    # _git and _snapshot_worktree stay real so the rollback runs
+    # against the actual repository.
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main.run_task", side_effect=fake_run_task),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main.try_salvage_style_failures", return_value=(False, [])),
+        patch("mcloop.main.check_off"),
+    ):
+        mock_checks.return_value = MagicMock(passed=False, command="pytest", output="boom")
+
+        result = _run_batch(**args)
+
+    assert result[0] == "failed"
+    # The non-ASCII tracked file is restored to its committed content.
+    assert tracked.read_text() == "original = 1\n"
+    # The non-ASCII untracked file created by the batch is removed.
+    assert not untracked.exists()
+
+
+def test_run_batch_rollback_untracked_symlink_to_dir_unlinked(tmp_path):
+    """A new untracked symlink pointing at a directory is unlinked, not rmtree'd.
+
+    is_dir() follows symlinks, so the old branch handed the symlink to
+    shutil.rmtree, which raises on symlinks and aborted the rollback
+    mid-way. The link itself must be removed and its target untouched.
+    """
+    import os
+
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    target = project_dir / "real_target"
+    target.mkdir()
+    (target / "keep.txt").write_text("keep")
+    link = project_dir / "link_to_dir"
+    os.symlink(target, link)
+
+    def git_side_effect(cmd, cwd, **kwargs):
+        if cmd[1:3] == ["diff", "--name-only"]:
+            return MagicMock(returncode=0, stdout="")
+        if cmd[1:3] == ["ls-files", "--others"]:
+            return MagicMock(returncode=0, stdout="link_to_dir\0")
+        return MagicMock(returncode=0, stdout="")
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=([], [])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+    assert result[0] == "failed"
+    # The symlink itself is gone...
+    assert not link.is_symlink()
+    assert not link.exists()
+    # ...but the directory it pointed at is untouched.
+    assert target.is_dir()
+    assert (target / "keep.txt").exists()
+
+
+def test_run_batch_rollback_filename_with_embedded_newline(tmp_path):
+    """NUL-delimited parsing keeps a newline-containing filename intact."""
+    args = _make_batch_args(tmp_path)
+    project_dir = args["project_dir"]
+    weird = project_dir / "weird\nname.txt"
+    weird.write_text("batch created")
+    pre = project_dir / "keep.txt"
+    pre.write_text("pre-existing")
+
+    def git_side_effect(cmd, cwd, **kwargs):
+        if cmd[1:3] == ["diff", "--name-only"]:
+            return MagicMock(returncode=0, stdout="")
+        if cmd[1:3] == ["ls-files", "--others"]:
+            return MagicMock(returncode=0, stdout="keep.txt\0weird\nname.txt\0")
+        return MagicMock(returncode=0, stdout="")
+
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._snapshot_worktree", return_value=([], ["keep.txt"])),
+        patch("mcloop.main.run_task") as mock_run,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.run_checks") as mock_checks,
+        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main.check_off"),
+    ):
+        mock_run.return_value = MagicMock(success=True, output="done")
+        mock_checks.return_value = MagicMock(passed=False, command="pytest")
+
+        result = _run_batch(**args)
+
+    assert result[0] == "failed"
+    # The newline-containing file was removed as one path, and the
+    # pre-existing untracked file survived.
+    assert not weird.exists()
+    assert pre.exists()
+    # Both rollback listing commands requested NUL-delimited output.
+    rollback_cmds = [
+        c[0][0]
+        for c in mock_git.call_args_list
+        if c[0][0][1:3] in (["diff", "--name-only"], ["ls-files", "--others"])
+    ]
+    assert rollback_cmds
+    assert all(cmd[-1] == "-z" for cmd in rollback_cmds)
 
 
 def test_run_batch_rollback_task_failure_no_rollback(tmp_path):
@@ -10645,6 +10806,8 @@ def test_run_summary_interrupted_run(tmp_path):
     invoke the registered writer, then raise a sentinel standing in for
     the process exit (the sleep never returns in production either).
     """
+    from mcloop.ratelimit import SESSION_LIMIT_POLL
+
     plan = tmp_path / "PLAN.md"
     plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
@@ -10657,7 +10820,14 @@ def test_run_summary_interrupted_run(tmp_path):
     class _HandlerExit(Exception):
         pass
 
-    def fake_sleep(_seconds):
+    def fake_sleep(seconds):
+        # Patching time.sleep patches the shared time module for the
+        # whole process, so any stray sleep (background threads,
+        # polluted retry loops) would fire the interrupt writer while
+        # _interrupt_detail still holds its default. Only the
+        # session-limit poll sleep simulates the Ctrl-C.
+        if seconds != SESSION_LIMIT_POLL:
+            return
         lifecycle_mod._write_interrupt_run_summary()
         raise _HandlerExit
 
@@ -10672,6 +10842,8 @@ def test_run_summary_interrupted_run(tmp_path):
             patch("mcloop.main._push_or_die"),
             patch("mcloop.main._kill_orphan_sessions"),
             patch("mcloop.main._ensure_git"),
+            patch("mcloop.main._get_git_hash", return_value=""),
+            patch("mcloop.main._write_task_baseline"),
             patch("mcloop.main._check_errors_json", return_value=True),
             patch("mcloop.main._check_user_input", return_value=None),
             patch("mcloop.main.run_task", return_value=result),
@@ -10682,7 +10854,10 @@ def test_run_summary_interrupted_run(tmp_path):
             patch("mcloop.main.notify"),
         ):
             with pytest.raises(_HandlerExit):
-                run_loop(plan)
+                # Pin a single-tier chain: the session-limit wait path
+                # under test is the len(chain) == 1 branch, and leaving
+                # chain=None couples the test to ~/.mcloop/config.json.
+                run_loop(plan, chain=[ChainEntry(cli="claude", model="sonnet")])
     finally:
         # The patched _build_and_write_summary never ran the real hook
         # clearing, so drop the leftover writer here.

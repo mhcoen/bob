@@ -84,6 +84,7 @@ from mcloop.git_ops import (
     _push_or_die,
     _read_task_baseline,
     _snapshot_worktree,
+    _split_nul_paths,
     _stage_safe,
     _worktree_status,
     _write_task_baseline,
@@ -1008,15 +1009,16 @@ def _run_batch(
     # Discard uncommitted changes from the failed batch,
     # preserving files that were dirty before the batch started.
     # Selective rollback: only revert files the batch actually touched.
+    # NUL-delimited (-z) output is exempt from core.quotepath escaping,
+    # so non-ASCII and newline-containing names round-trip verbatim.
     current_modified = _git(
-        ["git", "diff", "--name-only"],
+        ["git", "diff", "--name-only", "-z"],
         cwd=project_dir,
         label="batch rollback diff",
     )
     pre_mod_set = set(pre_batch_modified)
-    for f in current_modified.stdout.strip().splitlines():
-        f = f.strip()
-        if f and f not in pre_mod_set:
+    for f in _split_nul_paths(current_modified.stdout):
+        if f not in pre_mod_set:
             _git(
                 ["git", "checkout", "--", f],
                 cwd=project_dir,
@@ -1024,16 +1026,18 @@ def _run_batch(
             )
     # Remove only new untracked files created by the batch.
     current_untracked = _git(
-        ["git", "ls-files", "--others", "--exclude-standard"],
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
         cwd=project_dir,
         label="batch rollback untracked",
     )
     pre_untracked_set = set(pre_batch_untracked)
-    for f in current_untracked.stdout.strip().splitlines():
-        f = f.strip()
-        if f and f not in pre_untracked_set:
+    for f in _split_nul_paths(current_untracked.stdout):
+        if f not in pre_untracked_set:
             fpath = project_dir / f
-            if fpath.is_file():
+            # A symlink must be unlinked even when it points at a
+            # directory: is_dir() follows the link and rmtree raises
+            # on symlinks (and would delete the link target's contents).
+            if fpath.is_symlink() or fpath.is_file():
                 fpath.unlink()
             elif fpath.is_dir():
                 import shutil

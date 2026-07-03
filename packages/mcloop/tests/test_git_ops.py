@@ -442,6 +442,44 @@ def test_snapshot_worktree_consolidated_layout_returns_package_relative(tmp_path
     assert untracked == ["bar.py"]
 
 
+def test_snapshot_worktree_non_ascii_names_survive_quotepath(tmp_path):
+    """Non-ASCII names come back verbatim despite core.quotepath=true.
+
+    Without ``-z``, git quotes such names into backslash-escaped octal
+    (e.g. ``"h\\303\\251llo.py"``) that matches nothing on disk, so the
+    batch-rollback set comparison and checkout would silently miss the
+    file.
+    """
+    _init_repo(tmp_path)
+    subprocess.run(
+        ["git", "config", "core.quotepath", "true"],
+        cwd=tmp_path,
+        check=True,
+    )
+    tracked = tmp_path / "héllo.py"
+    tracked.write_text("x = 1\n")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "seed unicode"],
+        cwd=tmp_path,
+        check=True,
+    )
+    tracked.write_text("x = 2\n")
+    (tmp_path / "übersicht.txt").write_text("neu\n")
+
+    modified, untracked = _snapshot_worktree(tmp_path)
+
+    # Names are unescaped: each resolves to the real file on disk.
+    assert len(modified) == 1
+    assert (tmp_path / modified[0]).is_file()
+    assert not modified[0].startswith('"')
+    assert "\\" not in modified[0]
+    assert len(untracked) == 1
+    assert (tmp_path / untracked[0]).is_file()
+    assert not untracked[0].startswith('"')
+    assert "\\" not in untracked[0]
+
+
 # ── _committed_files_since (T-000001) ─────────────────────────────────
 
 

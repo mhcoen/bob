@@ -772,6 +772,16 @@ def _get_committed_diff(project_dir: Path, commit_sha: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
+def _split_nul_paths(stdout: str) -> list[str]:
+    """Split NUL-delimited git ``-z`` output into a list of paths.
+
+    ``-z`` output is exempt from ``core.quotepath`` escaping and keeps
+    filenames containing newlines intact, so paths round-trip verbatim
+    to checkout/unlink operations.
+    """
+    return [p for p in stdout.split("\0") if p]
+
+
 def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     """Snapshot modified and untracked files in the working tree.
 
@@ -782,25 +792,19 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     modified: list[str] = []
     untracked: list[str] = []
     diff_result = _git(
-        ["git", "diff", "--name-only", "--relative"],
+        ["git", "diff", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="snapshot modified",
     )
     if diff_result.returncode == 0:
-        for line in diff_result.stdout.strip().splitlines():
-            line = line.strip()
-            if line:
-                modified.append(line)
+        modified = _split_nul_paths(diff_result.stdout)
     untracked_result = _git(
-        ["git", "ls-files", "--others", "--exclude-standard"],
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
         cwd=project_dir,
         label="snapshot untracked",
     )
     if untracked_result.returncode == 0:
-        for line in untracked_result.stdout.strip().splitlines():
-            line = line.strip()
-            if line:
-                untracked.append(line)
+        untracked = _split_nul_paths(untracked_result.stdout)
     return modified, untracked
 
 

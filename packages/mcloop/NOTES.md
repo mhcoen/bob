@@ -434,7 +434,53 @@ call site is a terminal write followed by return; a future
 mid-run summary write would silently end interrupt coverage for the
 rest of that run — keep the one-terminal-write-per-run invariant.
 
+[2026-07-03] [6] [T-000033] Batch rollback switched to -z NUL-delimited
+git output. `git diff --name-only -z` / `git ls-files --others
+--exclude-standard -z` output is exempt from core.quotepath
+octal-escaping and keeps newline-containing filenames intact
+(confirmed against a real repo with quotepath=true in test_git_ops).
+Both the rollback in main.py and `_snapshot_worktree` in git_ops.py
+were switched together so the pre-batch set comparison stays
+representation-consistent. The untracked-removal branch now unlinks
+symlinks before the is_dir() check: is_file()/is_dir() follow links,
+so a symlink-to-directory previously reached shutil.rmtree, which
+raises on symlinks and aborted the rollback mid-way.
+
+[2026-07-03] [6] [T-000033] While fixing this,
+test_run_summary_interrupted_run (T-000032) failed once under xdist
+with failure_detail "Interrupted by signal" instead of "User
+interrupted during session limit wait", and its captured stdout never
+showed the "Session limit reached" print — some time.sleep other than
+main.py's session-limit poll fired first. The test's patch of
+mcloop.main.time.sleep patches the shared time module process-wide,
+so any stray sleeper triggers the interrupt writer while
+_interrupt_detail still holds its default. Hardened the test: pinned
+an explicit single-tier chain (was coupled to ~/.mcloop/config.json
+via the chain=None legacy path), stubbed _get_git_hash /
+_write_task_baseline (the fake .git dir made the real _git print an
+error and call the real, unpatched git_ops.notify), and gated
+fake_sleep on seconds == SESSION_LIMIT_POLL.
+
 ## Hypotheses
+
+[2026-07-03] [6] [T-000033] The rollback diff in main.py lacks the
+--relative flag that `_snapshot_worktree` uses. In a consolidated
+workspace where project_dir is a package subdirectory of the repo,
+the snapshot yields package-relative paths while the rollback yields
+workspace-rooted ones, so the pre-batch-modified set comparison would
+never match and rollback could checkout files that were dirty before
+the batch. Equivalent only when project_dir is the repo root. Not
+changed here to keep the fix targeted; needs its own task with a
+consolidated-layout regression test.
+
+[2026-07-03] [6] [T-000033] The exact call site that fired the
+globally-patched time.sleep in the one observed
+test_run_summary_interrupted_run failure (gw10) was not identified;
+candidates are a leaked background thread from an earlier test on the
+same xdist worker or an unrestored module-level patch changing
+run_loop's path into ratelimit.wait_for_reset's sleep(10). The
+hardening makes the test immune either way, but the polluter itself
+is still out there.
 
 ## Eliminated
 
