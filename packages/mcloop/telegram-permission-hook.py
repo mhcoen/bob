@@ -484,6 +484,18 @@ def update_message(message_id, text):
     }
     try:
         telegram_api("editMessageText", data=data)
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            return
+        # Same unbalanced-Markdown 400 as send_approval_request: retry
+        # the edit as plain text so the buttons are removed and the
+        # decision is visible instead of the message looking unanswered.
+        data = dict(data)
+        data.pop("parse_mode", None)
+        try:
+            telegram_api("editMessageText", data=data)
+        except Exception:
+            pass
     except Exception:
         pass
 
