@@ -17,14 +17,13 @@ from mcloop.runner import SubscriptionPreflightError
 
 @pytest.fixture(autouse=True)
 def _stub_runner_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Neutralise the env/command builders so only preflight decides usability."""
+    """Neutralise session prep so only preflight decides usability."""
     import mcloop.runner as runner
 
-    monkeypatch.setattr(runner, "_build_session_env", lambda cli: {})
     monkeypatch.setattr(
         runner,
-        "_build_command",
-        lambda *args, **kwargs: ["probe"],
+        "_prepare_session",
+        lambda *args, **kwargs: (["probe"], {}),
     )
 
 

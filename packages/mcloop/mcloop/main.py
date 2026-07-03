@@ -497,15 +497,12 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
     usable: list[ChainEntry] = []
     failures: list[tuple[int, ChainEntry, SubscriptionPreflightError]] = []
     for idx, entry in enumerate(chain, 1):
-        env = _runner._build_session_env(cli=entry.cli)
-        # _build_command applies provider/executor env mutations for Claude.
-        # The command itself is discarded; ensure_subscription_preflight builds
-        # its own minimal probe command from the same effective env.
-        _runner._build_command(
+        # ensure_subscription_preflight builds its own minimal probe command;
+        # _prepare_session supplies the same routed env a real session would use.
+        _cmd, env = _runner._prepare_session(
             entry.cli,
             "",
             model=entry.model,
-            env=env,
             executor_override=entry.executor,
         )
         try:

@@ -455,7 +455,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     The legacy ``run_bug_verify`` body skipped the provider env mutation
     and consequently sent kimi-k2.6 / DeepSeek bug-verify sessions to
     the default Anthropic endpoint. The fix builds a session env up
-    front and passes it through ``_build_command`` so
+    front and passes it through ``_prepare_session`` so
     ``_apply_provider_env`` fires.
 
     The assertion is split into two capture points so the test cannot
@@ -463,19 +463,19 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     with a no-op:
 
     - ``captured_pre`` is a snapshot of the env returned by
-      ``_build_session_env`` before ``_build_command`` runs. It must
+      ``_build_session_env`` before provider routing runs. It must
       contain at least one passthrough variable (PATH) and must NOT
       contain the provider-routing keys yet. A regression where
       ``session_env = {}`` fails the PATH assertion. A regression
       where ``_build_session_env`` itself starts injecting provider
       routing fails the absence assertion.
     - ``captured_env`` is the env at ``_run_session``, after
-      ``_build_command`` has called ``_apply_provider_env``. It must
+      ``_prepare_session`` has called ``_apply_provider_env``. It must
       contain every provider-routing key. A regression that bypasses
       ``_apply_provider_env`` fails this assertion.
 
     A discard-and-replace regression (call ``_build_session_env``,
-    drop the result, hand a fresh dict to ``_build_command``) is
+    drop the result, hand a fresh dict to provider routing) is
     caught by the per-key survival loop at the end: every key from
     the pre snapshot must be present in the env at ``_run_session``
     with the same value. We deliberately do NOT assert object
@@ -520,7 +520,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
 
     def _capturing_build_session_env(task_label: str = "", cli: str = "claude") -> dict[str, str]:
         # Call the real builder so the test sees what the wrapper
-        # actually constructs. Snapshot a copy before _build_command
+        # actually constructs. Snapshot a copy before _prepare_session
         # mutates it via _apply_provider_env. Return the original
         # dict so the in-place mutation lands as it would in
         # production.
@@ -559,12 +559,12 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     assert result.success is True
     assert result.exit_code == 0
 
-    # (a) captured_pre is the env BEFORE _build_command's mutation.
+    # (a) captured_pre is the env BEFORE _prepare_session's mutation.
     # It must be a real session env, not an empty dict.
     assert captured_pre, (
         "_build_session_env returned an empty dict. A regression that "
         "replaced session_env with {} would silently satisfy the "
-        "provider-routing assertions below because _build_command "
+        "provider-routing assertions below because _prepare_session "
         "injects them on whatever object it receives."
     )
     assert "PATH" in captured_pre, (
@@ -572,7 +572,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
         "copying passthrough variables. session_env = {} regression."
     )
     # Provider-routing keys must NOT be present yet at this point;
-    # _apply_provider_env runs inside _build_command. If they show up
+    # _apply_provider_env runs inside _prepare_session. If they show up
     # here, _build_session_env grew an out-of-band provider mutation.
     assert "ANTHROPIC_BASE_URL" not in captured_pre
     assert "ANTHROPIC_AUTH_TOKEN" not in captured_pre
@@ -615,9 +615,9 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     # (c) Per-key survival loop. Every key from the pre snapshot
     # MUST be present in the env at _run_session with the same
     # value. A regression that calls _build_session_env, discards
-    # the result, and passes a fresh {} to _build_command would
+    # the result, and passes a fresh {} to provider routing would
     # appear to satisfy the (b) provider-routing assertions because
-    # _build_command's _apply_provider_env mutates whatever object
+    # _prepare_session's _apply_provider_env mutates whatever object
     # it receives, but would fail this loop because the passthrough
     # keys (PATH, etc.) from the pre snapshot would not be in the
     # substitute dict.

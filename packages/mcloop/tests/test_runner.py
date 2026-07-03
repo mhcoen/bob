@@ -27,6 +27,7 @@ from mcloop.runner import (
     INVESTIGATION_TOOLS,
     _build_command,
     _last_output_lines,
+    _prepare_session,
     _print_stream_event,
     _slugify,
     _write_log,
@@ -69,6 +70,26 @@ def test_build_command_default_allowed_tools():
     cmd = _build_command("claude", "task")
     idx = cmd.index("--allowedTools")
     assert cmd[idx + 1] == "Edit,Write,Bash,Read,Glob,Grep"
+
+
+def test_prepare_session_routes_third_party_model_without_supplied_env(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key")
+
+    with patch("mcloop.config.load_role_config", return_value=None):
+        cmd, env = _prepare_session("claude", "task", model="kimi-k2.6")
+
+    assert cmd[0] == "claude"
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key"
+    assert env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
+    assert env["ANTHROPIC_API_KEY"] == ""
+
+
+def test_run_session_rejects_missing_env(tmp_path):
+    from mcloop.runner import _run_session
+
+    with pytest.raises(ValueError, match="explicit env"):
+        _run_session(["echo", "hi"], cwd=tmp_path)
 
 
 def test_investigation_tools_includes_web():
@@ -492,7 +513,7 @@ def test_run_session_uses_devnull_stdin(tmp_path):
         proc.wait.return_value = 0
         proc.returncode = 0
         proc.stdout = iter([])
-        _run_session(["echo", "hi"], cwd=tmp_path)
+        _run_session(["echo", "hi"], cwd=tmp_path, env=runner._build_session_env())
 
     _, kwargs = mock_popen.call_args_list[0]
     assert kwargs["stdin"] == subprocess.DEVNULL
@@ -869,12 +890,12 @@ def test_run_task_passes_executor_override(tmp_path):
     captured_kwargs = {}
     executor_override = {"use_slug_model": False}
 
-    def fake_build_command(cli, prompt, **kwargs):
+    def fake_prepare_session(cli, prompt, **kwargs):
         captured_kwargs.update(kwargs)
-        return ["echo", "done"]
+        return ["echo", "done"], {}
 
     with (
-        patch("mcloop.runner._build_command", side_effect=fake_build_command),
+        patch("mcloop.runner._prepare_session", side_effect=fake_prepare_session),
         patch("mcloop.runner._run_session", return_value=("", 0)),
         patch("mcloop.runner._write_log", return_value=tmp_path / "log.txt"),
     ):
@@ -1098,7 +1119,11 @@ def _mock_run_session_pipe(tmp_path, output_lines, returncode=0):
         proc.returncode = returncode
         proc.wait.return_value = returncode
         proc.stdout = iter(output_lines)
-        output, exitcode = _run_session(["echo", "hi"], cwd=tmp_path)
+        output, exitcode = _run_session(
+            ["echo", "hi"],
+            cwd=tmp_path,
+            env=runner._build_session_env(),
+        )
     return output, exitcode, mock_popen
 
 
@@ -1370,7 +1395,7 @@ def test_last_output_lines_cleared_on_session_start(tmp_path):
 
     # Run a trivial command that exits immediately
     cmd = ["echo", "hello"]
-    _run_session(cmd, tmp_path)
+    _run_session(cmd, tmp_path, env=runner._build_session_env())
     # After _run_session, the deque should NOT contain the stale line
     assert "stale line" not in list(_last_output_lines)
 
@@ -1381,7 +1406,7 @@ def test_last_output_lines_populated_during_session(tmp_path):
 
     _last_output_lines.clear()
     cmd = [sys.executable, "-c", "print('line1'); print('line2')"]
-    _run_session(cmd, tmp_path)
+    _run_session(cmd, tmp_path, env=runner._build_session_env())
     lines = list(_last_output_lines)
     assert "line1" in lines
     assert "line2" in lines
@@ -1880,7 +1905,6 @@ def test_build_session_env_openrouter_billing_codex(monkeypatch):
 def test_chain_kimi_executor_env(monkeypatch):
     """Chain executor overrides can force raw Kimi model ids and env overrides."""
     monkeypatch.setenv("MOONSHOT_API_KEY", "sk-moonshot")
-    env = {"PATH": "/usr/bin"}
     executor = {
         "base_url": "https://api.moonshot.ai/anthropic",
         "auth_token_env": "MOONSHOT_API_KEY",
@@ -1893,11 +1917,10 @@ def test_chain_kimi_executor_env(monkeypatch):
         },
     }
 
-    _build_command(
+    _, env = _prepare_session(
         "claude",
         "test prompt",
         model="kimi-k2.6",
-        env=env,
         executor_override=executor,
     )
 
@@ -2100,7 +2123,11 @@ def test_run_session_writes_pid_file_json_format(tmp_path):
         return original_unlink(self, *args, **kwargs)
 
     with patch.object(type(tmp_path / "x"), "unlink", skip_pid_unlink):
-        _run_session([sys.executable, "-c", "pass"], tmp_path)
+        _run_session(
+            [sys.executable, "-c", "pass"],
+            tmp_path,
+            env=runner._build_session_env(),
+        )
 
     assert "data" in pid_content, "PID file was never written"
     data = json.loads(pid_content["data"])
@@ -2135,7 +2162,7 @@ def test_run_session_pid_file_cmd_matches_command(tmp_path):
 
     cmd = [sys.executable, "-c", "pass"]
     with patch.object(type(tmp_path / "x"), "unlink", capture_before_unlink):
-        _run_session(cmd, tmp_path)
+        _run_session(cmd, tmp_path, env=runner._build_session_env())
 
     data = json.loads(pid_content["data"])
     assert data["cmd"] == shlex.join(cmd)
@@ -2159,11 +2186,11 @@ def test_subsession_applies_third_party_provider_env(invoke, tmp_path):
     """Every sub-session routes a third-party model to the provider endpoint.
 
     Regression: run_audit / run_bug_fix / run_post_fix_review /
-    run_diagnostic / run_sync built their command with ``env=None`` and
-    called ``_run_session`` with no env, so ``_apply_provider_env`` was
-    skipped and a third-party model (kimi/deepseek) routed to the wrong
-    endpoint or billed the wrong account. They must thread one session env
-    through both ``_build_command`` and ``_run_session``.
+    run_diagnostic / run_sync once built their command with ``env=None``
+    and called ``_run_session`` with no env, so ``_apply_provider_env``
+    was skipped and a third-party model (kimi/deepseek) routed to the
+    wrong endpoint or billed the wrong account. They must run a prepared
+    session env through ``_run_session``.
     """
     log_dir = tmp_path / "logs"
     captured: dict[str, object] = {}

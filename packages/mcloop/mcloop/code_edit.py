@@ -327,11 +327,10 @@ def _invoke_direct(
             eliminated,
             task_id=task_id,
         )
-    session_env = _runner._build_session_env(task_label=task_label, cli="claude")
-    cmd = _runner._build_command(
+    cmd, session_env = _runner._prepare_session(
         "claude",
         prompt,
-        env=session_env,
+        task_label=task_label,
         model=model,
         executor_override=executor_override,
     )
@@ -398,13 +397,9 @@ def _invoke_bug_verify_direct(
 ) -> CodeEditResult:
     """Direct bug-verify path.
 
-    Builds a session env up front and threads it through
-    ``_build_command`` and ``_run_session`` so ``_apply_provider_env``
-    fires for third-party model aliases (kimi-k2.6, DeepSeek, any
-    fully qualified provider slug). The legacy ``run_bug_verify``
-    body skipped this and consequently routed third-party models to
-    the wrong endpoint. The code-edit direct backend already does the
-    right thing; this function now mirrors it.
+    Builds a prepared session so provider routing for third-party
+    model aliases (kimi-k2.6, DeepSeek, any fully qualified provider
+    slug) cannot be skipped before ``_run_session`` starts the process.
     """
     from mcloop.prompts import build_bug_verify_prompt
 
@@ -413,8 +408,12 @@ def _invoke_bug_verify_direct(
     # MCLOOP_TASK_LABEL stays unset for native Anthropic models. Only
     # the third-party provider routing keys differ from the legacy
     # path, and only when the model is a third-party alias.
-    session_env = _runner._build_session_env(task_label="", cli="claude")
-    cmd = _runner._build_command("claude", prompt=prompt, env=session_env, model=model)
+    cmd, session_env = _runner._prepare_session(
+        "claude",
+        prompt=prompt,
+        task_label="",
+        model=model,
+    )
     output, returncode = _runner._run_session(
         cmd,
         project_dir,

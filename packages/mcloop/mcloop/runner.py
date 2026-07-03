@@ -831,8 +831,12 @@ def run_task(
         build_kwargs["executor_override"] = executor_override
     if allowed_tools:
         build_kwargs["allowed_tools"] = allowed_tools
-    session_env = _build_session_env(task_label=task_label, cli=cli)
-    cmd = _build_command(cli, prompt, env=session_env, **build_kwargs)
+    cmd, session_env = _prepare_session(
+        cli,
+        prompt,
+        task_label=task_label,
+        **build_kwargs,
+    )
     ensure_subscription_preflight(
         cli=cli,
         model=model,
@@ -865,21 +869,36 @@ def run_task(
 DEFAULT_ALLOWED_TOOLS = "Edit,Write,Bash,Read,Glob,Grep"
 
 
-def _build_command(
+def _prepare_session(
     cli: str,
     prompt: str | None = None,
     model: str | None = None,
     allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
-    env: dict[str, str] | None = None,
+    task_label: str = "",
     executor_override: dict | None = None,
-) -> list[str]:
-    if env is not None and cli == "claude" and model:
+) -> tuple[list[str], dict[str, str]]:
+    """Return a session command and the env that must be used to run it."""
+    session_env = _build_session_env(task_label=task_label, cli=cli)
+    if cli == "claude" and model:
         from mcloop.config import load_role_config
 
         executor_cfg = (
             executor_override if executor_override is not None else load_role_config("executor")
         )
-        _apply_provider_env(env, model, executor_cfg)
+        _apply_provider_env(session_env, model, executor_cfg)
+    command_kwargs: dict = {"model": model}
+    if allowed_tools != DEFAULT_ALLOWED_TOOLS:
+        command_kwargs["allowed_tools"] = allowed_tools
+    cmd = _build_command(cli, prompt, **command_kwargs)
+    return cmd, session_env
+
+
+def _build_command(
+    cli: str,
+    prompt: str | None = None,
+    model: str | None = None,
+    allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
+) -> list[str]:
     if cli == "claude":
         cmd = ["claude", "-p"]
         if prompt:
@@ -944,7 +963,9 @@ def _run_session(
     If *timeout* seconds elapse, the process group is killed and
     exit code -2 is returned.
     """
-    session_env = env if env is not None else _build_session_env()
+    if env is None:
+        raise ValueError("_run_session requires an explicit env from _prepare_session")
+    session_env = env
     _last_output_lines.clear()
     global _active_process
     process = subprocess.Popen(
@@ -1337,20 +1358,15 @@ def _run_claude_subsession(
 ) -> RunResult:
     """Run one claude sub-session (audit, bug-fix, review, diagnostic, sync).
 
-    Builds a single session env and threads it through both
-    ``_build_command`` (so ``_apply_provider_env`` routes third-party
-    models) and ``_run_session``, the same way ``run_task`` does. The
-    env-to-both-calls invariant lives here so no caller can skip
-    provider routing by forgetting to pass env.
+    Builds a single prepared session and threads its routed env through
+    ``_run_session``, the same way ``run_task`` does.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
+    cmd, session_env = _prepare_session(
         "claude",
         prompt=prompt,
         model=model,
         allowed_tools=allowed_tools,
-        env=session_env,
     )
     output, returncode = _run_session(cmd, project_dir, env=session_env)
     log_path = _write_log(log_dir, log_label, cmd, output, returncode)
