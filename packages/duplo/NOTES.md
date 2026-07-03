@@ -2,6 +2,21 @@
 
 ## Observations
 
+### [1] [T-000001] Hash save moved after all diff consumers — 2026-07-03
+
+`save_hashes(compute_hashes("."))` in `_subsequent_run` now runs after
+gap detection (the last consumer of the change diff) instead of before
+site-media download. Intended effect: a crash in media download, video
+design extraction, or gap detection leaves the seen-state unsaved, so
+the next run re-detects and re-analyzes the changed files (regression
+test: `test_gap_detection_failure_leaves_hashes_unsaved`). Side effect
+worth knowing: hashes are now computed *after* duplo's own writes in
+that window (design autogen block written to SPEC.md, gap tasks appended
+to PLAN.md), so those self-writes no longer show up as "File changes
+detected" on the next run. Previously they did, causing one spurious
+change report per autogen write; SPEC.md is re-read every run anyway,
+so no analysis is lost.
+
 ### [10] [T-000008] Gate regression suite now pins the stdout contract — 2026-06-04
 
 T-000008 was already complete (commit ec5bce1f) with three pure-core

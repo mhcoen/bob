@@ -1704,8 +1704,6 @@ def _subsequent_run() -> None:
         else:
             print("  No features extracted.")
 
-    save_hashes(compute_hashes("."))
-
     # Download embedded media from product-reference pages (step 9).
     # Returns all media (cached + new).
     if product_ref_raw_pages:
@@ -1825,6 +1823,12 @@ def _subsequent_run() -> None:
         summary.missing_examples = me
         summary.design_refinements = dr
         summary.tasks_appended = ta
+
+    # Persist the seen-state only after every consumer of the change diff
+    # (media download, behavioral-video design extraction, gap detection)
+    # has run. Saving earlier would consume the change trigger on a crash,
+    # so the next run would diff clean and never re-analyze those files.
+    save_hashes(compute_hashes("."))
 
     _print_summary(summary)
 

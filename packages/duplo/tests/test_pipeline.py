@@ -861,6 +861,54 @@ class TestSubsequentRunFileChanges:
         assert "ref/new.txt" in saved
         assert (tmp_path / "ref" / "new.txt").exists()
 
+    def test_gap_detection_failure_leaves_hashes_unsaved(self, capsys, tmp_path, monkeypatch):
+        """A crash in gap detection must not consume the change trigger.
+
+        Hashes are persisted only after the last consumer of the change
+        diff (gap detection), so a failure there leaves the seen-state
+        untouched and the next run re-detects the changed files.
+        """
+        _write_duplo_json(tmp_path, self._BASE_DATA)
+        duplo_dir = tmp_path / ".duplo"
+        (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
+        ref_dir = tmp_path / "ref"
+        ref_dir.mkdir(exist_ok=True)
+        (ref_dir / "new.txt").write_text("hello")
+        monkeypatch.chdir(tmp_path)
+
+        from duplo.hasher import load_hashes
+
+        with (
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline.extract_features", return_value=[]),
+            patch(
+                "duplo.pipeline._detect_and_append_gaps",
+                side_effect=RuntimeError("gap detection crashed"),
+            ),
+            pytest.raises(RuntimeError, match="gap detection crashed"),
+        ):
+            main()
+
+        assert load_hashes(tmp_path) == {}, (
+            "a crash in gap detection must leave the hash manifest unsaved"
+        )
+        capsys.readouterr()
+
+        # The next run sees the same diff again and re-analyzes the file.
+        with (
+            patch("duplo.pipeline._rescrape_product_url", return_value=(0, 0, "")),
+            patch("duplo.pipeline.extract_features", return_value=[]),
+            patch("duplo.pipeline._detect_and_append_gaps", return_value=(0, 0, 0, 0)),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase 0\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
+        ):
+            main()
+
+        out = capsys.readouterr().out
+        assert "File changes detected" in out
+        assert "+ ref/new.txt" in out
+        assert "ref/new.txt" in load_hashes(tmp_path)
+
 
 class TestAnalyzeNewFiles:
     """Tests for _analyze_new_files()."""
