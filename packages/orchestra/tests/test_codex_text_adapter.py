@@ -271,7 +271,6 @@ def test_prepare_sub_second_timeout_does_not_truncate_to_zero() -> None:
         p = a.prepare(_request(timeout_ms=ms))
         assert p.summary["timeout_s"] == expected, f"timeout_ms={ms}"
         assert p.inner["timeout_s"] == expected, f"timeout_ms={ms}"
-        assert p.summary["timeout_s"] >= 1
 
 
 def test_prepare_default_timeout_when_not_set() -> None:

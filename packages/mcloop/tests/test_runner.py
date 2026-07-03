@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mcloop import runner
 from mcloop.prompts import (
     bugs_md_has_bugs,
     build_audit_prompt,
@@ -2143,44 +2144,14 @@ def test_run_session_pid_file_cmd_matches_command(tmp_path):
 # --- Regression: sub-sessions apply third-party provider env routing ---
 
 
-def _run_sync_case(project_dir, log_dir, model):
-    from mcloop.runner import run_sync
-
-    run_sync(project_dir, log_dir, model=model)
-
-
-def _run_audit_case(project_dir, log_dir, model):
-    from mcloop.runner import run_audit
-
-    run_audit(project_dir, log_dir, model=model)
-
-
-def _run_post_fix_review_case(project_dir, log_dir, model):
-    from mcloop.runner import run_post_fix_review
-
-    run_post_fix_review(project_dir, log_dir, "bug description", "diff --git a b", model=model)
-
-
-def _run_bug_fix_case(project_dir, log_dir, model):
-    from mcloop.runner import run_bug_fix
-
-    run_bug_fix(project_dir, log_dir, model=model)
-
-
-def _run_diagnostic_case(project_dir, log_dir, model):
-    from mcloop.runner import run_diagnostic
-
-    run_diagnostic(project_dir, log_dir, {"exception_type": "ValueError"}, model=model)
-
-
 @pytest.mark.parametrize(
     "invoke",
     [
-        _run_sync_case,
-        _run_audit_case,
-        _run_post_fix_review_case,
-        _run_bug_fix_case,
-        _run_diagnostic_case,
+        lambda p, d, m: runner.run_sync(p, d, model=m),
+        lambda p, d, m: runner.run_audit(p, d, model=m),
+        lambda p, d, m: runner.run_post_fix_review(p, d, "bug desc", "diff --git a b", model=m),
+        lambda p, d, m: runner.run_bug_fix(p, d, model=m),
+        lambda p, d, m: runner.run_diagnostic(p, d, {"exception_type": "ValueError"}, model=m),
     ],
     ids=["sync", "audit", "post_fix_review", "bug_fix", "diagnostic"],
 )

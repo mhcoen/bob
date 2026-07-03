@@ -862,11 +862,14 @@ def run_task(
     )
 
 
+DEFAULT_ALLOWED_TOOLS = "Edit,Write,Bash,Read,Glob,Grep"
+
+
 def _build_command(
     cli: str,
     prompt: str | None = None,
     model: str | None = None,
-    allowed_tools: str = "Edit,Write,Bash,Read,Glob,Grep",
+    allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
     env: dict[str, str] | None = None,
     executor_override: dict | None = None,
 ) -> list[str]:
@@ -1326,45 +1329,53 @@ class StallTracker:
         return self._count
 
 
+def _run_claude_subsession(
+    prompt: str,
+    project_dir: Path,
+    log_dir: Path,
+    log_label: str,
+    model: str | None,
+    allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
+) -> RunResult:
+    """Run one claude sub-session (audit, bug-fix, review, diagnostic, sync).
+
+    Builds a single session env and threads it through both
+    ``_build_command`` (so ``_apply_provider_env`` routes third-party
+    models) and ``_run_session``, the same way ``run_task`` does. The
+    env-to-both-calls invariant lives here so no caller can skip
+    provider routing by forgetting to pass env.
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    session_env = _build_session_env(cli="claude")
+    cmd = _build_command(
+        "claude",
+        prompt=prompt,
+        model=model,
+        allowed_tools=allowed_tools,
+        env=session_env,
+    )
+    output, returncode = _run_session(cmd, project_dir, env=session_env)
+    log_path = _write_log(log_dir, log_label, cmd, output, returncode)
+    return RunResult(
+        success=returncode == 0,
+        output=output,
+        exit_code=returncode,
+        log_path=log_path,
+    )
+
+
 def run_sync(
     project_dir: str | Path,
     log_dir: str | Path,
     model: str | None = None,
 ) -> RunResult:
     """Launch a Claude Code session with full project context for sync analysis."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = build_sync_prompt()
-    # Build and thread the session env through both _build_command (so
-    # _apply_provider_env routes third-party models) and _run_session, the
-    # same way run_task does. Passing no env skips provider routing.
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
-        model=model,
-        env=session_env,
-    )
-    output, returncode = _run_session(
-        cmd,
-        project_dir,
-        env=session_env,
-    )
-    log_path = _write_log(
-        log_dir,
+    return _run_claude_subsession(
+        build_sync_prompt(),
+        Path(project_dir),
+        Path(log_dir),
         "sync",
-        cmd,
-        output,
-        returncode,
-    )
-
-    return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        model,
     )
 
 
@@ -1375,36 +1386,12 @@ def run_audit(
     existing_bugs: str = "",
 ) -> RunResult:
     """Launch a Claude Code session to audit the codebase and write BUGS.md."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = build_audit_prompt(existing_bugs=existing_bugs)
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
-        model=model,
-        env=session_env,
-    )
-    output, returncode = _run_session(
-        cmd,
-        project_dir,
-        env=session_env,
-    )
-    log_path = _write_log(
-        log_dir,
+    return _run_claude_subsession(
+        build_audit_prompt(existing_bugs=existing_bugs),
+        Path(project_dir),
+        Path(log_dir),
         "audit",
-        cmd,
-        output,
-        returncode,
-    )
-
-    return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        model,
     )
 
 
@@ -1447,36 +1434,12 @@ def run_post_fix_review(
     model: str | None = None,
 ) -> RunResult:
     """Launch a read-only review session on post-fix changes."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = build_post_fix_review_prompt(bug_descriptions, diff)
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
-        model=model,
-        env=session_env,
-    )
-    output, returncode = _run_session(
-        cmd,
-        project_dir,
-        env=session_env,
-    )
-    log_path = _write_log(
-        log_dir,
+    return _run_claude_subsession(
+        build_post_fix_review_prompt(bug_descriptions, diff),
+        Path(project_dir),
+        Path(log_dir),
         "post-fix-review",
-        cmd,
-        output,
-        returncode,
-    )
-
-    return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        model,
     )
 
 
@@ -1486,36 +1449,12 @@ def run_bug_fix(
     model: str | None = None,
 ) -> RunResult:
     """Launch a Claude Code session to fix bugs listed in BUGS.md."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = build_bug_fix_prompt()
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
-        model=model,
-        env=session_env,
-    )
-    output, returncode = _run_session(
-        cmd,
-        project_dir,
-        env=session_env,
-    )
-    log_path = _write_log(
-        log_dir,
+    return _run_claude_subsession(
+        build_bug_fix_prompt(),
+        Path(project_dir),
+        Path(log_dir),
         "bug-fix",
-        cmd,
-        output,
-        returncode,
-    )
-
-    return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        model,
     )
 
 
@@ -1528,33 +1467,14 @@ def run_diagnostic(
     model: str | None = None,
 ) -> RunResult:
     """Run a read-only diagnostic session for a single error."""
-    project_dir = Path(project_dir)
-    log_dir = Path(log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-
-    prompt = build_diagnostic_prompt(error_entry, source_content, git_log)
-    session_env = _build_session_env(cli="claude")
-    cmd = _build_command(
-        "claude",
-        prompt=prompt,
-        model=model,
-        allowed_tools="Read,Glob,Grep",
-        env=session_env,
-    )
-    output, returncode = _run_session(cmd, project_dir, env=session_env)
     exc_type = error_entry.get("exception_type", "unknown")
-    log_path = _write_log(
-        log_dir,
+    return _run_claude_subsession(
+        build_diagnostic_prompt(error_entry, source_content, git_log),
+        Path(project_dir),
+        Path(log_dir),
         f"diagnostic-{exc_type}",
-        cmd,
-        output,
-        returncode,
-    )
-    return RunResult(
-        success=returncode == 0,
-        output=output,
-        exit_code=returncode,
-        log_path=log_path,
+        model,
+        allowed_tools="Read,Glob,Grep",
     )
 
 

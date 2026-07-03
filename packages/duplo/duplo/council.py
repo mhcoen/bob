@@ -687,10 +687,8 @@ def _load_or_fallback_config(
         if not explicit_path.exists():
             raise CouncilError(f"DUPLO_COUNCIL_CONFIG path does not exist: {explicit_path}")
         try:
-            # load_config re-appends ``.orchestra/config.json`` to the
-            # project_dir, so pass the dir two levels above the explicit
-            # ``.orchestra/config.json`` file (its ``.parent`` is the
-            # ``.orchestra`` dir, not the project root).
+            # .parent is the .orchestra dir; the project root load_config
+            # expects is two levels up (see docstring).
             cfg = load_config(project_dir=explicit_path.parent.parent)
         except config_error as exc:
             raise CouncilError(f"failed to load council config at {explicit_path}: {exc}") from exc

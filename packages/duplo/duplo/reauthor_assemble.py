@@ -306,10 +306,7 @@ def assemble_reauthored_plan(
             string_sources = [s for s in from_field if isinstance(s, str)]
             if string_sources:
                 # Every merge source records the merge target as its
-                # replacement. The assembly loop emits the target once,
-                # at whichever source it reaches first in plan order, and
-                # later-source slots see it in ``emitted_synth_ids`` and
-                # drop themselves without leaking the consumed prior.
+                # replacement; ``emitted_synth_ids`` below dedups the emit.
                 for fid in string_sources:
                     replacement_at_prior.setdefault(fid, []).append(new_id)
         elif action == "new":

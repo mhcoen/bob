@@ -98,6 +98,21 @@ no progress on that channel is a true "stuck" signal — distinct from
 "working slowly". Prevents the wall-clock cap from punishing
 legitimate long-but-progressing work."""
 
+
+def timeout_s_from_ms(timeout_ms: int | None, default_s: int) -> int:
+    """Convert a request's ``timeout_ms`` to whole seconds for ``run_session``.
+
+    Ceil-divides so a sub-second cap does not truncate to 0, which the
+    session loop treats as "no wall-clock timeout", and floors any
+    explicit cap at 1s. Returns *default_s* when no cap was requested.
+    Shared by every adapter's ``prepare`` so the conversion cannot
+    drift per adapter.
+    """
+    if timeout_ms is None:
+        return default_s
+    return max(1, (timeout_ms + 999) // 1000)
+
+
 PROGRESS_QUEUE_INTERVAL: float = 3.0
 """How long the reader thread blocks before checking the timeout."""
 

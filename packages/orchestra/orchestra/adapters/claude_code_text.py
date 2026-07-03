@@ -28,6 +28,7 @@ from orchestra.adapters._subprocess import (
     build_session_env,
     extract_final_text,
     run_session,
+    timeout_s_from_ms,
     write_log,
 )
 from orchestra.errors import OrchestraError
@@ -141,14 +142,7 @@ class ClaudeCodeTextAdapter:
             backing.get("log_dir") or ext.get("log_dir") or project_dir / ".mcloop" / "logs"
         )
         task_label = str(backing.get("task_label") or ext.get("task_label") or "")
-        # Ceil-divide so a sub-second cap does not truncate to 0 (which the
-        # session loop treats as "no wall-clock timeout"), and guarantee at
-        # least 1s for any explicit non-None cap.
-        timeout_s = (
-            max(1, (request.timeout_ms + 999) // 1000)
-            if request.timeout_ms is not None
-            else self._default_timeout_s
-        )
+        timeout_s = timeout_s_from_ms(request.timeout_ms, self._default_timeout_s)
 
         cmd = self._build_command(model)
         env = build_session_env(

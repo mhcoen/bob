@@ -2,40 +2,23 @@
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from pathlib import Path
 
-# Bound every git call so a hung remote or a credential/hook prompt cannot
-# wedge the loop forever; GIT_TERMINAL_PROMPT=0 fails fast instead of
-# blocking on an interactive prompt.
-_GIT_TIMEOUT_S = 300
+from mcloop.git_ops import run_git_bounded
 
 
 def _run_git(
     *args: str,
     cwd: str | Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run a git command and return the result."""
-    try:
-        return subprocess.run(
-            ["git", *args],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_S,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except subprocess.TimeoutExpired as exc:
-        partial_out = exc.stdout if isinstance(exc.stdout, str) else ""
-        partial_err = exc.stderr if isinstance(exc.stderr, str) else ""
-        return subprocess.CompletedProcess(
-            ["git", *args],
-            returncode=124,
-            stdout=partial_out,
-            stderr=partial_err + f"\ngit command timed out after {_GIT_TIMEOUT_S}s",
-        )
+    """Run a git command and return the result.
+
+    Delegates to :func:`mcloop.git_ops.run_git_bounded` for the shared
+    timeout and non-interactive guards.
+    """
+    return run_git_bounded(["git", *args], cwd)
 
 
 def _slugify(text: str) -> str:

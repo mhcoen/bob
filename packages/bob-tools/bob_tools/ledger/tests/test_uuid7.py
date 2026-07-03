@@ -56,8 +56,7 @@ def test_same_millisecond_sequence_wrap_stays_monotonic(
 
     ids = [uuid7() for _ in range(count)]
 
-    assert ids == sorted(ids)
-    # Strictly increasing: (timestamp, seq) is unique per emit, and those
-    # bits dominate the trailing randomness.
+    # Strictly increasing (which implies sorted and unique): (timestamp,
+    # seq) is unique per emit, and those bits dominate the trailing
+    # randomness.
     assert all(a < b for a, b in pairwise(ids))
-    assert len(set(ids)) == count

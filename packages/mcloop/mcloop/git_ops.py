@@ -19,6 +19,38 @@ _SENSITIVE_PATTERNS = {".env", ".key", ".pem", "credentials.json", "secrets"}
 _GIT_TIMEOUT_S = 300
 
 
+def run_git_bounded(
+    args: list[str],
+    cwd: Path | str | None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a git command bounded and non-interactive.
+
+    The single low-level git runner: applies the timeout and
+    ``GIT_TERMINAL_PROMPT=0`` guards, and converts a timeout into an
+    ordinary failed ``CompletedProcess`` (exit 124) so callers handle
+    it through their normal error paths. Silent — wrappers add their
+    own reporting.
+    """
+    try:
+        return subprocess.run(
+            args,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=_GIT_TIMEOUT_S,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except subprocess.TimeoutExpired as exc:
+        partial_out = exc.stdout if isinstance(exc.stdout, str) else ""
+        partial_err = exc.stderr if isinstance(exc.stderr, str) else ""
+        return subprocess.CompletedProcess(
+            args,
+            returncode=124,
+            stdout=partial_out,
+            stderr=partial_err + f"\ngit command timed out after {_GIT_TIMEOUT_S}s",
+        )
+
+
 def _git(
     args: list[str],
     cwd: Path,
@@ -32,24 +64,7 @@ def _git(
     Telegram so the user is always aware of version control
     problems.
     """
-    try:
-        result = subprocess.run(
-            args,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT_S,
-            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except subprocess.TimeoutExpired as exc:
-        partial_out = exc.stdout if isinstance(exc.stdout, str) else ""
-        partial_err = exc.stderr if isinstance(exc.stderr, str) else ""
-        result = subprocess.CompletedProcess(
-            args,
-            returncode=124,
-            stdout=partial_out,
-            stderr=partial_err + f"\ngit command timed out after {_GIT_TIMEOUT_S}s",
-        )
+    result = run_git_bounded(args, cwd)
     if result.returncode != 0:
         cmd_str = " ".join(args)
         context = f" ({label})" if label else ""
