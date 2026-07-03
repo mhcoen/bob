@@ -310,11 +310,9 @@ class TestSelectIssues:
         assert result[0]["description"] == "Button misaligned"
         assert result[1]["description"] == "Color too dark"
 
-    def test_blank_input_returns_all(self):
+    def test_blank_input_returns_empty(self):
         result, _ = self._run(SAMPLE_ISSUES, "")
-        assert len(result) == 2
-        assert result[0]["description"] == "Button misaligned"
-        assert result[1]["description"] == "Color too dark"
+        assert result == []
 
     def test_none_keyword(self):
         result, _ = self._run(SAMPLE_ISSUES, "none")
@@ -348,6 +346,12 @@ class TestSelectIssues:
         issues = [{"description": "No status field", "severity": "minor"}]
         result, _ = self._run(issues, "all")
         assert len(result) == 1
+
+    def test_issue_without_description_does_not_crash(self):
+        issues = [{"severity": "major"}]
+        result, lines = self._run(issues, "all")
+        assert result == issues
+        assert "(missing description)" in "\n".join(lines)
 
     def test_filters_resolved(self):
         result, _ = self._run(SAMPLE_ISSUES, "all")

@@ -129,8 +129,7 @@ def select_issues(
       - "1,3,5"         – comma-separated numbers
       - "1-4,7"         – ranges and individual numbers mixed
 
-    Returns the list of selected issue dicts.  Blank input selects all
-    open issues (matching the ``[all]`` prompt default).
+    Returns the list of selected issue dicts.  Blank input skips issues.
     """
     open_issues = [iss for iss in issues if iss.get("status", "open") == "open"]
     if not open_issues:
@@ -140,16 +139,17 @@ def select_issues(
     for idx, iss in enumerate(open_issues, start=1):
         severity = iss.get("severity", iss.get("source", ""))
         label = f" [{severity}]" if severity else ""
-        print_fn(f"  {idx:>3}. {iss['description']}{label}")
+        description = iss.get("description", "(missing description)")
+        print_fn(f"  {idx:>3}. {description}{label}")
 
     print_fn("")
     print_fn("Which issues should be addressed in this phase?")
     print_fn('  Examples: "all", "none", "1,3", "1-3"')
-    raw = input_fn("Issues [all]: ").strip()
+    raw = input_fn("Issues [none]: ").strip()
 
-    if not raw or raw.lower() == "all":
+    if raw.lower() == "all":
         selected = list(open_issues)
-    elif raw.lower() == "none":
+    elif not raw or raw.lower() == "none":
         selected = []
     else:
         indices = _parse_selection(raw, len(open_issues))
