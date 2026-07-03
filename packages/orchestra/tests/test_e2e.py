@@ -1750,6 +1750,97 @@ def test_cmd_resume_accepts_unchanged_workflow_after_run_start_digest(
     assert rc == 0
 
 
+def _store_connection_closed(store: ArtifactStore) -> bool:
+    """Return True iff ``store``'s SQLite connection has been closed. A
+    closed connection raises ``ProgrammingError`` on any use."""
+    import sqlite3
+
+    try:
+        store._conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_cmd_resume_closes_store_when_executor_raises(
+    tmp_path: Path,
+    monkeypatch: Any,
+) -> None:
+    """cmd_resume opens the store (and log) before the run loop; a
+    failure in ``run_to_completion`` previously skipped ``store.close()``
+    because the close ran only inside the run-loop try, and the store was
+    opened outside it. A raising executor must leave no open store
+    connection. Regression guard for T-000001."""
+    import argparse
+
+    src = _build_two_state_fixture(tmp_path)
+    run_id = new_run_id()
+    data_root = tmp_path / "runs"
+    run_dir = data_root / run_id
+    run_dir.mkdir(parents=True)
+
+    reg = with_core()
+    workflow = load_workflow(src, reg)
+    store = _initialize_store(workflow, run_dir / "store.sqlite")
+    log = LogWriter(run_dir / "log.jsonl", run_id)
+    log.write(
+        "run_start",
+        fields={
+            "workflow_path": str(src),
+            "workflow_digest": cli._workflow_digest(src),
+            "workflow_name": workflow.name,
+            "spec_version": workflow.spec_version,
+            "external_inputs": {"topic": "x"},
+            "max_total_steps": workflow.max_total_steps,
+        },
+    )
+    executor = Executor(
+        workflow=workflow,
+        registry=reg,
+        store=store,
+        log=log,
+        run_dir=run_dir,
+        run_id=run_id,
+        external_inputs={"topic": "x"},
+    )
+    executor.step()
+    executor.step()
+    log.close()
+    store.close()
+
+    _truncate_log_after_state_exit(run_dir / "log.jsonl", "s_b")
+
+    # Capture the store cmd_resume opens for itself so we can assert its
+    # connection is released even though the run loop raised.
+    created: list[ArtifactStore] = []
+
+    def _capturing_store(path: Path) -> ArtifactStore:
+        # ``ArtifactStore`` (module-level import) is the same class
+        # object ``cli`` looked up; wrap it to record the instance
+        # cmd_resume opens for the resume.
+        s = ArtifactStore(path)
+        created.append(s)
+        return s
+
+    monkeypatch.setattr(cli, "ArtifactStore", _capturing_store)
+
+    def _boom(self: Executor) -> str:
+        raise RuntimeError("boom")
+
+    # Patch the method on the shared Executor class object (the same
+    # object ``cli.Executor`` refers to) so cmd_resume's run loop raises.
+    monkeypatch.setattr(Executor, "run_to_completion", _boom)
+
+    args = argparse.Namespace(run_id=run_id, data_root=str(data_root))
+    import pytest
+
+    with pytest.raises(RuntimeError, match="boom"):
+        cli.cmd_resume(args)
+
+    assert created, "expected cmd_resume to open a store"
+    assert _store_connection_closed(created[0]), "store connection leaked on executor failure"
+
+
 # --------------------------------------------------------------------
 # Pass-2 fix #2: retry counter survives a crash after retry transition
 # --------------------------------------------------------------------

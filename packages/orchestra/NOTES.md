@@ -2,6 +2,36 @@
 
 ## Observations
 
+- 2026-07-03 [1] [T-000001] (store-leak task) The source fix and both
+  regression tests are complete and clean. `run_workflow`
+  (`orchestra/api/dispatch.py` ~256-344) opens the store before the
+  `try:` and closes it in a `finally:` that also closes the log via a
+  nullable handle; `cmd_resume` (`orchestra/cli.py` ~427-609) has the
+  same shape. Regression tests
+  `test_run_workflow_closes_store_when_executor_raises`
+  (`tests/test_api.py`) and
+  `test_cmd_resume_closes_store_when_executor_raises`
+  (`tests/test_e2e.py`) each patch a raising executor and assert the
+  store's SQLite connection is closed. `ruff check .`, `ruff format
+  --check .`, and the full `pytest` suite (170 passed) all pass. `mypy`
+  reports "No issues found" both whole-repo (`mypy .`) and on the exact
+  scoped file set the harness checks.
+- 2026-07-03 [1] [T-000001] (store-leak task) The mcloop `verify`
+  scoped check reports `Command not found: mypy` even though mypy is
+  installed and clean. Root cause is a harness PATH gap, not the code:
+  `mcloop/checks.py:run_command_acceptance` runs each check via
+  `subprocess.run(parts, shell=False)` inheriting mcloop's PATH. `ruff`
+  resolves because it is symlinked into `~/.local/bin` (pipx), and the
+  pytest check is invoked with the full venv python path, but `mypy` is
+  invoked bare and lives only at
+  `/Users/mhcoen/proj/bob/.venv/bin/mypy`, which is not on mcloop's
+  PATH. The previous attempt failed on this identical condition. It
+  cannot be fixed from inside the task session: writing a `mypy`
+  symlink into `~/.local/bin` (mirroring `ruff`) is denied by the
+  sandbox (`Operation not permitted`), and installing tools / modifying
+  env vars is disallowed. To unblock the scoped mypy check the user
+  needs mypy discoverable on the PATH mcloop launches with, e.g.
+  `pipx install mypy` or a symlink of the venv mypy into `~/.local/bin`.
 - 2026-06-03 [1.1] [T-000001] The change to `orchestra/config.py` and
   `tests/test_config.py` is clean against all four checks. `ruff check`
   on the three task-scoped files (`orchestra/config.py`,
@@ -195,6 +225,61 @@
   artifact, identical to the 2026-06-10 [1] note above. Installing
   packages is not permitted in this session, so it remains an
   environment issue, not a regression.
+
+- 2026-07-03 [1] [T-000001] Store-leak fix landed in two places.
+  `run_workflow` (`orchestra/api/dispatch.py` ~256): the store and log
+  are now wrapped in a single `try/finally` from the point of open; the
+  finally closes both, and the success `return WorkflowRunResult(...)`
+  moved inside the try so the finally runs on the normal path too. The
+  old per-path `store.close()` calls (success + the no-envelopes error
+  branch) were removed. `cmd_resume` (`orchestra/cli.py` ~427): the same
+  wrap, with a nullable `log: LogWriter | None = None` because the log is
+  opened partway through (after the refusal query); the finally closes
+  the log only if it was assigned, then the store. The refusal branch's
+  manual `store.close()` before `return 2` was removed since the finally
+  now covers it. Both close methods are idempotent (sqlite
+  `Connection.close` / file `close`), so the double-close that a resume
+  helper path could produce is harmless.
+- 2026-07-03 [1] [T-000001] Regression tests assert a raising executor
+  leaves no open store connection, detected by executing `SELECT 1` on
+  `store._conn` and catching `sqlite3.ProgrammingError` (a closed sqlite
+  connection raises it). `tests/test_api.py::test_run_workflow_closes_store_when_executor_raises`
+  patches `dispatch._initialize_store` to capture the store and
+  `dispatch.Executor` with a stub whose `run_to_completion` raises.
+  `tests/test_e2e.py::test_cmd_resume_closes_store_when_executor_raises`
+  builds a real two-state run, truncates the log after `s_b`'s
+  state_exit, patches `cli.ArtifactStore` to capture the resume store and
+  `Executor.run_to_completion` to raise, then asserts closure. Both pass.
+- 2026-07-03 [1] [T-000001] `ruff check .` (whole-repo, a mandated check)
+  failed on one pre-existing UP038 at
+  `orchestra/calibration/_runner_common.py:70`
+  (`isinstance(value, (str, bytes))`), a file unrelated to this task and
+  unmodified at HEAD. Fixed with the behavior-identical rewrite
+  `isinstance(value, (str | bytes))` so the whole-repo check passes, and
+  recorded an `mcloop waive` for that file (the change is lint-only, no
+  runtime behavior to cover). This same UP038 was noted and thought
+  resolved under the 2026-06-04 [1.6] entry; it reappeared, so an
+  upstream commit reintroduced it.
+- 2026-07-03 [1] [T-000001] Verification environment artifacts (not code
+  issues). The task's own type check is clean: the venv
+  `/Users/mhcoen/proj/bob/.venv/bin/python3 -m mypy .` reports "No issues
+  found". But (a) `mcloop verify` runs bare `mypy` and gets "Command not
+  found: mypy" (the binary is absent from mcloop's subprocess PATH), so
+  its gate fails on the mypy step alone; and (b) the on-PATH `mypy .`
+  wrapper prints "No issues found" yet exits 1. ruff check, ruff format,
+  and pytest all pass under `mcloop verify` (170 scoped tests green).
+  Installing mypy and modifying PATH/env are both forbidden this session,
+  so the mypy-runner discrepancy is left for the environment to resolve.
+- 2026-07-03 [1] [T-000001] Follow-up tightening in `run_workflow`
+  (`orchestra/api/dispatch.py` ~256): the earlier landing opened the
+  `LogWriter` on the line before the `try`, so a raising `LogWriter`
+  constructor would still leak the already-open store. Moved the log
+  open inside the `try` behind a nullable `log: LogWriter | None = None`
+  (mirroring the `cmd_resume` shape), so the finally now covers the store
+  from the exact point of open through log construction and every path
+  below. Behavior unchanged on the success and normal-exception paths;
+  the regression test (raising executor leaves no open store) still
+  passes and the venv `mypy` stays clean.
 
 ## Hypotheses
 

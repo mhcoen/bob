@@ -15,6 +15,7 @@ workflow shape ``run_workflow`` uses at runtime.
 from __future__ import annotations
 
 import json
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -752,6 +753,75 @@ def test_run_workflow_forwards_criteria_to_executor(
     with pytest.raises(_CapturedDispatch):
         dispatch.run_workflow("code_edit", inputs, cfg, data_root=tmp_path / "runs", quiet=True)
     assert captured["criteria"] == crit
+
+
+def _store_connection_closed(store: object) -> bool:
+    """Return True iff ``store``'s SQLite connection has been closed.
+
+    A closed connection raises ``ProgrammingError`` on any use, which is
+    the observable that distinguishes a leaked (still-open) store from a
+    properly released one."""
+    conn = store._conn  # type: ignore[attr-defined]
+    try:
+        conn.execute("SELECT 1")
+    except sqlite3.ProgrammingError:
+        return True
+    return False
+
+
+def test_run_workflow_closes_store_when_executor_raises(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A raising executor must not leave the SQLite ArtifactStore open.
+    run_workflow opens the store before constructing the Executor; a
+    failure in ``run_to_completion`` (or the summary build) previously
+    skipped ``store.close()`` because it ran only on the success paths,
+    leaking a connection and fd on every errored run in a long-lived
+    process. Regression guard for T-000001."""
+    import orchestra.api.dispatch as dispatch
+    from orchestra.api.registry import _initialize_store as real_init
+
+    created: list[object] = []
+
+    def _capturing_init(workflow: object, db_path: Path) -> object:
+        store = real_init(workflow, db_path)  # type: ignore[arg-type]
+        created.append(store)
+        return store
+
+    monkeypatch.setattr(dispatch, "_initialize_store", _capturing_init)
+
+    class _BoomExecutor:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def run_to_completion(self) -> str:
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(dispatch, "Executor", _BoomExecutor)
+
+    cfg = OrchestraConfig(
+        roles={"editor": RoleBinding(adapter="claude_code_agent")},
+        workflows={"code_edit": WorkflowConfig(pattern="single")},
+    )
+    inputs: dict[str, object] = {
+        "instruction": "do it",
+        "context": "",
+        "prior_errors": "",
+        "eliminated": [],
+        "project_dir": str(tmp_path),
+        "description": "",
+        "task_label": "",
+        "task_id": "",
+        "check_commands": [],
+        "is_bug_task": False,
+        "final_prompt": "x",
+    }
+    with pytest.raises(RuntimeError, match="boom"):
+        dispatch.run_workflow("code_edit", inputs, cfg, data_root=tmp_path / "runs", quiet=True)
+
+    assert created, "expected run_workflow to open a store"
+    assert _store_connection_closed(created[0]), "store connection leaked on executor failure"
 
 
 def test_run_role_forwards_binding_criteria(

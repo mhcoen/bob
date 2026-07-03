@@ -67,7 +67,7 @@ def parse_verdict_decisions(
     for _, value, _ in verdicts:
         try:
             obj_raw: Any
-            if isinstance(value, (str, bytes)):
+            if isinstance(value, (str | bytes)):
                 obj_raw = json.loads(value)
             else:
                 obj_raw = value

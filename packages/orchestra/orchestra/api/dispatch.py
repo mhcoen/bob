@@ -255,83 +255,93 @@ def run_workflow(
 
     store = _initialize_store(workflow, run_dir / "store.sqlite")
     log_path = run_dir / "log.jsonl"
-    log = LogWriter(log_path, run_id)
-    from orchestra.prompt_snapshot import snapshot_prompt_sources
-
-    workflow, prompt_snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
-    log.write(
-        "run_start",
-        fields={
-            "workflow_path": str(Path(workflow_path).resolve()),
-            "workflow_digest": hashlib.sha256(Path(workflow_path).read_bytes()).hexdigest(),
-            "prompt_snapshot_manifest": prompt_snapshot_manifest,
-            "workflow_name": workflow.name,
-            "config_name": name,
-            "pattern": workflow_cfg.pattern,
-            "spec_version": workflow.spec_version,
-            "external_inputs": enriched,
-            "max_total_steps": workflow.max_total_steps,
-            "invocation_options": _safe_options(inv_opts),
-        },
-    )
-
-    resolved_progress = _resolve_progress_callback(progress_callback, quiet)
-    executor_progress = _wrap_progress_callback(
-        resolved_progress, role_bindings, invocation_options=inv_opts
-    )
-    transcript_path = run_dir / "transcript.jsonl"
-    transcript_writer = _IncrementalTranscriptWriter(transcript_path, run_dir, workflow)
-    executor = Executor(
-        workflow=workflow,
-        registry=registry,
-        store=store,
-        log=log,
-        run_dir=run_dir,
-        run_id=run_id,
-        external_inputs=dict(enriched),
-        invocation_options=inv_opts,
-        progress_callback=executor_progress,
-        criteria=cfg.criteria,
-        decision_consistency_mode=mode_for_workflow(name),
-        on_state_exit=transcript_writer,
-    )
-
-    terminal: str = "stop"
+    # The store and log both own OS resources (a SQLite connection and
+    # a file handle). Wrap their lifetimes from the point of open so an
+    # exception anywhere below -- opening the log, the executor, the
+    # envelope selection, or the summary build -- still releases them.
+    # Without this, each errored run in a long-lived REPL or server
+    # process leaks a connection and an fd until exhaustion. The log is
+    # opened inside the try, so it is tracked with a nullable handle the
+    # finally closes only if set.
+    log: LogWriter | None = None
     try:
-        terminal = executor.run_to_completion()
-    finally:
+        log = LogWriter(log_path, run_id)
+        from orchestra.prompt_snapshot import snapshot_prompt_sources
+
+        workflow, prompt_snapshot_manifest = snapshot_prompt_sources(workflow, run_dir)
         log.write(
-            "run_end",
-            fields={"terminal": terminal},
+            "run_start",
+            fields={
+                "workflow_path": str(Path(workflow_path).resolve()),
+                "workflow_digest": hashlib.sha256(Path(workflow_path).read_bytes()).hexdigest(),
+                "prompt_snapshot_manifest": prompt_snapshot_manifest,
+                "workflow_name": workflow.name,
+                "config_name": name,
+                "pattern": workflow_cfg.pattern,
+                "spec_version": workflow.spec_version,
+                "external_inputs": enriched,
+                "max_total_steps": workflow.max_total_steps,
+                "invocation_options": _safe_options(inv_opts),
+            },
         )
-        log.close()
 
-    envelopes = executor._envelopes
-    last_state = (
-        executor._last_state
-        if executor._last_state is not None
-        else (workflow.states[-1].name if workflow.states else workflow.start_state_name())
-    )
-    if last_state in envelopes:
-        envelope = envelopes[last_state]
-    elif envelopes:
-        envelope = next(iter(reversed(list(envelopes.values()))))
-    else:
+        resolved_progress = _resolve_progress_callback(progress_callback, quiet)
+        executor_progress = _wrap_progress_callback(
+            resolved_progress, role_bindings, invocation_options=inv_opts
+        )
+        transcript_path = run_dir / "transcript.jsonl"
+        transcript_writer = _IncrementalTranscriptWriter(transcript_path, run_dir, workflow)
+        executor = Executor(
+            workflow=workflow,
+            registry=registry,
+            store=store,
+            log=log,
+            run_dir=run_dir,
+            run_id=run_id,
+            external_inputs=dict(enriched),
+            invocation_options=inv_opts,
+            progress_callback=executor_progress,
+            criteria=cfg.criteria,
+            decision_consistency_mode=mode_for_workflow(name),
+            on_state_exit=transcript_writer,
+        )
+
+        terminal: str = "stop"
+        try:
+            terminal = executor.run_to_completion()
+        finally:
+            log.write(
+                "run_end",
+                fields={"terminal": terminal},
+            )
+
+        envelopes = executor._envelopes
+        last_state = (
+            executor._last_state
+            if executor._last_state is not None
+            else (workflow.states[-1].name if workflow.states else workflow.start_state_name())
+        )
+        if last_state in envelopes:
+            envelope = envelopes[last_state]
+        elif envelopes:
+            envelope = next(iter(reversed(list(envelopes.values()))))
+        else:
+            raise WorkflowApiError(f"workflow {name!r} produced no envelopes")
+
+        artifacts = _gather_artifacts(workflow, store)
+        summary = _build_summary(terminal=terminal, envelope=envelope, artifacts=artifacts)
+        return WorkflowRunResult(
+            run_id=run_id,
+            terminal=terminal,
+            envelope=envelope,
+            artifacts=artifacts,
+            log_path=log_path,
+            summary=summary,
+        )
+    finally:
+        if log is not None:
+            log.close()
         store.close()
-        raise WorkflowApiError(f"workflow {name!r} produced no envelopes")
-
-    artifacts = _gather_artifacts(workflow, store)
-    summary = _build_summary(terminal=terminal, envelope=envelope, artifacts=artifacts)
-    store.close()
-
-    return WorkflowRunResult(
-        run_id=run_id,
-        terminal=terminal,
-        envelope=envelope,
-        artifacts=artifacts,
-        log_path=log_path,
-        summary=summary,
-    )
 
 
 def _safe_options(opts: dict[str, Any]) -> dict[str, Any]:

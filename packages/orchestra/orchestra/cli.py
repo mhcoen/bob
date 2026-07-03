@@ -425,176 +425,187 @@ def cmd_resume(args: argparse.Namespace) -> int:
             return 2
 
     store = ArtifactStore(run_dir / "store.sqlite")
-
-    # Pass-2 fix #1 + pass-3 fix #2: refuse to resume into a state
-    # that committed artifact versions before crashing without
-    # writing state_exit. The committed work is durable in the store
-    # but the log shows only state_enter, so a naive resume would
-    # re-enter the state and run the actor a second time. For agent
-    # states that mutate the workspace, the second run re-mutates and
-    # corrupts the workspace.
-    #
-    # Two signals point at the same window. The artifact_write log
-    # records (pass-2) catch the state when the crash lands AFTER the
-    # log writes; the store-side query (pass-3) catches the earlier
-    # window between commit_tentative and the first artifact_write,
-    # where the committed row is durable but no log record names it.
-    # Querying the store keyed by invocation_id is authoritative for
-    # that earlier window.
-    if replay.current_state is not None and not replay.last_state_completed:
-        target_state = replay.current_state
-        state_decl = next(
-            (s for s in workflow.states if s.name == target_state),
-            None,
-        )
-        if state_decl is not None and state_decl.actor.kind == "agent":
-            target_attempt = replay.attempts.get(target_state)
-            store_orphans: list[Any] = []
-            if target_attempt is not None and replay.last_run_id:
-                from orchestra.visibility import make_invocation_id
-
-                target_inv = make_invocation_id(replay.last_run_id, target_state, target_attempt)
-                store_orphans = store.list_committed_by_invocation(target_inv)
-            log_orphan_attempts = sorted(
-                a for s, a in replay.committed_without_exit if s == target_state
-            )
-            if store_orphans or log_orphan_attempts:
-                refusal_reason: str
-                if store_orphans:
-                    arts = sorted({v.name for v in store_orphans})
-                    refusal_reason = (
-                        f"the store holds committed artifact versions "
-                        f"({', '.join(repr(a) for a in arts)}) tagged "
-                        f"with this invocation but no state_exit was "
-                        "written. The crash window between commit and "
-                        "log-write makes the artifact_write trail "
-                        "absent, so the store is the authoritative "
-                        "signal."
-                    )
-                else:
-                    refusal_reason = (
-                        "the log shows artifact_write records for this "
-                        "state with no matching state_exit"
-                    )
-                print(
-                    f"refusing to resume: state {target_state!r} "
-                    f"(attempt {target_attempt}) committed work to the "
-                    "store before crashing without a matching "
-                    "state_exit. Re-entering would run the agent a "
-                    "second time and re-mutate the workspace.",
-                    file=sys.stderr,
-                )
-                print(
-                    f"Reason: {refusal_reason}",
-                    file=sys.stderr,
-                )
-                print(
-                    "Inspect the run directory and either repair the "
-                    "log manually with a synthesized state_exit "
-                    "matching the durable artifact versions or roll "
-                    "the run back. The conservative default is refusal "
-                    "because agents are not assumed to be idempotent.",
-                    file=sys.stderr,
-                )
-                store.close()
-                return 2
-
-    log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
-
-    run_resume_hooks(workflow, registry, replay, log)
-
-    # Slice A: the persisted ``visibility.json`` is a best-effort
-    # cache; the log is the source of truth. Apply the rebuilt
-    # statuses to the index BEFORE constructing the Executor so the
-    # store consults the log-derived view from the first read.
-    from orchestra.visibility import VisibilityIndex
-
-    visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
-    visibility_index.replace_from(replay.visibility_statuses)
-
-    executor = Executor(
-        workflow=workflow,
-        registry=registry,
-        store=store,
-        log=log,
-        run_dir=run_dir,
-        run_id=replay.last_run_id,
-        external_inputs=external_inputs,
-        attempts=replay.attempts,
-        retries=replay.retries,
-        envelopes=replay.envelopes,
-        current_state=replay.current_state,
-        step_count=replay.step_count,
-        visibility_index=visibility_index,
-        last_transition_state=replay.last_transition_state,
-        last_transition_outcome=replay.last_transition_outcome,
-    )
+    # Wrap the store and log lifetimes in try/finally from the point of
+    # open. The refusal query below, run_resume_hooks, the
+    # VisibilityIndex setup, and the Executor construction can all raise
+    # before the run loop; a failure there would otherwise leak the
+    # SQLite connection and the log fd on every failed resume in a
+    # long-lived process. The log is opened partway through, so it is
+    # tracked with a nullable handle the finally closes only if set.
+    log: LogWriter | None = None
     terminal: str | None = None
     try:
-        # Slice A fix: a crash between ``state_exit`` and
-        # ``transition`` leaves the state's body durably complete but
-        # the routing decision unwritten. Re-select the transition
-        # from the reconstructed envelope WITHOUT re-running the
-        # actor; advance _current_state to the chosen target and
-        # let ``run_to_completion`` continue from there.
-        if (
-            replay.state_exit_without_transition
-            and replay.current_state is not None
-            and replay.current_state not in _TERMINAL_TARGETS
-        ):
-            executor.resume_pending_transition(replay.current_state)
-        # Round-3 fix: a crash between ``fan_out_end`` and the
-        # parent's ``transition`` leaves the routing decision
-        # durable in ``fan_out_end`` but the transition record
-        # unwritten. Close the missing transition without
-        # re-dispatching the fan-out children.
-        if replay.pending_fan_out_transition is not None and replay.open_fan_out is None:
-            pft = replay.pending_fan_out_transition
-            executor.close_fan_out_pending_transition(
-                parent_state_name=str(pft["parent_state"]),
-                parent_attempt=int(pft["attempt"]),
-                target=str(pft["target"]),
+        # Pass-2 fix #1 + pass-3 fix #2: refuse to resume into a state
+        # that committed artifact versions before crashing without
+        # writing state_exit. The committed work is durable in the store
+        # but the log shows only state_enter, so a naive resume would
+        # re-enter the state and run the actor a second time. For agent
+        # states that mutate the workspace, the second run re-mutates and
+        # corrupts the workspace.
+        #
+        # Two signals point at the same window. The artifact_write log
+        # records (pass-2) catch the state when the crash lands AFTER the
+        # log writes; the store-side query (pass-3) catches the earlier
+        # window between commit_tentative and the first artifact_write,
+        # where the committed row is durable but no log record names it.
+        # Querying the store keyed by invocation_id is authoritative for
+        # that earlier window.
+        if replay.current_state is not None and not replay.last_state_completed:
+            target_state = replay.current_state
+            state_decl = next(
+                (s for s in workflow.states if s.name == target_state),
+                None,
             )
-        # Slice A: if a fan_out group is open (fan_out_start without
-        # a matching fan_out_end), dispatch to resume_fan_out before
-        # the linear loop takes over. The method advances
-        # _current_state to the join/error target so run_to_completion
-        # can continue from there.
-        if replay.open_fan_out is not None:
-            of = replay.open_fan_out
-            children_field = of.get("children") or []
-            if not isinstance(children_field, list):
-                children_field = []
-            children_list = [str(c) for c in children_field]
-            # A child is "completed" only when its last state_enter
-            # has a matching state_exit -- i.e. the envelope's
-            # attempt equals the latest state_enter's attempt
-            # (replay's reconstructed ``attempts`` counter). If a
-            # later state_enter exists without a matching exit
-            # (the retry-mid-flight crash case), the older
-            # envelope is stale; the child is still pending and
-            # must be re-launched on resume per the fresh-budget
-            # rule.
-            completed = {
-                name: env
-                for name, env in replay.envelopes.items()
-                if (name in children_list and env.attempt == replay.attempts.get(name))
-            }
-            executor.resume_fan_out(
-                parent_state_name=str(of.get("parent_state", "")),
-                children=children_list,
-                join_target=str(of.get("join_target", "")),
-                error_target=str(of.get("error_target", "")),
-                completed_children=completed,
-                parent_attempt=replay.open_fan_out_attempt,
-            )
-        terminal = executor.run_to_completion()
-    finally:
-        log.write(
-            "run_end",
-            fields={"terminal": terminal if terminal is not None else "aborted"},
+            if state_decl is not None and state_decl.actor.kind == "agent":
+                target_attempt = replay.attempts.get(target_state)
+                store_orphans: list[Any] = []
+                if target_attempt is not None and replay.last_run_id:
+                    from orchestra.visibility import make_invocation_id
+
+                    target_inv = make_invocation_id(
+                        replay.last_run_id, target_state, target_attempt
+                    )
+                    store_orphans = store.list_committed_by_invocation(target_inv)
+                log_orphan_attempts = sorted(
+                    a for s, a in replay.committed_without_exit if s == target_state
+                )
+                if store_orphans or log_orphan_attempts:
+                    refusal_reason: str
+                    if store_orphans:
+                        arts = sorted({v.name for v in store_orphans})
+                        refusal_reason = (
+                            f"the store holds committed artifact versions "
+                            f"({', '.join(repr(a) for a in arts)}) tagged "
+                            f"with this invocation but no state_exit was "
+                            "written. The crash window between commit and "
+                            "log-write makes the artifact_write trail "
+                            "absent, so the store is the authoritative "
+                            "signal."
+                        )
+                    else:
+                        refusal_reason = (
+                            "the log shows artifact_write records for this "
+                            "state with no matching state_exit"
+                        )
+                    print(
+                        f"refusing to resume: state {target_state!r} "
+                        f"(attempt {target_attempt}) committed work to the "
+                        "store before crashing without a matching "
+                        "state_exit. Re-entering would run the agent a "
+                        "second time and re-mutate the workspace.",
+                        file=sys.stderr,
+                    )
+                    print(
+                        f"Reason: {refusal_reason}",
+                        file=sys.stderr,
+                    )
+                    print(
+                        "Inspect the run directory and either repair the "
+                        "log manually with a synthesized state_exit "
+                        "matching the durable artifact versions or roll "
+                        "the run back. The conservative default is refusal "
+                        "because agents are not assumed to be idempotent.",
+                        file=sys.stderr,
+                    )
+                    return 2
+
+        log = LogWriter(log_path, replay.last_run_id, start_seq=replay.next_seq)
+
+        run_resume_hooks(workflow, registry, replay, log)
+
+        # Slice A: the persisted ``visibility.json`` is a best-effort
+        # cache; the log is the source of truth. Apply the rebuilt
+        # statuses to the index BEFORE constructing the Executor so the
+        # store consults the log-derived view from the first read.
+        from orchestra.visibility import VisibilityIndex
+
+        visibility_index = VisibilityIndex(persist_path=run_dir / "visibility.json")
+        visibility_index.replace_from(replay.visibility_statuses)
+
+        executor = Executor(
+            workflow=workflow,
+            registry=registry,
+            store=store,
+            log=log,
+            run_dir=run_dir,
+            run_id=replay.last_run_id,
+            external_inputs=external_inputs,
+            attempts=replay.attempts,
+            retries=replay.retries,
+            envelopes=replay.envelopes,
+            current_state=replay.current_state,
+            step_count=replay.step_count,
+            visibility_index=visibility_index,
+            last_transition_state=replay.last_transition_state,
+            last_transition_outcome=replay.last_transition_outcome,
         )
-        log.close()
+        try:
+            # Slice A fix: a crash between ``state_exit`` and
+            # ``transition`` leaves the state's body durably complete but
+            # the routing decision unwritten. Re-select the transition
+            # from the reconstructed envelope WITHOUT re-running the
+            # actor; advance _current_state to the chosen target and
+            # let ``run_to_completion`` continue from there.
+            if (
+                replay.state_exit_without_transition
+                and replay.current_state is not None
+                and replay.current_state not in _TERMINAL_TARGETS
+            ):
+                executor.resume_pending_transition(replay.current_state)
+            # Round-3 fix: a crash between ``fan_out_end`` and the
+            # parent's ``transition`` leaves the routing decision
+            # durable in ``fan_out_end`` but the transition record
+            # unwritten. Close the missing transition without
+            # re-dispatching the fan-out children.
+            if replay.pending_fan_out_transition is not None and replay.open_fan_out is None:
+                pft = replay.pending_fan_out_transition
+                executor.close_fan_out_pending_transition(
+                    parent_state_name=str(pft["parent_state"]),
+                    parent_attempt=int(pft["attempt"]),
+                    target=str(pft["target"]),
+                )
+            # Slice A: if a fan_out group is open (fan_out_start without
+            # a matching fan_out_end), dispatch to resume_fan_out before
+            # the linear loop takes over. The method advances
+            # _current_state to the join/error target so run_to_completion
+            # can continue from there.
+            if replay.open_fan_out is not None:
+                of = replay.open_fan_out
+                children_field = of.get("children") or []
+                if not isinstance(children_field, list):
+                    children_field = []
+                children_list = [str(c) for c in children_field]
+                # A child is "completed" only when its last state_enter
+                # has a matching state_exit -- i.e. the envelope's
+                # attempt equals the latest state_enter's attempt
+                # (replay's reconstructed ``attempts`` counter). If a
+                # later state_enter exists without a matching exit
+                # (the retry-mid-flight crash case), the older
+                # envelope is stale; the child is still pending and
+                # must be re-launched on resume per the fresh-budget
+                # rule.
+                completed = {
+                    name: env
+                    for name, env in replay.envelopes.items()
+                    if (name in children_list and env.attempt == replay.attempts.get(name))
+                }
+                executor.resume_fan_out(
+                    parent_state_name=str(of.get("parent_state", "")),
+                    children=children_list,
+                    join_target=str(of.get("join_target", "")),
+                    error_target=str(of.get("error_target", "")),
+                    completed_children=completed,
+                    parent_attempt=replay.open_fan_out_attempt,
+                )
+            terminal = executor.run_to_completion()
+        finally:
+            log.write(
+                "run_end",
+                fields={"terminal": terminal if terminal is not None else "aborted"},
+            )
+    finally:
+        if log is not None:
+            log.close()
         store.close()
     print(f"run {replay.last_run_id} resumed and finished: {terminal}")
     return 0 if terminal == "done" else 1
