@@ -61,6 +61,20 @@ PASSTHROUGH_VARS: frozenset[str] = frozenset(
         "RTK_DB_PATH",
         "RTK_TEE",
         "RTK_TEE_DIR",
+        # Standard proxy environment. Not a credential in the excluded
+        # sense: in a proxied environment (a sandboxed agent session, a
+        # corporate network) the child CLI has NO network at all without
+        # these, and every call surfaces as an opaque ConnectionRefused
+        # after retries (the 2026-07-02 writer draft run). Hosts that need
+        # no proxy simply ignore them.
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
     }
 )
 
