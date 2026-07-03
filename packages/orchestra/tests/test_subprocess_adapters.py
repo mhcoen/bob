@@ -362,3 +362,68 @@ def test_run_session_clears_activity_on_completion(tmp_path: Path, fast_progress
         silent=True,
     )
     assert _subprocess.get_current_activity() == ""
+
+
+def test_idle_kill_paused_while_live_pending_approval(
+    tmp_path: Path,
+    fast_progress: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A live pending-approval file must freeze the idle clock.
+
+    Regression: the idle-kill fired during Telegram approval waits
+    (the hook blocks the tool call, so the stream goes silent), so a
+    session waiting on a human was killed with -3 after IDLE_TIMEOUT_S
+    and the attempt was burned. With an approval in flight the wait is
+    not idleness. The pending file is named by the hook's pid; use our
+    own pid so it counts as live.
+    """
+    import os
+
+    monkeypatch.setattr(_subprocess, "IDLE_TIMEOUT_S", 0.3)
+    pending_dir = tmp_path / ".mcloop" / "pending"
+    pending_dir.mkdir(parents=True)
+    (pending_dir / str(os.getpid())).write_text("Bash: pytest -x")
+
+    # Sleeps well past IDLE_TIMEOUT_S while producing no output. With
+    # the pending file honored, the session survives to completion.
+    output, exit_code = _subprocess.run_session(
+        ["sh", "-c", "sleep 0.8; echo survived"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=30,
+        silent=True,
+    )
+    assert exit_code == 0
+    assert "survived" in output
+
+
+def test_idle_kill_fires_despite_stale_pending_file(
+    tmp_path: Path,
+    fast_progress: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pending file whose hook pid is dead must not freeze the clock.
+
+    A SIGKILL of the session's process group kills the hook before its
+    cleanup runs, orphaning the pending file. Honoring the orphan would
+    disable the idle kill forever, so stale entries are pruned and the
+    kill still fires (-3).
+    """
+    monkeypatch.setattr(_subprocess, "IDLE_TIMEOUT_S", 0.3)
+    pending_dir = tmp_path / ".mcloop" / "pending"
+    pending_dir.mkdir(parents=True)
+    # Pid 2**22 is above macOS/Linux default pid ranges: reliably dead.
+    stale = pending_dir / str(2**22)
+    stale.write_text("Bash: pytest -x")
+
+    output, exit_code = _subprocess.run_session(
+        ["sh", "-c", "sleep 5; echo survived"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=30,
+        silent=True,
+    )
+    assert exit_code == -3
+    assert "survived" not in output
+    assert not stale.exists()

@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -458,7 +459,18 @@ def send_approval_request(text):
             ]
         },
     }
-    result = telegram_api("sendMessage", data=data)
+    try:
+        result = telegram_api("sendMessage", data=data)
+    except urllib.error.HTTPError as e:
+        if e.code != 400:
+            raise
+        # Interpolated command text with unbalanced Markdown tokens
+        # (_ * `) makes Telegram reject the message with 400, which
+        # previously turned the ask into a silent "no opinion" and
+        # bypassed the permission gate. Retry as plain text.
+        data = dict(data)
+        data.pop("parse_mode", None)
+        result = telegram_api("sendMessage", data=data)
     return result["result"]["message_id"]
 
 

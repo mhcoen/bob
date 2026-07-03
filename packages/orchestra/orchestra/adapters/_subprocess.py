@@ -458,6 +458,44 @@ def _start_watchdog(parent_pid: int, pgid: int, pid_file: Path) -> subprocess.Po
     )
 
 
+def _live_pending_approvals(pending_dir: Path) -> list[Path]:
+    """Return pending-approval files whose hook process is still alive.
+
+    The permission hook writes ``<pid>`` files into ``.mcloop/pending``
+    while it waits for a Telegram response, and removes them on exit. A
+    SIGKILL of the session's process group kills the hook before its
+    cleanup runs, orphaning the file; honoring an orphan would freeze
+    the idle clock forever, so stale entries (named by a dead pid) are
+    pruned here. Files not named by a pid (except ``denied``, handled
+    by the caller) are treated as live.
+    """
+    live: list[Path] = []
+    try:
+        entries = list(pending_dir.iterdir())
+    except OSError:
+        return live
+    for pf in entries:
+        if pf.name == "denied":
+            continue
+        try:
+            pid = int(pf.name)
+        except ValueError:
+            live.append(pf)
+            continue
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            try:
+                pf.unlink(missing_ok=True)
+            except OSError:
+                pass
+            continue
+        except OSError:
+            pass
+        live.append(pf)
+    return live
+
+
 def _kill_watchdog(watchdog: subprocess.Popen[bytes] | None) -> None:
     if watchdog is None:
         return
@@ -967,12 +1005,18 @@ def run_session(
                             pass
                         process.wait()
                         return _assemble(head_lines, tail_lines, dropped), 1
-                    if not shown_waiting:
-                        try:
-                            pending = list(pending_dir.iterdir())
-                        except OSError:
-                            pending = []
-                        if pending:
+                    pending = _live_pending_approvals(pending_dir)
+                    if pending:
+                        # A human approval is in flight. This is a wait,
+                        # not idleness: freeze the idle clock so the
+                        # session is not killed mid-approval. The hook
+                        # itself times out (POLL_TIMEOUT) and responds
+                        # deny, which removes the pending file and
+                        # resumes the stream, so this cannot wait
+                        # forever. Stale files from killed hook
+                        # processes are pruned by the helper.
+                        last_event_time = time.monotonic()
+                        if not shown_waiting:
                             count = len(pending)
                             try:
                                 desc = pending[0].read_text()[:80]
@@ -984,8 +1028,9 @@ def run_session(
                                     f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
                                     flush=True,
                                 )
+                            _set_current_activity(f"waiting for Telegram approval: {desc}"[:120])
                             shown_waiting = True
-                            continue
+                        continue
                 now = time.monotonic()
                 if now - last_dot >= PROGRESS_DOT_INTERVAL:
                     if not silent:
