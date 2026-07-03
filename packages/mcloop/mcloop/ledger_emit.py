@@ -25,11 +25,12 @@ contract lives in the Q3 resolution section there.
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from mcloop.git_ops import run_git_bounded
 
 _PHASE_HEADER_RE = re.compile(r"^##\s+Phase\s+(?P<id>[A-Za-z0-9_]+):\s+(?P<title>.+?)\s*$")
 _PHASE_ID_COMMENT_RE = re.compile(r"<!--\s*phase_id\s*:\s*(?P<id>[A-Za-z0-9_]+)\s*-->")
@@ -271,13 +272,7 @@ def _classify_change(touched_paths: list[str]) -> str:
 def _git_head_sha(project_dir: Path) -> str | None:
     """Best-effort git HEAD sha; returns None outside a git checkout."""
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = run_git_bounded(["git", "rev-parse", "HEAD"], str(project_dir))
     except (FileNotFoundError, OSError):
         return None
     if result.returncode != 0:
@@ -289,12 +284,9 @@ def _git_head_sha(project_dir: Path) -> str | None:
 def _git_subject(project_dir: Path, sha: str) -> str:
     """Return the commit subject for ``sha``; empty string on failure."""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "log", "-1", "--format=%s", sha],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
+            str(project_dir),
         )
     except (FileNotFoundError, OSError):
         return ""
@@ -304,12 +296,9 @@ def _git_subject(project_dir: Path, sha: str) -> str:
 def _git_author(project_dir: Path, sha: str) -> str:
     """Return the author for ``sha`` (``Name <email>``); empty on failure."""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "log", "-1", "--format=%an <%ae>", sha],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
+            str(project_dir),
         )
     except (FileNotFoundError, OSError):
         return ""
@@ -319,12 +308,9 @@ def _git_author(project_dir: Path, sha: str) -> str:
 def _git_branch(project_dir: Path) -> str | None:
     """Return the current branch (no abbrev) or None outside git."""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
+            str(project_dir),
         )
     except (FileNotFoundError, OSError):
         return None
@@ -337,12 +323,9 @@ def _git_branch(project_dir: Path) -> str | None:
 def _git_parents(project_dir: Path, sha: str) -> list[str]:
     """Return the parent shas of ``sha`` (empty for root commits)."""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "log", "-1", "--format=%P", sha],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
+            str(project_dir),
         )
     except (FileNotFoundError, OSError):
         return []
@@ -354,12 +337,9 @@ def _git_parents(project_dir: Path, sha: str) -> list[str]:
 def _git_diff_numstat(project_dir: Path, sha: str) -> tuple[int, int, int]:
     """Return (files_changed, lines_added, lines_removed) for ``sha``."""
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "show", "--numstat", "--format=", sha],
-            cwd=str(project_dir),
-            capture_output=True,
-            text=True,
-            check=False,
+            str(project_dir),
         )
     except (FileNotFoundError, OSError):
         return 0, 0, 0

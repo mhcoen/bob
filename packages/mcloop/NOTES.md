@@ -202,6 +202,22 @@ Behavior changes worth noting:
   and `test_run_checks_mixed_batch_unmapped_behavioral_fails_gate` in
   test_targeted.py).
 
+### [2] [T-000029] All bare subprocess git calls migrated to run_git_bounded (2026-07-03)
+Migrated 16 bare `subprocess.run(["git", ...])` sites (git_ops init/add/
+commit/show, errors.py, investigate_cmd.py x2, ledger_emit.py x6,
+reviewer.py, review_integration.py, code_edit.py, coverage_verify.py x2)
+onto `git_ops.run_git_bounded`. Two behavior deltas worth knowing:
+`code_edit._detect_changed_files` previously used a 10s local timeout and
+`coverage_verify._changed_new_lines`/`_is_untracked` used 30s; all now
+share the wrapper's 300s bound (a hung git there stalls up to 300s instead
+of failing fast, but gains GIT_TERMINAL_PROMPT=0 and never hangs forever).
+A new AST-based guard test (`test_no_bare_git_subprocess_outside_git_ops`
+in tests/test_git_ops.py) scans mcloop/*.py for literal git argvs passed
+to subprocess.run/Popen/check_* outside git_ops; it cannot see a git argv
+built in a variable before the call, so that shape would slip past the
+guard (none exist today; main.py and audit.py already route through
+`_git`).
+
 ## Hypotheses
 
 ### [14.6] [T-000389] docstring changes are classified non-behavioral even when `__doc__` is runtime-consumed (2026-06-01)

@@ -582,3 +582,49 @@ def test_committed_files_since_consolidated_layout_is_package_relative(tmp_path)
     files = _committed_files_since(package, base)
 
     assert files == ["foo.py"]
+
+
+def test_no_bare_git_subprocess_outside_git_ops():
+    """Every git invocation in mcloop must flow through git_ops.
+
+    ``git_ops.run_git_bounded`` is the single low-level git runner: it
+    applies the timeout and ``GIT_TERMINAL_PROMPT=0`` guards so a hung
+    remote, slow hook, or credential prompt cannot wedge the loop. A
+    bare ``subprocess.run(["git", ...])`` (or Popen/check_* variant)
+    anywhere else in the package bypasses both guards.
+    """
+    import ast
+
+    import mcloop
+
+    pkg_dir = Path(mcloop.__file__).parent
+    spawn_names = {"run", "Popen", "check_output", "check_call", "call"}
+    offenders: list[str] = []
+    for py in sorted(pkg_dir.glob("*.py")):
+        if py.name == "git_ops.py":
+            continue
+        tree = ast.parse(py.read_text(encoding="utf-8"), filename=str(py))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (
+                isinstance(func, ast.Attribute)
+                and func.attr in spawn_names
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "subprocess"
+            ):
+                continue
+            if not node.args:
+                continue
+            argv = node.args[0]
+            if (
+                isinstance(argv, (ast.List, ast.Tuple))
+                and argv.elts
+                and isinstance(argv.elts[0], ast.Constant)
+                and argv.elts[0].value == "git"
+            ):
+                offenders.append(f"{py.name}:{node.lineno}")
+    assert not offenders, (
+        f"bare subprocess git calls outside git_ops (use git_ops.run_git_bounded): {offenders}"
+    )

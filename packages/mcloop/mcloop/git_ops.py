@@ -164,12 +164,7 @@ def _ensure_git(project_dir: Path) -> None:
         flush=True,
     )
     try:
-        result = subprocess.run(
-            ["git", "init"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-        )
+        result = run_git_bounded(["git", "init"], project_dir)
         if result.returncode != 0:
             msg = f"CRITICAL: git init failed: {result.stderr.strip()}"
             print(formatting.error_msg(msg), flush=True)
@@ -179,16 +174,10 @@ def _ensure_git(project_dir: Path) -> None:
         gitignore = project_dir / ".gitignore"
         if not gitignore.exists():
             gitignore.write_text(".duplo/\nlogs/\n.mcloop/\n.build/\n")
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=project_dir,
-            capture_output=True,
-        )
-        commit_result = subprocess.run(
+        run_git_bounded(["git", "add", "-A"], project_dir)
+        commit_result = run_git_bounded(
             ["git", "commit", "-m", "mcloop: initial commit"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
+            project_dir,
         )
         if commit_result.returncode != 0:
             stderr = commit_result.stderr.strip()
@@ -761,12 +750,7 @@ def read_file_at_head(project_dir: Path, path: str) -> str | None:
     """
     if not _has_git_repo(project_dir):
         return None
-    result = subprocess.run(
-        ["git", "show", f"HEAD:./{path}"],
-        cwd=project_dir,
-        capture_output=True,
-        text=True,
-    )
+    result = run_git_bounded(["git", "show", f"HEAD:./{path}"], project_dir)
     if result.returncode != 0:
         return None
     return result.stdout

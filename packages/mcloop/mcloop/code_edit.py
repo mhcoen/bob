@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from mcloop import runner as _runner
+from mcloop.git_ops import run_git_bounded
 from mcloop.orchestra_override import (
     banner_lines,
     is_acknowledged,
@@ -372,14 +373,7 @@ def _detect_changed_files(project_dir: Path) -> list[str]:
     repo or git is missing, returns an empty list. Does not raise.
     """
     try:
-        out = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        out = run_git_bounded(["git", "status", "--porcelain"], project_dir)
     except (OSError, subprocess.SubprocessError):
         return []
     if out.returncode != 0:

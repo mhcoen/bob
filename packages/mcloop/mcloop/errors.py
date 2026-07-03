@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json as _json
-import subprocess
 from pathlib import Path
 
 from mcloop import formatting
+from mcloop.git_ops import run_git_bounded
 from mcloop.notify import notify
 from mcloop.prompts import parse_diagnostic_output
 from mcloop.ratelimit import RateLimitState, run_session_with_fallover
@@ -192,11 +192,9 @@ def _check_errors_json(
     # Gather git log for diagnostic context
     git_log = ""
     try:
-        git_log_proc = subprocess.run(
+        git_log_proc = run_git_bounded(
             ["git", "log", "--oneline", "-20"],
-            cwd=project_dir,
-            capture_output=True,
-            text=True,
+            project_dir,
         )
         if git_log_proc.returncode == 0:
             git_log = git_log_proc.stdout.strip()

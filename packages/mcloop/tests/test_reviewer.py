@@ -346,7 +346,7 @@ def test_run_review_cli_writes_results(tmp_path):
 
     with (
         patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
-        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+        patch("mcloop.reviewer.run_git_bounded", return_value=diff_result),
         patch(
             "mcloop.reviewer.run_review",
             return_value=[ReviewFinding("x.py", [1, 2], "warning", "issue", "medium")],
@@ -377,7 +377,7 @@ def test_run_review_cli_empty_diff(tmp_path, capsys):
 
     with (
         patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
-        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+        patch("mcloop.reviewer.run_git_bounded", return_value=diff_result),
     ):
         run_review_cli("abc123", str(tmp_path))
 
@@ -391,7 +391,7 @@ def test_run_review_cli_git_error(tmp_path, capsys):
 
     with (
         patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
-        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+        patch("mcloop.reviewer.run_git_bounded", return_value=diff_result),
     ):
         run_review_cli("bad", str(tmp_path))
 
@@ -405,7 +405,7 @@ def test_run_review_cli_no_plan(tmp_path):
 
     with (
         patch("mcloop.config.load_reviewer_config", return_value=_FAKE_CONFIG),
-        patch("mcloop.reviewer.subprocess.run", return_value=diff_result),
+        patch("mcloop.reviewer.run_git_bounded", return_value=diff_result),
         patch("mcloop.reviewer.run_review", return_value=[]) as mock_review,
     ):
         run_review_cli("abc123", str(tmp_path))

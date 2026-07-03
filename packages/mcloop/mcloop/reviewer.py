@@ -12,7 +12,6 @@ the orchestra package installed.
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -21,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from mcloop.formatting import strip_code_fences
+from mcloop.git_ops import run_git_bounded
 
 _MCLOOP_CONFIG = Path.home() / ".mcloop" / "config.json"
 
@@ -477,11 +477,9 @@ def run_review_cli(commit_hash: str, project_dir: str) -> None:
     config.setdefault("log_dir", str(proj / ".mcloop" / "logs"))
 
     # Get diff
-    result = subprocess.run(
+    result = run_git_bounded(
         ["git", "diff", f"{commit_hash}^..{commit_hash}"],
-        capture_output=True,
-        text=True,
-        cwd=proj,
+        proj,
     )
     if result.returncode != 0:
         print(f"git diff failed: {result.stderr.strip()}", file=sys.stderr)

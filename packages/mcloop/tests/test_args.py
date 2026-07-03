@@ -3708,7 +3708,7 @@ def test_investigation_passed_merges_on_yes(tmp_path, capsys):
 
     with (
         patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
-        patch("mcloop.investigate_cmd.subprocess.run") as mock_run,
+        patch("mcloop.investigate_cmd.run_git_bounded") as mock_run,
         patch("builtins.input", return_value="y"),
         patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
         patch("mcloop.investigate_cmd.worktree.remove") as mock_remove,
@@ -3737,7 +3737,7 @@ def test_investigation_passed_skips_merge_on_no(tmp_path, capsys):
 
     with (
         patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
-        patch("mcloop.investigate_cmd.subprocess.run") as mock_run,
+        patch("mcloop.investigate_cmd.run_git_bounded") as mock_run,
         patch("builtins.input", return_value="n"),
         patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
     ):
@@ -3757,7 +3757,7 @@ def test_investigation_passed_skips_merge_on_eof(tmp_path, capsys):
 
     with (
         patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
-        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.run_git_bounded", return_value=MagicMock(stdout="")),
         patch("builtins.input", side_effect=EOFError),
         patch("mcloop.investigate_cmd.worktree.merge") as mock_merge,
     ):
@@ -3775,7 +3775,7 @@ def test_investigation_passed_merge_failure(tmp_path, capsys):
 
     with (
         patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
-        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.run_git_bounded", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
         patch(
             "mcloop.investigate_cmd.worktree.merge",
@@ -3797,7 +3797,7 @@ def test_investigation_passed_cleanup_failure_non_fatal(tmp_path, capsys):
 
     with (
         patch("mcloop.investigate_cmd.worktree.current_branch", return_value="main"),
-        patch("mcloop.investigate_cmd.subprocess.run", return_value=MagicMock(stdout="")),
+        patch("mcloop.investigate_cmd.run_git_bounded", return_value=MagicMock(stdout="")),
         patch("builtins.input", return_value="y"),
         patch("mcloop.investigate_cmd.worktree.merge"),
         patch(

@@ -19,6 +19,7 @@ import mcloop.process_monitor  # noqa: F401
 from mcloop import formatting, worktree
 from mcloop._planfile_compat import Task, parse
 from mcloop.checks import detect_app_type, detect_run
+from mcloop.git_ops import run_git_bounded
 from mcloop.investigator import gather_bug_context, generate_plan
 from mcloop.notify import notify
 
@@ -312,22 +313,18 @@ def _investigation_passed(
     source_branch = worktree.current_branch(cwd=project_dir)
 
     # Show commits on the investigation branch
-    log_result = subprocess.run(
+    log_result = run_git_bounded(
         ["git", "log", "--oneline", source_branch + ".." + branch],
-        cwd=str(project_dir),
-        capture_output=True,
-        text=True,
+        str(project_dir),
     )
     if log_result.stdout.strip():
         print("\nCommits to merge:", file=sys.stderr)
         print(log_result.stdout.rstrip(), file=sys.stderr)
 
     # Show changed files summary
-    diff_result = subprocess.run(
+    diff_result = run_git_bounded(
         ["git", "diff", "--stat", source_branch + "..." + branch],
-        cwd=str(project_dir),
-        capture_output=True,
-        text=True,
+        str(project_dir),
     )
     if diff_result.stdout.strip():
         print("\nChanged files:", file=sys.stderr)

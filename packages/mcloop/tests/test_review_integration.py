@@ -21,17 +21,17 @@ from mcloop.session_context import SessionContext
 
 def test_get_commit_hash(tmp_path):
     """_get_commit_hash returns the HEAD commit hash."""
-    with patch("mcloop.review_integration.subprocess.run") as mock_run:
+    with patch("mcloop.review_integration.run_git_bounded") as mock_run:
         mock_run.return_value = MagicMock(stdout="abc123\n")
         h = _get_commit_hash(tmp_path)
     assert h == "abc123"
     mock_run.assert_called_once()
-    assert mock_run.call_args[1]["cwd"] == tmp_path
+    assert mock_run.call_args[0][1] == tmp_path
 
 
 def test_get_commit_hash_empty(tmp_path):
     """_get_commit_hash returns empty string on failure."""
-    with patch("mcloop.review_integration.subprocess.run") as mock_run:
+    with patch("mcloop.review_integration.run_git_bounded") as mock_run:
         mock_run.return_value = MagicMock(stdout="")
         h = _get_commit_hash(tmp_path)
     assert h == ""

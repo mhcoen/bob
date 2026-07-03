@@ -42,6 +42,8 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from mcloop.git_ops import run_git_bounded
+
 # A unified-diff hunk header: ``@@ -a,b +c,d @@``. Group 1 is the new-side
 # start line; group 2 (optional) the new-side length.
 _HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -300,12 +302,9 @@ def changed_new_lines(
     if not baseline_sha:
         return None
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "diff", baseline_sha, "--", src],
-            cwd=Path(project_dir),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            Path(project_dir),
         )
     except (OSError, subprocess.SubprocessError):
         return None
@@ -336,12 +335,9 @@ def _is_untracked(project_dir: Path, src: str) -> bool:
     the project, so no ``--relative`` is needed.
     """
     try:
-        result = subprocess.run(
+        result = run_git_bounded(
             ["git", "ls-files", "--others", "--exclude-standard", "--", src],
-            cwd=Path(project_dir),
-            capture_output=True,
-            text=True,
-            timeout=30,
+            Path(project_dir),
         )
     except (OSError, subprocess.SubprocessError):
         return False

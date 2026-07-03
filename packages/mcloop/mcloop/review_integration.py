@@ -16,6 +16,7 @@ from pathlib import Path
 
 from mcloop import formatting
 from mcloop.errors import _insert_bugs_section
+from mcloop.git_ops import run_git_bounded
 from mcloop.session_context import SessionContext
 
 _reviewer_procs: list[subprocess.Popen] = []
@@ -23,12 +24,7 @@ _reviewer_procs: list[subprocess.Popen] = []
 
 def _get_commit_hash(project_dir: Path) -> str:
     """Return the current HEAD commit hash."""
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        capture_output=True,
-        text=True,
-        cwd=project_dir,
-    )
+    result = run_git_bounded(["git", "rev-parse", "HEAD"], project_dir)
     return result.stdout.strip()
 
 
