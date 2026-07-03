@@ -2770,3 +2770,47 @@ class TestWriteClaudeMd:
         content = path.read_text(encoding="utf-8")
         assert "# MyApp" in content
         assert "## Stack" in content
+
+
+class TestProcessedVideosManifest:
+    """load_processed_videos / record_processed_videos round-trips."""
+
+    def test_load_missing_file_returns_empty(self, tmp_path):
+        from duplo.saver import load_processed_videos
+
+        assert load_processed_videos(target_dir=tmp_path) == {}
+
+    def test_load_corrupted_file_returns_empty(self, tmp_path):
+        from duplo.saver import PROCESSED_VIDEOS_JSON, load_processed_videos
+
+        path = tmp_path / PROCESSED_VIDEOS_JSON
+        path.parent.mkdir(parents=True)
+        path.write_text("{not json", encoding="utf-8")
+        assert load_processed_videos(target_dir=tmp_path) == {}
+
+    def test_record_then_load_round_trip(self, tmp_path):
+        from duplo.saver import load_processed_videos, record_processed_videos
+
+        record_processed_videos({"ref/a.mp4": "hash-a"}, target_dir=tmp_path)
+        assert load_processed_videos(target_dir=tmp_path) == {"ref/a.mp4": "hash-a"}
+
+    def test_record_merges_and_overwrites(self, tmp_path):
+        from duplo.saver import load_processed_videos, record_processed_videos
+
+        record_processed_videos(
+            {"ref/a.mp4": "hash-a", "ref/b.mp4": "hash-b"},
+            target_dir=tmp_path,
+        )
+        record_processed_videos({"ref/b.mp4": "hash-b2"}, target_dir=tmp_path)
+        assert load_processed_videos(target_dir=tmp_path) == {
+            "ref/a.mp4": "hash-a",
+            "ref/b.mp4": "hash-b2",
+        }
+
+    def test_non_string_values_dropped_on_load(self, tmp_path):
+        from duplo.saver import PROCESSED_VIDEOS_JSON, load_processed_videos
+
+        path = tmp_path / PROCESSED_VIDEOS_JSON
+        path.parent.mkdir(parents=True)
+        path.write_text('{"ref/a.mp4": "h", "ref/bad.mp4": 42}', encoding="utf-8")
+        assert load_processed_videos(target_dir=tmp_path) == {"ref/a.mp4": "h"}

@@ -81,8 +81,8 @@ from duplo.verification_extractor import (
     load_frame_descriptions,
 )
 from duplo.frame_filter import apply_filter, filter_frames
-from duplo.video_extractor import extract_all_videos
-from duplo.hasher import compute_hashes, diff_hashes, load_hashes, save_hashes
+from duplo.video_extractor import ExtractionResult, extract_all_videos
+from duplo.hasher import _hash_file, compute_hashes, diff_hashes, load_hashes, save_hashes
 from bob_tools.planfile import (
     Plan,
     PlanValidationError,
@@ -116,8 +116,10 @@ from duplo.saver import (
     derive_app_name,
     get_current_phase,
     load_examples,
+    load_processed_videos,
     load_product,
     mark_implemented_features,
+    record_processed_videos,
     resolve_completed_fixes,
     save_build_preferences,
     save_design_requirements,
@@ -312,6 +314,82 @@ def _read_local_md(target_dir: Path | str = ".") -> str:
         return ""
 
 
+def _processed_video_key(video: Path) -> str:
+    """Return the manifest key for *video*: cwd-relative POSIX path when possible."""
+    resolved = video.resolve()
+    try:
+        return resolved.relative_to(Path.cwd()).as_posix()
+    except ValueError:
+        return resolved.as_posix()
+
+
+def _record_video_completion(results: list[ExtractionResult]) -> None:
+    """Record videos that completed the frame pipeline in the manifest.
+
+    Videos whose extraction errored are not recorded, so they are
+    retried on the next run.
+    """
+    entries: dict[str, str] = {}
+    for vr in results:
+        if vr.error:
+            continue
+        try:
+            entries[_processed_video_key(vr.source)] = _hash_file(vr.source)
+        except OSError:
+            continue
+    if entries:
+        record_processed_videos(entries)
+
+
+def _videos_needing_processing(videos: list[Path]) -> tuple[list[Path], list[Path]]:
+    """Split *videos* into ``(to_process, already_processed)``.
+
+    A video counts as already processed when the manifest records a
+    content hash equal to its current hash — covering both unchanged
+    inputs from prior runs and videos already run through the pipeline
+    earlier in this run.  Unreadable or missing files go to
+    *to_process* so the extractor reports the error.
+    """
+    manifest = load_processed_videos()
+    to_process: list[Path] = []
+    already: list[Path] = []
+    for video in videos:
+        recorded = manifest.get(_processed_video_key(video))
+        if recorded is None:
+            to_process.append(video)
+            continue
+        try:
+            current = _hash_file(video)
+        except OSError:
+            to_process.append(video)
+            continue
+        (already if current == recorded else to_process).append(video)
+    return to_process, already
+
+
+def _stored_accepted_frames(videos: list[Path]) -> dict[Path, list[Path]]:
+    """Return previously accepted frames for *videos* from disk.
+
+    ``apply_filter`` deletes rejected frames, so the frames still in
+    ``.duplo/video_frames/`` under a video's stem are exactly the
+    accepted set from its last pipeline run.
+    """
+    frames_dir = Path(".duplo") / "video_frames"
+    if not frames_dir.is_dir():
+        return {}
+    lookup: dict[Path, list[Path]] = {}
+    for video in videos:
+        prefixes = (f"{video.stem}_scene_", f"{video.stem}_interval_")
+        frames = sorted(
+            p
+            for p in frames_dir.iterdir()
+            if p.name.endswith(".png") and p.name.startswith(prefixes)
+        )
+        if frames:
+            lookup[video] = frames
+    return lookup
+
+
 def _run_video_frame_pipeline(
     videos: list[Path],
     *,
@@ -324,6 +402,12 @@ def _run_video_frame_pipeline(
     *accepted_frames_by_path* maps each input video path to its
     accepted (post-filter) frames via
     :func:`~duplo.orchestrator._accepted_frames_by_source`.
+
+    Each video that completes the pipeline without an extraction error
+    is recorded in ``.duplo/processed_videos.json`` with its content
+    hash, so subsequent runs (and later stages of the same run) skip it
+    via :func:`_videos_needing_processing` while its content is
+    unchanged.
     """
     frames_dir = Path(".duplo") / "video_frames"
     results = extract_all_videos(videos, frames_dir)
@@ -335,6 +419,7 @@ def _run_video_frame_pipeline(
             print(f"{indent}  {vr.source.name}: {len(vr.frames)} frame(s) extracted")
             video_frames.extend(vr.frames)
     if not video_frames:
+        _record_video_completion(results)
         return [], {}
     print(f"{indent}Filtering frames with Vision \u2026")
     decisions = filter_frames(video_frames)
@@ -353,6 +438,7 @@ def _run_video_frame_pipeline(
     accepted_frames_by_path = _accepted_frames_by_source(filtered_results)
 
     if not video_frames:
+        _record_video_completion(results)
         return [], accepted_frames_by_path
     print(f"{indent}Describing UI states \u2026")
     frame_descs = describe_frames(video_frames)
@@ -370,6 +456,7 @@ def _run_video_frame_pipeline(
     stored = store_accepted_frames(frame_entries)
     if stored:
         print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
+    _record_video_completion(results)
     return video_frames, accepted_frames_by_path
 
 
@@ -921,13 +1008,19 @@ def _analyze_new_files(
     video_frames: list[Path] = []
     accepted_frames_by_path: dict[Path, list[Path]] = {}
     if behavioral_videos:
-        print(f"\nExtracting frames from {len(behavioral_videos)} new video(s) \u2026")
-        video_frames, accepted_frames_by_path = _run_video_frame_pipeline(
-            behavioral_videos,
-        )
-        summary.videos_found = len(behavioral_videos)
-        analyzed_anything = True
-        summary.video_frames_extracted = len(video_frames)
+        to_process, already_done = _videos_needing_processing(behavioral_videos)
+        if already_done:
+            print(f"\n{len(already_done)} video(s) already processed; reusing stored frames.")
+            accepted_frames_by_path.update(_stored_accepted_frames(already_done))
+        if to_process:
+            print(f"\nExtracting frames from {len(to_process)} new video(s) \u2026")
+            video_frames, fresh_accepted = _run_video_frame_pipeline(
+                to_process,
+            )
+            accepted_frames_by_path.update(fresh_accepted)
+            summary.videos_found = len(to_process)
+            analyzed_anything = True
+            summary.video_frames_extracted = len(video_frames)
 
     # Compose design input via four-source model when spec is
     # available; fall back to all images + frames otherwise.
@@ -1112,10 +1205,17 @@ def _rescrape_product_url(
         site_video_frames: list[Path] = []
         if site_videos:
             print(f"  {len(site_videos)} video(s) from product site.")
-            site_video_frames, _ = _run_video_frame_pipeline(
-                site_videos,
-                indent="  ",
-            )
+            to_process, already_done = _videos_needing_processing(site_videos)
+            if already_done:
+                print(f"  {len(already_done)} video(s) already processed; reusing stored frames.")
+                for frames in _stored_accepted_frames(already_done).values():
+                    site_video_frames.extend(frames)
+            if to_process:
+                fresh_frames, _ = _run_video_frame_pipeline(
+                    to_process,
+                    indent="  ",
+                )
+                site_video_frames.extend(fresh_frames)
         if spec:
             design_input = collect_design_input(
                 spec,
@@ -1726,12 +1826,24 @@ def _subsequent_run() -> None:
         assert len(behavioral_paths) == len(set(behavioral_paths)), (
             "Duplicate source path across ref-declared and scraped videos"
         )
+        # Gate on the processed-videos manifest: skip videos whose
+        # content is unchanged since they last completed the pipeline,
+        # including ones _analyze_new_files already handled this run.
         accepted_by_path: dict[Path, list[Path]] = {}
         if behavioral_paths:
-            print(f"\nProcessing {len(behavioral_paths)} behavioral video(s) \u2026")
-            _, accepted_by_path = _run_video_frame_pipeline(
-                behavioral_paths,
-            )
+            to_process, already_done = _videos_needing_processing(behavioral_paths)
+            if already_done:
+                print(
+                    f"\n{len(already_done)} behavioral video(s) already"
+                    " processed; reusing stored frames."
+                )
+                accepted_by_path.update(_stored_accepted_frames(already_done))
+            if to_process:
+                print(f"\nProcessing {len(to_process)} behavioral video(s) \u2026")
+                _, fresh_accepted = _run_video_frame_pipeline(
+                    to_process,
+                )
+                accepted_by_path.update(fresh_accepted)
 
         # Compose design input from four sources with
         # content-hash dedup.

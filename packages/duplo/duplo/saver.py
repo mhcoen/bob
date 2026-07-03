@@ -23,6 +23,7 @@ from duplo.questioner import BuildPreferences
 DUPLO_DIR = ".duplo"
 DUPLO_JSON = ".duplo/duplo.json"
 PRODUCT_JSON = ".duplo/product.json"
+PROCESSED_VIDEOS_JSON = ".duplo/processed_videos.json"
 CLAUDE_MD_FILENAME = "CLAUDE.md"
 
 
@@ -1234,6 +1235,45 @@ def store_accepted_frames(
         save_frame_descriptions(json_entries, target_dir=target_dir)
 
     return copied
+
+
+def load_processed_videos(
+    *,
+    target_dir: Path | str = ".",
+) -> dict[str, str]:
+    """Load the processed-videos manifest from ``.duplo/processed_videos.json``.
+
+    Maps a project-relative video path to the SHA-256 content hash the
+    video had when it last completed the frame pipeline (extraction,
+    Vision filtering, description).  Returns ``{}`` when missing or
+    corrupted.
+    """
+    path = (Path(target_dir) / PROCESSED_VIDEOS_JSON).resolve()
+    data = _safe_read_json(path)
+    return {str(k): str(v) for k, v in data.items() if isinstance(v, str)}
+
+
+def record_processed_videos(
+    entries: dict[str, str],
+    *,
+    target_dir: Path | str = ".",
+) -> Path:
+    """Merge *entries* into the processed-videos manifest and persist it.
+
+    Each entry maps a video path key to its content hash at processing
+    time.  Existing keys are overwritten; other entries are preserved.
+
+    Returns the path to the written file.
+    """
+    _ensure_duplo_dir(target_dir)
+    path = (Path(target_dir) / PROCESSED_VIDEOS_JSON).resolve()
+    data = load_processed_videos(target_dir=target_dir)
+    data.update(entries)
+    path.write_text(
+        json.dumps(data, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 def move_references(

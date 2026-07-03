@@ -9911,3 +9911,300 @@ class TestFirstRunNoDuploJson:
         # unguarded duplo.json read on the first-run path was passed.
         assert mock_roadmap.called
         assert (tmp_path / _DUPLO_JSON).exists()
+
+
+class TestProcessedVideoGating:
+    """Behavioral videos unchanged since their last pipeline completion
+    are gated out of extraction/Vision/description ([T-000002]).
+
+    The gate is ``.duplo/processed_videos.json``: each video that
+    completes ``_run_video_frame_pipeline`` is recorded with its content
+    hash, and ``_videos_needing_processing`` skips videos whose current
+    hash matches — across runs and within a single run.
+    """
+
+    def test_videos_needing_processing_splits_by_manifest(self, tmp_path, monkeypatch):
+        """Manifest-matched videos are skipped; stale or unknown ones are not."""
+        import hashlib
+
+        from duplo.pipeline import _videos_needing_processing
+        from duplo.saver import record_processed_videos
+
+        monkeypatch.chdir(tmp_path)
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        unchanged = ref / "same.mp4"
+        unchanged.write_bytes(b"MP4A" * 100)
+        changed = ref / "edited.mp4"
+        changed.write_bytes(b"MP4B" * 100)
+        fresh = ref / "new.mp4"
+        fresh.write_bytes(b"MP4C" * 100)
+
+        record_processed_videos(
+            {
+                "ref/same.mp4": hashlib.sha256(unchanged.read_bytes()).hexdigest(),
+                "ref/edited.mp4": "stale-hash",
+            }
+        )
+
+        to_process, already = _videos_needing_processing([unchanged, changed, fresh])
+
+        assert already == [unchanged]
+        assert to_process == [changed, fresh]
+
+    def test_missing_file_with_manifest_entry_needs_processing(self, tmp_path, monkeypatch):
+        """A manifest entry for an unreadable file does not silently skip it."""
+        from duplo.pipeline import _videos_needing_processing
+        from duplo.saver import record_processed_videos
+
+        monkeypatch.chdir(tmp_path)
+        record_processed_videos({"ref/gone.mp4": "some-hash"})
+        missing = tmp_path / "ref" / "gone.mp4"
+
+        to_process, already = _videos_needing_processing([missing])
+
+        assert to_process == [missing]
+        assert already == []
+
+    def test_pipeline_records_completed_videos_only(self, tmp_path, monkeypatch):
+        """Completion is recorded per video; extraction errors are retried."""
+        import hashlib
+
+        from duplo.frame_describer import FrameDescription
+        from duplo.frame_filter import FilterDecision
+        from duplo.pipeline import _run_video_frame_pipeline
+        from duplo.saver import load_processed_videos
+        from duplo.video_extractor import ExtractionResult
+
+        monkeypatch.chdir(tmp_path)
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True)
+        ok_vid = tmp_path / "ok.mp4"
+        ok_vid.write_bytes(b"MP4" * 100)
+        bad_vid = tmp_path / "bad.mp4"
+        bad_vid.write_bytes(b"BAD" * 100)
+        frame = frames_dir / "ok_scene_0001.png"
+        frame.write_bytes(b"PNG")
+
+        with (
+            patch(
+                "duplo.pipeline.extract_all_videos",
+                return_value=[
+                    ExtractionResult(source=ok_vid, frames=[frame]),
+                    ExtractionResult(source=bad_vid, frames=[], error="ffmpeg failed"),
+                ],
+            ),
+            patch(
+                "duplo.pipeline.filter_frames",
+                return_value=[FilterDecision(path=frame, keep=True, reason="ok")],
+            ),
+            patch(
+                "duplo.pipeline.describe_frames",
+                return_value=[FrameDescription(path=frame, state="Main", detail="d")],
+            ),
+            patch("duplo.pipeline.store_accepted_frames", return_value=[]),
+        ):
+            _run_video_frame_pipeline([ok_vid, bad_vid])
+
+        manifest = load_processed_videos()
+        assert manifest == {"ok.mp4": hashlib.sha256(ok_vid.read_bytes()).hexdigest()}
+
+    def test_stored_accepted_frames_matches_by_stem(self, tmp_path, monkeypatch):
+        """Skipped videos reuse the accepted frames still on disk."""
+        from duplo.pipeline import _stored_accepted_frames
+
+        monkeypatch.chdir(tmp_path)
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True)
+        (frames_dir / "demo_scene_0001.png").write_bytes(b"P1")
+        (frames_dir / "demo_interval_0001.png").write_bytes(b"P2")
+        (frames_dir / "other_scene_0001.png").write_bytes(b"P3")
+
+        vid = Path("ref/demo.mp4")
+        lookup = _stored_accepted_frames([vid])
+
+        assert [p.name for p in lookup[vid]] == [
+            "demo_interval_0001.png",
+            "demo_scene_0001.png",
+        ]
+
+    def _spec_with_behavioral_video(self):
+        """Spec with one scrapeable source and one behavioral-target video."""
+        from duplo.spec_reader import (
+            DesignBlock,
+            ProductSpec,
+            ReferenceEntry,
+            SourceEntry,
+        )
+
+        src = SourceEntry(
+            url="https://prod.com",
+            role="product-reference",
+            scrape="deep",
+        )
+        spec = ProductSpec(
+            raw="test",
+            sources=[src],
+            references=[
+                ReferenceEntry(
+                    path=Path("ref/demo.mp4"),
+                    roles=["behavioral-target"],
+                ),
+            ],
+            design=DesignBlock(),
+        )
+        return src, spec
+
+    def _setup_project(self, tmp_path, monkeypatch, *, manifest_hash: str | None):
+        """Project dir with a behavioral video and synced file hashes.
+
+        Returns the video path. When *manifest_hash* is given, the video
+        is pre-recorded in the processed-videos manifest with that hash.
+        """
+        from duplo.hasher import compute_hashes, save_hashes
+        from duplo.saver import record_processed_videos
+
+        _write_duplo_json(
+            tmp_path,
+            {
+                "source_url": "https://prod.com",
+                "features": [],
+                "preferences": {
+                    "platform": "web",
+                    "language": "Python",
+                    "constraints": [],
+                    "preferences": [],
+                },
+            },
+        )
+        ref = tmp_path / "ref"
+        ref.mkdir()
+        vid = ref / "demo.mp4"
+        vid.write_bytes(b"MP4" * 500)
+        monkeypatch.chdir(tmp_path)
+        # Synced hashes: the diff is clean, as on a true second run.
+        save_hashes(compute_hashes("."))
+        if manifest_hash is not None:
+            record_processed_videos({"ref/demo.mp4": manifest_hash})
+        return vid
+
+    def _run_patches(self, src, spec, scrape_result, tmp_path):
+        """Patch set for driving _subsequent_run through the spec-sources path."""
+        return (
+            patch("duplo.pipeline.read_spec", return_value=spec),
+            patch(
+                "duplo.pipeline.validate_for_run",
+                return_value=MagicMock(warnings=[], errors=[]),
+            ),
+            patch("duplo.pipeline.scrapeable_sources", return_value=[src]),
+            patch(
+                "duplo.pipeline._scrape_declared_sources",
+                return_value=scrape_result,
+            ),
+            patch("duplo.pipeline._persist_scrape_result"),
+            patch("duplo.pipeline.collect_design_input", return_value=[]),
+            patch("duplo.pipeline.generate_phase_plan", return_value="# Phase\n"),
+            patch("duplo.pipeline.save_plan", return_value=tmp_path / "PLAN.md"),
+        )
+
+    def test_unchanged_video_second_run_zero_extractor_describer_calls(
+        self, tmp_path, monkeypatch
+    ):
+        """[T-000002] regression: an unchanged behavioral video on a
+        second run triggers zero extractor, filter, and describer calls."""
+        import hashlib
+
+        import contextlib
+
+        vid = self._setup_project(tmp_path, monkeypatch, manifest_hash=None)
+        from duplo.saver import record_processed_videos
+
+        record_processed_videos({"ref/demo.mp4": hashlib.sha256(vid.read_bytes()).hexdigest()})
+        src, spec = self._spec_with_behavioral_video()
+        scrape_result = ScrapeResult(combined_text="", product_ref_raw_pages={})
+
+        with contextlib.ExitStack() as stack:
+            for patcher in self._run_patches(src, spec, scrape_result, tmp_path):
+                stack.enter_context(patcher)
+            mock_extract = stack.enter_context(patch("duplo.pipeline.extract_all_videos"))
+            mock_filter = stack.enter_context(patch("duplo.pipeline.filter_frames"))
+            mock_describe = stack.enter_context(patch("duplo.pipeline.describe_frames"))
+            main()
+
+        mock_extract.assert_not_called()
+        mock_filter.assert_not_called()
+        mock_describe.assert_not_called()
+
+    def test_stale_manifest_hash_reprocesses_video(self, tmp_path, monkeypatch):
+        """A video whose content no longer matches the manifest is re-run."""
+        import contextlib
+
+        self._setup_project(tmp_path, monkeypatch, manifest_hash="stale-hash")
+        src, spec = self._spec_with_behavioral_video()
+        scrape_result = ScrapeResult(combined_text="", product_ref_raw_pages={})
+
+        with contextlib.ExitStack() as stack:
+            for patcher in self._run_patches(src, spec, scrape_result, tmp_path):
+                stack.enter_context(patcher)
+            mock_extract = stack.enter_context(
+                patch("duplo.pipeline.extract_all_videos", return_value=[])
+            )
+            main()
+
+        mock_extract.assert_called_once()
+        assert mock_extract.call_args[0][0] == [Path("ref/demo.mp4")]
+
+    def test_changed_video_processed_once_per_run(self, tmp_path, monkeypatch):
+        """A changed ref/ behavioral video is processed by
+        _analyze_new_files and NOT re-processed by the spec-sources
+        behavioral block in the same invocation."""
+        from duplo.frame_describer import FrameDescription
+        from duplo.frame_filter import FilterDecision
+        from duplo.video_extractor import ExtractionResult
+
+        vid = self._setup_project(tmp_path, monkeypatch, manifest_hash=None)
+        # Empty stored hashes: every file (incl. the video) diffs as added.
+        (tmp_path / ".duplo" / "file_hashes.json").write_text("{}", encoding="utf-8")
+        src, spec = self._spec_with_behavioral_video()
+        scrape_result = ScrapeResult(combined_text="", product_ref_raw_pages={})
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True)
+        frame = frames_dir / "demo_scene_0001.png"
+        frame.write_bytes(b"PNG")
+        del vid  # processed via the relative ref/ path below
+
+        import contextlib
+
+        with contextlib.ExitStack() as stack:
+            for patcher in self._run_patches(src, spec, scrape_result, tmp_path):
+                stack.enter_context(patcher)
+            mock_extract = stack.enter_context(
+                patch(
+                    "duplo.pipeline.extract_all_videos",
+                    return_value=[
+                        ExtractionResult(source=Path("ref/demo.mp4"), frames=[frame]),
+                    ],
+                )
+            )
+            mock_filter = stack.enter_context(
+                patch(
+                    "duplo.pipeline.filter_frames",
+                    return_value=[FilterDecision(path=frame, keep=True, reason="ok")],
+                )
+            )
+            mock_describe = stack.enter_context(
+                patch(
+                    "duplo.pipeline.describe_frames",
+                    return_value=[FrameDescription(path=frame, state="Main", detail="d")],
+                )
+            )
+            mock_store = stack.enter_context(
+                patch("duplo.pipeline.store_accepted_frames", return_value=[])
+            )
+            main()
+
+        assert mock_extract.call_count == 1
+        assert mock_filter.call_count == 1
+        assert mock_describe.call_count == 1
+        assert mock_store.call_count == 1

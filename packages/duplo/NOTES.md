@@ -1907,6 +1907,26 @@ detection, since behavior contracts and video cases render as `Verify: ...`
 (`spec_reader.format_contracts_as_verification`,
 `verification_extractor.format_verification_tasks`).
 
+[2] [T-000002] 2026-07-03: Behavioral-video re-processing is gated via a new
+`.duplo/processed_videos.json` manifest (video path -> content hash, recorded when a
+video completes `_run_video_frame_pipeline` without an extraction error) rather than
+the run's file-hash diff alone, for two confirmed reasons: (a) site-media videos live
+under `.duplo/site_media/`, which `hasher.compute_hashes` skips, so they never appear
+in the diff and diff-gating could not cover them; (b) a byte-unchanged video that is
+newly declared in SPEC.md (e.g. `proposed: true` removed) must still be processed on
+first appearance — diff-only gating would skip it forever. The manifest approach keeps
+the existing phase5 integration tests (TestProposedBehavioralRemovedBothVideosInPipeline)
+green while making an unchanged video's second run trigger zero extractor/Vision/
+describer calls. Same-run dedupe (video changed -> processed by `_analyze_new_files`,
+then reached again by the spec-sources behavioral block) falls out of the same
+mechanism, since the manifest is written at pipeline completion.
+
+[2] [T-000002] 2026-07-03: Skipped (already-processed) videos reuse their accepted
+frames from `.duplo/video_frames/` for design-input composition:
+`frame_filter.apply_filter` deletes rejected frames from disk, so the frames still
+present under a video's stem are exactly the accepted set from its last run
+(`_stored_accepted_frames`).
+
 ## Hypotheses
 
 [6] [T-000006] The verify-without-build check is intentionally false-positive-safe
@@ -1927,3 +1947,10 @@ is the natural integration point; until then it is a standalone, tested utility
 consumed by the T-000005 regression test. Wiring it unconditionally into the
 canonical flow would risk double-stamping against `migrate`, so it is intentionally
 left as a post-assembly normalization step for the corrective gate to call.
+
+[2] [T-000002] 2026-07-03: Deleting `.duplo/processed_videos.json` is the escape
+hatch to force full video re-processing. If a user clears `.duplo/video_frames/`
+without deleting the manifest, skipped videos contribute no frames to design input
+until the video's content changes or the manifest is removed; a fallback that
+reprocesses when stored frames are missing was deliberately not added, to keep the
+gate simple and Vision-spend-safe. Revisit if it bites in practice.
