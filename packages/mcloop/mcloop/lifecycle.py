@@ -51,6 +51,10 @@ _current_task_text = ""
 _current_task_id = ""  # R4: canonical T-NNNNNN id; "" when absent
 _phase_start_time = 0.0
 _project_dir: Path | None = None
+# Run-summary writer registered by run_loop so the signal handler can
+# land an "interrupted" run summary before os._exit(130). None when no
+# run is in flight (or the run already wrote its terminal summary).
+_interrupt_summary_writer: Callable[[], None] | None = None
 _lifecycle_state = "not_started"
 _atexit_callback_registered = False
 _TASK_ID_RE = re.compile(r"^(T-\d{6}):\s*(.*)$")
@@ -139,6 +143,32 @@ def _save_interrupt_state() -> None:
         (mcloop_dir / "interrupted.json").write_text(_json.dumps(state, indent=2) + "\n")
     except OSError:
         pass
+
+
+def set_interrupt_summary_writer(writer: Callable[[], None] | None) -> None:
+    """Register the callable the signal handler uses to write the run
+    summary before exiting, or clear it with ``None``.
+
+    The writer must use only synchronous file I/O: it runs inside the
+    signal handler, immediately before ``os._exit(130)``.
+    """
+    global _interrupt_summary_writer
+    _interrupt_summary_writer = writer
+
+
+def _write_interrupt_run_summary() -> None:
+    """Invoke the registered run-summary writer, if any.
+
+    Runs inside the signal handler, so a failing writer must never
+    block the exit path; the writer itself reports write errors loudly.
+    """
+    writer = _interrupt_summary_writer
+    if writer is None:
+        return
+    try:
+        writer()
+    except Exception as exc:
+        print(f"Failed to write interrupted run summary: {exc}", flush=True)
 
 
 def _unlink_active_pid_file() -> None:
@@ -504,6 +534,7 @@ def register_signal_handlers(
             cleanup_callback()  # type: ignore[operator]
         _graceful_kill_active_process()
         _unlink_active_pid_file()
+        _write_interrupt_run_summary()
         print("State saved. Exiting.", flush=True)
         os._exit(130)
 

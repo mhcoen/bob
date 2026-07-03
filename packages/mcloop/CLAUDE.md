@@ -61,7 +61,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/investigator.py** - Generate investigation plans and gather bug context. Contains the debugging playbook and crash report filtering by process name.
 
-**mcloop/lifecycle.py** - Process lifecycle: interrupt state, orphan cleanup, active-process tracking. `_check_interrupted` accepts active_paths for split-plan skip/describe targeting.
+**mcloop/lifecycle.py** - Process lifecycle: interrupt state, orphan cleanup, active-process tracking. `_check_interrupted` accepts active_paths for split-plan skip/describe targeting. The signal handler writes an "interrupted" run summary before `os._exit(130)` via the writer `run_loop` registers with `set_interrupt_summary_writer`; `_build_and_write_summary` clears the hook when a run writes its terminal summary normally.
 
 **mcloop/main.py** - CLI entry point and run loop. Defines `RunStatus`, `BuildResult`. Orchestrates task execution, checks, commits, reviewer spawn, audit, and run-summary writing. Supports `--stop-after-stage`, `--stop-after-one`, `--timeout`, and the `maintain` subcommand.
 
@@ -254,13 +254,13 @@ Setup. Reset the working tree to the pre-step-1 base again. Keep the
 `.orchestra/config.json` from step 2. Restore PLAN.md to the same
 single item.
 
-Important: after SIGINT, `latest.json` is NOT updated. Mcloop's
-signal handler in `mcloop/lifecycle.py` calls `os._exit(130)`, which
-skips the normal run-summary writer. `latest.json` after the
-interrupt still describes the previous completed run, not the
-interrupted one. Do not read `latest.json` for any yes/no check in
-this step. Verify interruption state from the orchestra session
-log on disk and the process tree only.
+Important: after SIGINT, `latest.json` IS updated. Mcloop's signal
+handler in `mcloop/lifecycle.py` writes an interrupted run summary
+(via the writer `run_loop` registers with
+`set_interrupt_summary_writer`) immediately before `os._exit(130)`,
+so `.mcloop/runs/latest.json` describes the interrupted run with
+`terminal_status: "interrupted"`. Also verify interruption state
+from the orchestra session log on disk and the process tree.
 
 The same `os._exit(130)` also kills the entire process before
 orchestra's executor finishes the in-flight state, so the executor
@@ -284,6 +284,9 @@ Do not press Ctrl-C a second time.
 Pass criteria, all required:
 
 - Mcloop exits within ten seconds of the SIGINT.
+- `cat .mcloop/runs/latest.json` shows
+  `"terminal_status": "interrupted"` (the signal handler writes the
+  run summary before exiting).
 - `.mcloop/active-pid` does not exist
   (`ls .mcloop/active-pid` returns `No such file or directory`).
 - For orchestra-backed runs only: `$ORCHESTRA_LOG` exists and

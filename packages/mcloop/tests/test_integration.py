@@ -144,6 +144,47 @@ def test_full_cycle_two_tasks(
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
+def test_interrupt_summary_writer_registered_during_run(
+    mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
+):
+    """run_loop registers a SIGINT run-summary writer; invoking it (as the
+    signal handler does before os._exit) lands an "interrupted" latest.json,
+    and the normal terminal summary write clears the hook (T-000032)."""
+    import json
+
+    import mcloop.lifecycle as lifecycle_mod
+
+    md = _make_project(tmp_path, "- [ ] Task one\n")
+    captured = []
+
+    def _capture_and_succeed(*args, **kwargs):
+        captured.append(lifecycle_mod._interrupt_summary_writer)
+        return _ok_run_result()
+
+    mock_run.side_effect = _capture_and_succeed
+
+    with _isolated_git_state():
+        result = run_loop(md, no_audit=True)
+
+    assert result.ok
+    # The writer was registered while the task ran, and the run's terminal
+    # summary write cleared it on the way out.
+    assert captured and captured[0] is not None
+    assert lifecycle_mod._interrupt_summary_writer is None
+
+    captured[0]()
+    latest = json.loads((tmp_path / ".mcloop" / "runs" / "latest.json").read_text())
+    assert latest["terminal_status"] == "interrupted"
+    assert latest["failure_detail"] == "Interrupted by signal"
+    assert latest["mode"] == "plan"
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_nested_subtasks(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):

@@ -111,6 +111,7 @@ from mcloop.lifecycle import (
     _write_ruledout_to_plan,  # noqa: F401 — re-exported for tests
     register_atexit_cleanup,
     register_signal_handlers,
+    set_interrupt_summary_writer,
     shutdown_lifecycle,
 )
 from mcloop.maintain import run_maintain
@@ -1058,6 +1059,10 @@ def _build_and_write_summary(
     audit_result: str | None = None,
 ) -> Path | None:
     """Build a RunSummary and write it. Returns the file path, or None on error."""
+    # Every call site is the run's terminal summary write (each returns
+    # right after). Once it runs, the signal handler must not overwrite
+    # the result with an "interrupted" summary, so drop the hook first.
+    set_interrupt_summary_writer(None)
     summary = RunSummary(
         run_start=run_start_iso,
         run_end=_iso_now(),
@@ -1479,6 +1484,32 @@ def run_loop(
     task_entries: list[TaskEntry] = []
     check_entries: list[CheckEntry] = []
     commit_hashes: list[str] = []
+
+    # KeyboardInterrupt never reaches this frame: lifecycle's signal
+    # handler calls os._exit(130) directly. Register a writer with the
+    # handler so an interrupted run still lands a run summary
+    # (terminal_status "interrupted") in .mcloop/runs/latest.json.
+    # _build_and_write_summary clears the hook when the run writes its
+    # terminal summary through the normal exit paths.
+    _run_mode = "plan"  # refined after bug-only detection below
+    _interrupt_detail = ["Interrupted by signal"]
+    _interrupt_stuck: list[str] = []
+
+    def _write_interrupt_summary() -> None:
+        _build_and_write_summary(
+            project_dir,
+            run_start_iso,
+            elapsed_seconds=time.monotonic() - run_start_mono,
+            mode=_run_mode,
+            task_entries=task_entries,
+            check_entries=check_entries,
+            commit_hashes=commit_hashes,
+            terminal_status="interrupted",
+            failure_detail=_interrupt_detail[0],
+            stuck=list(_interrupt_stuck),
+        )
+
+    set_interrupt_summary_writer(_write_interrupt_summary)
     failed_task: str | None = None
     failed_reason: str = ""
     terminal_failure: str | None = None  # Set by any fatal failure; gates success path
@@ -2064,38 +2095,15 @@ def run_loop(
                             ),
                             flush=True,
                         )
-                        try:
-                            time.sleep(SESSION_LIMIT_POLL)
-                        except KeyboardInterrupt:
-                            total = time.monotonic() - run_start
-                            _print_summary(
-                                completed,
-                                None,
-                                "",
-                                parse(bugs_path)
-                                + (parse(plan_path) if plan_path.exists() else []),
-                                total,
-                                project_dir,
-                                notes_snapshot,
-                            )
-                            print("\nExiting.", flush=True)
-                            _build_and_write_summary(
-                                project_dir,
-                                run_start_iso,
-                                elapsed_seconds=total,
-                                mode=_run_mode,
-                                task_entries=task_entries,
-                                check_entries=check_entries,
-                                commit_hashes=commit_hashes,
-                                terminal_status="interrupted",
-                                failure_detail="User interrupted during session limit wait",
-                                stuck=[f"{format_task_id(task)}{task.text}"],
-                            )
-                            return RunStatus(
-                                "interrupted",
-                                stuck=[f"{format_task_id(task)}{task.text}"],
-                                detail="User interrupted during session limit wait",
-                            )
+                        # Ctrl-C during this wait lands in lifecycle's
+                        # signal handler, never here as KeyboardInterrupt;
+                        # tag the interrupt summary with the wait context
+                        # for the duration of the sleep.
+                        _interrupt_detail[0] = "User interrupted during session limit wait"
+                        _interrupt_stuck.append(f"{format_task_id(task)}{task.text}")
+                        time.sleep(SESSION_LIMIT_POLL)
+                        _interrupt_detail[0] = "Interrupted by signal"
+                        _interrupt_stuck.clear()
                         attempt -= 1
                         continue
                     rate_state.mark_limited(active_entry.cli, cooldown=SESSION_LIMIT_POLL)

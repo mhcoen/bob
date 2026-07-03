@@ -22,6 +22,7 @@ from mcloop.lifecycle import (
     _write_ruledout_to_plan,
     register_atexit_cleanup,
     register_signal_handlers,
+    set_interrupt_summary_writer,
     shutdown_lifecycle,
 )
 
@@ -1075,6 +1076,90 @@ def test_register_signal_handlers_exits_with_130():
         for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
     }
     try:
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit") as mock_exit,
+        ):
+            handler(signal.SIGINT, None)
+        mock_exit.assert_called_once_with(130)
+    finally:
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_signal_handler_writes_run_summary_before_exit():
+    """The handler invokes the registered summary writer before os._exit.
+
+    T-000032: KeyboardInterrupt never reaches run_loop (the handler
+    calls os._exit directly), so the handler itself must land the
+    interrupted run summary via the writer run_loop registered.
+    """
+    process_ref = MagicMock()
+    events = []
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        set_interrupt_summary_writer(lambda: events.append("summary"))
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch(
+                "mcloop.lifecycle.os._exit",
+                side_effect=lambda code: events.append("exit"),
+            ),
+        ):
+            handler(signal.SIGINT, None)
+        assert events == ["summary", "exit"]
+    finally:
+        set_interrupt_summary_writer(None)
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_signal_handler_summary_writer_error_still_exits():
+    """A raising summary writer never blocks the exit path."""
+    process_ref = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+
+    def _boom():
+        raise OSError("disk full")
+
+    try:
+        set_interrupt_summary_writer(_boom)
+        register_signal_handlers(process_ref)
+        handler = signal.getsignal(signal.SIGINT)
+        with (
+            patch("mcloop.lifecycle._save_interrupt_state"),
+            patch("mcloop.lifecycle._graceful_kill_active_process"),
+            patch("mcloop.lifecycle.os._exit") as mock_exit,
+        ):
+            handler(signal.SIGINT, None)
+        mock_exit.assert_called_once_with(130)
+    finally:
+        set_interrupt_summary_writer(None)
+        for sig, orig in originals.items():
+            signal.signal(sig, orig)
+
+
+def test_signal_handler_no_summary_writer_registered():
+    """With no writer registered the handler still runs to os._exit."""
+    process_ref = MagicMock()
+    originals = {
+        sig: signal.getsignal(sig)
+        for sig in (signal.SIGINT, signal.SIGTSTP, signal.SIGTERM, signal.SIGHUP)
+    }
+    try:
+        set_interrupt_summary_writer(None)
         register_signal_handlers(process_ref)
         handler = signal.getsignal(signal.SIGINT)
         with (

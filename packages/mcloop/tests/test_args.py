@@ -10381,6 +10381,34 @@ def test_run_summary_write_failure_survives_notify_error(tmp_path, capsys):
     assert "read-only fs" in out
 
 
+def test_build_and_write_summary_clears_interrupt_writer(tmp_path):
+    """The terminal summary write drops the interrupt-summary hook.
+
+    T-000032: run_loop registers a writer so the SIGINT handler can
+    land an interrupted summary. Once the run writes its terminal
+    summary through the normal path, a late signal must not overwrite
+    it, so _build_and_write_summary clears the hook first.
+    """
+    import mcloop.lifecycle as lifecycle_mod
+    from mcloop.main import _build_and_write_summary
+
+    try:
+        lifecycle_mod.set_interrupt_summary_writer(lambda: None)
+        _build_and_write_summary(
+            project_dir=tmp_path,
+            run_start_iso="2026-04-10T12:00:00+00:00",
+            elapsed_seconds=300.0,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="success",
+        )
+        assert lifecycle_mod._interrupt_summary_writer is None
+    finally:
+        lifecycle_mod.set_interrupt_summary_writer(None)
+
+
 def test_run_summary_all_fields_populated(tmp_path):
     """A fully populated RunSummary serializes all fields."""
     from mcloop.run_summary import CheckEntry, RunSummary, TaskEntry, write_run_summary
@@ -10609,7 +10637,14 @@ def test_run_summary_failed_run(tmp_path):
 
 
 def test_run_summary_interrupted_run(tmp_path):
-    """Interrupted run still produces a summary."""
+    """Ctrl-C during the session-limit wait still produces a summary.
+
+    T-000032: KeyboardInterrupt never reaches run_loop — lifecycle's
+    signal handler writes the summary via the writer run_loop registers,
+    then calls os._exit(130). Simulate the handler firing mid-sleep:
+    invoke the registered writer, then raise a sentinel standing in for
+    the process exit (the sleep never returns in production either).
+    """
     plan = tmp_path / "PLAN.md"
     plan.write_text(canonical_plan_text("# Plan\n\n- [ ] Do task\n"))
     (tmp_path / ".git").mkdir()
@@ -10619,29 +10654,43 @@ def test_run_summary_interrupted_run(tmp_path):
     def capture_summary(*args, **kwargs):
         captured.update(kwargs)
 
+    class _HandlerExit(Exception):
+        pass
+
+    def fake_sleep(_seconds):
+        lifecycle_mod._write_interrupt_run_summary()
+        raise _HandlerExit
+
     result = MagicMock()
     result.success = True
     result.output = "session limit"
     result.exit_code = 2
 
-    with (
-        patch("mcloop.main._checkpoint"),
-        patch("mcloop.main._push_or_die"),
-        patch("mcloop.main._kill_orphan_sessions"),
-        patch("mcloop.main._ensure_git"),
-        patch("mcloop.main._check_errors_json", return_value=True),
-        patch("mcloop.main._check_user_input", return_value=None),
-        patch("mcloop.main.run_task", return_value=result),
-        patch("mcloop.main.is_session_limited", return_value=True),
-        patch("mcloop.main.time.sleep", side_effect=KeyboardInterrupt),
-        patch("mcloop.main._print_summary"),
-        patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
-        patch("mcloop.main.notify"),
-    ):
-        status = run_loop(plan)
+    try:
+        with (
+            patch("mcloop.main._checkpoint"),
+            patch("mcloop.main._push_or_die"),
+            patch("mcloop.main._kill_orphan_sessions"),
+            patch("mcloop.main._ensure_git"),
+            patch("mcloop.main._check_errors_json", return_value=True),
+            patch("mcloop.main._check_user_input", return_value=None),
+            patch("mcloop.main.run_task", return_value=result),
+            patch("mcloop.main.is_session_limited", return_value=True),
+            patch("mcloop.main.time.sleep", side_effect=fake_sleep),
+            patch("mcloop.main._print_summary"),
+            patch("mcloop.main._build_and_write_summary", side_effect=capture_summary),
+            patch("mcloop.main.notify"),
+        ):
+            with pytest.raises(_HandlerExit):
+                run_loop(plan)
+    finally:
+        # The patched _build_and_write_summary never ran the real hook
+        # clearing, so drop the leftover writer here.
+        lifecycle_mod.set_interrupt_summary_writer(None)
 
-    assert status.status == "interrupted"
     assert captured.get("terminal_status") == "interrupted"
+    assert captured.get("failure_detail") == "User interrupted during session limit wait"
+    assert any("Do task" in item for item in captured.get("stuck", []))
 
 
 def test_commit_returns_hash(tmp_path):

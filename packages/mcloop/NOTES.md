@@ -415,6 +415,25 @@ the batch fallover swaps only ``current_model`` → ``fallback_model``
 way the non-batch path does. If multi-tier chains should apply to
 batches too, that is a separate enhancement.
 
+[2026-07-03] [T-000032] Chose the "better outcome" branch of the task:
+the SIGINT/SIGTERM handler now writes an "interrupted" run summary
+(latest.json gets terminal_status "interrupted") via a writer run_loop
+registers with lifecycle.set_interrupt_summary_writer, and the dead
+try/except KeyboardInterrupt around the session-limit sleep was
+removed (the handler's os._exit(130) makes KeyboardInterrupt
+unreachable in run_loop). Follow-ups worth knowing: (1) this changes
+the signal path, so per the smoke-test section's own terms the
+one-time live interrupt gate (step 3) should be re-run before trusting
+the orchestra backend again; its latest.json criteria in CLAUDE.md
+were updated to expect the interrupted summary. (2) The writer is
+registered only by run_loop after its task/check/commit accumulators
+exist; interrupts during early startup (preflight, canonical-input
+gate) and in maintain mode still exit without writing a summary, same
+as before. (3) _build_and_write_summary clears the hook because every
+call site is a terminal write followed by return; a future
+mid-run summary write would silently end interrupt coverage for the
+rest of that run — keep the one-terminal-write-per-run invariant.
+
 ## Hypotheses
 
 ## Eliminated
