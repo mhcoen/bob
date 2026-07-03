@@ -94,6 +94,8 @@ from mcloop.install_cmd import (
     _cmd_install,
     _cmd_uninstall,
     _load_mcloop_config,
+    check_hook_drift,
+    hook_drift_warning,
 )
 from mcloop.investigate_cmd import (
     _cmd_investigate,
@@ -1273,6 +1275,13 @@ def run_loop(
     pending_switch_reason = ""
 
     project_checks = get_check_commands(project_dir)
+
+    # Warn loudly when installed hook scripts have drifted from the packaged
+    # copies: a stale hook silently drops policy shipped in newer versions
+    # (e.g. the test-routing deny) with no other signal.
+    stale_hooks = check_hook_drift()
+    if stale_hooks:
+        print(formatting.error_msg(hook_drift_warning(stale_hooks)))
 
     _kill_orphan_sessions(project_dir)
     _ensure_git(project_dir)

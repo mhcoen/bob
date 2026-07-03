@@ -38,6 +38,8 @@ from mcloop.install_cmd import (
     _setup_sandbox,
     _setup_telegram,
     _unmerge_settings,
+    check_hook_drift,
+    hook_drift_warning,
 )
 from mcloop.investigate_cmd import (
     MAX_VERIFICATION_ROUNDS,
@@ -425,8 +427,33 @@ def test_install_hooks_copies_scripts(tmp_path, capsys):
     assert "copied:" in out
 
 
-def test_install_hooks_skips_existing(tmp_path, capsys):
-    """Skips copy when destination file already exists."""
+def test_install_hooks_skips_identical(tmp_path, capsys):
+    """Skips copy when the installed file matches the repo copy."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+    hooks_dir = home / ".mcloop" / "hooks"
+    hooks_dir.mkdir(parents=True)
+
+    for name in _HOOK_SCRIPTS:
+        (hooks_dir / name).write_text((repo_root / name).read_text())
+
+    import mcloop.install_cmd as install_mod
+
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            results = _install_hooks(dry_run=False)
+    finally:
+        install_mod.__file__ = orig_file
+
+    out = capsys.readouterr().out
+    assert "skip (up to date):" in out
+    assert all(status == "skipped (already installed)" for _label, status in results)
+
+
+def test_install_hooks_refreshes_stale(tmp_path, capsys):
+    """Overwrites an installed hook whose content drifted from the repo copy."""
     repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
     home = tmp_path / "home"
     hooks_dir = home / ".mcloop" / "hooks"
@@ -441,16 +468,43 @@ def test_install_hooks_skips_existing(tmp_path, capsys):
     install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
     try:
         with patch.object(Path, "home", return_value=home):
-            _install_hooks(dry_run=False)
+            results = _install_hooks(dry_run=False)
     finally:
         install_mod.__file__ = orig_file
 
-    # Files should NOT be overwritten
+    for name in _HOOK_SCRIPTS:
+        assert (hooks_dir / name).read_text() == (repo_root / name).read_text()
+
+    out = capsys.readouterr().out
+    assert "updated (stale):" in out
+    assert all(status == "updated (was stale)" for _label, status in results)
+
+
+def test_install_hooks_dry_run_reports_stale(tmp_path, capsys):
+    """Dry run reports a stale hook without overwriting it."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+    hooks_dir = home / ".mcloop" / "hooks"
+    hooks_dir.mkdir(parents=True)
+
+    for name in _HOOK_SCRIPTS:
+        (hooks_dir / name).write_text(f"# old {name}\n")
+
+    import mcloop.install_cmd as install_mod
+
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            _install_hooks(dry_run=True)
+    finally:
+        install_mod.__file__ = orig_file
+
     for name in _HOOK_SCRIPTS:
         assert (hooks_dir / name).read_text() == f"# old {name}\n"
 
     out = capsys.readouterr().out
-    assert "skip (exists):" in out
+    assert "would update (stale):" in out
 
 
 def test_install_hooks_dry_run(tmp_path, capsys):
@@ -492,6 +546,64 @@ def test_install_hooks_warns_missing_source(tmp_path, capsys):
 
     err = capsys.readouterr().err
     assert "Warning: hook source not found" in err
+
+
+# --- check_hook_drift ---
+
+
+def _drift_env(tmp_path, installed_content):
+    """Set up repo + installed hooks; installed_content maps name -> text."""
+    repo_root, fake_mcloop_dir = _setup_hooks(tmp_path)
+    home = tmp_path / "home"
+    hooks_dir = home / ".mcloop" / "hooks"
+    hooks_dir.mkdir(parents=True)
+    for name, content in installed_content.items():
+        (hooks_dir / name).write_text(content)
+    return fake_mcloop_dir, home
+
+
+def _run_drift_check(fake_mcloop_dir, home):
+    import mcloop.install_cmd as install_mod
+
+    orig_file = install_mod.__file__
+    install_mod.__file__ = str(fake_mcloop_dir / "install_cmd.py")
+    try:
+        with patch.object(Path, "home", return_value=home):
+            return check_hook_drift()
+    finally:
+        install_mod.__file__ = orig_file
+
+
+def test_check_hook_drift_detects_stale_hook(tmp_path):
+    """An installed hook whose content differs from the repo copy is stale."""
+    installed = {name: f"# old {name}\n" for name in _HOOK_SCRIPTS}
+    fake_mcloop_dir, home = _drift_env(tmp_path, installed)
+
+    assert _run_drift_check(fake_mcloop_dir, home) == list(_HOOK_SCRIPTS)
+
+
+def test_check_hook_drift_identical_copies_are_clean(tmp_path):
+    """Installed hooks matching the repo copies report no drift."""
+    installed = {name: f"# {name}\n" for name in _HOOK_SCRIPTS}
+    fake_mcloop_dir, home = _drift_env(tmp_path, installed)
+
+    assert _run_drift_check(fake_mcloop_dir, home) == []
+
+
+def test_check_hook_drift_ignores_missing_installed_hook(tmp_path):
+    """A hook that was never installed is not reported as drift."""
+    fake_mcloop_dir, home = _drift_env(tmp_path, {})
+
+    assert _run_drift_check(fake_mcloop_dir, home) == []
+
+
+def test_hook_drift_warning_names_hooks_and_remedy():
+    """The warning lists each stale hook and points at mcloop install."""
+    msg = hook_drift_warning(["telegram-permission-hook.py"])
+
+    assert "telegram-permission-hook.py" in msg
+    assert "mcloop install" in msg
+    assert "WARNING" in msg
 
 
 # --- _merge_settings ---

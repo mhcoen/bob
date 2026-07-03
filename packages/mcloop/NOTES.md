@@ -277,6 +277,21 @@ properly means deciding whether preflight should gain fmt's new
 drop-guard (recommended) rather than blessing the current
 silent-drop behavior in the tests.
 
+[2026-07-03] [8] [T-000036] Hook drift detection (check_hook_drift +
+run_loop warning + install refresh) covers only the canonical install
+location ~/.mcloop/hooks/. The incident file in the bug report lived at
+~/.claude/hooks/telegram-permission-hook.py — a prior `bob install`
+location. `_merge_settings` already dedupes settings.json entries
+pointing at that path (so the stale copy stops being *invoked* after a
+reinstall), but the stale file itself stays on disk and is not covered
+by the drift check. If some other tool re-adds a settings entry for it,
+the gate can go quiet again with no warning; extending the check to any
+telegram-permission-hook.py path referenced by ~/.claude/settings.json
+would close that hole. Also: `mcloop install` now overwrites a drifted
+installed hook with the packaged copy, so local hand-edits to
+~/.mcloop/hooks/* are clobbered by reinstall — intentional (the
+installed copies are managed artifacts), but worth knowing.
+
 ## Hypotheses
 
 ### [14.6] [T-000389] docstring changes are classified non-behavioral even when `__doc__` is runtime-consumed (2026-06-01)

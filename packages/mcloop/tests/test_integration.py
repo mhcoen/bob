@@ -144,6 +144,73 @@ def test_full_cycle_two_tasks(
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
+def test_stale_installed_hook_warns_at_startup(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+    capsys,
+):
+    """A stale installed hook triggers a loud warning at run_loop startup."""
+    md = _make_project(tmp_path, "- [ ] Task one\n")
+    mock_run.return_value = _ok_run_result()
+
+    with (
+        _isolated_git_state(),
+        patch(
+            "mcloop.main.check_hook_drift",
+            return_value=["telegram-permission-hook.py"],
+        ),
+    ):
+        result = run_loop(md, no_audit=True)
+
+    assert result.ok
+    out = capsys.readouterr().out
+    assert "telegram-permission-hook.py" in out
+    assert "differ from this mcloop version" in out
+    assert "mcloop install" in out
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_no_warning_when_hooks_are_current(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+    capsys,
+):
+    """No drift warning is printed when installed hooks match the repo."""
+    md = _make_project(tmp_path, "- [ ] Task one\n")
+    mock_run.return_value = _ok_run_result()
+
+    with (
+        _isolated_git_state(),
+        patch("mcloop.main.check_hook_drift", return_value=[]),
+    ):
+        result = run_loop(md, no_audit=True)
+
+    assert result.ok
+    out = capsys.readouterr().out
+    assert "differ from this mcloop version" not in out
+
+
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
 def test_interrupt_summary_writer_registered_during_run(
     mock_run, mock_checks, mock_meaningful, mock_commit, mock_checkpoint, mock_notify, tmp_path
 ):

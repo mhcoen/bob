@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 import json as _json
 import os
 import shutil
@@ -428,11 +429,52 @@ _HOOK_SCRIPTS = [
 ]
 
 
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def check_hook_drift() -> list[str]:
+    """Return hook scripts whose installed copy differs from the repo copy.
+
+    Compares each script in ``_HOOK_SCRIPTS`` under ``~/.mcloop/hooks/``
+    against the packaged copy at the repo root by SHA-256. A hook missing
+    on either side is not reported as drift: a missing installed copy is
+    an install-time concern and a missing source cannot be compared.
+    """
+    repo_root = Path(__file__).resolve().parent.parent
+    hooks_dir = Path.home() / ".mcloop" / "hooks"
+    stale: list[str] = []
+    for script_name in _HOOK_SCRIPTS:
+        src = repo_root / script_name
+        dest = hooks_dir / script_name
+        if not src.is_file() or not dest.is_file():
+            continue
+        try:
+            if _file_sha256(src) != _file_sha256(dest):
+                stale.append(script_name)
+        except OSError:
+            continue
+    return stale
+
+
+def hook_drift_warning(stale: list[str]) -> str:
+    """Build the loud warning printed when installed hooks have drifted."""
+    lines = ["WARNING: installed hook scripts differ from this mcloop version:"]
+    for name in stale:
+        lines.append(f"      ~/.mcloop/hooks/{name}")
+    lines.append(
+        "    A stale hook silently drops policy shipped in newer versions"
+        " (e.g. the test-routing deny)."
+    )
+    lines.append("    Run 'mcloop install' to refresh the installed hooks.")
+    return "\n".join(lines)
+
+
 def _install_hooks(
     *,
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
-    """Copy hook scripts to ~/.mcloop/hooks/. Skip if already present."""
+    """Copy hook scripts to ~/.mcloop/hooks/. Refresh stale copies."""
     repo_root = Path(__file__).resolve().parent.parent
     hooks_dir = Path.home() / ".mcloop" / "hooks"
 
@@ -454,8 +496,20 @@ def _install_hooks(
             continue
 
         if dest.exists():
-            print(f"  skip (exists): {dest}")
-            results.append((label, "skipped (already installed)"))
+            try:
+                identical = _file_sha256(src) == _file_sha256(dest)
+            except OSError:
+                identical = False
+            if identical:
+                print(f"  skip (up to date): {dest}")
+                results.append((label, "skipped (already installed)"))
+            elif dry_run:
+                print(f"  would update (stale): {src} -> {dest}")
+                results.append((label, "would update (stale, dry run)"))
+            else:
+                shutil.copy2(src, dest)
+                print(f"  updated (stale): {dest}")
+                results.append((label, "updated (was stale)"))
             continue
 
         if dry_run:
