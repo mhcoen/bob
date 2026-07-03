@@ -671,7 +671,9 @@ def _load_or_fallback_config(
 
     1. Explicit ``DUPLO_COUNCIL_CONFIG`` path (an .orchestra/config.json
        file). Loaded via its project dir (two levels up, since
-       ``load_config`` re-appends ``.orchestra/config.json``).
+       ``load_config`` re-appends ``.orchestra/config.json``). If the
+       loaded config does not contain all council roles, falls back to
+       hardcoded bindings, matching project-config behavior.
     2. Project's ``.orchestra/config.json`` if present and contains
        all six required council role bindings (framer, four
        proposers, synthesizer).
@@ -692,6 +694,13 @@ def _load_or_fallback_config(
             cfg = load_config(project_dir=explicit_path.parent.parent)
         except config_error as exc:
             raise CouncilError(f"failed to load council config at {explicit_path}: {exc}") from exc
+        missing = _missing_council_roles(cfg)
+        if missing:
+            return _build_fallback_config(
+                config_cls=config_cls,
+                role_cls=role_cls,
+                workflow_cls=workflow_cls,
+            )
         return _ensure_council_workflow(cfg, config_cls=config_cls, workflow_cls=workflow_cls)
 
     try:
@@ -701,7 +710,7 @@ def _load_or_fallback_config(
             f"failed to load .orchestra/config.json at {project_dir}: {exc}"
         ) from exc
 
-    missing = [r for r in _COUNCIL_REQUIRED_ROLES if r not in project_cfg.roles]
+    missing = _missing_council_roles(project_cfg)
     if not missing:
         return _ensure_council_workflow(
             project_cfg, config_cls=config_cls, workflow_cls=workflow_cls
@@ -716,6 +725,10 @@ def _load_or_fallback_config(
 
 _CANONICAL_WORKFLOW_NAME = "council_four_canonical"
 _REAUTHOR_WORKFLOW_NAME = "council_four_reauthor"
+
+
+def _missing_council_roles(cfg: Any) -> list[str]:
+    return [role for role in _COUNCIL_REQUIRED_ROLES if role not in cfg.roles]
 
 
 def _ensure_council_workflow(cfg: Any, *, config_cls: Any, workflow_cls: Any) -> Any:
@@ -740,12 +753,15 @@ def _ensure_council_workflow(cfg: Any, *, config_cls: Any, workflow_cls: Any) ->
     for name in needed:
         if name not in new_workflows:
             new_workflows[name] = workflow_cls(pattern=name)
-    return config_cls(
-        roles=dict(cfg.roles),
-        workflows=new_workflows,
-        verbs=dict(cfg.verbs),
-        criteria=cfg.criteria,
-    )
+    rebuild_kwargs = {
+        "roles": dict(cfg.roles),
+        "workflows": new_workflows,
+        "verbs": dict(cfg.verbs),
+        "criteria": cfg.criteria,
+    }
+    if hasattr(cfg, "role_bindings"):
+        rebuild_kwargs["role_bindings"] = dict(cfg.role_bindings)
+    return config_cls(**rebuild_kwargs)
 
 
 def _build_fallback_config(

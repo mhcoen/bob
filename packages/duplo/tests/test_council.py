@@ -93,6 +93,38 @@ class _StubResult:
             self.artifacts[name] = _StubArtifactView(text)
 
 
+class _FakeConfigError(Exception):
+    pass
+
+
+class _FakeRoleBinding:
+    def __init__(self, *, adapter: str, model: str | None = None) -> None:
+        self.adapter = adapter
+        self.model = model
+
+
+class _FakeWorkflowConfig:
+    def __init__(self, *, pattern: str) -> None:
+        self.pattern = pattern
+
+
+class _FakeConfig:
+    def __init__(
+        self,
+        *,
+        roles: dict[str, Any],
+        workflows: dict[str, Any],
+        verbs: dict[str, Any] | None = None,
+        criteria: Any = None,
+        role_bindings: dict[str, Any] | None = None,
+    ) -> None:
+        self.roles = roles
+        self.workflows = workflows
+        self.verbs = verbs or {}
+        self.criteria = criteria
+        self.role_bindings = role_bindings or {}
+
+
 def _patch_run_workflow(result: Any, captured: dict[str, Any] | None = None):
     """Patch ``orchestra.run_workflow`` to return ``result``.
 
@@ -700,6 +732,61 @@ class TestCanonicalPlanFormatValidator:
 
 
 class TestConfigResolution:
+    def test_explicit_config_missing_council_roles_falls_back(self, tmp_path, monkeypatch):
+        explicit_path = tmp_path / ".orchestra" / "config.json"
+        explicit_path.parent.mkdir()
+        explicit_path.write_text("{}")
+        monkeypatch.setenv("DUPLO_COUNCIL_CONFIG", str(explicit_path))
+        captured: dict[str, Any] = {}
+
+        def load_config(*, project_dir: Path) -> _FakeConfig:
+            captured["project_dir"] = project_dir
+            return _FakeConfig(
+                roles={"framer": _FakeRoleBinding(adapter="custom", model="custom")},
+                workflows={},
+            )
+
+        cfg = council._load_or_fallback_config(
+            tmp_path / "project",
+            load_config=load_config,
+            config_cls=_FakeConfig,
+            role_cls=_FakeRoleBinding,
+            workflow_cls=_FakeWorkflowConfig,
+            config_error=_FakeConfigError,
+        )
+
+        assert captured["project_dir"] == tmp_path
+        assert set(council._COUNCIL_REQUIRED_ROLES).issubset(cfg.roles)
+        assert cfg.roles["framer"].adapter == "claude_code_text"
+        assert "council_four_canonical" in cfg.workflows
+        assert "council_four_reauthor" in cfg.workflows
+
+    def test_injecting_council_workflows_preserves_role_bindings(self):
+        role_bindings = {
+            "plan_author": {
+                "workflow": "plan_author",
+                "proposer": "plan_author_proposer",
+            }
+        }
+        cfg = _FakeConfig(
+            roles={
+                role: _FakeRoleBinding(adapter="custom", model=role)
+                for role in council._COUNCIL_REQUIRED_ROLES
+            },
+            workflows={"council_four_canonical": _FakeWorkflowConfig(pattern="existing")},
+            role_bindings=role_bindings,
+        )
+
+        resolved = council._ensure_council_workflow(
+            cfg,
+            config_cls=_FakeConfig,
+            workflow_cls=_FakeWorkflowConfig,
+        )
+
+        assert resolved.role_bindings == role_bindings
+        assert "council_four_canonical" in resolved.workflows
+        assert "council_four_reauthor" in resolved.workflows
+
     def test_falls_back_when_no_project_config(self, tmp_path):
         captured: dict[str, Any] = {}
         with _patch_run_workflow(_StubResult(), captured=captured):
