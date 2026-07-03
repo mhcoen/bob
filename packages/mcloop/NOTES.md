@@ -235,6 +235,48 @@ built in a variable before the call, so that shape would slip past the
 guard (none exist today; main.py and audit.py already route through
 `_git`).
 
+### [7] [T-000035] Remediation message now names bob-plan fmt; fmt repaired to actually work on the raised-for files (2026-07-03)
+`PlanNotCanonicalError` messages now name `bob-plan fmt <actual path>`
+(bob-plan has no `migrate` subcommand). Two coordinated bob-tools
+`cmd_fmt` changes make the named command true: (1) fmt parses with
+`force_strict_from_magic=False`, so a marker-bearing file with id-less
+tasks -- the exact input canonicalization exists to repair, which
+previously died in `load()`'s magic-forced strict parse with "expected
+task id", leaving NO tool path -- now gets ids assigned; (2) fmt now
+REFUSES (exit 1, file untouched) when the parse would silently drop
+incomplete checkboxes sitting outside any `## Stage`/`## Phase` heading
+(previously it rewrote the file WITHOUT them -- silent task loss). The
+R1 message therefore instructs move-under-heading first, then fmt.
+Pinned by tests/test_planfile_remediation.py (mcloop) and
+TestFmt additions in bob_tools/planfile/tests/test_cli.py (bob-tools).
+
+### [7] [T-000035] preflight_runtime_plan silently drops phaseless checkboxes; wire-in precondition tests look stale (2026-07-03)
+While verifying the remediation path I reproduced two adjacent problems
+I deliberately did not fix under this task. (a) Data loss in the
+production gate: `_enforce_canonical_inputs` on a PLAN.md containing
+only `- [ ] Do something` routes through
+`bob_tools.planfile.preflight_runtime_plan`, which "migrates" it and
+writes back a file containing ONLY `<!-- bob-plan-format: 1 -->` -- the
+phaseless task is dropped from disk with no error (the parser never
+surfaced it, normalization validated fine, and the canonical save wrote
+the empty plan). The R1 refusal that `enforce_canonical` implements does
+not run on this path. (b) Consequently
+tests/integration/test_precondition_wire_in.py and
+tests/integration/test_r2_precondition.py, which assert
+`_enforce_canonical_inputs` raises `PlanNotCanonicalError` and
+byte-preserves the file, pin the pre-9fcad1f1 gate contract and FAIL
+when actually executed (reproduced by direct invocation of the test
+functions: `_enforce_canonical_inputs` returns without raising and
+mutates the file). This has gone unnoticed because they never run:
+tests/conftest.py skips any item with "integration" in
+`item.keywords`, and pytest puts parent NODE NAMES (including the
+`tests/integration` directory) into keywords, so every test under
+that directory is silently skipped in default runs even though none
+of them carry the `@pytest.mark.integration` marker. Fixing them
+properly means deciding whether preflight should gain fmt's new
+drop-guard (recommended) rather than blessing the current
+silent-drop behavior in the tests.
+
 ## Hypotheses
 
 ### [14.6] [T-000389] docstring changes are classified non-behavioral even when `__doc__` is runtime-consumed (2026-06-01)

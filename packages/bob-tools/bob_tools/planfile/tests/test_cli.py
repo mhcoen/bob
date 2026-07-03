@@ -59,6 +59,21 @@ COMPAT_PLAN = """# Compat CLI Fixture
 - [ ] second task
 """
 
+MARKER_BEARING_ID_LESS_PLAN = """<!-- bob-plan-format: 1 -->
+
+# Marker Fixture
+
+## Stage 1: Bootstrap
+
+- [ ] first task
+- [ ] second task
+"""
+
+PHASELESS_PLAN = """# Phaseless Fixture
+
+- [ ] stray task
+"""
+
 INVALID_PLAN = """# Broken Plan
 
 # Broken Plan
@@ -159,6 +174,37 @@ class TestFmt:
         assert rc2 == EXIT_OK
         twice = strict_plan_path.read_text()
         assert once == twice
+
+    def test_assigns_task_ids_on_marker_bearing_plan(self, tmp_path: Path) -> None:
+        """A magic-lined file with id-less tasks is fmt's core repair case.
+
+        ``load`` would reject it (the magic line force-enables strict
+        parsing, which requires ids), so fmt must parse leniently; this
+        used to exit 1 with "expected task id" and left no tool path to
+        canonicalize such a file.
+        """
+        path = tmp_path / "PLAN.md"
+        path.write_text(MARKER_BEARING_ID_LESS_PLAN)
+        rc = main(["fmt", str(path)])
+        assert rc == EXIT_OK
+        text = path.read_text()
+        assert "T-000001" in text
+        assert "T-000002" in text
+        assert "<!-- bob-plan-format: 1 -->" in text
+
+    def test_refuses_to_drop_checkboxes_outside_phase_heading(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """The parser drops checkboxes that sit outside any Stage/Phase
+        heading; fmt must refuse rather than silently rewrite the file
+        without them."""
+        path = tmp_path / "PLAN.md"
+        path.write_text(PHASELESS_PLAN)
+        rc = main(["fmt", str(path)])
+        captured = capsys.readouterr()
+        assert rc == EXIT_INVALID_PLAN
+        assert "refusing to format" in captured.err
+        assert path.read_text() == PHASELESS_PLAN  # byte-preserved
 
 
 class TestDone:

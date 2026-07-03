@@ -8,9 +8,14 @@ Five subcommands wired through ``argparse``:
 * ``next PATH`` — print the next actionable task as a one-line
   ``T-NNNNNN: <text>``. Validates first, exits ``1`` on validation
   failure.
-* ``fmt PATH`` — load, :func:`migrate`, and save back in place. The
-  composition is ``save(path, migrate(parse_plan(read(path))))`` per
-  design doc section 3.2.
+* ``fmt PATH`` — parse leniently, :func:`migrate`, and save back in
+  place: ``save(path, migrate(parse_plan(read(path))))`` per design
+  doc section 3.2. The parse does not let the magic line force strict
+  mode (``force_strict_from_magic=False``) so a magic-lined file with
+  id-less tasks — the exact input canonicalization exists to repair —
+  can be formatted. ``fmt`` refuses (exit ``1``, file untouched) when
+  the parse would silently drop incomplete checkboxes that sit outside
+  any ``## Stage`` / ``## Phase`` heading.
 * ``done PATH TASK_ID`` — validate, :func:`complete_task`, save, and
   print the resulting Settlements as JSON on stdout.
 * ``fail PATH TASK_ID --reason TEXT`` — validate, :func:`fail_task`,
@@ -37,12 +42,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
+from bob_tools.planfile._shared import _INCOMPLETE_CHECKBOX_RE
+from bob_tools.planfile.canonical import _count_todo_tasks
 from bob_tools.planfile.fileio import load, save
 from bob_tools.planfile.model import (
     PlanSyntaxError,
     PlanValidationError,
     Settlement,
 )
+from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.operations import (
     complete_task,
     fail_task,
@@ -121,13 +129,35 @@ def cmd_next(args: argparse.Namespace) -> int:
 def cmd_fmt(args: argparse.Namespace) -> int:
     path = Path(args.path)
     try:
-        plan = load(path)
-    except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
-        return EXIT_INVALID_PLAN
+        text = path.read_text()
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
+    # ``fmt`` is the canonicalization entry point, so it must accept the
+    # inputs canonicalization exists to repair. A magic-lined file whose
+    # tasks are still id-less would be rejected by the strict parse that
+    # ``load`` performs (the magic line force-enables strict mode),
+    # leaving no tool path to canonicalize it. Parse leniently instead;
+    # the save below still round-trips through the canonical gate.
+    try:
+        plan = parse_plan(text, source_path=path, force_strict_from_magic=False)
+    except PlanSyntaxError as exc:
+        _print_parse_error(exc, sys.stderr)
+        return EXIT_INVALID_PLAN
+    # The parser only surfaces checkboxes that sit under a ``## Stage``
+    # / ``## Phase`` heading; formatting a file with strays would
+    # silently drop them from the rewritten file. Refuse instead.
+    src_incomplete = len(_INCOMPLETE_CHECKBOX_RE.findall(text))
+    plan_incomplete = _count_todo_tasks(plan)
+    if src_incomplete > plan_incomplete:
+        dropped = src_incomplete - plan_incomplete
+        print(
+            f"{path}: refusing to format: {dropped} incomplete checkbox "
+            f"line(s) sit outside any `## Stage` / `## Phase` heading and "
+            f"would be dropped; move them under a phase heading and re-run",
+            file=sys.stderr,
+        )
+        return EXIT_INVALID_PLAN
     migrated = migrate(plan)
     # ``migrate`` per design doc section 3.2 only assigns T-NNNNNN ids
     # and phase_id comments; it deliberately does not touch

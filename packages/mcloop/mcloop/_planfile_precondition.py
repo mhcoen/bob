@@ -152,6 +152,11 @@ def discriminate_r2(plan: Plan) -> tuple[R2Verdict, str]:
     return ("ALLOW", "all parsed tasks carry stable T-NNNNNN ids")
 
 
+def _fmt_target(source_path: Path | None) -> str:
+    """Path argument for the ``bob-plan fmt`` command named in error messages."""
+    return str(source_path) if source_path is not None else "<path>"
+
+
 def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None = None) -> None:
     """Raise ``PlanNotCanonicalError`` if ``plan`` fails the precondition.
 
@@ -159,6 +164,14 @@ def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None 
     distinct predicates. Both ``source_text`` and ``plan`` are required
     arguments — R1 cannot be decided from ``plan`` alone (see module
     docstring), while R2 is a parsed-plan predicate.
+
+    The remediation named in each message is ``bob-plan fmt`` — the only
+    bob-plan subcommand that canonicalizes a file in place (there is no
+    ``migrate`` subcommand). For R1 the tasks are invisible to the
+    parser, so no tool can recover them: the user must first move the
+    stray checkbox lines under a ``## Stage`` / ``## Phase`` heading
+    (``bob-plan fmt`` refuses to save while it would drop them), and
+    only then can ``fmt`` assign the ids.
     """
     verdict, reason = discriminate_r1(source_text, plan)
     if verdict == "REJECT_GRAMMAR_NARROWED":
@@ -166,9 +179,10 @@ def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None 
         raise PlanNotCanonicalError(
             f"PLAN.md{path_hint} is not in canonical bob-tools planfile form.\n"
             f"  {reason}.\n"
-            f"  Run: bob-plan migrate <path>\n"
-            f"  Migration is deterministic; bob-plan fmt produces the same "
-            f"output each time, so this is reversible.",
+            f"  Move the stray checkbox lines under a `## Stage N: <title>` or\n"
+            f"  `## Phase N: <title>` heading, then run: bob-plan fmt {_fmt_target(source_path)}\n"
+            f"  (bob-plan fmt refuses to save while stray checkboxes would be\n"
+            f"  dropped; its output is deterministic and idempotent.)",
             source_path=source_path,
         )
     r2_verdict, r2_reason = discriminate_r2(plan)
@@ -177,8 +191,8 @@ def enforce_canonical(source_text: str, plan: Plan, *, source_path: Path | None 
         raise PlanNotCanonicalError(
             f"PLAN.md{path_hint} is not in canonical bob-tools planfile form.\n"
             f"  {r2_reason}.\n"
-            f"  Run: bob-plan migrate <path>\n"
-            f"  Migration is deterministic; bob-plan fmt produces the same "
-            f"output each time, so this is reversible.",
+            f"  Run: bob-plan fmt {_fmt_target(source_path)}\n"
+            f"  (bob-plan fmt assigns the missing T-NNNNNN ids in place; its\n"
+            f"  output is deterministic and idempotent.)",
             source_path=source_path,
         )

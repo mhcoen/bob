@@ -66,7 +66,7 @@ def test_helper_rejects_phaseless_master(tmp_path: Path) -> None:
     bugs = tmp_path / "BUGS.md"
     with pytest.raises(PlanNotCanonicalError) as ei:
         _enforce_canonical_inputs(master, bugs)
-    assert "bob-plan migrate" in str(ei.value)
+    assert "bob-plan fmt" in str(ei.value)
 
 
 def test_helper_rejects_phaseless_plan(
