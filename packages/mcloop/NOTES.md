@@ -2,6 +2,23 @@
 
 ## Observations
 
+### [4] [T-000031] Silent summary-write swallow was masking unserializable summaries in tests (2026-07-03)
+Surfacing the `write_run_summary` failure in `_build_and_write_summary`
+(stdout warning + `notify(level="error")`, run stays alive) immediately
+exposed a latent defect: every `tests/test_integration.py` test that patched
+`mcloop.main._commit` with a bare `MagicMock` had been producing a
+`RunSummary` whose `commit_hash`/`commit_hashes` held a MagicMock, so
+`write_run_summary` raised "Object of type MagicMock is not JSON
+serializable" on every one of those runs -- invisibly, because of the old
+`except Exception: return None`. Those integration tests therefore never
+actually exercised the summary-writing path. Fixed by giving all 25
+`_commit` patches `return_value="abc123"`, so the summaries now serialize
+for real. The notify call in the new error path is itself wrapped in a
+broad try/except so a Telegram outage cannot turn a summary-write warning
+into a crash; both behaviors are pinned by
+`test_run_summary_write_failure_surfaces_warning` and
+`test_run_summary_write_failure_survives_notify_error` in tests/test_args.py.
+
 ### [1] [T-000001] Coverage-exemption AST check is deliberately conservative (2026-06-04)
 `is_coverage_exempt_python` in `mcloop/coverage_verify.py` exempts a changed
 `.py` file from the coverage gate only when every top-level statement is inert:

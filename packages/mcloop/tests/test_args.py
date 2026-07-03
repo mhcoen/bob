@@ -10326,6 +10326,61 @@ def test_run_summary_write_and_latest(tmp_path):
     assert data["elapsed_seconds"] == 300.0
 
 
+def test_run_summary_write_failure_surfaces_warning(tmp_path, capsys):
+    """A raising summary writer prints a visible warning, notifies at error
+    level, and returns None instead of crashing the loop."""
+    from mcloop.main import _build_and_write_summary
+
+    with (
+        patch("mcloop.main.write_run_summary", side_effect=OSError("disk full")),
+        patch("mcloop.main.notify") as mock_notify,
+    ):
+        result = _build_and_write_summary(
+            project_dir=tmp_path,
+            run_start_iso="2026-04-10T12:00:00+00:00",
+            elapsed_seconds=300.0,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="success",
+        )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "Failed to write run summary" in out
+    assert "disk full" in out
+    mock_notify.assert_called_once()
+    assert mock_notify.call_args.kwargs.get("level") == "error"
+    assert "disk full" in mock_notify.call_args.args[0]
+
+
+def test_run_summary_write_failure_survives_notify_error(tmp_path, capsys):
+    """If the error notification itself raises, the failure is still printed
+    and the run keeps going."""
+    from mcloop.main import _build_and_write_summary
+
+    with (
+        patch("mcloop.main.write_run_summary", side_effect=OSError("read-only fs")),
+        patch("mcloop.main.notify", side_effect=RuntimeError("telegram down")),
+    ):
+        result = _build_and_write_summary(
+            project_dir=tmp_path,
+            run_start_iso="2026-04-10T12:00:00+00:00",
+            elapsed_seconds=300.0,
+            mode="plan",
+            task_entries=[],
+            check_entries=[],
+            commit_hashes=[],
+            terminal_status="success",
+        )
+
+    assert result is None
+    out = capsys.readouterr().out
+    assert "Failed to write run summary" in out
+    assert "read-only fs" in out
+
+
 def test_run_summary_all_fields_populated(tmp_path):
     """A fully populated RunSummary serializes all fields."""
     from mcloop.run_summary import CheckEntry, RunSummary, TaskEntry, write_run_summary

@@ -110,7 +110,7 @@ def _notify_calls(mock_notify):
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -140,7 +140,7 @@ def test_full_cycle_two_tasks(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -170,7 +170,7 @@ def test_nested_subtasks(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -197,7 +197,7 @@ def test_retry_then_succeed(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks")
 @patch("mcloop.main.run_task")
@@ -228,7 +228,7 @@ def test_checks_fail_then_pass(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
 def test_max_retries_exhausted_stops_loop(
@@ -256,7 +256,7 @@ def test_max_retries_exhausted_stops_loop(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -288,7 +288,7 @@ def test_rate_limit_notifies(
 @patch("mcloop.main.time.sleep")
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -325,7 +325,7 @@ def test_session_limit_polls_then_retries(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -353,7 +353,7 @@ _CHECKS_FAIL = CheckResult(passed=False, output="FAILED", command="pytest")
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
@@ -389,7 +389,7 @@ def test_noop_nonbug_task_fails_terminally_when_checks_fail(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -424,7 +424,7 @@ def test_noop_nonbug_task_accepted_when_checks_pass(
 @patch("mcloop.main.notify")
 @patch("mcloop.main._run_audit_fix_cycle")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -459,7 +459,7 @@ def test_audit_phase_uses_chain_primary_model(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -497,7 +497,7 @@ def test_zero_diff_verification_task_accepts_on_real_checks_not_prose(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
@@ -533,7 +533,7 @@ def test_zero_diff_verification_task_rejects_on_real_check_failure(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
@@ -608,7 +608,7 @@ def test_startup_chain_preflight_aborts_only_when_every_tier_fails(tmp_path, mon
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -647,7 +647,7 @@ def test_bug_task_noop_is_failure_even_when_checks_pass(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
@@ -677,7 +677,7 @@ def test_noop_nonbug_already_satisfied_accepts_without_new_commit(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch(
     "mcloop.main._committed_files_since",
     return_value=["src/feature.py"],
@@ -724,7 +724,7 @@ def test_noop_with_prior_commit_marks_task_successful(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main.run_autofix")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
@@ -772,7 +772,7 @@ def test_metadata_only_autofix_guard_accepts_committed_task_work(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main.run_autofix")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks")
@@ -814,7 +814,7 @@ def test_metadata_only_autofix_guard_still_retries_without_committed_work(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch(
     "mcloop.main._committed_files_since",
     return_value=["src/feature.py"],
@@ -850,7 +850,7 @@ def test_noop_with_prior_commit_but_failing_gate_marks_failure(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch(
     "mcloop.main._committed_files_since",
     return_value=["src/fixed.py"],
@@ -890,7 +890,7 @@ def test_noop_bug_task_with_prior_commit_marks_successful(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main.run_task")
 def test_noop_then_checks_fail_is_terminal(
     mock_run, mock_commit, mock_checkpoint, mock_notify, tmp_path
@@ -920,7 +920,7 @@ def test_noop_then_checks_fail_is_terminal(
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=False)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_FAIL)
 @patch("mcloop.main.run_task")
@@ -1075,7 +1075,7 @@ def test_commit_propagates_errors(mock_run, tmp_path):
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")
 def test_all_done_noop(mock_run, mock_checks, mock_commit, mock_checkpoint, mock_notify, tmp_path):
@@ -1153,7 +1153,7 @@ def test_checkpoint_propagates_errors(mock_run, tmp_path):
 
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
-@patch("mcloop.main._commit")
+@patch("mcloop.main._commit", return_value="abc123")
 @patch("mcloop.main._has_meaningful_changes", return_value=True)
 @patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
 @patch("mcloop.main.run_task")

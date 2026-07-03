@@ -1076,7 +1076,20 @@ def _build_and_write_summary(
     )
     try:
         return write_run_summary(project_dir, summary)
-    except Exception:
+    except Exception as exc:
+        # A stale latest.json silently poisons anything that gates on it
+        # (e.g. the orchestra smoke-test procedure), so surface the failure
+        # loudly while keeping the run alive.
+        print(
+            formatting.error_msg(
+                f"Failed to write run summary (.mcloop/runs/latest.json may be stale): {exc}"
+            ),
+            flush=True,
+        )
+        try:
+            notify(f"Run summary write failed: {exc}", level="error")
+        except Exception:
+            pass
         return None
 
 
