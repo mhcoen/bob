@@ -880,9 +880,11 @@ def _run_batch(
     )
 
     # A rate/session limit mid-batch must not read as an ordinary failure.
-    # Mark the CLI limited and surface the event; returning "failed" lets the
-    # batch retry loop re-enter _run_batch, whose top-of-function
-    # get_available_cli / wait_for_reset waits out the limit before retrying.
+    # Mark the CLI limited and surface the event; returning "limited" tells
+    # the batch retry loop this was noise, not a merit failure, so it must
+    # NOT consume a retry attempt or feed the limit text back as prior
+    # errors. Re-entering _run_batch waits out the limit via the
+    # top-of-function get_available_cli / wait_for_reset before retrying.
     if is_session_limited(result.output, result.exit_code) or is_rate_limited(
         result.output, result.exit_code
     ):
@@ -890,7 +892,7 @@ def _run_batch(
         limit_msg = f"Batch: {active_cli} rate/session-limited; waiting for reset before retry."
         print(formatting.system_msg(limit_msg), flush=True)
         notify(limit_msg, level="warning")
-        return "failed", _tail(result.output, 50)
+        return "limited", _tail(result.output, 50)
 
     if not result.success:
         elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -1797,7 +1799,10 @@ def run_loop(
             if len(batch_children) > 1:
                 batch_handled = "failed"
                 batch_prior_errors = ""
-                for batch_attempt in range(1, max_retries + 1):
+                batch_model = current_model
+                batch_attempt = 0
+                while batch_attempt < max_retries:
+                    batch_attempt += 1
                     if batch_attempt > 1:
                         print(
                             formatting.system_msg(
@@ -1806,7 +1811,7 @@ def run_loop(
                             ),
                             flush=True,
                         )
-                    batch_handled, batch_prior_errors = _run_batch(
+                    batch_handled, batch_detail = _run_batch(
                         batch_children,
                         tasks,
                         active_file,
@@ -1817,7 +1822,7 @@ def run_loop(
                         ctx,
                         rate_state,
                         cli,
-                        current_model,
+                        batch_model,
                         fallback_model,
                         max_retries,
                         project_checks,
@@ -1832,6 +1837,27 @@ def run_loop(
                     )
                     if batch_handled == "success":
                         break
+                    if batch_handled == "limited":
+                        # A transient rate/session limit is not a failure
+                        # on the merits. Do not consume an attempt and do
+                        # not feed the limit noise back as prior errors.
+                        # _run_batch already marked the CLI limited, so its
+                        # next entry waits for reset. Fall over to the
+                        # configured fallback model, mirroring the non-batch
+                        # chain-advance path.
+                        if fallback_model and batch_model != fallback_model:
+                            batch_model = fallback_model
+                            print(
+                                formatting.system_msg(
+                                    f"Batch: falling over to fallback model {fallback_model}"
+                                ),
+                                flush=True,
+                            )
+                        batch_attempt -= 1
+                        continue
+                    # Genuine failure on the merits: carry the error tail
+                    # into the next retry as prior_errors.
+                    batch_prior_errors = batch_detail
                 if batch_handled == "success":
                     if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)

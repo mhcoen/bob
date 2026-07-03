@@ -7549,6 +7549,99 @@ def test_run_loop_batch_detection(tmp_path):
         assert mock_batch.call_count >= 1
 
 
+def test_run_loop_batch_limit_does_not_consume_attempts_or_fail(tmp_path):
+    """A transient limit ('limited') from _run_batch must not burn a retry
+    attempt or mark the batch failed.
+
+    Regression for T-000028: transient rate/session limits mid-batch used to
+    return 'failed', which consumed a batch_attempt and, after max_retries
+    limit hits, mark_failed the parent and every child even though nothing
+    failed on the merits. With the fix, 'limited' returns are retried
+    indefinitely (waiting for reset) without decrementing the budget.
+    """
+    md = (
+        "# Test project\n\n"
+        "- [ ] [BATCH] Build components\n"
+        "  - [ ] Add feature A\n"
+        "  - [ ] Add feature B\n"
+    )
+    md = canonical_plan_text(md)
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(md)
+    current = plan
+
+    import subprocess
+
+    subprocess.run(["git", "init"], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+    subprocess.run(["git", "add", "."], cwd=tmp_path, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=tmp_path,
+        capture_output=True,
+    )
+
+    with (
+        patch("mcloop.main._check_errors_json", return_value=True),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._run_batch") as mock_batch,
+        patch("mcloop.main.mark_failed") as mock_mark_failed,
+        patch("mcloop.main._check_user_input", return_value=None),
+        patch("mcloop.main.run_checks") as mock_full_checks,
+        patch("mcloop.main._push_or_die"),
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._run_audit_fix_cycle"),
+        patch("mcloop.main.detect_build", return_value=None),
+        patch("mcloop.main.detect_run", return_value=None),
+        patch("mcloop.main.get_check_commands", return_value=[]),
+    ):
+        mock_full_checks.return_value = MagicMock(passed=True)
+
+        # max_retries is 3, but return a transient limit 5 times -- more than
+        # the budget -- before finally succeeding. The old for-loop would have
+        # given up at 3 and marked the batch failed; the new while-loop must
+        # keep going because 'limited' does not consume an attempt.
+        limit_calls = {"n": 0}
+
+        def batch_side_effect(*a, **kw):
+            limit_calls["n"] += 1
+            if limit_calls["n"] <= 5:
+                return ("limited", "429 you've hit your session limit")
+            content = current.read_text()
+            content = content.replace(
+                "- [ ] T-000001: Add feature A",
+                "- [x] T-000001: Add feature A",
+            )
+            content = content.replace(
+                "- [ ] T-000002: Add feature B",
+                "- [x] T-000002: Add feature B",
+            )
+            content = content.replace(
+                "- [ ] T-000003: [BATCH] Build components",
+                "- [x] T-000003: [BATCH] Build components",
+            )
+            current.write_text(content)
+            return ("success", "")
+
+        mock_batch.side_effect = batch_side_effect
+
+        run_loop(plan, max_retries=3)
+
+        # Retried past the 3-attempt budget: limits were not counted.
+        assert mock_batch.call_count == 6
+        # No task was ever marked failed on the merits.
+        mock_mark_failed.assert_not_called()
+
+
 def test_run_loop_batch_disabled_by_config(tmp_path):
     """When config has "batch": false, _run_batch is never called."""
     md = (

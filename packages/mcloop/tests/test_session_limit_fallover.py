@@ -259,8 +259,9 @@ def test_audit_cycle_still_fails_on_genuine_error(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Batch path: a mid-batch limit marks the CLI limited and returns "failed"
-# (so the batch retry loop waits for reset), not a silent fail-open.
+# Batch path: a mid-batch limit marks the CLI limited and returns "limited"
+# (so the batch retry loop waits for reset without consuming an attempt),
+# not a silent fail-open.
 # ---------------------------------------------------------------------------
 
 
@@ -315,5 +316,5 @@ def test_run_batch_detects_limit_and_marks_state(tmp_path):
             None,
         )
 
-    assert status == "failed"  # triggers the batch retry loop
+    assert status == "limited"  # signals the retry loop to not consume an attempt
     assert state.is_limited("claude")  # CLI marked so retry waits for reset
