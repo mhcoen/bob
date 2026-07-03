@@ -12,19 +12,6 @@ _VIDEO_EXTS = {".mp4", ".mov", ".webm", ".avi"}
 _PDF_EXTS = {".pdf"}
 _TEXT_EXTS = {".txt", ".md", ".markdown", ".rst", ".text"}
 
-_SKIP_DIRS = {
-    ".duplo",
-    ".git",
-    "__pycache__",
-    "node_modules",
-    ".venv",
-    "venv",
-    ".build",
-    "logs",
-    ".mcloop",
-    ".claude",
-}
-
 # Files that are clearly not reference material.
 _IGNORE_EXTS = {
     ".pyc",

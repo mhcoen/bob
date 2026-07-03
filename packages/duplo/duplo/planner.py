@@ -21,7 +21,6 @@ from bob_tools.planfile import migrate as planfile_migrate
 from bob_tools.planfile import save as planfile_save
 
 from duplo import council
-from duplo.claude_cli import query
 from duplo.extractor import Feature
 from duplo.plan_author_adapter import run_plan_author
 from duplo.questioner import BuildPreferences
@@ -109,46 +108,6 @@ emit a top-level ``# <AppName> — Phase N: <Title>`` H1; the
 runtime owns the project envelope.
 """
 
-_NEXT_PHASE_SYSTEM = """\
-You are a senior software architect helping to plan the next phase of an application build.
-
-Given the completed phase plan, user feedback, and (optionally) visual issues from
-screenshot comparison, produce the next phase body. The next phase must:
-- Build incrementally on what was completed in the previous phase
-- Address all user feedback items
-- Fix any visual issues identified in screenshot comparison
-- Add the next most valuable batch of features (not everything at once)
-
-Emit the canonical Slice C phase body: a ``## Phase phase_NNN: <title>``
-H2 header followed by ``- [ ]`` checklist tasks. The runtime owns the
-phase_id and the project H1 envelope; do not invent ordinals or wrap
-the body in a ``# <AppName>`` heading.
-
-## Phase phase_NNN: <short title>
-
-- [ ] Implementation step. Steps that implement one or more features
-  MUST end with a [feat: "Feature Name"] annotation. Multiple
-  features go comma-separated: [feat: "Push-to-talk recording",
-  "Global keyboard shortcuts"]. Bug or visual-issue fixes use
-  [fix: "description"]. Scaffolding or structural steps that do
-  not map to any feature use no annotation.
-
-Additional rules:
-- When a step has multiple subtasks that are all specific enough
-  to be executed without design decisions, mark the parent step
-  with [BATCH] so McLoop combines the subtasks into a single
-  session for efficiency.
-- Reserve [USER] only for genuinely human-only checks with no
-  scriptable form. Runnable verification must be expressed as a
-  helper-script creation step plus an [AUTO:run_cli] step that
-  invokes the helper with an absolute command path.
-- Every leaf implementation task must be concrete enough for duplo
-  to attach a proof annotation. Put implementation and covering tests
-  in the same batch, name exact commands in backticks when command
-  exit status is the proof, and avoid vague leaves with no file,
-  test, command, or downstream proof.
-"""
-
 _PLAN_FILENAME = "PLAN.md"
 
 _FENCE_RE = re.compile(
@@ -158,49 +117,15 @@ _FENCE_RE = re.compile(
 
 _H1_HEADING_RE = re.compile(r"^# \S")
 
-# Any markdown heading (any depth) followed by content. Used as the
-# preamble boundary in _ensure_h1_heading: lines before the first
-# heading are LLM commentary or separator noise (`Here is the plan:`,
-# `---`); lines from the first heading onward are real content.
-# Slice C's inner `## Phase phase_NNN:` qualifies as a heading and
-# anchors content even when it sits above a stray H1.
-_ANY_HEADING_RE = re.compile(r"^#+\s+\S")
-
-# Strip and validate use SEPARATE regex constants. Codex's framing:
-# "The symmetry is a concern, not a virtue here. Strip and validation
-# have different jobs. Sharing the same permissive regex means both
-# can agree on the wrong interpretation."
-#
-# Strip pattern: superset of mcloop's checklist.py STAGE_RE
-# (^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b, IGNORECASE). Whatever mcloop
-# would parse as a phase/stage header, Duplo MUST also recognize and
-# remove. False positives are fine; false negatives leave duplicate
-# headings that mcloop sees but Duplo missed, which fail mcloop's
-# duplicate-Phase/Stage check at parse time.
-#
-# Catches every shape mcloop matches:
-#   - any heading level (^#+), not just H1 (catches ## Phase 3, ### Stage 5)
-#   - "Phase N" or "Stage N" anywhere in the heading text
-#   - no colon required after the digit (catches `# Phase 3 Glob filtering`)
-#   - lowercase, uppercase, or mixed-case (re.IGNORECASE)
-#   - any separator before the keyword: em-dash, en-dash, hyphen-minus,
-#     or none
-#
-# Critically does NOT catch the inner Slice C semantic header
-# `## Phase phase_NNN: title`: the `phase_001` token has no
-# whitespace between "phase" and the digit (the underscore breaks
-# the `phase\s+\d+` pattern), so Slice C headers survive the strip.
-_PHASE_H1_STRIP_RE = re.compile(r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b", re.IGNORECASE)
-
-# Validate pattern: STRICT match of the canonical envelope shape Duplo
-# renders. This is the regex used by validate_h1_ordinal_sequence to
-# extract ordinals from PLAN.md for the source-of-truth check. False
-# positives here would let prose H1s like
+# Validate pattern: STRICT match of the canonical envelope shape the
+# planfile renderer emits. This is the regex used by
+# validate_h1_ordinal_sequence to extract ordinals from PLAN.md for the
+# source-of-truth check. False positives here would let prose H1s like
 # `# Background: Phase 1 introduced filtering` be counted as phase
 # ordinals, breaking validation against actual roadmap state.
 #
-# Matches exactly what _ensure_h1_heading prepends: single-hash, em-dash
-# separator, "Phase " (capitalized), digit, colon-space, trailing title.
+# Matches the canonical envelope H1: single-hash, em-dash separator,
+# "Phase " (capitalized), digit, colon-space, trailing title.
 _PHASE_H1_VALIDATE_RE = re.compile(r"^# .+? — Phase (\d+): .+$")
 
 
@@ -208,107 +133,6 @@ def _strip_fences(text: str) -> str:
     """Remove outer triple-backtick fences if the LLM wrapped the plan."""
     m = _FENCE_RE.match(text)
     return m.group(1) if m else text
-
-
-def _strip_trailing_commentary(content: str) -> str:
-    """Truncate *content* after the last ``- [ ]`` task or subtask line.
-
-    Finds the last line whose leading-whitespace-stripped prefix is ``- [ ]``
-    (a task or subtask checkbox) and discards everything after it, leaving
-    exactly one trailing newline. This handles the case where the LLM wraps
-    the plan in code fences AND adds meta-commentary after the closing fence:
-    ``_strip_fences`` cannot remove such commentary because ``_FENCE_RE``
-    requires the closing fence at end-of-string. The correct invariant is
-    that nothing should appear in phase content after the last task.
-
-    If no task line is found, or the last task line is already the final
-    line of *content*, returns *content* unchanged -- there is no trailing
-    commentary to strip and we preserve the exact input formatting
-    (including any absence of a trailing newline, which the caller may
-    rely on).
-    """
-    lines = content.splitlines()
-    last_task_idx: int | None = None
-    for i, line in enumerate(lines):
-        if line.lstrip().startswith("- [ ]"):
-            last_task_idx = i
-    if last_task_idx is None or last_task_idx == len(lines) - 1:
-        return content
-    kept = lines[: last_task_idx + 1]
-    return "\n".join(kept) + "\n"
-
-
-def _ensure_h1_heading(
-    content: str,
-    project_name: str,
-    phase_num: int,
-    phase_title: str,
-) -> str:
-    """Strip-and-render the H1 phase heading.
-
-    Phase ordinal in the outer ``# <project_name> — Phase N: <title>``
-    H1 is execution metadata that belongs to Duplo's roadmap state,
-    not to the synthesizer. Earlier versions of this function trusted
-    whatever H1 the synthesizer wrote (or prepended one only when
-    none was present). That kept the synthesizer in the ownership
-    loop for phase ordinals: parallel council invocations have no
-    shared counter, the synthesizer guesses the ordinal, gets it
-    wrong (duplicates, gaps, off-by-one), the resulting PLAN.md
-    fails mcloop's parser.
-
-    The durable rule (codex's framing): model emits phase content;
-    Duplo wraps it in the deterministic PLAN.md envelope. So this
-    function:
-
-      1. Strips any leading non-H1 commentary (preambles like "Here
-         is the plan:" or stray "---" separators that some models
-         emit above the heading).
-      2. Strips ALL model-authored ``# <something> — Phase N: ...``
-         H1 lines from the body. The synthesizer may have written
-         one, several, or none; all are removed.
-      3. Renders the canonical H1 from Duplo's roadmap state
-         (``project_name``, ``phase_num``, ``phase_title``) and
-         prepends it to the cleaned body.
-
-    Even if the synthesizer ignores its template instructions and
-    fabricates an H1, the strip-and-render step overwrites it.
-    Model-authored phase ordinals cannot escape Duplo's control.
-    """
-    lines = content.splitlines(keepends=True)
-
-    # Step 1: strip leading non-heading commentary up to the first
-    # markdown heading of ANY depth. The boundary is "first heading"
-    # rather than "first H1" because the synthesizer's body, under
-    # the new contract, contains a Slice C `## Phase phase_NNN:` H2
-    # as its first heading. Treating any-depth heading as the
-    # boundary keeps that H2 as content while still stripping
-    # LLM commentary preambles (`Here is the plan:`, `---`).
-    first_heading_idx: int | None = None
-    for i, line in enumerate(lines):
-        if _ANY_HEADING_RE.match(line):
-            first_heading_idx = i
-            break
-    if first_heading_idx is not None:
-        lines = lines[first_heading_idx:]
-
-    # Step 2: drop every phase/stage heading mcloop would parse as a
-    # section header (any heading level containing "Phase N" or
-    # "Stage N", with or without colon, in any case). The strip
-    # regex is a superset of mcloop's checklist.py STAGE_RE.
-    cleaned: list[str] = []
-    for line in lines:
-        if _PHASE_H1_STRIP_RE.match(line.rstrip("\n")):
-            continue
-        cleaned.append(line)
-
-    body = "".join(cleaned).lstrip()
-
-    # Step 3: render the canonical H1 from Duplo's roadmap state.
-    app_name = project_name or "App"
-    heading = f"# {app_name} — Phase {phase_num}: {phase_title}"
-    if body:
-        return f"{heading}\n\n{body}"
-    return f"{heading}\n"
 
 
 class CanonicalH1OrdinalError(RuntimeError):
@@ -439,56 +263,6 @@ def parse_completed_tasks(plan_content: str) -> list[CompletedTask]:
             )
         )
     return tasks
-
-
-def _detect_next_phase_number(current_plan: str) -> int:
-    """Return the next phase number inferred from *current_plan* heading."""
-    match = re.search(r"#\s*.*?(?:Phase|Stage)\s+(\d+)", current_plan, re.IGNORECASE)
-    return (int(match.group(1)) + 1) if match else 2
-
-
-def generate_next_phase_plan(
-    current_plan: str,
-    feedback: str,
-    issues_text: str = "",
-    *,
-    platform_addendum: str = "",
-) -> str:
-    """Return the next phase PLAN.md content as a string.
-
-    Uses ``claude -p`` to generate the plan based on the completed phase
-    plan, user feedback, and visual issues from screenshot comparison.
-
-    Args:
-        current_plan: Markdown content of the just-completed PLAN.md.
-        feedback: User feedback collected after testing the phase.
-        issues_text: Optional visual issues text (e.g. from ISSUES.md).
-        platform_addendum: Optional platform-rules text appended to the
-            system prompt when non-empty.
-
-    Returns:
-        Markdown string suitable for writing to ``PLAN.md``.
-    """
-    next_phase = _detect_next_phase_number(current_plan)
-
-    issues_section = (
-        f"\nVisual issues identified in screenshots:\n{issues_text.strip()}\n"
-        if issues_text.strip()
-        else "\nNo visual issues reported.\n"
-    )
-
-    prompt = f"""\
-Completed phase plan:
-{current_plan.strip()}
-
-User feedback:
-{feedback.strip()}
-{issues_section}
-Generate Phase {next_phase} PLAN.md now.
-"""
-
-    system = _NEXT_PHASE_SYSTEM + platform_addendum if platform_addendum else _NEXT_PHASE_SYSTEM
-    return _strip_fences(query(prompt, system=system))
 
 
 def generate_phase_plan(
@@ -647,28 +421,6 @@ Generate the phase body now.
         project_dir=Path(target_dir),
     )
     return council.typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
-
-
-def append_test_tasks(plan: str, test_tasks: list[str]) -> str:
-    """Append documentation-example test tasks to a generated plan.
-
-    Inserts the tasks before the final checklist item if one exists,
-    or appends them at the end.
-    """
-    if not test_tasks:
-        return plan
-    lines = plan.rstrip().split("\n")
-    # Find the last checklist item to insert before it.
-    last_check_idx = None
-    for i in range(len(lines) - 1, -1, -1):
-        if lines[i].lstrip().startswith("- ["):
-            last_check_idx = i
-            break
-    if last_check_idx is not None:
-        before = lines[:last_check_idx]
-        after = lines[last_check_idx:]
-        return "\n".join(before + test_tasks + after) + "\n"
-    return "\n".join(lines) + "\n" + "\n".join(test_tasks) + "\n"
 
 
 _BUGS_HEADING_RE = re.compile(r"^## Bugs\s*$", re.MULTILINE)

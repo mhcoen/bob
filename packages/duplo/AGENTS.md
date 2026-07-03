@@ -362,9 +362,7 @@ detects new files and appends tasks for anything missing.
   `# <AppName> — Phase N: <Title>`. Accepts optional `phase_number`
   keyword to override the phase dict's number (derived from
   `phases` history length + 1 in main.py).
-  `generate_next_phase_plan()` incorporates feedback and visual
-  issues. `append_test_tasks()` appends doc-example test checklist
-  items to a plan. `save_plan()` writes the file; if PLAN.md already
+  `save_plan()` writes the file; if PLAN.md already
   exists it appends new content after a blank line, preserving all
   existing checked and unchecked items. `CompletedTask` dataclass
   (text, features, fixes, indent). `parse_completed_tasks()` parses

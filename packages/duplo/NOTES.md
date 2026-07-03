@@ -2,6 +2,33 @@
 
 ## Observations
 
+### [7] [T-000007] Dead-code sweep: two adjacent symbols left in place — 2026-07-03
+
+Deleted the audited dead code: `scanner._SKIP_DIRS` (never read;
+`scan_directory` is top-level-only by design, pinned by
+`test_subdirs_under_ref_ignored`), `pipeline._visual_target_video_frames`
+(zero references), and the planner cluster `generate_next_phase_plan`,
+`_detect_next_phase_number`, `_ensure_h1_heading`,
+`_strip_trailing_commentary`, `append_test_tasks` plus their orphaned
+tests. Removing `_ensure_h1_heading` also orphaned its exclusive-use
+helpers `_ANY_HEADING_RE` and `_PHASE_H1_STRIP_RE` (deleted with it); the
+`_PHASE_H1_VALIDATE_RE` comment was reworded off the deleted function.
+`generate_next_phase_plan` was the sole consumer of the `query` import,
+now removed.
+
+Two adjacent-but-unlisted dead symbols were left in `planner.py` because
+they were outside the audit's grep-verified list:
+1. `_H1_HEADING_RE` (planner.py ~118) is defined and never referenced
+   anywhere -- genuinely dead, independent of this sweep. Left in place
+   for a future audit rather than expanding scope.
+2. `_strip_fences` / `_FENCE_RE` lost their only production caller when
+   `generate_next_phase_plan` went, so they are now test-only. They were
+   NOT in the deletion list, still carry dedicated coverage
+   (`TestStripFences`) and an AST invariant guard
+   (`test_parsing_invariant.py::test_no_strip_fences_then_json_loads_in_migrated_modules`),
+   so they were retained. Candidates for the next dead-code pass if no
+   production caller reappears.
+
 ### [1] [T-000001] Hash save moved after all diff consumers — 2026-07-03
 
 `save_hashes(compute_hashes("."))` in `_subsequent_run` now runs after

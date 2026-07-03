@@ -18,17 +18,11 @@ from duplo.plan_author_adapter import PlanAuthorCappedError
 from duplo.planner import (
     CanonicalH1OrdinalError,
     CompletedTask,
-    _NEXT_PHASE_SYSTEM,
     _PHASE_SYSTEM,
     _PLAN_FILENAME,
-    _detect_next_phase_number,
-    _ensure_h1_heading,
     _escape_mcloop_tags,
     _strip_bugs_section,
     _strip_fences,
-    _strip_trailing_commentary,
-    append_test_tasks,
-    generate_next_phase_plan,
     generate_phase_plan,
     parse_completed_tasks,
     save_plan,
@@ -637,183 +631,6 @@ class TestGeneratePhasePlanH1Heading:
         assert result.phases[0].title == "Integrations"
 
 
-class TestEnsureH1Heading:
-    """Strip-and-render contract.
-
-    Phase ordinals in the outer ``# <project> — Phase N: <title>`` H1
-    are execution metadata owned by Duplo's roadmap state, not the
-    synthesizer. _ensure_h1_heading strips ANY model-authored
-    ``# X — Phase N: ...`` H1 from the body and renders the canonical
-    H1 from (project_name, phase_num, phase_title). This is the
-    durable fix for the "synthesizer guesses the phase ordinal,
-    gets it wrong" anti-pattern. Codex framing: model emits phase
-    content; Duplo wraps it in the deterministic envelope.
-    """
-
-    def test_overrides_synthesizer_h1_with_canonical(self):
-        """Synthesizer emits an H1 with project name 'App' and ordinal
-        1; Duplo's roadmap state says project 'X' and ordinal 1. The
-        canonical H1 wins regardless of what the synthesizer wrote."""
-        result = _ensure_h1_heading("\n\n# App — Phase 1: Core\n", "X", 1, "Core")
-        assert result == "# X — Phase 1: Core\n"
-
-    def test_overrides_when_synthesizer_uses_wrong_ordinal(self):
-        """Synthesizer emits 'Phase 7' when Duplo's roadmap says
-        Phase 2. The canonical H1 (Phase 2) overwrites the wrong
-        ordinal — the bug fix."""
-        body = "# Widget — Phase 7: WrongOrdinal\n\n- [ ] Real task\n"
-        result = _ensure_h1_heading(body, "Widget", 2, "Polish")
-        assert result.startswith("# Widget — Phase 2: Polish\n")
-        assert "Phase 7" not in result
-        assert "WrongOrdinal" not in result
-        assert "- [ ] Real task" in result
-
-    def test_strips_multiple_phase_h1s(self):
-        """Synthesizer emits multiple stray phase H1s; all are
-        stripped, only Duplo's canonical H1 remains."""
-        body = "# Foo — Phase 1: Stray one\n\n# Bar — Phase 5: Stray two\n\n- [ ] Real task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        phase_h1_count = sum(
-            1 for line in result.splitlines() if " — Phase " in line and line.startswith("# ")
-        )
-        assert phase_h1_count == 1
-        assert result.startswith("# Real — Phase 3: Real Title\n")
-        assert "- [ ] Real task" in result
-        assert "Stray one" not in result
-        assert "Stray two" not in result
-
-    # ----------- Broader strip regex (clarification #2) -----------
-
-    def test_strips_phase_h1_with_hyphen_separator(self):
-        """Synthesizer uses ASCII hyphen-minus instead of em-dash."""
-        body = "# project - Phase 1: Hyphen sep\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "Hyphen sep" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_with_en_dash(self):
-        """Synthesizer uses en-dash instead of em-dash."""
-        body = "# project – Phase 1: En dash\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "En dash" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_without_separator(self):
-        """Synthesizer omits the separator entirely."""
-        body = "# project Phase 1: No sep\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "No sep" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_without_project_prefix(self):
-        """Synthesizer drops the project name and writes a bare
-        ``# Phase N: ...`` heading."""
-        body = "# Phase 1: Bare phase\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "Bare phase" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_with_lowercase_phase(self):
-        """Synthesizer writes ``phase`` in lowercase. Strip is
-        case-insensitive."""
-        body = "# project — phase 1: Lowercase\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "Lowercase" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_with_uppercase_phase(self):
-        """All-caps PHASE."""
-        body = "# project — PHASE 1: Uppercase\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "Uppercase" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_strips_phase_h1_with_extra_whitespace(self):
-        """Extra whitespace around the digit and colon."""
-        body = "# project — Phase   1   :   Whitespace\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "Whitespace" not in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_does_not_strip_h2_phase_headings(self):
-        """The inner ``## Phase phase_NNN:`` semantic header MUST
-        survive the strip; it's the phase_id boundary that mcloop's
-        Slice C parser anchors on. Strip is anchored at ``# ``
-        (single hash), not ``## ``."""
-        body = "## Phase phase_001: Inner header\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        assert "## Phase phase_001:" in result, (
-            "the inner Slice C semantic header must be preserved"
-        )
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_does_not_strip_unrelated_h1_text(self):
-        """An H1 line that mentions 'phase' but doesn't match the
-        ``Phase \\d+:`` shape (e.g., 'phases of work') is content,
-        not a phase H1, and must not be stripped."""
-        body = "# Phases of work overview\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "Real", 3, "Real Title")
-        # The non-phase H1 stays in the body (with Duplo's canonical
-        # prepended on top).
-        assert "Phases of work overview" in result
-        assert result.startswith("# Real — Phase 3: Real Title")
-
-    def test_prepends_when_no_heading(self):
-        result = _ensure_h1_heading("plain text\n", "Widget", 2, "Polish")
-        assert result.startswith("# Widget — Phase 2: Polish\n\nplain text")
-
-    def test_prepends_when_h2_only(self):
-        result = _ensure_h1_heading("## sub\n\n- [ ] x", "App", 0, "Scaffold")
-        assert result.startswith("# App — Phase 0: Scaffold\n\n## sub")
-
-    def test_empty_content_produces_heading_only(self):
-        assert _ensure_h1_heading("", "App", 0, "Scaffold") == "# App — Phase 0: Scaffold\n"
-
-    def test_empty_project_name_uses_fallback(self):
-        result = _ensure_h1_heading("- [ ] Task", "", 1, "Core")
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_hash_without_space_is_not_h1(self):
-        result = _ensure_h1_heading("#foo\n", "App", 1, "Core")
-        assert result.startswith("# App — Phase 1: Core\n\n#foo")
-
-    def test_empty_h1_line_is_not_accepted(self):
-        result = _ensure_h1_heading("# \n- [ ] Task", "App", 1, "Core")
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_strips_preamble_before_h1(self):
-        """LLM meta-commentary before the H1 is discarded, the H1
-        is also discarded (strip-and-render), and Duplo's canonical
-        H1 prepends. Previously this test pinned that the model's
-        original H1 survived; the new contract says it doesn't."""
-        content = (
-            "The PLAN.md content is ready. Here it is for you to append to PLAN.md:\n"
-            "\n"
-            "---\n"
-            "\n"
-            "# Numi — Phase 4: Advanced\n"
-            "\n"
-            "- [ ] First task\n"
-        )
-        result = _ensure_h1_heading(content, "Numi", 4, "Advanced")
-        assert result.startswith("# Numi — Phase 4: Advanced")
-        assert "The PLAN.md content is ready" not in result
-        assert "---" not in result
-        # Exactly one phase H1 line in the result.
-        phase_h1_count = sum(
-            1 for line in result.splitlines() if line.startswith("# ") and " — Phase " in line
-        )
-        assert phase_h1_count == 1
-
-    def test_strips_preamble_with_separator_only(self):
-        content = "---\n\n# App — Phase 2: Core\n\n- [ ] Task"
-        result = _ensure_h1_heading(content, "Ignored", 99, "Ignored")
-        # Old behavior kept the model's H1 verbatim. New behavior
-        # strips it and renders Duplo's canonical envelope.
-        assert result == "# Ignored — Phase 99: Ignored\n\n- [ ] Task"
-        assert "App — Phase 2" not in result
-
-
 class TestPhaseSystemPromptAnnotations:
     def test_system_prompt_requires_feat_annotation(self):
         assert '[feat: "Feature Name"]' in _PHASE_SYSTEM
@@ -859,27 +676,6 @@ class TestPhaseSystemPromptAnnotations:
         assert "McLoop will pause only on true [USER] tasks" in _PHASE_SYSTEM
 
 
-class TestNextPhaseSystemPromptAnnotations:
-    def test_system_prompt_requires_feat_annotation(self):
-        assert '[feat: "Feature Name"]' in _NEXT_PHASE_SYSTEM
-
-    def test_system_prompt_requires_multi_feature_annotation(self):
-        assert "comma-separated" in _NEXT_PHASE_SYSTEM
-
-    def test_system_prompt_requires_fix_annotation(self):
-        assert '[fix: "description"]' in _NEXT_PHASE_SYSTEM
-
-    def test_system_prompt_no_annotation_for_scaffolding(self):
-        assert "no annotation" in _NEXT_PHASE_SYSTEM.lower()
-
-    def test_system_prompt_reserves_user_for_human_only_checks(self):
-        assert "Reserve [USER] only for genuinely human-only checks" in _NEXT_PHASE_SYSTEM
-        assert "Runnable verification must be expressed" in _NEXT_PHASE_SYSTEM
-        assert "[AUTO:run_cli] step" in _NEXT_PHASE_SYSTEM
-
-
-_SAMPLE_CURRENT_PLAN = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
-
 _ANNOTATED_PHASE_PLAN = """\
 ## Phase phase_001: Core
 
@@ -891,18 +687,6 @@ _ANNOTATED_PHASE_PLAN = """\
 - [ ] Fix email validation on signup [fix: "email format not checked"] [accept: command-exit: true]
 """
 
-_ANNOTATED_NEXT_PLAN = """\
-# Phase 2: Search
-
-## Objective
-Add full-text search across the application.
-
-## Implementation steps
-1. Set up search index infrastructure
-2. Add search bar component [feat: "Full-text search"]
-3. Implement result ranking [feat: "Full-text search", "Relevance scoring"]
-4. Fix broken layout on mobile [fix: "sidebar overlaps content on small screens"]
-"""
 
 _ANNOTATION_RE = re.compile(r"\[(feat|fix):\s*\"[^\"]+\"(?:,\s*\"[^\"]+\")*\]")
 
@@ -980,24 +764,6 @@ class TestPlanAnnotationOutput:
                 stripped = line.lstrip()
                 assert stripped.startswith("- [ ]") or stripped.startswith("- [x]")
 
-    def test_next_phase_plan_contains_feat_annotations(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
-        feat_matches = re.findall(r'\[feat: "[^"]+"\]', result)
-        assert len(feat_matches) >= 1
-
-    def test_next_phase_plan_contains_fix_annotations(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
-        fix_matches = re.findall(r'\[fix: "[^"]+"\]', result)
-        assert len(fix_matches) >= 1
-
-    def test_next_phase_plan_multi_feature_annotation(self):
-        with patch("duplo.planner.query", return_value=_ANNOTATED_NEXT_PLAN):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search.")
-        multi = re.findall(r'\[feat: "[^"]+",\s*"[^"]+"\]', result)
-        assert len(multi) >= 1
-
     def test_scaffolding_lines_have_no_annotation(self):
         with patch("duplo.planner.run_plan_author", return_value=_ANNOTATED_PHASE_PLAN):
             result = generate_phase_plan(
@@ -1011,85 +777,6 @@ class TestPlanAnnotationOutput:
         assert scaffold_tasks, "scaffolding task must survive parsing"
         for task in scaffold_tasks:
             assert task.annotations == ()
-
-
-class TestDetectNextPhaseNumber:
-    def test_extracts_phase_number(self):
-        plan = "# Phase 1: Core Auth\n\n## Objective\nMinimal app."
-        assert _detect_next_phase_number(plan) == 2
-
-    def test_extracts_higher_phase_number(self):
-        plan = "# Phase 3: Dashboard\n\n## Objective\nAdd dashboard."
-        assert _detect_next_phase_number(plan) == 4
-
-    def test_defaults_to_two_when_no_phase_heading(self):
-        assert _detect_next_phase_number("No heading here.") == 2
-
-    def test_case_insensitive(self):
-        assert _detect_next_phase_number("# phase 2: Foo") == 3
-
-    def test_prefixed_heading(self):
-        plan = "# McWhisper — Phase 3: Dashboard\n\n## Objective\nAdd dashboard."
-        assert _detect_next_phase_number(plan) == 4
-
-    def test_stage_heading(self):
-        plan = "# Stage 1: Core\n\n## Objective\nMinimal app."
-        assert _detect_next_phase_number(plan) == 2
-
-    def test_stage_higher_number(self):
-        plan = "## Stage 2: Features\n\n- [ ] Add search"
-        assert _detect_next_phase_number(plan) == 3
-
-    def test_prefixed_stage_heading(self):
-        plan = "# MyApp — Stage 4: Polish\n\n## Objective\nFinal pass."
-        assert _detect_next_phase_number(plan) == 5
-
-
-_SAMPLE_NEXT_PLAN = "# Phase 2: Search\n\n## Objective\nAdd search."
-
-
-class TestGenerateNextPhasePlan:
-    def test_returns_string(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Add search feature.")
-        assert isinstance(result, str)
-        assert result == _SAMPLE_NEXT_PLAN
-
-    def test_passes_current_plan_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        prompt = mock_query.call_args[0][0]
-        assert "Phase 1: Core Auth" in prompt
-
-    def test_passes_feedback_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "Needs dark mode.")
-        prompt = mock_query.call_args[0][0]
-        assert "Needs dark mode." in prompt
-
-    def test_passes_issues_text_to_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", "- Layout broken")
-        prompt = mock_query.call_args[0][0]
-        assert "Layout broken" in prompt
-
-    def test_next_phase_number_in_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        prompt = mock_query.call_args[0][0]
-        assert "Phase 2" in prompt
-
-    def test_no_issues_text_shows_no_issues_message(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        prompt = mock_query.call_args[0][0]
-        assert "No visual issues reported" in prompt
-
-    def test_empty_issues_text_shows_no_issues_message(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback", "")
-        prompt = mock_query.call_args[0][0]
-        assert "No visual issues reported" in prompt
 
 
 _PLATFORM_ADDENDUM = (
@@ -1131,48 +818,6 @@ class TestPlatformAddendum:
             )
         system = mock_query.call_args.kwargs["system"]
         assert system == _PHASE_SYSTEM
-
-    def test_next_phase_plan_appends_addendum_to_system_prompt(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(
-                _SAMPLE_CURRENT_PLAN,
-                "feedback",
-                platform_addendum=_PLATFORM_ADDENDUM,
-            )
-        system = mock_query.call_args.kwargs["system"]
-        assert _NEXT_PHASE_SYSTEM in system
-        assert _PLATFORM_ADDENDUM in system
-
-    def test_next_phase_plan_empty_addendum_leaves_system_unchanged(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(
-                _SAMPLE_CURRENT_PLAN,
-                "feedback",
-                platform_addendum="",
-            )
-        system = mock_query.call_args.kwargs["system"]
-        assert system == _NEXT_PHASE_SYSTEM
-
-    def test_next_phase_plan_default_has_no_addendum(self):
-        with patch("duplo.planner.query", return_value=_SAMPLE_NEXT_PLAN) as mock_query:
-            generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        system = mock_query.call_args.kwargs["system"]
-        assert system == _NEXT_PHASE_SYSTEM
-
-
-class TestAppendTestTasks:
-    def test_appends_tasks_to_plan(self):
-        plan = "# Phase 1\n- [ ] Build core"
-        tasks = ["- [ ] Wire up tests", "  - [ ] Replace stub"]
-        result = append_test_tasks(plan, tasks)
-        assert "Build core" in result
-        assert result == (
-            "# Phase 1\n- [ ] Wire up tests\n  - [ ] Replace stub\n- [ ] Build core\n"
-        )
-
-    def test_returns_plan_unchanged_when_no_tasks(self):
-        plan = "# Phase 1\n- [ ] Build core\n"
-        assert append_test_tasks(plan, []) == plan
 
 
 class TestSavePlan:
@@ -1278,17 +923,6 @@ class TestStripValidateRegexSplit:
     """
 
     PROSE_H1 = "# Background: Phase 1 introduced filtering\n"
-
-    def test_strip_catches_prose_h1_false_positive(self):
-        """Synthesizer wrote a prose H1 mid-body that mentions
-        ``Phase N``. Strip removes it (acceptable false positive
-        because Duplo prepends the canonical envelope anyway)."""
-        body = f"## Phase phase_001: real header\n\n{self.PROSE_H1}\n- [ ] Real task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        assert "Background" not in result
-        assert "## Phase phase_001:" in result
-        assert "- [ ] Real task" in result
-        assert result.startswith("# App — Phase 1: Core")
 
     def test_validator_does_not_count_prose_h1_false_positive(self):
         """The same prose H1, if it ended up in PLAN.md somehow
@@ -1438,73 +1072,6 @@ class TestValidateH1OrdinalSequence:
         bad = "# App — Phase 0: A\n# App — Phase 1: B\n# App — Phase 3: D\n"
         with pytest.raises(CanonicalH1OrdinalError):
             validate_h1_ordinal_sequence(bad)
-
-
-class TestStripIsSupersetOfMcloopParser:
-    """Defect 5: Duplo's strip regex must be a SUPERSET of mcloop's
-    checklist.py STAGE_RE
-    (^#+\\s+.*?\\b(?:stage|phase)\\s+(\\d+)\\b, IGNORECASE).
-    Whatever mcloop matches as a phase/stage header, Duplo MUST
-    also recognize and strip — otherwise an unstripped wrong H1
-    survives the body, Duplo prepends its canonical H1, mcloop
-    sees both and fires duplicate-Phase.
-    """
-
-    def test_strip_removes_h1_phase_no_colon(self):
-        """`# Phase 3 Glob filtering` — no colon after digit.
-        Codex's example #1."""
-        body = "# Phase 3 Glob filtering\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        assert "Glob filtering" not in result
-        assert "Phase 3" not in result
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_strip_removes_h2_phase(self):
-        """`## Phase 3` — H2, no colon. Codex's example #2."""
-        body = "## Phase 3\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        # The H2 must be stripped because mcloop would parse it
-        # as a stage header.
-        assert "## Phase 3" not in result
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_strip_removes_h3_stage(self):
-        """`### Stage 5: Cleanup` — H3, "Stage" keyword."""
-        body = "### Stage 5: Cleanup\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        assert "Stage 5" not in result
-        assert "Cleanup" not in result
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_strip_removes_lowercase_stage(self):
-        """`# stage 4 — Foo` — lowercase 'stage' keyword."""
-        body = "# stage 4 — Foo\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        assert "stage 4" not in result
-        assert "Foo" not in result
-        assert result.startswith("# App — Phase 1: Core")
-
-    def test_strip_removes_phase_with_no_title(self):
-        """`# Phase 7` — bare. mcloop would parse as stage 7."""
-        body = "# Phase 7\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        # The bare phase header is stripped.
-        result_lines = result.splitlines()
-        # The only "Phase" line is Duplo's canonical envelope.
-        phase_lines = [ln for ln in result_lines if "Phase" in ln and ln.startswith("# ")]
-        assert len(phase_lines) == 1
-        assert phase_lines[0].startswith("# App — Phase 1: Core")
-
-    def test_strip_preserves_slice_c_semantic_header(self):
-        """The Slice C semantic header `## Phase phase_NNN: title`
-        MUST survive. The `phase_001` token has no whitespace
-        between "phase" and the digit (the underscore breaks the
-        `\\bphase\\s+\\d+\\b` pattern), so Slice C headers are
-        invisible to mcloop's STAGE_RE and to Duplo's strip."""
-        body = "## Phase phase_003: Glob filtering\n\n- [ ] Task\n"
-        result = _ensure_h1_heading(body, "App", 1, "Core")
-        assert "## Phase phase_003: Glob filtering" in result
-        assert result.startswith("# App — Phase 1: Core")
 
 
 class TestSavePlanAcceptsExpectedOrdinals:
@@ -2142,112 +1709,6 @@ class TestPlanStructureForMcloop:
             assert "## Bugs" not in text, f"case {i} leaked ## Bugs"
 
 
-class TestStripTrailingCommentary:
-    """Tests for _strip_trailing_commentary() and its integration with
-    generate_phase_plan() when the LLM wraps the plan in code fences AND
-    adds meta-commentary after the closing fence.
-    """
-
-    def test_truncates_after_last_task_with_fence_and_commentary(self):
-        """End-to-end: a fenced synthesizer body with trailing
-        meta-commentary still parses cleanly under the typed-Plan
-        boundary. Pre-T-000186 the assertion was that the returned
-        markdown string ended at ``- [ ] Third task\\n``; post-T-000186
-        the boundary returns a typed :class:`bob_tools.planfile.Plan`
-        whose tasks survive verbatim and whose rendered output
-        contains none of the fence / commentary noise.
-        """
-        llm_output = (
-            "```markdown\n"
-            "## Phase phase_001: Core\n"
-            "\n"
-            "- [ ] First task [accept: command-exit: true]\n"
-            "- [ ] Second task [accept: command-exit: true]\n"
-            "- [ ] Third task [accept: command-exit: true]\n"
-            "```\n"
-            "\n"
-            "---\n"
-            "\n"
-            "**Structure:** The plan has three tasks.\n"
-            "\n"
-            "Want me to write it?\n"
-        )
-        with patch("duplo.planner.run_plan_author", return_value=llm_output):
-            result = generate_phase_plan(
-                "https://example.com",
-                _sample_features(),
-                _sample_prefs(),
-                project_name="MyApp",
-                phase_number=1,
-            )
-        assert isinstance(result, Plan)
-        text = _plan_to_text(result)
-        # Three task lines survive in document order.
-        task_lines = [ln for ln in text.splitlines() if ln.lstrip().startswith("- [ ]")]
-        assert any("First task" in ln for ln in task_lines)
-        assert any("Second task" in ln for ln in task_lines)
-        assert any("Third task" in ln for ln in task_lines)
-        # The fence and trailing commentary are gone.
-        assert "```" not in text
-        assert "---" not in text
-        assert "**Structure:**" not in text
-        assert "Want me to write it?" not in text
-
-    def test_keeps_content_unchanged_when_no_trailing_garbage(self):
-        content = "# Phase 1: Core\n\n- [ ] Task one\n- [ ] Task two\n"
-        assert _strip_trailing_commentary(content).endswith("- [ ] Task two\n")
-
-    def test_truncates_after_indented_subtask(self):
-        content = (
-            "# Phase 1\n"
-            "\n"
-            "- [ ] Parent\n"
-            "  - [ ] Nested subtask\n"
-            "\n"
-            "Trailing prose that should be dropped.\n"
-        )
-        result = _strip_trailing_commentary(content)
-        assert result.endswith("  - [ ] Nested subtask\n")
-        assert "Trailing prose" not in result
-
-    def test_no_task_lines_returns_content_unchanged(self):
-        content = "# Phase 1\n\nNo tasks here.\n"
-        assert _strip_trailing_commentary(content) == content
-
-    def test_preserves_input_when_last_task_is_final_line(self):
-        # When there is no trailing commentary to strip, input is preserved
-        # verbatim -- including the absence of a trailing newline. This
-        # prevents unintended reformatting of already-clean LLM output.
-        content = "# Phase 1\n- [ ] Task"
-        assert _strip_trailing_commentary(content) == content
-
-    def test_strips_trailing_fence_and_qa_commentary_from_real_llm_output(self):
-        # Reproduces the exact failure mode from BUGS.md: fenced plan with
-        # trailing "---", bold "**Structure:**" summary, and "Want me to
-        # write it?" prose -- _strip_fences cannot remove the fence because
-        # _FENCE_RE anchors the closing fence at \Z, so this function must.
-        content = (
-            "# MyApp — Phase 1: Core\n"
-            "\n"
-            "- [ ] Scaffold project\n"
-            "- [ ] Add main window\n"
-            "- [ ] Wire up entry point\n"
-            "```\n"
-            "\n"
-            "---\n"
-            "\n"
-            "**Structure:** three tasks covering scaffold, window, entry.\n"
-            "\n"
-            "Want me to write it?\n"
-        )
-        result = _strip_trailing_commentary(content)
-        assert result.endswith("- [ ] Wire up entry point\n")
-        assert "```" not in result
-        assert "---" not in result
-        assert "**Structure:**" not in result
-        assert "Want me to write it?" not in result
-
-
 class TestEscapeMcloopTags:
     """Tests for _escape_mcloop_tags() and its integration with save_plan()."""
 
@@ -2330,8 +1791,7 @@ class TestStripFences:
         otherwise non-canonical body would have been rejected mid-loop),
         so generate_phase_plan does NOT re-strip code fences the way the
         legacy single-actor path did. A clean Slice C body lands as a
-        typed Plan; fence-stripping now lives only on the
-        :func:`generate_next_phase_plan` path.
+        typed Plan.
         """
         clean = "## Phase phase_001: Core\n\n- [ ] Task [accept: command-exit: true]\n"
         with patch("duplo.planner.run_plan_author", return_value=clean):
@@ -2346,13 +1806,6 @@ class TestStripFences:
         assert "```" not in text
         assert "## Phase 1: Core" in text
         assert any("Task" in t.text for t in result.phases[0].tasks)
-
-    def test_generate_next_phase_plan_strips_fences(self):
-        fenced = "```markdown\n# Phase 2: Search\n\n- [ ] Task\n```"
-        with patch("duplo.planner.query", return_value=fenced):
-            result = generate_next_phase_plan(_SAMPLE_CURRENT_PLAN, "feedback")
-        assert not result.startswith("```")
-        assert result.startswith("# Phase 2")
 
 
 class TestPhaseIdAgreementFirstPhase:

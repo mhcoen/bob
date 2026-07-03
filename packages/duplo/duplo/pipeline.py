@@ -460,33 +460,6 @@ def _run_video_frame_pipeline(
     return video_frames, accepted_frames_by_path
 
 
-def _visual_target_video_frames(
-    spec: ProductSpec | None,
-    videos: list[Path],
-    frames: list[Path],
-) -> list[Path]:
-    """Return *frames* that came from videos with ``visual-target`` role.
-
-    Matches frames to their source videos using filename stems (ffmpeg
-    names frames ``{stem}_scene_NNNN.png``).
-    """
-    if not spec or not frames or not videos:
-        return []
-    from duplo.spec_reader import format_visual_references
-
-    root = Path.cwd()
-    vt_resolved = set()
-    for entry in format_visual_references(spec):
-        if entry.path.suffix.lower() in _VIDEO_EXTS:
-            vt_resolved.add((root / entry.path).resolve())
-
-    vt_stems = {v.stem for v in videos if v.resolve() in vt_resolved}
-    if not vt_stems:
-        return []
-
-    return [f for f in frames if any(f.name.startswith(stem + "_") for stem in vt_stems)]
-
-
 @dataclasses.dataclass
 class ScrapeResult:
     """Accumulated results from scraping all declared sources."""
