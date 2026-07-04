@@ -10,6 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
+from orchestra.errors import ResumeError
 from orchestra.resume import replay_log
 
 
@@ -252,6 +255,62 @@ def test_replay_increments_attempts_across_repeated_entries(tmp_path: Path) -> N
     assert state.attempts == {"A": 2}
     assert state.current_state == "A"
     assert state.last_state_completed is False
+
+
+# --------------------------------------------------------------------
+# Malformed-record guards (T-000007): a state_enter/state_exit with a
+# null state_id or attempt must raise, not silently corrupt the map.
+# The previous bare ``assert`` vanished under ``python -O``, letting a
+# ``None`` state_id key the attempts dict.
+# --------------------------------------------------------------------
+
+
+def test_replay_state_enter_with_null_state_id_raises(tmp_path: Path) -> None:
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            # state_id/attempt default to None in _common: malformed.
+            _common(1, "state_enter", attempt=1),
+        ],
+    )
+    with pytest.raises(ResumeError, match="malformed state_enter"):
+        replay_log(str(log))
+
+
+def test_replay_state_enter_with_null_attempt_raises(tmp_path: Path) -> None:
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(1, "state_enter", state_id="A"),
+        ],
+    )
+    with pytest.raises(ResumeError, match="malformed state_enter"):
+        replay_log(str(log))
+
+
+def test_replay_state_exit_with_null_state_id_raises(tmp_path: Path) -> None:
+    log = tmp_path / "log.jsonl"
+    _write_log(
+        log,
+        [
+            _common(0, "run_start"),
+            _common(
+                1,
+                "state_enter",
+                state_id="A",
+                attempt=1,
+                attempts={"A": 1},
+                retries={"A": 0},
+            ),
+            _common(2, "state_exit", attempt=1, status="ok", outcome="complete"),
+        ],
+    )
+    with pytest.raises(ResumeError, match="malformed state_exit"):
+        replay_log(str(log))
 
 
 # --------------------------------------------------------------------

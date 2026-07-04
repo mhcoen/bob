@@ -220,9 +220,14 @@ class ProfileRegistry:
         """
         if backing not in self.actor_backings:
             raise KeyError(f"no adapter registered for backing {backing!r}")
-        cached = self._adapter_cache.get(backing)
-        if cached is not None:
-            return cached
+        # Membership test, not a truthiness check on the cached value:
+        # a factory that legitimately returns ``None`` (or any falsy
+        # instance) must still be cached and returned once, not
+        # re-invoked on every call. Re-invoking would violate the
+        # one-instance-per-backing invariant the runner spec requires
+        # for adapters with process-local state.
+        if backing in self._adapter_cache:
+            return self._adapter_cache[backing]
         instance = self.actor_backings[backing]()
         self._adapter_cache[backing] = instance
         return instance

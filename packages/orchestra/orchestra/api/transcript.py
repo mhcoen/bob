@@ -138,15 +138,6 @@ def _build_transcript(
     return turns
 
 
-def _write_transcript_jsonl(path: Path, transcript: list[Turn]) -> None:
-    """Persist the transcript as JSONL alongside the orchestra log."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as fh:
-        for turn in transcript:
-            fh.write(json.dumps(asdict(turn), sort_keys=True, ensure_ascii=False))
-            fh.write("\n")
-
-
 class _IncrementalTranscriptWriter:
     """Appends one ``Turn`` JSON line to ``transcript.jsonl`` per
     state_exit, fsynced before returning to the executor.

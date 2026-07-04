@@ -26,8 +26,6 @@ from orchestra.api.bindings import (  # noqa: F401
     _wrap_progress_callback,
 )
 from orchestra.api.dispatch import (  # noqa: F401
-    _CODE_EDIT_WORKFLOW_NAMES,
-    _ERROR_OUTCOMES,
     _build_summary,
     _gather_artifacts,
     _maybe_inject_final_prompt,
@@ -59,7 +57,6 @@ from orchestra.api.transcript import (  # noqa: F401
     _derive_termination,
     _IncrementalTranscriptWriter,
     _select_final_artifact,
-    _write_transcript_jsonl,
 )
 from orchestra.api.validators import (  # noqa: F401
     _WORKFLOW_RULES,
@@ -81,8 +78,6 @@ __all__ = [
     "_ADAPTER_CLASSES",
     "_ADAPTER_TO_KIND",
     "_ASK_ANONYMOUS_REVIEWERS_ANONYMIZE_INPUT_SCHEMA",
-    "_CODE_EDIT_WORKFLOW_NAMES",
-    "_ERROR_OUTCOMES",
     "_IncrementalTranscriptWriter",
     "_PARALLEL_THINKING_FINISH_PANEL_INPUT_SCHEMA",
     "_PROVIDER_CONFIGS",
@@ -116,7 +111,6 @@ __all__ = [
     "_validate_prji",
     "_validate_role_bindings",
     "_wrap_progress_callback",
-    "_write_transcript_jsonl",
     "run_role",
     "run_verb",
     "run_workflow",

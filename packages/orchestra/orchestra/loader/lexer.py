@@ -77,8 +77,6 @@ class Lexer:
         # The stack holds the leading-whitespace string of the line
         # that opened each currently-open block.
         self._indent_stack: list[str] = [""]
-        # Pending tokens (used to flush DEDENTs at end-of-file).
-        self._pending: list[Token] = []
         # Tab/space mixing detection: the lexer locks in to whichever
         # is used first and rejects mixing.
         self._indent_unit: str | None = None
@@ -98,9 +96,6 @@ class Lexer:
     def _iter(self) -> Iterator[Token]:
         # Process line by line so indentation is straightforward.
         while True:
-            if self._pending:
-                yield self._pending.pop(0)
-                continue
             if self._pos >= len(self._src):
                 # Flush remaining DEDENTs.
                 while len(self._indent_stack) > 1:

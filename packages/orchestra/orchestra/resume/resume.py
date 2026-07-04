@@ -132,8 +132,11 @@ def replay_log(log_path: str | Path) -> ReplayState:
         state.last_run_id = rec.run_id
         state.next_seq = max(state.next_seq, rec.seq + 1)
         if rec.event == "state_enter":
-            assert rec.state_id is not None
-            assert rec.attempt is not None
+            if rec.state_id is None or rec.attempt is None:
+                raise ResumeError(
+                    "malformed state_enter record at seq "
+                    f"{rec.seq}: state_id={rec.state_id!r} attempt={rec.attempt!r}"
+                )
             state.attempts[rec.state_id] = rec.attempt
             attempts_field = rec.fields.get("attempts")
             if isinstance(attempts_field, dict):
@@ -188,8 +191,11 @@ def replay_log(log_path: str | Path) -> ReplayState:
             if rec.state_id is not None and rec.attempt is not None:
                 state.committed_without_exit.add((rec.state_id, rec.attempt))
         elif rec.event == "state_exit":
-            assert rec.state_id is not None
-            assert rec.attempt is not None
+            if rec.state_id is None or rec.attempt is None:
+                raise ResumeError(
+                    "malformed state_exit record at seq "
+                    f"{rec.seq}: state_id={rec.state_id!r} attempt={rec.attempt!r}"
+                )
             state.last_state_completed = True
             state.committed_without_exit.discard((rec.state_id, rec.attempt))
             outcome = rec.fields.get("outcome")

@@ -57,10 +57,6 @@ from orchestra.spine import (
 )
 from orchestra.store import ArtifactStore
 
-_CODE_EDIT_WORKFLOW_NAMES: frozenset[str] = frozenset(
-    {"single", "draft_then_adjudicate", "propose_critique_synthesize"}
-)
-
 
 def _gather_artifacts(workflow: Workflow, store: ArtifactStore) -> dict[str, ArtifactView]:
     out: dict[str, ArtifactView] = {}
@@ -433,14 +429,6 @@ def run_verb(
 # --------------------------------------------------------------------
 # run_role: user-facing role-to-workflow entry point
 # --------------------------------------------------------------------
-
-
-# Outcomes that indicate the workflow ended in a failure transition
-# (as opposed to a judge-driven convergence or a cap-driven CAPPED
-# termination). Per T-000007: stuck/error/timeout transitions map to
-# ERROR; the executor uses the same names for adapter failures and
-# the loader-side stuck condition.
-_ERROR_OUTCOMES: frozenset[str] = frozenset({"stuck", "error", "timeout", "cancelled"})
 
 
 def _resolve_compound_model_identifiers(

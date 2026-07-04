@@ -2,6 +2,30 @@
 
 ## Observations
 
+- 2026-07-03 [7] [T-000007] Dead-code sweep. Deleted `_CODE_EDIT_WORKFLOW_NAMES`
+  and `_ERROR_OUTCOMES` (`orchestra/api/dispatch.py`), `_write_transcript_jsonl`
+  (`orchestra/api/transcript.py`), and `Lexer._pending` plus its always-false
+  guard in `_iter` (`orchestra/loader/lexer.py`); the four were grep-confirmed
+  unreferenced except via the `orchestra/api/__init__.py` compat shim, whose
+  re-exports and `__all__` entries were removed too. On the gating question the
+  task flagged: the generalization IS intended. `_maybe_inject_final_prompt`
+  (`dispatch.py` ~118-135) gates purely on whether the workflow declares the
+  `FINAL_PROMPT_INPUT` external input, so `build_code_edit_prompt` now runs for
+  any such workflow rather than only the three names the deleted frozenset held.
+  `_ERROR_OUTCOMES` was likewise superseded: `_derive_termination`
+  (`transcript.py`) classifies ERROR from `target == "stop"` / no-transition
+  inline and never consulted the set. `_pending` was never appended to, so the
+  branch was dead. No behavior change from any of the four removals. Two real
+  fixes in the same pass, each with a regression test: (a) `adapter_for`
+  (`registry/registry.py` ~217) now uses an `in`-membership cache check so a
+  factory returning `None` is cached once instead of re-invoked forever;
+  (b) the bare `assert`s guarding `state_enter`/`state_exit` records in
+  `replay_log` (`resume/resume.py`) now raise `ResumeError` so a null
+  `state_id`/`attempt` cannot silently corrupt the attempts map under
+  `python -O`. New tests in `tests/test_registry.py`, `tests/test_resume.py`,
+  and a new `tests/test_lexer.py` (added to cover the lexer edit for the
+  behavioral-change gate).
+
 - 2026-07-03 [6] [T-000006] The task framed `max_state_visits` as a
   distinct per-state bound that the parser wrongly aliases onto the
   global `max_total_steps` budget. The frozen design docs contradict

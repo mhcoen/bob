@@ -51,6 +51,27 @@ def test_adapter_for_caches_instance_per_backing():
     assert h1 is h2
 
 
+def test_adapter_for_caches_a_none_returning_factory():
+    """A factory that returns ``None`` (or any falsy instance) must be
+    invoked exactly once and its result cached. A truthiness-based
+    cache check would treat ``None`` as a permanent miss and re-invoke
+    the factory on every call, violating the one-instance-per-backing
+    invariant."""
+    reg = ProfileRegistry()
+    calls = {"n": 0}
+
+    def factory():
+        calls["n"] += 1
+        return None
+
+    reg.register_actor_backing("nullable", factory)
+    first = reg.adapter_for("nullable")
+    second = reg.adapter_for("nullable")
+    assert first is None
+    assert second is None
+    assert calls["n"] == 1
+
+
 def test_register_actor_backing_invalidates_cache():
     reg = ProfileRegistry()
 
