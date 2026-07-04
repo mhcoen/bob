@@ -223,17 +223,15 @@ def _format(template: str, substitutions: dict[str, Any]) -> str:
     substitutions dict. Missing keys are left as ``{key}`` literals
     (see ``_DefaultMissing``).
 
-    The substitution values may be nested dicts (e.g. a read artifact
-    is wrapped in ``{"value": ..., "__version_id": ...}``). Unwrap to
-    the underlying value before formatting.
+    Substitution values are already unwrapped by the caller
+    (``_render_prompt`` reads ``art.value`` before handing them over),
+    so ``_format`` formats them verbatim. It must not second-guess the
+    shape of a value: a dict-valued variable such as
+    ``{"value": "x", "lang": "en"}`` is a real value in its own right
+    and is rendered whole, not silently collapsed to its ``"value"``
+    member.
     """
-    flat: dict[str, Any] = {}
-    for k, v in substitutions.items():
-        if isinstance(v, dict) and "value" in v:
-            flat[k] = v["value"]
-        else:
-            flat[k] = v
-    return template.format_map(_DefaultMissing(flat))
+    return template.format_map(_DefaultMissing(substitutions))
 
 
 class _DefaultMissing(dict[str, Any]):

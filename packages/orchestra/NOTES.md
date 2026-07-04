@@ -2,6 +2,21 @@
 
 ## Observations
 
+- 2026-07-03 [5] [T-000005] (template/guard resolution) Fixed two
+  defects. (a) `_format` (`orchestra/executor/_executor_common.py` ~218)
+  no longer unwraps dict values that carry a `"value"` key; the branch
+  was dead for its only caller (`_render_prompt` already resolves
+  `art.value`) and dropped the rest of a real dict-valued variable.
+  (b) `guards._walk` (`orchestra/executor/guards.py` ~67) no longer
+  falls back to `hasattr` for a missing dict key. Behavior change worth
+  flagging: a missing dict sub-key now resolves to `None` (reads as
+  false in a `TruthyTest`) instead of raising `KeyError`. The prior
+  code only reached the raise when the missing key also failed
+  `hasattr`, so for dict keys shadowing builtins (`get`/`items`/`keys`/
+  `values`) it returned a truthy bound method instead. The `hasattr`
+  fallback is retained for non-dict objects (envelope attribute access).
+  Regression tests in `tests/test_guards.py`.
+
 - 2026-07-03 [4] [T-000004] (run_session timeout contract) Hardened the
   wall-clock guard in `run_session` (`orchestra/adapters/_subprocess.py`):
   `timeout` is now typed `int | None`, `None` is the only supported

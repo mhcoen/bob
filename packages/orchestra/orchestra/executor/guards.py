@@ -66,8 +66,17 @@ class GuardContext:
 
 def _walk(value: Any, parts: tuple[str, ...]) -> Any:
     for p in parts:
-        if isinstance(value, dict) and p in value:
-            value = value[p]
+        if isinstance(value, dict):
+            # A dict step resolves only against its keys. A missing key
+            # is absent, never a fallback to hasattr: ``foo.items`` on a
+            # dict without an ``items`` key must not resolve to the bound
+            # ``dict.items`` method (a truthy builtin that would make a
+            # TruthyTest always fire). Absent resolves to None so the
+            # guard reads it as false.
+            if p in value:
+                value = value[p]
+            else:
+                return None
         elif hasattr(value, p):
             value = getattr(value, p)
         else:
