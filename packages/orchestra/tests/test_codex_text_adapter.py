@@ -410,8 +410,15 @@ def test_invoke_returns_error_verdict_on_other_nonzero(
 
 def test_verdict_for_exit_code_mapping() -> None:
     assert _verdict_for_exit_code(0) == "complete"
+    # -2 (wall-clock timeout) and -3 (idle-kill) are both genuine
+    # timeouts. run_session kills a stuck session with -3 after
+    # IDLE_TIMEOUT_S; it must not surface as a hard error.
     assert _verdict_for_exit_code(-2) == "timeout"
+    assert _verdict_for_exit_code(-3) == "timeout"
     assert _verdict_for_exit_code(1) == "error"
+    # 130 is a deliberate caller-initiated interrupt, not a stuck
+    # session, so it is deliberately classified as error rather than
+    # timeout to avoid retrying a run the caller asked to abort.
     assert _verdict_for_exit_code(130) == "error"
 
 
