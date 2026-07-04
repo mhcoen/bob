@@ -562,3 +562,30 @@ workflow ask_single
     assert answer == "answer"
     # The fake run_workflow received the project_dir we passed.
     assert captured["project_dir"] == tmp_path
+
+
+def test_help_surfaces_malformed_config_error(
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A malformed config is a load error, not an absent config.
+    ``orchestra help`` must surface the error (as the verb dispatcher
+    does) instead of printing the misleading "(none; create ...)"
+    hint. Regression for T-000006."""
+    _write_global_config(isolated_home, {"roles": []})
+    rc = cli.main(["help"])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "roles" in captured.err
+    assert "(none" not in captured.out
+
+
+def test_help_for_verb_surfaces_malformed_config_error(
+    isolated_home: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The same error surfacing applies to ``orchestra help <verb>``."""
+    _write_global_config(isolated_home, {"roles": []})
+    rc = cli.main(["help", "ask"])
+    assert rc == 1
+    assert "roles" in capsys.readouterr().err

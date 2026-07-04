@@ -2,6 +2,21 @@
 
 ## Observations
 
+- 2026-07-03 [6] [T-000006] The task framed `max_state_visits` as a
+  distinct per-state bound that the parser wrongly aliases onto the
+  global `max_total_steps` budget. The frozen design docs contradict
+  this: `design/orchestra-grammar.md` ~398 states "Either keyword is
+  accepted; they are synonyms" and `design/orchestra-design.md` ~250
+  calls `max_state_visits` the "equivalent" of `max_total_steps`. Per
+  the CLAUDE.md design discipline (surface a design problem as a
+  finding rather than silently amend a frozen doc), I kept the synonym
+  behavior and only fixed the genuine defect: the duplicate-declaration
+  guard used a `0` sentinel, so a first declared value of `0` defeated
+  the guard and let a second declaration through. The guard now uses a
+  `None` sentinel. If a real semantic split between a global budget and
+  a per-state visit bound is wanted, it needs a grammar-doc change and a
+  new IR field, not a silent parser divergence.
+
 - 2026-07-03 [5] [T-000005] (template/guard resolution) Fixed two
   defects. (a) `_format` (`orchestra/executor/_executor_common.py` ~218)
   no longer unwraps dict values that carry a `"value"` key; the branch

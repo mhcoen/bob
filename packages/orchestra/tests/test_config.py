@@ -795,3 +795,77 @@ def test_compound_role_binding_rejects_duplicate_criterion_ids() -> None:
     with pytest.raises(ConfigError) as excinfo:
         OrchestraConfig.from_dict(raw)
     assert "dup" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------
+# Falsy but wrong-typed sections must raise, not be masked into empty
+# defaults. Regression for T-000006: `raw.get(x) or {}` coerced a
+# present-but-wrong-typed falsy value (e.g. `[]`) into the empty
+# default instead of raising ConfigError.
+# --------------------------------------------------------------------
+
+
+def test_empty_list_roles_section_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict({"roles": []})
+    assert "roles" in str(excinfo.value)
+
+
+def test_empty_list_workflows_section_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict({"workflows": []})
+    assert "workflows" in str(excinfo.value)
+
+
+def test_empty_list_verbs_section_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict({"verbs": []})
+    assert "verbs" in str(excinfo.value)
+
+
+def test_empty_list_role_bindings_section_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict({"role_bindings": []})
+    assert "role_bindings" in str(excinfo.value)
+
+
+def test_absent_sections_still_default_to_empty() -> None:
+    """The falsy-wrong-typed fix must not break the absent-key path:
+    an empty config still loads with empty sections."""
+    cfg = OrchestraConfig.from_dict({})
+    assert cfg.roles == {}
+    assert cfg.workflows == {}
+    assert cfg.verbs == {}
+
+
+def test_falsy_wrong_typed_role_parameters_rejected() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(
+            {"roles": {"editor": {"adapter": "claude_code_agent", "parameters": []}}}
+        )
+    assert "parameters" in str(excinfo.value)
+
+
+def test_falsy_wrong_typed_role_overrides_rejected() -> None:
+    """An empty-list (falsy, wrong-typed) role_overrides must raise
+    rather than be masked into an empty object."""
+    raw = {
+        "roles": {"drafter": {"adapter": "claude_code_text"}},
+        "workflows": {"code_edit": {"pattern": "single", "role_overrides": []}},
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(raw)
+    assert "role_overrides" in str(excinfo.value)
+
+
+def test_falsy_wrong_typed_role_binding_criteria_rejected() -> None:
+    """A role-scoped ``criteria`` given as a falsy wrong type (empty
+    dict) must raise rather than be coerced to the empty default."""
+    raw = {
+        "role_bindings": {
+            "design": {"pattern": "design_loop", "criteria": {}},
+        },
+    }
+    with pytest.raises(ConfigError) as excinfo:
+        OrchestraConfig.from_dict(raw)
+    assert "criteria" in str(excinfo.value)

@@ -100,7 +100,10 @@ def _parse_criteria(context: str, raw_value: Any) -> tuple[CriterionDecl, ...]:
     accept the same shape and enforce the same unique-id rule.
     ``context`` names the owning scope for error messages.
     """
-    criteria_raw = raw_value or []
+    # Default only when the key is absent. A present-but-wrong-typed
+    # value that happens to be falsy (e.g. an empty dict) must still
+    # raise, not be silently coerced to the empty default.
+    criteria_raw = [] if raw_value is None else raw_value
     if not isinstance(criteria_raw, list):
         raise ConfigError(f"{context}: 'criteria' must be an array")
     criteria_list = [CriterionDecl.from_dict(item) for item in criteria_raw]
@@ -226,7 +229,9 @@ def _role_optional_fields(role_name: str, raw: dict[str, Any]) -> dict[str, Any]
     tools = raw.get("tools")
     if tools is not None and not isinstance(tools, str):
         raise ConfigError(f"role {role_name!r}: 'tools' must be a string")
-    parameters = raw.get("parameters") or {}
+    parameters = raw.get("parameters")
+    if parameters is None:
+        parameters = {}
     if not isinstance(parameters, dict):
         raise ConfigError(f"role {role_name!r}: 'parameters' must be an object")
     return {
@@ -369,7 +374,9 @@ class WorkflowConfig:
         pattern = raw.get("pattern")
         if not isinstance(pattern, str) or not pattern:
             raise ConfigError(f"workflow {workflow_name!r}: missing or empty 'pattern' key")
-        overrides_raw = raw.get("role_overrides") or {}
+        overrides_raw = raw.get("role_overrides")
+        if overrides_raw is None:
+            overrides_raw = {}
         if not isinstance(overrides_raw, dict):
             raise ConfigError(f"workflow {workflow_name!r}: 'role_overrides' must be an object")
         role_overrides: dict[str, dict[str, Any]] = {}
@@ -426,21 +433,33 @@ class OrchestraConfig:
         # the sections. Validation that a workflow's required roles
         # have bindings runs against the merged config in the api,
         # not here, so a partial file does not fail to load.
-        roles_raw = raw.get("roles") or {}
+        # Default a section only when its key is absent. A present but
+        # wrong-typed section that is also falsy (e.g. ``roles: []``)
+        # must raise a ConfigError rather than be masked into an empty
+        # object by ``or {}``.
+        roles_raw = raw.get("roles")
+        if roles_raw is None:
+            roles_raw = {}
         if not isinstance(roles_raw, dict):
             raise ConfigError("'roles' must be an object")
         roles = {name: RoleBinding.from_dict(name, body) for name, body in roles_raw.items()}
-        workflows_raw = raw.get("workflows") or {}
+        workflows_raw = raw.get("workflows")
+        if workflows_raw is None:
+            workflows_raw = {}
         if not isinstance(workflows_raw, dict):
             raise ConfigError("'workflows' must be an object")
         workflows = {
             name: WorkflowConfig.from_dict(name, body) for name, body in workflows_raw.items()
         }
-        verbs_raw = raw.get("verbs") or {}
+        verbs_raw = raw.get("verbs")
+        if verbs_raw is None:
+            verbs_raw = {}
         if not isinstance(verbs_raw, dict):
             raise ConfigError("'verbs' must be an object")
         verbs = {name: VerbBinding.from_dict(name, body) for name, body in verbs_raw.items()}
-        role_bindings_raw = raw.get("role_bindings") or {}
+        role_bindings_raw = raw.get("role_bindings")
+        if role_bindings_raw is None:
+            role_bindings_raw = {}
         if not isinstance(role_bindings_raw, dict):
             raise ConfigError("'role_bindings' must be an object")
         role_bindings = {

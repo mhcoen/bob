@@ -2038,3 +2038,93 @@ workflow x
     msg = str(exc.value)
     assert "schema" in msg
     assert "artifact" in msg
+
+
+# --------------------------------------------------------------------
+# T-000006 loader nits: CRLF blank lines, require_diff validation, and
+# the max_total_steps duplicate-declaration guard.
+# --------------------------------------------------------------------
+
+
+def test_crlf_blank_lines_parse(tmp_path):
+    """A blank CRLF line inside a block must be skipped like a blank LF
+    line. Regression: the blank-line guard tested only "\\n" while the
+    newline consumer accepts "\\r\\n", so CRLF source lexed a spurious
+    NEWLINE (and DEDENT) token and failed to parse."""
+    src = (
+        "spec 0.1\r\n"
+        "workflow x\r\n"
+        "  max_total_steps 5\r\n"
+        "\r\n"
+        "  model m\r\n"
+        "  state s\r\n"
+        "    actor model m\r\n"
+        "    on complete => done\r\n"
+        "    on error => stop\r\n"
+        "    on timeout => stop\r\n"
+    )
+    wf = parse_workflow(src, tmp_path / "x.orc")
+    assert wf.max_total_steps == 5
+    assert [s.name for s in wf.states] == ["s"]
+
+
+def test_require_diff_rejects_non_boolean(tmp_path):
+    src = (
+        "spec 0.1\n"
+        "workflow x\n"
+        "  max_total_steps 5\n"
+        "  state s\n"
+        "    actor shell\n"
+        "    require_diff yes\n"
+        "    on complete => done\n"
+        "    on error => stop\n"
+        "    on timeout => stop\n"
+    )
+    with pytest.raises(ParseError, match="require_diff expects"):
+        parse_workflow(src, tmp_path / "x.orc")
+
+
+def test_require_diff_accepts_boolean(tmp_path):
+    for literal, expected in (("true", True), ("false", False)):
+        src = (
+            "spec 0.1\n"
+            "workflow x\n"
+            "  max_total_steps 5\n"
+            "  state s\n"
+            "    actor shell\n"
+            f"    require_diff {literal}\n"
+            "    on complete => done\n"
+            "    on error => stop\n"
+            "    on timeout => stop\n"
+        )
+        wf = parse_workflow(src, tmp_path / "x.orc")
+        assert wf.state("s").backing_options["require_diff"] is expected
+
+
+def test_max_state_visits_is_synonym_for_max_total_steps(tmp_path):
+    """orchestra-grammar.md: the two keywords are synonyms."""
+    src = "spec 0.1\nworkflow x\n  max_state_visits 7\n"
+    wf = parse_workflow(src, tmp_path / "x.orc")
+    assert wf.max_total_steps == 7
+
+
+def test_duplicate_max_total_steps_rejected(tmp_path):
+    src = "spec 0.1\nworkflow x\n  max_total_steps 5\n  max_total_steps 9\n"
+    with pytest.raises(ParseError, match="declared more than once"):
+        parse_workflow(src, tmp_path / "x.orc")
+
+
+def test_duplicate_max_total_steps_rejected_when_first_is_zero(tmp_path):
+    """The duplicate guard must fire even when the first declared value
+    is 0. Regression: the guard compared against a 0 sentinel, so a
+    first value of 0 silently allowed a second declaration."""
+    src = "spec 0.1\nworkflow x\n  max_total_steps 0\n  max_total_steps 5\n"
+    with pytest.raises(ParseError, match="declared more than once"):
+        parse_workflow(src, tmp_path / "x.orc")
+
+
+def test_max_total_steps_and_max_state_visits_conflict_rejected(tmp_path):
+    """Being synonyms, declaring one after the other is a duplicate."""
+    src = "spec 0.1\nworkflow x\n  max_total_steps 5\n  max_state_visits 9\n"
+    with pytest.raises(ParseError, match="declared more than once"):
+        parse_workflow(src, tmp_path / "x.orc")

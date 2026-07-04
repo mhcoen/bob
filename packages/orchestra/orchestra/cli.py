@@ -786,15 +786,15 @@ def main(argv: list[str] | None = None) -> int:
         return _dispatch_verb(raw_args[0], raw_args[1:], progress_callback=progress_cb)
 
     if raw_args and raw_args[0] == "help":
-        config, _err = _try_load_merged_config(project_dir=Path.cwd())
+        config, err = _try_load_merged_config(project_dir=Path.cwd())
+        # A malformed config is a load error, not an absent config.
+        # Surface it (as _dispatch_verb does) instead of printing the
+        # misleading "(none; create ...)" hint from the help overview.
+        if config is None:
+            print(err or "config unavailable", file=sys.stderr)
+            return 1
         if len(raw_args) == 1:
             return _print_help_overview(config)
-        if config is None:
-            print(
-                f"no config; cannot describe verb. Create {global_config_path()} first.",
-                file=sys.stderr,
-            )
-            return 1
         return _print_help_for_verb(raw_args[1], config)
 
     parser = argparse.ArgumentParser(prog="orchestra")

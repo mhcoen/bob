@@ -78,7 +78,11 @@ class Parser:
 
         profiles: list[str] = []
         external_inputs: list[ExternalInputDecl] = []
-        max_total_steps = 0
+        # None means "not yet declared" so a first declared value of 0
+        # does not defeat the duplicate-declaration guard below. The
+        # validator rejects a missing or non-positive budget, so 0 is
+        # never a legal value; the sentinel only has to be distinct.
+        max_total_steps: int | None = None
         compression_model: str | None = None
         models: list[ModelDecl] = []
         roles: list[RoleDecl] = []
@@ -108,10 +112,13 @@ class Parser:
                 self._expect("NEWLINE")
                 external_inputs.append(ExternalInputDecl(name=ename, type=etype))
             elif kw == "max_total_steps" or kw == "max_state_visits":
+                # `max_total_steps` and `max_state_visits` are synonyms
+                # per orchestra-grammar.md ("Either keyword is accepted;
+                # they are synonyms") and orchestra-design.md rule 11.
                 self._advance()
                 value = int(self._expect("INT").value)
                 self._expect("NEWLINE")
-                if max_total_steps != 0:
+                if max_total_steps is not None:
                     raise ParseError(
                         "max_total_steps declared more than once",
                         line=tok.line,
@@ -148,7 +155,7 @@ class Parser:
             name=name,
             profiles=tuple(profiles),
             external_inputs=tuple(external_inputs),
-            max_total_steps=max_total_steps,
+            max_total_steps=max_total_steps if max_total_steps is not None else 0,
             compression_model=compression_model,
             models=tuple(models),
             roles=tuple(roles),
@@ -467,6 +474,11 @@ class Parser:
             elif kw == "require_diff":
                 self._advance()
                 bv = self._expect("IDENT").value
+                if bv not in ("true", "false"):
+                    raise ParseError(
+                        f"require_diff expects true|false, got {bv!r}",
+                        line=tok.line,
+                    )
                 backing_options["require_diff"] = bv == "true"
                 self._expect("NEWLINE")
             else:

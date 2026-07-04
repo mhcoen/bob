@@ -111,7 +111,10 @@ class Lexer:
             # We are at the start of a line. Read leading whitespace.
             ws = self._read_leading_ws()
             # Blank or comment-only line: skip without changing indent.
-            if self._pos >= len(self._src) or self._src[self._pos] == "\n":
+            # A bare CR or a CRLF pair both open a blank line here; the
+            # guard must match every newline _consume_newline accepts,
+            # otherwise CRLF source lexes a spurious NEWLINE token.
+            if self._pos >= len(self._src) or self._src[self._pos] in ("\n", "\r"):
                 if self._pos < len(self._src):
                     self._consume_newline()
                 continue
