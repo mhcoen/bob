@@ -285,6 +285,7 @@ class _FakePopen:
         stdout: Any = None,
         stderr: Any = None,
         text: bool = True,
+        errors: str | None = None,
         env: dict[str, str] | None = None,
         start_new_session: bool = False,
     ) -> None:

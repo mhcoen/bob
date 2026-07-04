@@ -99,6 +99,29 @@ def test_run_session_silent_does_not_change_exit_code(
     assert code_loud == 7
 
 
+def test_run_session_bad_utf8_byte_still_captures_trailing_output(
+    tmp_path: Path,
+) -> None:
+    """A single invalid UTF-8 byte mid-stream must not truncate
+    capture. With strict decoding the reader thread would raise on
+    the bad byte, swallow the exception, queue the sentinel, and drop
+    every later line including the final result record. The stream is
+    opened with ``errors="replace"`` so the bad byte is replaced and
+    the trailing record survives."""
+    # printf emits: a normal line, a raw 0xff (invalid UTF-8), then the
+    # trailing result record. exit 0 so the truncation is silent.
+    output, exit_code = _subprocess.run_session(
+        ["sh", "-c", r"printf 'first\n\377\nRESULT_RECORD\n'"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=30,
+        silent=True,
+    )
+    assert exit_code == 0
+    assert "first" in output
+    assert "RESULT_RECORD" in output
+
+
 # --------------------------------------------------------------------
 # Pass-2 fix #4: write_log filenames do not collide under fan-out
 # --------------------------------------------------------------------

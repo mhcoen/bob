@@ -879,6 +879,7 @@ def run_session(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        errors="replace",
         env=env,
         start_new_session=True,
     )
