@@ -2,6 +2,18 @@
 
 ## Observations
 
+- 2026-07-03 [4] [T-000004] (run_session timeout contract) Hardened the
+  wall-clock guard in `run_session` (`orchestra/adapters/_subprocess.py`):
+  `timeout` is now typed `int | None`, `None` is the only supported
+  "no timeout" spelling, the loop guard reads `if timeout is not None`,
+  and values `<= 0` raise `ValueError` before the process is spawned.
+  The identical mirror guard in mcloop's `_run_session`
+  (`packages/mcloop/mcloop/runner.py` ~972, ~1120) was fixed in the same
+  pass. Every real mcloop caller already passes
+  `task_timeout or DEFAULT_TASK_TIMEOUT` (always a positive int), so no
+  caller regresses; but this session's mandated check commands run in the
+  orchestra cwd only, so mcloop's own test suite was not exercised here.
+  The environment should run mcloop's pytest to confirm the mirror change.
 - 2026-07-03 [1] [T-000001] (store-leak task) The source fix and both
   regression tests are complete and clean. `run_workflow`
   (`orchestra/api/dispatch.py` ~256-344) opens the store before the

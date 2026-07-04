@@ -123,6 +123,92 @@ def test_run_session_bad_utf8_byte_still_captures_trailing_output(
 
 
 # --------------------------------------------------------------------
+# T-000004: run_session's wall-clock timeout contract. ``None`` is the
+# only supported way to spell "no timeout"; ``0`` and other non-positive
+# values are rejected so a future caller cannot resurrect the falsy-zero
+# sentinel that silently disabled the guard.
+# --------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_timeout", [0, -1, -3600])
+def test_run_session_rejects_non_positive_timeout(
+    tmp_path: Path,
+    bad_timeout: int,
+) -> None:
+    """A ``timeout`` of 0 or negative is a caller error, not a sentinel.
+    ``run_session`` raises ``ValueError`` before it spawns anything so
+    the falsy-zero bug (0 read as "no wall-clock cap") cannot recur."""
+    with pytest.raises(ValueError, match="None"):
+        _subprocess.run_session(
+            ["true"],
+            tmp_path,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=bad_timeout,
+            silent=True,
+        )
+
+
+def test_run_session_rejects_timeout_before_spawn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The rejection happens before ``subprocess.Popen`` is reached, so
+    an invalid timeout never leaves a stray process or PID file."""
+    called = False
+
+    def _boom(*args: Any, **kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        raise AssertionError("Popen must not be called for an invalid timeout")
+
+    monkeypatch.setattr("orchestra.adapters._subprocess.subprocess.Popen", _boom)
+    with pytest.raises(ValueError):
+        _subprocess.run_session(
+            ["true"],
+            tmp_path,
+            env={"PATH": "/usr/bin:/bin"},
+            timeout=0,
+            silent=True,
+        )
+    assert called is False
+
+
+def test_run_session_none_timeout_disables_wall_clock_cap(
+    tmp_path: Path,
+    fast_progress: None,
+) -> None:
+    """``timeout=None`` disables the wall-clock cap. A quick subprocess
+    finishes with its real exit code rather than being force-killed with
+    the timeout code (-2), proving None is accepted and the guard never
+    fires."""
+    output, exit_code = _subprocess.run_session(
+        ["sh", "-c", "sleep 0.3; echo done"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=None,
+        silent=True,
+    )
+    assert exit_code == 0
+    assert "done" in output
+
+
+def test_run_session_positive_timeout_still_kills_on_wall_clock(
+    tmp_path: Path,
+    fast_progress: None,
+) -> None:
+    """The guard still works for a legitimate positive cap: a process
+    that outlives its wall-clock timeout is killed and returns -2."""
+    _, exit_code = _subprocess.run_session(
+        ["sh", "-c", "sleep 5"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=1,
+        silent=True,
+    )
+    assert exit_code == -2
+
+
+# --------------------------------------------------------------------
 # Pass-2 fix #4: write_log filenames do not collide under fan-out
 # --------------------------------------------------------------------
 

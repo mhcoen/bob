@@ -834,7 +834,7 @@ def run_session(
     cmd: list[str],
     cwd: Path,
     env: dict[str, str],
-    timeout: int = DEFAULT_TIMEOUT_S,
+    timeout: int | None = DEFAULT_TIMEOUT_S,
     *,
     silent: bool = False,
     stdin_bytes: bytes | None = None,
@@ -868,7 +868,22 @@ def run_session(
     summary. Callers that have no prompt (mock adapters, codex
     smoke probes) can leave it ``None`` and the stdin pipe falls
     back to /dev/null.
+
+    ``timeout`` is a whole-second wall-clock cap. Pass ``None`` to
+    disable the wall-clock cap entirely (the idle timeout still
+    applies); this is the only supported way to spell "no timeout".
+    A value ``<= 0`` is rejected with ``ValueError``: 0 used to be an
+    undocumented falsy sentinel for "no timeout", which let a
+    sub-second cap that floored to 0 silently disable the guard and
+    truncate a session. Callers converting a millisecond budget must
+    go through ``timeout_s_from_ms``, which floors any explicit cap at
+    1s.
     """
+    if timeout is not None and timeout <= 0:
+        raise ValueError(
+            f"timeout must be a positive number of seconds or None, got {timeout}; "
+            "pass None to disable the wall-clock cap"
+        )
     session = SessionState()
     previous = _current_session()
     _set_current_session(session)
@@ -966,7 +981,7 @@ def run_session(
                     process.kill()
                 process.wait()
                 return _assemble(head_lines, tail_lines, dropped), 130
-            if timeout and (time.monotonic() - started) > timeout:
+            if timeout is not None and (time.monotonic() - started) > timeout:
                 try:
                     os.killpg(os.getpgid(process.pid), 9)
                 except OSError:

@@ -969,13 +969,24 @@ def _run_session(
     cmd: list[str],
     cwd: Path,
     env: dict | None = None,
-    timeout: int = DEFAULT_TASK_TIMEOUT,
+    timeout: int | None = DEFAULT_TASK_TIMEOUT,
 ) -> tuple[str, int]:
     """Run a CLI session, stream output, return (output, exit_code).
 
     If *timeout* seconds elapse, the process group is killed and
     exit code -2 is returned.
+
+    *timeout* is a whole-second wall-clock cap. Pass ``None`` to
+    disable the cap (the idle/stall guards still apply); that is the
+    only supported way to spell "no timeout". A value ``<= 0`` is
+    rejected with ``ValueError`` so a future caller cannot resurrect
+    the falsy-zero sentinel that once silently disabled the guard.
     """
+    if timeout is not None and timeout <= 0:
+        raise ValueError(
+            f"timeout must be a positive number of seconds or None, got {timeout}; "
+            "pass None to disable the wall-clock cap"
+        )
     if env is None:
         raise ValueError("_run_session requires an explicit env from _prepare_session")
     session_env = env
@@ -1117,7 +1128,7 @@ def _run_session(
         if _interrupted:
             break
         # Check task timeout
-        if timeout and (time.monotonic() - session_start) > timeout:
+        if timeout is not None and (time.monotonic() - session_start) > timeout:
             elapsed_m = timeout / 60
             print(
                 f"\n!!! Task timed out after {elapsed_m:.0f}m. Killing session.",
