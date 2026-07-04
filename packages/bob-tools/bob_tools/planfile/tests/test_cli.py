@@ -69,6 +69,18 @@ MARKER_BEARING_ID_LESS_PLAN = """<!-- bob-plan-format: 1 -->
 - [ ] second task
 """
 
+MARKER_BEARING_MIXED_IDS_PLAN = """<!-- bob-plan-format: 1 -->
+
+# Marker Fixture
+
+## Stage 1: Bootstrap
+<!-- phase_id: phase_001 -->
+
+- [ ] T-000005: already has an id
+- [ ] bare todo
+- [x] bare done task
+"""
+
 PHASELESS_PLAN = """# Phaseless Fixture
 
 - [ ] stray task
@@ -191,6 +203,34 @@ class TestFmt:
         assert "T-000001" in text
         assert "T-000002" in text
         assert "<!-- bob-plan-format: 1 -->" in text
+
+    def test_migrates_bare_checkboxes_beside_id_bearing_ones_under_marker(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """fmt assigns ids to bare checkboxes regardless of the marker.
+
+        A magic-lined file may legitimately carry a mix of already-id'd
+        and still-bare checkboxes (a partially migrated plan). fmt must
+        migrate the bare ones — assigning ids is what fmt is for —
+        rather than take the strict-validate path the marker would
+        otherwise force, which rejected bare checkboxes with "expected
+        task id after checkbox marker". This pins the migrate-vs-validate
+        trigger in ``cmd_fmt`` at the partial-migration boundary the
+        single-scenario test above does not cover.
+        """
+        path = tmp_path / "PLAN.md"
+        path.write_text(MARKER_BEARING_MIXED_IDS_PLAN)
+        rc = main(["fmt", str(path)])
+        captured = capsys.readouterr()
+        assert rc == EXIT_OK
+        # The failure signature from the bug report must never appear.
+        assert "expected task id" not in captured.err
+        text = path.read_text()
+        # Existing id is preserved; the two bare checkboxes get fresh
+        # ids continuing past the max in use, not an error.
+        assert "T-000005: already has an id" in text
+        assert "T-000006: bare todo" in text
+        assert "T-000007: bare done task" in text
 
     def test_refuses_to_drop_checkboxes_outside_phase_heading(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]

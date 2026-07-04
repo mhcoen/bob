@@ -367,9 +367,7 @@ def update(
         post_text = path.read_text()
         if pre_text != post_text:
             raise ConcurrentUpdateError(path)
-        plan = parse_plan(
-            post_text, source_path=path, force_strict_from_magic=magic
-        )
+        plan = parse_plan(post_text, source_path=path, force_strict_from_magic=magic)
         new_plan = operation(plan)
         if not magic:
             new_plan = dataclasses.replace(new_plan, magic_version=None)

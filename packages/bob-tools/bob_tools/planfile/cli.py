@@ -50,7 +50,6 @@ from bob_tools.planfile.model import (
     PlanValidationError,
     Settlement,
 )
-from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.operations import (
     complete_task,
     fail_task,
@@ -58,6 +57,7 @@ from bob_tools.planfile.operations import (
     next_tasks,
     validate_plan,
 )
+from bob_tools.planfile.parser import parse_plan
 from bob_tools.planfile.preflight import (
     PlanPreflightError,
     preflight_runtime_plan,

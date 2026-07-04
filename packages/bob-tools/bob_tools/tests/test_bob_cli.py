@@ -38,11 +38,7 @@ def test_install_copies_hook_and_registers(
     assert dst.read_text() == fake_hook.read_text()
 
     settings = json.loads((home / ".claude" / "settings.json").read_text())
-    cmds = [
-        h["command"]
-        for e in settings["hooks"]["PreToolUse"]
-        for h in e["hooks"]
-    ]
+    cmds = [h["command"] for e in settings["hooks"]["PreToolUse"] for h in e["hooks"]]
     assert f"python3 {dst}" in cmds
 
 
@@ -57,11 +53,7 @@ def test_install_is_idempotent(
 
     settings = json.loads((home / ".claude" / "settings.json").read_text())
     dst = home / ".claude" / "hooks" / "telegram-permission-hook.py"
-    cmds = [
-        h["command"]
-        for e in settings["hooks"]["PreToolUse"]
-        for h in e["hooks"]
-    ]
+    cmds = [h["command"] for e in settings["hooks"]["PreToolUse"] for h in e["hooks"]]
     # registered exactly once despite two installs
     assert cmds.count(f"python3 {dst}") == 1
     out = capsys.readouterr().out

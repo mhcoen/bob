@@ -3,19 +3,22 @@
 # during pytest so unmocked LLM paths fail fast instead of silently
 # burning 5-15 seconds per call. Opt out with @pytest.mark.llm.
 import subprocess as _mcloop_subprocess
+from typing import Any
 
 import pytest
 
 
 @pytest.fixture(autouse=True)
-def _mcloop_block_real_llm_calls(request, monkeypatch):
+def _mcloop_block_real_llm_calls(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Prevent tests from making real LLM subprocess calls."""
     if request.node.get_closest_marker("llm"):
         return  # Test opted out via @pytest.mark.llm
     _real_run = _mcloop_subprocess.run
     _real_popen = _mcloop_subprocess.Popen
 
-    def _is_llm_binary(cmd):
+    def _is_llm_binary(cmd: object) -> bool:
         if isinstance(cmd, (list, tuple)) and cmd:
             binary = str(cmd[0])
             return (
@@ -25,7 +28,7 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
             )
         return False
 
-    def _guarded_run(cmd, *args, **kwargs):
+    def _guarded_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
         if _is_llm_binary(cmd):
             raise RuntimeError(
                 f"Test made a real LLM subprocess call: {cmd!r}. "
@@ -35,7 +38,7 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
             )
         return _real_run(cmd, *args, **kwargs)
 
-    def _guarded_popen(cmd, *args, **kwargs):
+    def _guarded_popen(cmd: Any, *args: Any, **kwargs: Any) -> Any:
         # Some CLIs spawn the LLM via Popen rather than run; guard both
         # or the Popen path leaks a real call straight through.
         if _is_llm_binary(cmd):
@@ -49,4 +52,3 @@ def _mcloop_block_real_llm_calls(request, monkeypatch):
 
     monkeypatch.setattr(_mcloop_subprocess, "run", _guarded_run)
     monkeypatch.setattr(_mcloop_subprocess, "Popen", _guarded_popen)
-

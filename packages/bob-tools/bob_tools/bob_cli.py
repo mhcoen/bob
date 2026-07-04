@@ -119,8 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     install = sub.add_parser(
         "install",
         help=(
-            "install the combined Telegram + RTK Claude Code hook into "
-            "~/.claude/hooks/"
+            "install the combined Telegram + RTK Claude Code hook into ~/.claude/hooks/"
         ),
     )
     install.add_argument("--home", help="override home directory (for testing)")

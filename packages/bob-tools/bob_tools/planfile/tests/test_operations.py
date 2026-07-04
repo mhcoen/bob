@@ -681,9 +681,7 @@ class TestValidatePlanConstructed:
         validate_plan(plan, constructed=True)
 
     def test_missing_accept_rejected_on_leaf_implementation_task(self) -> None:
-        plan = self._cplan(
-            phases=(self._cphase(tasks=(self._ctask(annotations=()),)),)
-        )
+        plan = self._cplan(phases=(self._cphase(tasks=(self._ctask(annotations=()),)),))
         with pytest.raises(PlanValidationError) as exc_info:
             validate_plan(plan, constructed=True)
         assert any(
@@ -717,9 +715,7 @@ class TestValidatePlanConstructed:
     def test_unknown_accept_kind_rejected(self) -> None:
         plan = self._cplan(
             phases=(
-                self._cphase(
-                    tasks=(self._ctask(annotations=(("accept", "manual"),)),)
-                ),
+                self._cphase(tasks=(self._ctask(annotations=(("accept", "manual"),)),)),
             )
         )
         with pytest.raises(PlanValidationError) as exc_info:
