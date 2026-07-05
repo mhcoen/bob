@@ -24,6 +24,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from bob_tools.planfile.fileio import _acquire_exclusive_lock, _atomic_write_text
 from bob_tools.planfile.iteration import _iter_plan_tasks
 from bob_tools.planfile.model import Plan, Task, TaskStatus
 from bob_tools.planfile.parser import parse_plan
@@ -170,6 +171,13 @@ def backfill_file(
     Parses the file in unchecked (compat-tolerant) mode, stamps resolvable
     DONE tasks, and rewrites the file canonically only when something
     changed. Returns ``(backfilled, left_null)``.
+
+    The read pins UTF-8 and the rewrite goes through the same
+    lock+atomic-write path as every other writer in this library
+    (:func:`~bob_tools.planfile.fileio._acquire_exclusive_lock` around
+    :func:`~bob_tools.planfile.fileio._atomic_write_text`), so a crash
+    mid-write cannot truncate PLAN.md and a concurrent ``save``/``update``
+    cannot interleave with the backfill.
     """
     text = path.read_text(encoding="utf-8")
     plan = parse_plan(text, strict=False)
@@ -178,5 +186,7 @@ def backfill_file(
         plan, rel_path, repo_root=repo_root, run=run
     )
     if backfilled:
-        path.write_text(render_plan(new_plan), encoding="utf-8")
+        rendered = render_plan(new_plan)
+        with _acquire_exclusive_lock(path):
+            _atomic_write_text(path, rendered)
     return backfilled, left_null

@@ -8,6 +8,27 @@
 
 ## Observations
 
+- 2026-07-05 [7] [T-000007] Write-path durability holes closed.
+  `backfill_file` (`planfile/backfill.py`) now renders then writes through
+  `fileio._acquire_exclusive_lock` + `fileio._atomic_write_text` (imported
+  by `from ... import`, so tests monkeypatch the names on the **backfill**
+  module, not `fileio`), matching every other writer — no more bare
+  `path.write_text`. Encodings pinned to UTF-8 everywhere they were locale-
+  dependent: `fileio.load` (`path.read_text`), both reads in `fileio.update`,
+  and the tempfile `os.fdopen` inside `_atomic_write_text`; backfill already
+  pinned UTF-8 so the plan encoding is now consistent across all paths.
+  Added a directory `fsync` after `os.replace` in `_atomic_write_text` (new
+  `_fsync_directory` helper) so the rename itself is durable, not just the
+  file contents. **Decision worth revisiting:** `_fsync_directory` swallows
+  `EINVAL` (some filesystems reject `fsync` on a directory fd) but
+  re-raises any other `OSError`. This trades a narrow durability guarantee
+  for portability; if a target filesystem is known to support directory
+  fsync, the swallow hides nothing, but on such a filesystem a spurious
+  EINVAL would silently weaken the crash-safety claim. Regression tests in
+  `test_fileio.py` (fsync-of-directory-descriptor, EINVAL-swallow,
+  non-EINVAL-propagation, UTF-8 pin round-trip) and `test_backfill.py`
+  (lock+atomic-write routing, no-write-when-nothing-backfilled, non-ASCII
+  UTF-8 round-trip).
 - 2026-07-05 [5] [T-000005] Fixed the action-tag+text round-trip break by
   making the **renderer refuse** the ambiguous combination (design doc
   section 4.3 grammar `ActionTag ← "[AUTO:" Word "]" WS Text?` defines args

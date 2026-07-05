@@ -19,6 +19,8 @@ from __future__ import annotations
 import contextlib
 import dataclasses
 import errno
+import os
+import stat
 import threading
 import time
 from collections.abc import Iterator
@@ -574,3 +576,169 @@ def test_update_default_magic_true_still_strict_on_idless(tmp_path: Path) -> Non
     path.write_text(_MAGIC_IDLESS_QUEUE)
     with pytest.raises(PlanSyntaxError):
         update(path, lambda plan: plan, validation="unchecked")
+
+
+# --- T-000007 durability + encoding pins ------------------------------------
+
+# A canonical fixture whose project title carries non-ASCII text, so the
+# UTF-8 pin is observable in the bytes on disk and after a re-parse.
+_UNICODE_PLAN = (
+    "<!-- bob-plan-format: 1 -->\n"
+    "\n"
+    "# Café résumé fixture ☕\n"
+    "\n"
+    "## Stage 1: Smoke\n"
+    "<!-- phase_id: phase_001 -->\n"
+    "\n"
+    "- [ ] T-000001: only task [accept: pytest]\n"
+)
+
+
+def test_atomic_write_pins_utf8_regardless_of_locale(tmp_path: Path) -> None:
+    """``_atomic_write_text`` always encodes UTF-8, not the platform locale.
+
+    Before the fix the tempfile was opened with ``os.fdopen(fd, "w")``,
+    whose encoding follows ``locale.getpreferredencoding``; on a non-UTF-8
+    locale a non-ASCII plan would be re-encoded inconsistently (or fail).
+    Pinning ``encoding="utf-8"`` makes the on-disk bytes deterministic:
+    they equal the UTF-8 encoding of the text, which we can assert
+    directly without perturbing the process locale.
+    """
+    path = tmp_path / "PLAN.md"
+    text = "# café ☕ résumé\n"
+    fileio._atomic_write_text(path, text)
+    assert path.read_bytes() == text.encode("utf-8")
+
+
+def test_load_reads_utf8_bytes(tmp_path: Path) -> None:
+    """``load`` decodes the file as UTF-8 regardless of platform locale.
+
+    Writing raw UTF-8 bytes and loading must recover the non-ASCII
+    title; the prior ``path.read_text()`` used the locale encoding and
+    would mojibake or raise on a non-UTF-8 locale.
+    """
+    path = tmp_path / "PLAN.md"
+    path.write_bytes(_UNICODE_PLAN.encode("utf-8"))
+    plan = load(path)
+    assert plan.project_title == "Café résumé fixture ☕"
+
+
+def test_save_load_round_trips_non_ascii(tmp_path: Path) -> None:
+    """A canonical save of a non-ASCII plan round-trips through load."""
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_UNICODE_PLAN)
+    save(path, plan)
+    assert path.read_bytes() == render_from(plan)
+    assert load(path).project_title == "Café résumé fixture ☕"
+
+
+def render_from(plan: Plan) -> bytes:
+    """Helper: canonical render of ``plan`` as UTF-8 bytes for byte-compare."""
+    from bob_tools.planfile.operations import assert_mcloop_canonical
+
+    return assert_mcloop_canonical(plan).encode("utf-8")
+
+
+def test_save_fsyncs_containing_directory_after_rename(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``save`` fsyncs the directory after ``os.replace`` so the rename is durable.
+
+    The prior ``_atomic_write_text`` fsynced only the tempfile, leaving a
+    window where a crash right after the rename could drop the update
+    despite the crash-safety claim. This test intercepts the directory
+    fsync helper and asserts it runs exactly once against the target's
+    parent, after the write. It falsifies the prior code, which had no
+    such call at all.
+    """
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_MINIMAL_PLAN)
+
+    dirs_fsynced: list[Path] = []
+    real_fsync_dir = fileio._fsync_directory
+
+    def _spy(directory: Path) -> None:
+        dirs_fsynced.append(directory)
+        real_fsync_dir(directory)
+
+    monkeypatch.setattr(fileio, "_fsync_directory", _spy)
+    save(path, plan, validation="unchecked")
+
+    assert dirs_fsynced == [tmp_path], (
+        f"save() must fsync the containing directory exactly once; got {dirs_fsynced}"
+    )
+
+
+def test_atomic_write_fsyncs_a_directory_descriptor(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The directory fsync targets an actual directory descriptor.
+
+    Records the fd kinds passed to ``os.fsync`` during a write and
+    asserts at least one is a directory — the tempfile fsync covers the
+    contents, the directory fsync covers the rename.
+    """
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_MINIMAL_PLAN)
+
+    saw_directory_fsync = []
+    real_fsync = os.fsync
+
+    def _record(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            saw_directory_fsync.append(fd)
+        real_fsync(fd)
+
+    monkeypatch.setattr("os.fsync", _record)
+    save(path, plan, validation="unchecked")
+
+    assert saw_directory_fsync, "no directory descriptor was fsync'd after rename"
+
+
+def test_directory_fsync_swallows_einval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A filesystem that rejects directory fsync with EINVAL is tolerated.
+
+    Some filesystems return ``EINVAL`` for ``fsync`` on a directory
+    descriptor; that is a platform limitation, not a durability failure
+    of the write, so the save must still succeed and commit the bytes.
+    """
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_MINIMAL_PLAN)
+
+    real_fsync = os.fsync
+
+    def _einval_on_dirs(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "directory fsync unsupported")
+        real_fsync(fd)
+
+    monkeypatch.setattr("os.fsync", _einval_on_dirs)
+    save(path, plan, validation="unchecked")
+
+    assert "T-000001: only task" in path.read_text(encoding="utf-8")
+
+
+def test_directory_fsync_propagates_non_einval_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A non-EINVAL directory fsync error propagates rather than being hidden.
+
+    An ``EIO`` on the directory fsync signals real trouble making the
+    rename durable, so it must surface to the caller instead of being
+    swallowed like the benign EINVAL case.
+    """
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_MINIMAL_PLAN)
+
+    real_fsync = os.fsync
+
+    def _eio_on_dirs(fd: int) -> None:
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errno.EIO, "directory fsync failed")
+        real_fsync(fd)
+
+    monkeypatch.setattr("os.fsync", _eio_on_dirs)
+    with pytest.raises(OSError, match="directory fsync failed"):
+        save(path, plan, validation="unchecked")

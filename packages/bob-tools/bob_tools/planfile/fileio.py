@@ -7,8 +7,10 @@ filesystem lives here so the rest of the library can stay
 side-effect-free and easy to test.
 
 ``save`` writes atomically: the new content is written to a sibling
-tempfile, ``fsync``'d, and renamed over the destination so a crash
-between write and rename never leaves a half-written PLAN.md. ``save``
+tempfile, ``fsync``'d, renamed over the destination, and the containing
+directory is ``fsync``'d so both the file contents and the rename are
+durable — a crash between write and rename never leaves a half-written
+PLAN.md, and a crash right after the rename never loses it. ``save``
 also holds an advisory exclusive ``fcntl.flock`` on a sidecar lock
 file for the duration of the write, so a concurrent ``save`` or
 ``update`` cannot interleave. ``update`` is the safe-mutation entry
@@ -61,6 +63,7 @@ from __future__ import annotations
 
 import contextlib
 import dataclasses
+import errno
 import fcntl
 import os
 import re
@@ -124,8 +127,13 @@ def load(path: Path) -> Plan:
     Errors from :func:`bob_tools.planfile.parser.parse_plan` propagate
     unchanged. The ``source_path`` on the returned Plan is set to
     ``path`` so subsequent error messages can name the file.
+
+    The read is pinned to UTF-8 so a non-UTF-8 platform locale cannot
+    misdecode a plan carrying non-ASCII text; every writer in this
+    module (and the backfill writer) emits UTF-8, so the read must
+    match.
     """
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     return parse_plan(text, source_path=path)
 
 
@@ -257,11 +265,16 @@ def _atomic_write_text(path: Path, text: str) -> None:
     knows about Plans at all, so there is no in-process path that
     writes a Plan without going through :func:`_render_for_validation`.
 
-    Writes to a sibling tempfile, ``fsync``s the descriptor, then
-    ``os.replace``s the tempfile over ``path``; the tempfile is
-    unlinked on any pre-rename failure so failed writes do not litter
-    the directory. Used by :func:`save` (under the lock it acquires)
-    and by :func:`update` (under the lock it already holds).
+    Writes to a sibling tempfile (UTF-8, pinned so the on-disk encoding
+    never depends on the platform locale), ``fsync``s the descriptor,
+    ``os.replace``s the tempfile over ``path``, then ``fsync``s the
+    containing directory so the rename itself is durable — without the
+    directory fsync a crash right after the rename can lose the update
+    even though the file contents were fsync'd, defeating the
+    crash-safety claim. The tempfile is unlinked on any pre-rename
+    failure so failed writes do not litter the directory. Used by
+    :func:`save` (under the lock it acquires) and by :func:`update`
+    (under the lock it already holds).
     """
     directory = path.parent if path.parent != Path("") else Path(".")
     fd, tmp_name = tempfile.mkstemp(
@@ -270,7 +283,7 @@ def _atomic_write_text(path: Path, text: str) -> None:
         dir=str(directory),
     )
     try:
-        with os.fdopen(fd, "w") as fp:
+        with os.fdopen(fd, "w", encoding="utf-8") as fp:
             fp.write(text)
             fp.flush()
             os.fsync(fp.fileno())
@@ -281,6 +294,30 @@ def _atomic_write_text(path: Path, text: str) -> None:
         except FileNotFoundError:
             pass
         raise
+    _fsync_directory(directory)
+
+
+def _fsync_directory(directory: Path) -> None:
+    """``fsync`` ``directory`` so a preceding ``os.replace`` is durable.
+
+    A file rename is a directory metadata change; fsyncing the file
+    descriptor makes the *contents* durable but not the directory entry
+    that points at the new inode. Without this a crash immediately after
+    ``os.replace`` can leave the directory still referencing the old
+    inode, silently losing the just-committed update.
+
+    Some filesystems reject ``fsync`` on a directory descriptor with
+    ``EINVAL``; that is a platform limitation, not a durability failure
+    of this write, so it is swallowed. Any other error propagates.
+    """
+    dir_fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(dir_fd)
+    except OSError as exc:
+        if exc.errno != errno.EINVAL:
+            raise
+    finally:
+        os.close(dir_fd)
 
 
 def save(
@@ -376,9 +413,9 @@ def update(
     the re-parse does not force strict (id-less entries survive) and the
     magic line is dropped from the written bytes.
     """
-    pre_text = path.read_text()
+    pre_text = path.read_text(encoding="utf-8")
     with _acquire_exclusive_lock(path):
-        post_text = path.read_text()
+        post_text = path.read_text(encoding="utf-8")
         if pre_text != post_text:
             raise ConcurrentUpdateError(path)
         plan = parse_plan(post_text, source_path=path, force_strict_from_magic=magic)
