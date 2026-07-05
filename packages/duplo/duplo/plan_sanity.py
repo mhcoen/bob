@@ -258,22 +258,23 @@ def _scope_item_covered(item: str, builders: list[_BuilderView]) -> bool:
     return False
 
 
-def _is_verification(body: str, feats: tuple[str, ...]) -> bool:
+def _is_verification(body: str) -> bool:
     """Classify a task description as verification or build work.
 
-    The strict machine-rendered form (``Verify: type ...``) is always a
-    verification task -- it is exactly how behavior contracts and video
-    cases are rendered. A prose verify/test phrasing ("Verify the
-    exporter handles empty input") counts as verification only when the
-    task carries no ``[feat: ...]`` annotation: a feat annotation
-    declares the task *delivers* a feature, so such a task is real build
-    work that merely happens to start with "Verify". Misclassifying it
-    would keep its feature out of ``built_features`` and let the repair
-    gate silently delete genuine feature work (T-000003).
+    Phrase-only: the strict machine-rendered form (``Verify: type ...``)
+    and any prose verify/test phrasing both classify as verification,
+    REGARDLESS of a ``[feat: ...]`` annotation. An earlier fix
+    (T-000003) exempted feat-annotated verify phrasings so the repair
+    gate would not delete them -- but that let their feats enter
+    ``built_features``, so a plan containing ONLY verification text
+    passed the gate clean with full scope coverage: verification
+    satisfied its own build requirement. The deletion protection now
+    lives in :func:`orphan_verification_lines` instead (feat-carrying
+    verify tasks are never mechanically dropped; they hard-stop the
+    gate loudly for a human decision), so classification can stay
+    honest: verification text never counts as building anything.
     """
-    if _VERIFY_STRICT_RE.match(body):
-        return True
-    return bool(_VERIFY_PREFIX_RE.match(body)) and not feats
+    return bool(_VERIFY_STRICT_RE.match(body)) or bool(_VERIFY_PREFIX_RE.match(body))
 
 
 def _annotation_values(raw: str) -> list[str]:
@@ -312,7 +313,7 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
             _ParsedTask(
                 text=body,
                 feats=feat_names,
-                is_verification=_is_verification(body, feat_names),
+                is_verification=_is_verification(body),
                 line_index=index,
             )
         )
@@ -420,13 +421,29 @@ def _check_verification_mapping(
 
 
 def orphan_verification_lines(plan_text: str) -> list[int]:
-    """Return the 0-based source line indices of orphan verification tasks.
+    """Return the 0-based source line indices of DROPPABLE orphan
+    verification tasks.
 
     An orphan verification task is one that :func:`check_plan_sanity`
     flags as :data:`KIND_VERIFY_WITHOUT_BUILD`. This read-only accessor
-    lets a deterministic repairer drop exactly those lines using the same
-    parse and the same orphan predicate the checker uses, so the two can
-    never diverge. Indices are returned in source order.
+    lets a deterministic repairer drop exactly those lines using the
+    same parse and the same orphan predicate the checker uses.
+
+    A feat-annotated PROSE-form orphan ("Verify the exporter handles
+    empty input [feat: ...]") is deliberately EXCLUDED from the
+    droppable set: the annotation is a signal the task may be genuine
+    build work merely phrased as "Verify ...", and deleting it
+    mechanically would destroy feature work (the original T-000003
+    bug). Such a task stays flagged by the checker, so the gate's
+    single repair pass cannot clear it and the hard-stop report
+    surfaces it for a human decision: add a real builder, rephrase the
+    task, or drop the annotation. Its feats never count toward
+    ``built_features`` either way -- a plan of pure verification text
+    cannot pass the gate. The strict machine-rendered form
+    (``Verify: ...``) remains droppable even with a feat annotation: it
+    is exactly what duplo's own renderers emit for verification cases,
+    so it is never ambiguous build work. Indices are returned in source
+    order.
     """
     tasks = _parse_tasks(plan_text)
     build_tasks = [t for t in tasks if not t.is_verification]
@@ -434,7 +451,9 @@ def orphan_verification_lines(plan_text: str) -> list[int]:
     return [
         t.line_index
         for t in tasks
-        if t.is_verification and _is_orphan_verification(t, built_features)
+        if t.is_verification
+        and (bool(_VERIFY_STRICT_RE.match(t.text)) or not t.feats)
+        and _is_orphan_verification(t, built_features)
     ]
 
 

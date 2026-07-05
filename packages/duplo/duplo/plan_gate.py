@@ -110,10 +110,13 @@ def _repair_verify_without_build(plan_text: str) -> tuple[str, list[str]]:
     it checks, so removing it is the only mechanical repair; the missing
     build, if real, surfaces as a scope-coverage problem the user owns.
 
-    Build tasks that merely *sound* like verification ("Verify the
-    exporter handles empty input") but carry a ``[feat: ...]``
-    annotation are classified as builders by the checker's shared parse
-    and therefore can never appear in the drop set (T-000003).
+    Tasks that sound like verification but carry a ``[feat: ...]``
+    annotation are excluded from the drop set by
+    :func:`orphan_verification_lines` itself: they may be genuine build
+    work phrased as "Verify ...", so the gate hard-stops on them for a
+    human decision instead of deleting them (T-000003) -- while their
+    feats still never count as built, so pure verification text cannot
+    satisfy the gate.
     """
     drop = set(orphan_verification_lines(plan_text))
     if not drop:

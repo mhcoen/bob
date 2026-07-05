@@ -66,11 +66,12 @@ def test_verify_without_build_repaired_in_one_pass() -> None:
     assert outcome.report_after is not None and outcome.report_after.ok
 
 
-def test_prose_verify_build_task_with_feat_survives_gate() -> None:
-    # T-000003 regression: a genuine build task phrased "Verify ..." that
-    # carries a [feat: ...] annotation must pass the gate untouched -- it
-    # was previously misclassified as an orphan verification task and
-    # silently deleted.
+def test_prose_verify_with_feat_hard_stops_never_deleted() -> None:
+    # The two T-000003-class failure modes, both closed: the task is
+    # NEVER silently deleted (the original bug), and its feat NEVER
+    # counts as built (the over-corrected fix let a plan of pure
+    # verification text pass the gate clean). With no real builder the
+    # gate hard-stops, plan untouched, for a human decision.
     plan = _plan(
         _phase(
             1,
@@ -79,20 +80,39 @@ def test_prose_verify_build_task_with_feat_survives_gate() -> None:
         )
     )
     outcome = run_plan_sanity_gate(plan)
-    assert outcome.status == "clean"
-    assert outcome.plan_text == plan
+    assert outcome.status == "hard_stop"
     assert "Verify the exporter handles empty input" in outcome.plan_text
 
 
-def test_repair_drops_only_strict_orphan_not_feat_annotated_build() -> None:
-    # A repair pass triggered by a machine-rendered orphan ("Verify: ...")
-    # must not take the feat-annotated prose-verify build task with it.
+def test_prose_verify_with_feat_passes_when_feature_built() -> None:
+    # The legitimate T-000003 shape survives untouched when a real
+    # builder delivers the feature.
     plan = _plan(
         _phase(
             1,
             "Core",
-            "- [ ] T-000001: Verify the exporter handles empty input [feat: exporter]\n"
-            '- [ ] T-000002: Verify: currency converts [feat: "Currency exchange"]',
+            '- [ ] T-000001: Implement the exporter module [feat: "exporter"]\n'
+            "- [ ] T-000002: Verify the exporter handles empty input [feat: exporter]",
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert outcome.status == "clean"
+    assert outcome.plan_text == plan
+
+
+def test_repair_drops_only_plain_orphan_not_feat_annotated() -> None:
+    # A repair pass triggered by a plain machine-rendered orphan
+    # ("Verify: ...") must not take a feat-annotated verify line with
+    # it: feat-carrying lines are excluded from the droppable set. Here
+    # the feat-annotated line's feature IS built, so after the orphan is
+    # dropped the plan is clean.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            '- [ ] T-000001: Implement the exporter module [feat: "exporter"]\n'
+            "- [ ] T-000002: Verify the exporter handles empty input [feat: exporter]\n"
+            '- [ ] T-000003: Verify: currency converts [feat: "Currency exchange"]',
         )
     )
     outcome = run_plan_sanity_gate(plan)

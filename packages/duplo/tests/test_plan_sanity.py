@@ -11,6 +11,7 @@ from duplo.plan_sanity import (
     KIND_SCOPE_UNCOVERED,
     KIND_VERIFY_WITHOUT_BUILD,
     check_plan_sanity,
+    orphan_verification_lines,
 )
 
 
@@ -264,10 +265,13 @@ def test_unannotated_verify_flagged_when_plan_builds_nothing() -> None:
     assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
 
 
-def test_prose_verify_task_with_feat_is_build_work_not_flagged() -> None:
-    # T-000003 regression: a real build task phrased "Verify ..." that
-    # carries a [feat: ...] annotation is a builder, not a verification
-    # task. Its feature counts as built and nothing is flagged.
+def test_prose_verify_task_with_feat_does_not_count_as_built() -> None:
+    # A verify-phrased task's [feat: ...] must NOT enter built_features:
+    # letting it did meant a plan of pure verification text passed the
+    # gate clean, with scope coverage satisfied by its own checks. The
+    # task is flagged (its feature is unbuilt) but never mechanically
+    # dropped (see orphan_verification_lines); the gate hard-stops for a
+    # human decision instead.
     plan = _plan(
         _phase(
             1,
@@ -276,27 +280,32 @@ def test_prose_verify_task_with_feat_is_build_work_not_flagged() -> None:
         )
     )
     report = check_plan_sanity(plan)
-    assert report.ok
-    assert report.violations == []
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
+    # ... but the feat-carrying line is not in the droppable set.
+    assert orphan_verification_lines(plan) == []
 
 
-def test_prose_verify_feat_backs_a_strict_verification_task() -> None:
-    # The prose-verify builder's feature is in built_features, so a
-    # machine-rendered "Verify:" task mapping to it is not an orphan.
+def test_prose_verify_with_feat_passes_when_feature_built_elsewhere() -> None:
+    # The legitimate shape: a real builder delivers the feature; the
+    # verify-phrased feat-annotated task then maps to a built feature
+    # and nothing is flagged.
     plan = _plan(
         _phase(
             1,
             "Core",
-            '- [ ] T-000001: Verify the exporter handles empty input [feat: "exporter"]\n'
-            '- [ ] T-000002: Verify: export an empty file [feat: "exporter"]',
+            '- [ ] T-000001: Implement the exporter module [feat: "exporter"]\n'
+            '- [ ] T-000002: Verify the exporter handles empty input [feat: "exporter"]\n'
+            '- [ ] T-000003: Verify: export an empty file [feat: "exporter"]',
         )
     )
     report = check_plan_sanity(plan)
     assert report.ok
 
 
-def test_test_that_phrasing_with_feat_is_build_work() -> None:
-    # The exemption covers every verify-ish prose prefix, not just "Verify".
+def test_test_that_phrasing_with_feat_is_still_verification() -> None:
+    # Every verify-ish prose prefix classifies as verification even with
+    # a feat annotation; verification text never builds anything.
     plan = _plan(
         _phase(
             1,
@@ -305,7 +314,8 @@ def test_test_that_phrasing_with_feat_is_build_work() -> None:
         )
     )
     report = check_plan_sanity(plan)
-    assert report.ok
+    assert not report.ok
+    assert report.kinds() == {KIND_VERIFY_WITHOUT_BUILD}
 
 
 def test_prose_verify_without_feat_still_flagged_when_plan_builds_nothing() -> None:

@@ -67,6 +67,18 @@ def extract_scene_frames(
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = video.stem
 
+    # Clean BOTH mode prefixes up front, not just the mode about to run.
+    # Each ffmpeg helper cleans only its own prefix, so when a replaced
+    # video flips the winning mode (v1 smooth -> interval frames; v2 has
+    # hard cuts -> scene frames), the losing mode's stale frames from
+    # the PREVIOUS content would survive on disk and every later
+    # frame-reuse pass would return the union -- feeding old-content
+    # frames into design extraction and SPEC autogen.
+    for stale_prefix in (f"{stem}_scene_", f"{stem}_interval_"):
+        for old in output_dir.iterdir():
+            if old.name.startswith(stale_prefix) and old.name.endswith(".png"):
+                old.unlink()
+
     frames = _run_ffmpeg_scene_detect(video, output_dir, stem, threshold, max_frames)
     if isinstance(frames, str):
         return ExtractionResult(source=video, frames=[], error=frames)
