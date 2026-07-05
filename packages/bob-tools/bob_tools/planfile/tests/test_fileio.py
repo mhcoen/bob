@@ -547,6 +547,56 @@ def test_save_canonical_magic_false_still_rejects_idless(tmp_path: Path) -> None
         save(path, plan, validation="canonical", magic=False)
 
 
+# A plan whose completed task tail carries a fenced code block; the
+# parser captures the fence lines as that task's ``trailing_lines``.
+_TRAILING_LINES_PLAN = (
+    "<!-- bob-plan-format: 1 -->\n"
+    "\n"
+    "# Canonical fileio fixture\n"
+    "\n"
+    "## Stage 1: Smoke\n"
+    "<!-- phase_id: phase_001 -->\n"
+    "\n"
+    "- [x] T-000001: ran the linter [accept: pytest]\n"
+    "  ```\n"
+    "  ruff output\n"
+    "  ```\n"
+    "\n"
+    "- [ ] T-000002: only task [accept: pytest]\n"
+)
+
+
+def test_save_canonical_default_rejects_trailing_lines(tmp_path: Path) -> None:
+    """T-000010 GUARD: without ``allow_trailing_lines`` the canonical save
+    still rejects a task carrying ``trailing_lines``. The construction-API
+    invariant that catches raw source lines smuggled into a built task
+    must stay in force on the default path."""
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_TRAILING_LINES_PLAN)
+    assert plan.phases[0].tasks[0].trailing_lines  # parser captured them
+    with pytest.raises(PlanValidationError):
+        save(path, plan, validation="canonical")
+
+
+def test_save_canonical_allow_trailing_lines_preserves_block(tmp_path: Path) -> None:
+    """T-000010 regression: ``save(allow_trailing_lines=True)`` exempts the
+    trailing-lines invariant and writes the captured fence block verbatim.
+
+    Only the structural validator sees a trailing-lines-cleared copy;
+    ``assert_mcloop_canonical`` renders the untouched plan, so the block
+    round-trips to disk byte-for-byte."""
+    path = tmp_path / "PLAN.md"
+    plan = parse_plan(_TRAILING_LINES_PLAN)
+    save(path, plan, validation="canonical", allow_trailing_lines=True)
+    text = path.read_text()
+    assert "  ```\n  ruff output\n  ```\n" in text
+    # every other constructed invariant still holds — re-parse is clean
+    # and re-saving the same bytes is a no-op.
+    reparsed = parse_plan(text)
+    save(path, reparsed, validation="canonical", allow_trailing_lines=True)
+    assert path.read_text() == text
+
+
 def test_save_magic_true_keeps_magic_line(tmp_path: Path) -> None:
     """Default magic=True is unchanged: a canonical plan keeps its magic line."""
     path = tmp_path / "PLAN.md"

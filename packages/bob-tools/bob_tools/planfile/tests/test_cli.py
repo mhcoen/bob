@@ -89,6 +89,33 @@ PHASELESS_PLAN = """# Phaseless Fixture
 - [ ] stray task
 """
 
+# A completed task whose tail carries a fenced code block. The parser
+# captures those four fence/output lines (plus the trailing blank) as
+# the task's ``trailing_lines`` (lossless retention). ``fmt`` used to
+# crash here: it re-rendered through the constructed-mode validator,
+# which rejects any ``trailing_lines`` as a construction-API violation,
+# so a plan using the documented trailing-line capture could not be
+# fmt'd (BUGS.md T-000010).
+TRAILING_BLOCK_PLAN = """<!-- bob-plan-format: 1 -->
+
+# Trailing Block Fixture
+
+## Stage 1: Bootstrap
+<!-- phase_id: phase_001 -->
+
+- [x] T-000001: ran the linter
+  ```
+  ruff output
+  here
+  ```
+
+- [ ] T-000002: next task
+"""
+
+# The exact fenced block the parser captured as trailing lines; ``fmt``
+# must preserve it byte-for-byte.
+TRAILING_BLOCK_FENCE = "  ```\n  ruff output\n  here\n  ```\n"
+
 INVALID_PLAN = """# Broken Plan
 
 # Broken Plan
@@ -248,6 +275,35 @@ class TestFmt:
         assert rc == EXIT_INVALID_PLAN
         assert "refusing to format" in captured.err
         assert path.read_text() == PHASELESS_PLAN  # byte-preserved
+
+    def test_preserves_task_trailing_code_block(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """fmt on a plan whose completed task carries a trailing fenced
+        code block succeeds and preserves the block byte-for-byte.
+
+        Regression for BUGS.md T-000010: fmt re-rendered through the
+        constructed-mode validator, which rejects the ``trailing_lines``
+        the parser legitimately captured from disk, so any plan using the
+        documented lossless trailing-line capture crashed with
+        "trailing_lines must be empty on constructed tasks".
+        """
+        path = tmp_path / "PLAN.md"
+        path.write_text(TRAILING_BLOCK_PLAN)
+        rc = main(["fmt", str(path)])
+        captured = capsys.readouterr()
+        assert rc == EXIT_OK
+        assert "trailing_lines" not in captured.err
+        text = path.read_text()
+        # The captured fenced block survives verbatim.
+        assert TRAILING_BLOCK_FENCE in text
+        # ids were still assigned to the surrounding tasks.
+        assert "T-000001: ran the linter" in text
+        assert "T-000002: next task" in text
+        # fmt stays idempotent on the trailing-line-bearing file.
+        rc2 = main(["fmt", str(path)])
+        assert rc2 == EXIT_OK
+        assert path.read_text() == text
 
 
 class TestDone:

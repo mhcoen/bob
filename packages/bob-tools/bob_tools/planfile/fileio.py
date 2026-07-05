@@ -202,8 +202,63 @@ def _acquire_exclusive_lock(path: Path) -> Iterator[None]:
         os.close(fd)
 
 
+def _clear_task_trailing_lines(task: Task) -> Task:
+    """Return ``task`` (and its subtree) with ``trailing_lines`` cleared.
+
+    Trailing lines are lossless source-position trivia the parser
+    captures verbatim; the semantic normalizers used by both the
+    field-stability harness and :func:`assert_mcloop_canonical` already
+    clear them before comparing, so removing them changes nothing the
+    structural validator legitimately inspects. Used only to build the
+    validation-only copy in :func:`_render_for_validation` when
+    ``allow_trailing_lines`` is set.
+    """
+    return dataclasses.replace(
+        task,
+        trailing_lines=(),
+        children=tuple(_clear_task_trailing_lines(child) for child in task.children),
+    )
+
+
+def _clear_trailing_lines(plan: Plan) -> Plan:
+    """Return a copy of ``plan`` with every task's ``trailing_lines`` cleared.
+
+    Recurses through phase tasks, subsection tasks, and bug-section tasks
+    (and each task's child subtree). The returned plan is used *only* to
+    satisfy the constructed-mode structural gate; the real bytes are still
+    rendered from the untouched ``plan`` so captured trailing lines survive
+    to disk byte-for-byte.
+    """
+    phases = tuple(
+        dataclasses.replace(
+            phase,
+            tasks=tuple(_clear_task_trailing_lines(task) for task in phase.tasks),
+            subsections=tuple(
+                dataclasses.replace(
+                    sub,
+                    tasks=tuple(_clear_task_trailing_lines(task) for task in sub.tasks),
+                )
+                for sub in phase.subsections
+            ),
+        )
+        for phase in plan.phases
+    )
+    bugs = plan.bugs
+    if bugs is not None:
+        bugs = dataclasses.replace(
+            bugs,
+            tasks=tuple(_clear_task_trailing_lines(task) for task in bugs.tasks),
+        )
+    return dataclasses.replace(plan, phases=phases, bugs=bugs)
+
+
 def _render_for_validation(
-    plan: Plan, validation: ValidationMode, path: Path | None, *, magic: bool = True
+    plan: Plan,
+    validation: ValidationMode,
+    path: Path | None,
+    *,
+    magic: bool = True,
+    allow_trailing_lines: bool = False,
 ) -> str:
     """Return the bytes to commit for ``plan`` under the given ``validation``.
 
@@ -227,6 +282,20 @@ def _render_for_validation(
     accept a cleared magic line — would never be reached, making the
     loose-queue path unusable.
 
+    ``allow_trailing_lines`` exempts the constructed-mode "no
+    ``trailing_lines``" invariant, which exists to catch construction-API
+    tasks that smuggle in raw source lines. A plan parsed from a file
+    legitimately carries lossless trailing lines (a completed task
+    followed by a fenced output block, inter-section spacing, ...), so
+    :func:`bob_tools.planfile.cli.cmd_fmt` — whose whole job is to
+    canonicalize a file in place — sets this. The exemption is achieved
+    by running the structural validator against a trailing-lines-cleared
+    copy while :func:`assert_mcloop_canonical` still renders the untouched
+    ``plan``, so the captured lines round-trip to disk byte-for-byte.
+    Because both semantic normalizers already clear ``trailing_lines``
+    before comparing, the cleared copy validates identically to the
+    original in every other respect.
+
     Centralizing the choice here keeps :func:`save` and the in-lock
     save inside :func:`update` honoring the same mode without
     duplicating the branch.
@@ -240,8 +309,11 @@ def _render_for_validation(
         # Acceptance is a proof contract enforced at the authoring layer
         # (duplo authoring / add_phase_task / mcloop enforce) during the
         # legacy-migration window, not at the save gate.
+        plan_for_structural = (
+            _clear_trailing_lines(plan) if allow_trailing_lines else plan
+        )
         validate_plan(
-            plan,
+            plan_for_structural,
             constructed=True,
             require_acceptance=False,
             allow_cleared_magic=not magic,
@@ -326,6 +398,7 @@ def save(
     *,
     validation: ValidationMode = "canonical",
     magic: bool = True,
+    allow_trailing_lines: bool = False,
 ) -> None:
     """Atomically write ``plan`` to ``path`` under an exclusive lock.
 
@@ -360,10 +433,20 @@ def save(
     ``False`` for a loose queue (mcloop's BUGS.md) so the magic line is
     dropped before render — ``magic_version`` is cleared, which
     ``render_plan`` and ``assert_mcloop_canonical`` both accept.
+
+    ``allow_trailing_lines`` (default ``False``) exempts the
+    constructed-mode "no ``trailing_lines``" invariant so a plan parsed
+    from a file — which legitimately carries the parser's lossless
+    trailing-line capture — can be re-saved through the canonical gate.
+    The trailing lines are preserved in the written bytes; only the
+    structural validator sees a trailing-lines-cleared copy. Used by
+    ``fmt``, whose job is to canonicalize an on-disk file in place.
     """
     if not magic:
         plan = dataclasses.replace(plan, magic_version=None)
-    text = _render_for_validation(plan, validation, path, magic=magic)
+    text = _render_for_validation(
+        plan, validation, path, magic=magic, allow_trailing_lines=allow_trailing_lines
+    )
     with _acquire_exclusive_lock(path):
         _atomic_write_text(path, text)
 

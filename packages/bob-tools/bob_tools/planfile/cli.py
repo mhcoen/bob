@@ -177,8 +177,16 @@ def cmd_fmt(args: argparse.Namespace) -> int:
     # being rejected at save time.
     if migrated.magic_version is None:
         migrated = dataclasses.replace(migrated, magic_version=1)
+    # ``fmt`` canonicalizes a file that already exists on disk, so its
+    # tasks legitimately carry the parser's lossless trailing-line
+    # capture (a completed task followed by a fenced output block,
+    # inter-section spacing, ...). The constructed-mode "no
+    # trailing_lines" invariant exists to catch construction-API tasks
+    # that smuggle in raw source lines, not to reject content a file
+    # legitimately had; exempt it here so those lines round-trip to disk
+    # byte-for-byte instead of crashing the canonical save gate.
     try:
-        save(path, migrated)
+        save(path, migrated, allow_trailing_lines=True)
     except OSError as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER

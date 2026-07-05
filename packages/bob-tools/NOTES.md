@@ -8,6 +8,31 @@
 
 ## Observations
 
+- 2026-07-05 [9] [T-000010] `bob-plan fmt` crash on trailing code block fixed.
+  Root cause: the canonical save gate (`fileio._render_for_validation`) ran
+  `validate_plan(constructed=True)`, which rejects any task carrying
+  `trailing_lines`. That invariant exists to catch construction-API tasks
+  smuggling raw source lines, but a plan parsed from a file legitimately
+  carries the parser's lossless trailing-line capture (fenced output block
+  after a completed task, inter-section spacing). fmt is the one path whose
+  job is to canonicalize an on-disk file, so it hit the invariant on every
+  such plan. Fix: added `allow_trailing_lines` (mirroring the existing
+  `require_acceptance` / `allow_cleared_magic` opt-outs) to `save` and
+  `_render_for_validation`; when set, the STRUCTURAL validator runs against
+  a `trailing_lines`-cleared copy of the plan while `assert_mcloop_canonical`
+  still renders the untouched plan, so captured lines round-trip to disk
+  byte-for-byte. This is safe because both semantic normalizers (the
+  field-stability harness's `_normalize_task_for_semantic_compare` and
+  `semantic_diff`'s plan normalizer) already clear `trailing_lines` before
+  comparing, so the cleared copy validates identically in every other
+  respect. `cmd_fmt` passes `allow_trailing_lines=True`; every other save
+  caller keeps the default `False`, so the construction-API guard is
+  unchanged on all non-fmt paths. Note: the sibling save paths (`done`,
+  `fail`, mcloop `update`) still reject `trailing_lines` on the default
+  path — this fix was scoped to fmt per the task, but if those operations
+  are ever run on a file that already carries trailing lines they will hit
+  the same gate; revisit if that surfaces.
+
 - 2026-07-05 [7] [T-000007] Write-path durability holes closed.
   `backfill_file` (`planfile/backfill.py`) now renders then writes through
   `fileio._acquire_exclusive_lock` + `fileio._atomic_write_text` (imported
