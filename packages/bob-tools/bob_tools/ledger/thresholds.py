@@ -590,24 +590,30 @@ def record_crossings(
     if not crossings:
         return []
 
-    seen_keys = _existing_crossing_keys(storage)
+    # Lock the read+append span. Without a lock held across both, two
+    # processes could each read the existing crossings (neither seeing
+    # the other's not-yet-written record), then both append the same
+    # crossing -- a check-then-act race that double-fires a reauthor.
+    # ``append`` re-enters the same lock, so nesting is safe.
     emitted: list[str] = []
-    for crossing in crossings:
-        key = (crossing.rule_id.value, frozenset(crossing.evidence_event_ids))
-        if key in seen_keys:
-            continue
-        seen_keys.add(key)
-        ev = storage.append(
-            event_type=EventType.THRESHOLD_CROSSED,
-            payload=make_threshold_crossed_payload(
-                rule_id=crossing.rule_id.value,
-                triggering_event_ids=list(crossing.evidence_event_ids),
-                summary=crossing.summary,
-            ),
-            run_id=run_id,
-            git=git,
-        )
-        emitted.append(ev.event_id)
+    with storage.exclusive():
+        seen_keys = _existing_crossing_keys(storage)
+        for crossing in crossings:
+            key = (crossing.rule_id.value, frozenset(crossing.evidence_event_ids))
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            ev = storage.append(
+                event_type=EventType.THRESHOLD_CROSSED,
+                payload=make_threshold_crossed_payload(
+                    rule_id=crossing.rule_id.value,
+                    triggering_event_ids=list(crossing.evidence_event_ids),
+                    summary=crossing.summary,
+                ),
+                run_id=run_id,
+                git=git,
+            )
+            emitted.append(ev.event_id)
     return emitted
 
 

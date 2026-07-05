@@ -9,11 +9,12 @@ storage layer is responsible for:
   - Validating each event against ``bob_tools.ledger.schema`` BEFORE
     writing, so a malformed payload raises and produces no partial
     write.
-  - Performing the append as a single ``write()`` call, taking
-    advantage of POSIX line-buffered append serialization between
-    concurrent writers (events under ``PIPE_BUF`` are atomic without
-    file locking; this is the Slice A discipline). File locking is
-    deferred to Slice B if needed.
+  - Performing the append under an exclusive cross-process advisory
+    lock (``flock`` on ``<ledger_dir>/.writers/.lock``) so two
+    concurrent writers can never interleave a line. O_APPEND alone
+    only guarantees atomicity for writes at most ``PIPE_BUF`` bytes;
+    a ``commit_landed`` event with a large ``touched_paths`` list can
+    exceed that, so the lock is mandatory rather than optional.
 
 Reading is read-only and unsorted by default; consumers (the
 projector) sort by ``event_id`` themselves. The storage layer does
@@ -22,12 +23,14 @@ not maintain any read index.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import socket
 import threading
 import uuid
 from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +45,19 @@ from bob_tools.ledger.schema import validate_event
 
 EVENTS_FILENAME = "PLAN.events.jsonl"
 WRITERS_DIRNAME = ".writers"
+LOCK_FILENAME = ".lock"
+
+
+class SeqStateError(RuntimeError):
+    """Raised when a writer's persisted seq file is present but corrupt.
+
+    A missing seq file is normal (a brand-new writer starts at 0). An
+    *existing* file that is empty, non-numeric, or negative is
+    corruption: silently resetting to 0 would re-issue seq values the
+    writer has already used, colliding the ``(writer_id, seq)``
+    projection tiebreaker. We refuse to reset and surface the problem
+    instead.
+    """
 
 
 def _now_iso() -> str:
@@ -84,8 +100,70 @@ class Storage:
         self._writers_dir = self.ledger_dir / WRITERS_DIRNAME
         self._seq_path = self._writers_dir / f"{writer_id}.seq"
         self._events_path = self.ledger_dir / EVENTS_FILENAME
-        self._lock = threading.Lock()
+        self._lock_path = self._writers_dir / LOCK_FILENAME
+        # Reentrant so ``exclusive()`` can span a read+append and the
+        # nested ``append`` re-enters the same held lock without
+        # deadlocking. Held for the whole critical section, so the
+        # ``_flock_depth`` counter is only ever touched by one thread
+        # at a time.
+        self._rlock = threading.RLock()
+        self._flock_fd: int | None = None
+        self._flock_depth = 0
         self._next_seq: int = self._read_next_seq()
+
+    # -- cross-process locking ----------------------------------------------
+
+    @contextmanager
+    def _interprocess_lock(self) -> Iterator[None]:
+        """Hold an exclusive advisory lock over the ledger directory.
+
+        Serializes appends across every process (and thread) writing to
+        this ledger, so a line can never interleave regardless of size.
+        Reentrant within a single process: nested acquisitions bump a
+        depth counter and only the outermost one touches ``flock``.
+        """
+        self._rlock.acquire()
+        try:
+            if self._flock_depth == 0:
+                self._writers_dir.mkdir(parents=True, exist_ok=True)
+                fd = os.open(
+                    str(self._lock_path),
+                    os.O_RDWR | os.O_CREAT,
+                    0o644,
+                )
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX)
+                except BaseException:
+                    os.close(fd)
+                    raise
+                self._flock_fd = fd
+            self._flock_depth += 1
+            try:
+                yield
+            finally:
+                self._flock_depth -= 1
+                if self._flock_depth == 0 and self._flock_fd is not None:
+                    try:
+                        fcntl.flock(self._flock_fd, fcntl.LOCK_UN)
+                    finally:
+                        os.close(self._flock_fd)
+                        self._flock_fd = None
+        finally:
+            self._rlock.release()
+
+    @contextmanager
+    def exclusive(self) -> Iterator[None]:
+        """Public span lock for read-then-write sequences.
+
+        A caller that must read the current log and append derived
+        events atomically with respect to other writers (e.g.
+        ``record_crossings`` checking for existing crossings before
+        emitting) wraps the whole read+append span in ``with
+        storage.exclusive():``. ``append`` re-enters the same lock, so
+        nesting is safe.
+        """
+        with self._interprocess_lock():
+            yield
 
     # -- seq persistence -----------------------------------------------------
 
@@ -93,11 +171,28 @@ class Storage:
         try:
             raw = self._seq_path.read_text().strip()
         except FileNotFoundError:
+            # No persisted state: a brand-new writer legitimately
+            # starts at seq 0.
             return 0
+        if not raw:
+            raise SeqStateError(
+                f"seq file for writer {self.writer_id!r} is empty "
+                f"({self._seq_path}); refusing to reset to 0"
+            )
         try:
             last = int(raw)
-        except ValueError:
-            return 0
+        except ValueError as exc:
+            raise SeqStateError(
+                f"seq file for writer {self.writer_id!r} is not an "
+                f"integer ({self._seq_path}, contents {raw!r}); "
+                f"refusing to reset to 0"
+            ) from exc
+        if last < 0:
+            raise SeqStateError(
+                f"seq file for writer {self.writer_id!r} holds a "
+                f"negative seq ({last}, {self._seq_path}); refusing "
+                f"to reset to 0"
+            )
         return last + 1
 
     def _persist_seq(self, used_seq: int) -> None:
@@ -138,7 +233,7 @@ class Storage:
         if not run_id:
             raise ValueError("run_id must be non-empty")
 
-        with self._lock:
+        with self._interprocess_lock():
             seq = self._next_seq
             event = Event(
                 event_id=event_id or uuid7(),
@@ -198,7 +293,9 @@ class Storage:
 
 __all__ = [
     "EVENTS_FILENAME",
+    "LOCK_FILENAME",
     "WRITERS_DIRNAME",
+    "SeqStateError",
     "Storage",
     "allocate_writer_id",
 ]

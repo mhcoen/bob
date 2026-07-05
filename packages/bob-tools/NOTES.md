@@ -1141,7 +1141,36 @@
   heading) but would surprise a user who hand-wrote a PLAN.md with
   bare task lines.
 
+- 2026-07-05 [8] [T-000008] Ledger concurrency/idempotency fixes.
+  Storage.append now serializes writers with a POSIX advisory lock
+  (`fcntl.flock` on `<ledger_dir>/.writers/.lock`) held across the
+  whole seq-persist + write span, replacing the old
+  "O_APPEND is atomic under PIPE_BUF" discipline (a `commit_landed`
+  with a large `touched_paths` list can exceed PIPE_BUF). The lock is
+  reentrant within a process via a `threading.RLock` + depth counter
+  so `Storage.exclusive()` can wrap a read-then-append span and the
+  nested `append` re-enters without deadlocking. `record_crossings`
+  now wraps its `_existing_crossing_keys` read and the appends in one
+  `storage.exclusive()` span, closing the check-then-act race that
+  let two processes double-emit the same `threshold_crossed`.
+  `_read_next_seq` now raises `SeqStateError` on an empty / non-numeric
+  / negative seq file (only a *missing* file still resets to 0). The
+  projector dedupes by `event_id` at the top of the replay loop, so a
+  duplicated event line applies exactly once across every record type
+  (invariants, human_decisions, findings, evidence_refs,
+  design_reasoning_refs), not just the phase/assumption id-keyed paths.
+
 ## Hypotheses
+
+- 2026-07-05 [8] [T-000008] The ledger's new append lock is POSIX-only
+  (`fcntl` / `flock`), so the storage layer no longer imports cleanly
+  on Windows. bob-tools targets macOS/Linux today, so this is fine,
+  but if a Windows consumer ever appears the lock needs an
+  `msvcrt.locking` (or `portalocker`) fallback. The advisory lock also
+  only protects writers that go through `Storage.append` /
+  `Storage.exclusive()`; a process that writes `PLAN.events.jsonl`
+  directly (bypassing Storage) is still unserialized — acceptable
+  because Storage is the sole sanctioned writer, but worth remembering.
 
 - 2026-05-21 [19.2] [T-000189] The duplo-level test suite does not
   exercise reopen-DONE/FAILED or skip-duplicate-TODO through the

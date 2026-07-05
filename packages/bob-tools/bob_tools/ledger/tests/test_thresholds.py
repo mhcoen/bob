@@ -1349,3 +1349,40 @@ class TestRecordCrossings:
 
         with pytest.raises(ValueError, match="run_id"):
             record_crossings(storage, [commit], run_id="")
+
+    def test_concurrent_recorders_do_not_double_emit(self, tmp_path: Path) -> None:
+        # Two writers on the same ledger recording the SAME crossing
+        # concurrently must produce exactly one threshold_crossed event.
+        # Without a lock spanning the read+append, both could read an
+        # empty crossing set, then both append -- a check-then-act race.
+        import threading
+
+        seed = Storage(tmp_path, writer_id="w-seed")
+        commits = _seed_unattributed_commits(seed, n=1)
+        events = seed.read_all()
+        crossings = evaluate_thresholds(project(events), events, ThresholdParams())
+        assert len(crossings) == 1
+
+        a = Storage(tmp_path, writer_id="w-A")
+        b = Storage(tmp_path, writer_id="w-B")
+        barrier = threading.Barrier(2)
+
+        def record(s: Storage) -> None:
+            barrier.wait()
+            record_crossings(s, crossings, run_id="rec")
+
+        t1 = threading.Thread(target=record, args=(a,))
+        t2 = threading.Thread(target=record, args=(b,))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        all_events = seed.read_all()
+        threshold_events = [
+            e for e in all_events if e.type is EventType.THRESHOLD_CROSSED
+        ]
+        assert len(threshold_events) == 1
+        assert threshold_events[0].payload["triggering_event_ids"] == [
+            commits[0].event_id
+        ]

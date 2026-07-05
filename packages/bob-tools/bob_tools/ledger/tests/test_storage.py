@@ -330,3 +330,148 @@ class TestAllocateWriterId:
 
     def test_prefix_overridable(self) -> None:
         assert allocate_writer_id(prefix="mcloop").startswith("mcloop-")
+
+
+# ---------------------------------------------------------------------
+# Seq corruption: refuse to reset to 0
+# ---------------------------------------------------------------------
+
+
+class TestSeqCorruption:
+    """A missing seq file is a legitimately-new writer (start at 0). An
+    *existing* but corrupt file (empty, non-numeric, negative) must NOT
+    silently reset to 0 -- doing so re-issues seq values already used,
+    colliding the (writer_id, seq) projection tiebreaker.
+    """
+
+    def _seq_path(self, tmp_path: Path) -> Path:
+        seq_dir = tmp_path / WRITERS_DIRNAME
+        seq_dir.mkdir(parents=True, exist_ok=True)
+        return seq_dir / "w-1.seq"
+
+    def test_missing_seq_file_starts_at_zero(self, tmp_path: Path) -> None:
+        s = Storage(tmp_path, writer_id="w-1")
+        ev = s.append(
+            event_type=EventType.PHASE_STARTED,
+            payload=make_phase_started_payload(phase_id="p1", title="x"),
+            run_id="r-1",
+        )
+        assert ev.seq == 0
+
+    def test_empty_seq_file_raises(self, tmp_path: Path) -> None:
+        from bob_tools.ledger.storage import SeqStateError
+
+        self._seq_path(tmp_path).write_text("")
+        with pytest.raises(SeqStateError):
+            Storage(tmp_path, writer_id="w-1")
+
+    def test_whitespace_seq_file_raises(self, tmp_path: Path) -> None:
+        from bob_tools.ledger.storage import SeqStateError
+
+        self._seq_path(tmp_path).write_text("   \n")
+        with pytest.raises(SeqStateError):
+            Storage(tmp_path, writer_id="w-1")
+
+    def test_non_numeric_seq_file_raises(self, tmp_path: Path) -> None:
+        from bob_tools.ledger.storage import SeqStateError
+
+        self._seq_path(tmp_path).write_text("not-a-number")
+        with pytest.raises(SeqStateError):
+            Storage(tmp_path, writer_id="w-1")
+
+    def test_negative_seq_file_raises(self, tmp_path: Path) -> None:
+        from bob_tools.ledger.storage import SeqStateError
+
+        self._seq_path(tmp_path).write_text("-3")
+        with pytest.raises(SeqStateError):
+            Storage(tmp_path, writer_id="w-1")
+
+    def test_valid_seq_file_resumes(self, tmp_path: Path) -> None:
+        self._seq_path(tmp_path).write_text("4")
+        s = Storage(tmp_path, writer_id="w-1")
+        ev = s.append(
+            event_type=EventType.PHASE_STARTED,
+            payload=make_phase_started_payload(phase_id="p1", title="x"),
+            run_id="r-1",
+        )
+        assert ev.seq == 5
+
+
+# ---------------------------------------------------------------------
+# Cross-writer locking on append
+# ---------------------------------------------------------------------
+
+
+class TestAppendLocking:
+    def test_large_payload_concurrent_appends_not_torn(self, tmp_path: Path) -> None:
+        # A commit_landed with a large touched_paths list exceeds
+        # PIPE_BUF, so O_APPEND alone cannot guarantee atomicity. The
+        # exclusive lock must still serialize writers cleanly.
+        big_paths = [f"src/module_{i}/file_{i}.py" for i in range(600)]
+        per_writer = 15
+        a = Storage(tmp_path, writer_id="w-A")
+        b = Storage(tmp_path, writer_id="w-B")
+
+        def emit(s: Storage, prefix: str) -> None:
+            for _ in range(per_writer):
+                payload = make_commit_landed_payload(
+                    commit="abc12345",
+                    parent_commits=[],
+                    branch="main",
+                    author="m",
+                    subject="s",
+                    attributed_phase_id="p1",
+                    files_changed=1,
+                    lines_added=1,
+                    lines_removed=0,
+                    change_class=CommitChangeClass.CODE,
+                    touched_paths=big_paths,
+                )
+                s.append(
+                    event_type=EventType.COMMIT_LANDED,
+                    payload=payload,
+                    run_id="r-1",
+                )
+
+        t1 = threading.Thread(target=emit, args=(a, "a"))
+        t2 = threading.Thread(target=emit, args=(b, "b"))
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        events_path = tmp_path / EVENTS_FILENAME
+        with events_path.open("r", encoding="utf-8") as f:
+            lines = [line for line in f.read().splitlines() if line]
+        assert len(lines) == per_writer * 2
+        # Every line parses -- no interleaved/torn JSON.
+        decoded = [json.loads(line) for line in lines]
+        assert all(len(d["payload"]["touched_paths"]) == 600 for d in decoded)
+
+    def test_exclusive_span_allows_nested_append(self, tmp_path: Path) -> None:
+        # exclusive() must be reentrant: append re-enters the same lock
+        # without deadlocking.
+        s = Storage(tmp_path, writer_id="w-1")
+        with s.exclusive():
+            ev = s.append(
+                event_type=EventType.PHASE_STARTED,
+                payload=make_phase_started_payload(phase_id="p1", title="x"),
+                run_id="r-1",
+            )
+        assert ev.seq == 0
+        assert len(s.read_all()) == 1
+
+    def test_exclusive_releases_lock_on_exit(self, tmp_path: Path) -> None:
+        # After the span exits, a separate Storage in this process can
+        # still acquire the lock (no lingering hold).
+        s = Storage(tmp_path, writer_id="w-1")
+        with s.exclusive():
+            pass
+        other = Storage(tmp_path, writer_id="w-2")
+        with other.exclusive():
+            ev = other.append(
+                event_type=EventType.PHASE_STARTED,
+                payload=make_phase_started_payload(phase_id="p2", title="y"),
+                run_id="r-1",
+            )
+        assert ev.seq == 0

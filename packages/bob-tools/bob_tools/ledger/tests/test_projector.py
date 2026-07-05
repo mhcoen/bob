@@ -941,3 +941,108 @@ class TestStateSerialization:
         a = project(events)
         b = project(copy.deepcopy(events))
         assert a == b
+
+
+# ---------------------------------------------------------------------
+# Idempotence: duplicated event lines apply exactly once
+# ---------------------------------------------------------------------
+
+
+class TestDuplicateEventDedup:
+    """A duplicated event line (same event_id appended twice) must be
+    applied exactly once across every record type, not just phases and
+    assumptions. Without event_id dedup, list-append handlers
+    (invariants, human_decisions, findings, evidence_refs,
+    design_reasoning_refs) double-count and re-fire threshold crossings.
+    """
+
+    def test_duplicate_invariant_declared_counts_once(self) -> None:
+        ev = _make(
+            EventType.INVARIANT_DECLARED,
+            make_invariant_declared_payload(
+                invariant_id="inv-1",
+                statement="x must hold",
+                source="human",
+            ),
+        )
+        s = project([ev, copy.deepcopy(ev)])
+        assert len(s.invariants) == 1
+        assert s.invariants[0].invariant_id == "inv-1"
+
+    def test_duplicate_human_decision_counts_once(self) -> None:
+        ev = _make(
+            EventType.HUMAN_DECISION_RECORDED,
+            make_human_decision_recorded_payload(
+                decision_id="d-1",
+                summary="ship it",
+                rationale="because",
+                decided_by="mike",
+            ),
+        )
+        s = project([ev, copy.deepcopy(ev)])
+        assert len(s.human_decisions) == 1
+        assert s.human_decisions[0].decision_id == "d-1"
+
+    def test_duplicate_unattributed_finding_counts_once(self) -> None:
+        ev = _make(
+            EventType.FINDING_OBSERVED,
+            make_finding_observed_payload(summary="odd log line"),
+        )
+        s = project([ev, copy.deepcopy(ev)])
+        assert s.findings_unattributed == [ev.event_id]
+
+    def test_duplicate_commit_evidence_ref_counts_once(self) -> None:
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="Boot"),
+        )
+        commit = _make(
+            EventType.COMMIT_LANDED,
+            _commit_payload(attributed_phase_id="p1"),
+        )
+        s = project([e1, commit, copy.deepcopy(commit)])
+        assert len(s.phases) == 1
+        assert s.phases[0].evidence_refs == [commit.event_id]
+
+    def test_duplicate_design_reasoning_ref_counts_once(self) -> None:
+        e1 = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="Boot"),
+        )
+        dr = _make(
+            EventType.DESIGN_REASONING_RECORDED,
+            make_design_reasoning_recorded_payload(
+                decision_id="dr-1",
+                linked_event_id=e1.event_id,
+                rationale="why",
+            ),
+        )
+        s = project([e1, dr, copy.deepcopy(dr)])
+        assert s.phases[0].design_reasoning_refs == [dr.event_id]
+        assert s.orphaned_design_reasoning == []
+
+    def test_duplicate_orphan_design_reasoning_counts_once(self) -> None:
+        dr = _make(
+            EventType.DESIGN_REASONING_RECORDED,
+            make_design_reasoning_recorded_payload(
+                decision_id="dr-1",
+                linked_event_id=uuid7(),  # unresolvable link -> orphan
+                rationale="why",
+            ),
+        )
+        s = project([dr, copy.deepcopy(dr)])
+        assert s.orphaned_design_reasoning == [dr.event_id]
+        assert s.orphaned_design_reasoning_count == 1
+
+    def test_duplicate_does_not_advance_extra_state(self) -> None:
+        # A repeated line must not perturb the high-water marks beyond
+        # what the single event already established.
+        ev = _make(
+            EventType.PHASE_STARTED,
+            make_phase_started_payload(phase_id="p1", title="Boot"),
+            seq=3,
+            writer_id="writer-Z",
+        )
+        once = project([ev])
+        twice = project([ev, copy.deepcopy(ev)])
+        assert once == twice

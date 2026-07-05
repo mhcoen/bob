@@ -362,8 +362,21 @@ def project(events: Iterable[Event]) -> PlanState:
     event_to_phase: dict[str, str] = {}
     deferred_design_reasoning: list[Event] = []
     seen_writers: set[str] = set()
+    seen_event_ids: set[str] = set()
 
     for ev in sorted_events:
+        # Idempotence: a duplicated event line (same event_id appended
+        # twice, e.g. a retried writer or a torn-then-rewritten append)
+        # must apply exactly once. Phase and assumption handlers dedupe
+        # by their domain id, but invariant/human_decision/finding and
+        # every evidence_refs/design_reasoning_refs append are pure
+        # list appends that would otherwise double-count and re-fire
+        # threshold crossings. Skip the whole event -- high-water marks
+        # are idempotent for a repeated (writer_id, seq) anyway.
+        if ev.event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(ev.event_id)
+
         # High-water marks. T1 fold: every event reaching project() has
         # been validated by the caller and so counts as successfully
         # applied. Reserved events count too -- their schema validates,
