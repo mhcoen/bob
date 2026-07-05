@@ -924,20 +924,18 @@ class TestValidatePlanConstructed:
             "children[0].task_id is missing on constructed task" in m for m in messages
         )
 
-    def test_trailing_lines_rejected_on_constructed_task(self) -> None:
+    def test_trailing_lines_accepted_on_constructed_validation(self) -> None:
+        # Trailing lines pass constructed validation: make_task cannot
+        # produce them, so the old rejection only ever fired on plans
+        # parsed from disk, where they are legitimate lossless content.
         plan = self._cplan(
             phases=(
                 self._cphase(
-                    tasks=(self._ctask(trailing_lines=("# stash",)),),
+                    tasks=(self._ctask(trailing_lines=("  # stash",)),),
                 ),
             ),
         )
-        with pytest.raises(PlanValidationError) as exc_info:
-            validate_plan(plan, constructed=True)
-        assert any(
-            "trailing_lines must be empty on constructed tasks" in m
-            for m in exc_info.value.messages
-        )
+        validate_plan(plan, constructed=True)
 
     def test_project_title_newline_rejected(self) -> None:
         plan = self._cplan(project_title="line\nbreak")
@@ -4248,11 +4246,12 @@ class TestAddBugTask:
         assert new_plan.bugs is not None
         assert len(new_plan.bugs.tasks) == 2
 
-    def test_field_stability_rejection_for_hand_built_task(self) -> None:
-        # A Task hand-built with nonempty trailing_lines violates the
-        # Stage 10 constructed-task contract; add_bug_task must reject
-        # it before any plan mutation.
-        bad = Task(
+    def test_hand_built_task_with_trailing_lines_accepted(self) -> None:
+        # Trailing lines on a hand-built Task are accepted and preserved
+        # through add_bug_task: they are lossless renderable content,
+        # not a contract violation (the old rejection existed only to
+        # catch parsed-from-disk lines, where they are legitimate).
+        carried = Task(
             task_id=None,
             text="bug body",
             status=TaskStatus.TODO,
@@ -4264,8 +4263,9 @@ class TestAddBugTask:
             ruled_out=(),
             indent_level=0,
             line_number=0,
-            trailing_lines=("oops",),
+            trailing_lines=("  oops",),
         )
         plan = self._plan_no_bugs()
-        with pytest.raises(PlanValidationError):
-            add_bug_task(plan, bad)
+        new_plan, _task_id = add_bug_task(plan, carried)
+        assert new_plan.bugs is not None
+        assert new_plan.bugs.tasks[-1].trailing_lines == ("  oops",)

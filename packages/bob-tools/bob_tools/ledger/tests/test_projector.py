@@ -28,6 +28,7 @@ Coverage:
 from __future__ import annotations
 
 import copy
+import dataclasses
 import json
 import random
 from typing import Any
@@ -992,13 +993,18 @@ class TestDuplicateEventDedup:
         assert s.findings_unattributed == [ev.event_id]
 
     def test_duplicate_commit_evidence_ref_counts_once(self) -> None:
+        # Distinct events from one writer carry distinct seqs (as the
+        # real Storage guarantees); the projector dedups (writer_id,
+        # seq) collisions, so fixtures must model real streams.
         e1 = _make(
             EventType.PHASE_STARTED,
             make_phase_started_payload(phase_id="p1", title="Boot"),
+            seq=0,
         )
         commit = _make(
             EventType.COMMIT_LANDED,
             _commit_payload(attributed_phase_id="p1"),
+            seq=1,
         )
         s = project([e1, commit, copy.deepcopy(commit)])
         assert len(s.phases) == 1
@@ -1008,6 +1014,7 @@ class TestDuplicateEventDedup:
         e1 = _make(
             EventType.PHASE_STARTED,
             make_phase_started_payload(phase_id="p1", title="Boot"),
+            seq=0,
         )
         dr = _make(
             EventType.DESIGN_REASONING_RECORDED,
@@ -1016,10 +1023,26 @@ class TestDuplicateEventDedup:
                 linked_event_id=e1.event_id,
                 rationale="why",
             ),
+            seq=1,
         )
         s = project([e1, dr, copy.deepcopy(dr)])
         assert s.phases[0].design_reasoning_refs == [dr.event_id]
         assert s.orphaned_design_reasoning == []
+
+    def test_same_writer_seq_different_event_ids_applies_once(self) -> None:
+        # The crash-replay duplicate class: an appended line survives a
+        # power loss but the seq-file rename is lost, so the restarted
+        # writer re-issues the SAME (writer_id, seq) under a FRESH
+        # uuid7. event_id dedup cannot see this; the projector must
+        # apply exactly one of the two.
+        f1 = _make(
+            EventType.FINDING_OBSERVED,
+            make_finding_observed_payload(summary="observed once"),
+            seq=0,
+        )
+        f2 = dataclasses.replace(f1, event_id=uuid7())
+        s = project([f1, f2])
+        assert len(s.findings_unattributed) == 1
 
     def test_duplicate_orphan_design_reasoning_counts_once(self) -> None:
         dr = _make(

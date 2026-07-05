@@ -86,6 +86,27 @@ def _contains_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
 
 
+def _count_unfenced_incomplete_checkboxes(text: str) -> int:
+    """Count incomplete-checkbox lines outside ``` fences.
+
+    The parser treats content inside a Markdown code fence as verbatim
+    (a ``- [ ]`` line in a fenced example is not a task), so any count
+    used to cross-check the parser against raw text must apply the same
+    fence rule or every fenced example trips a false "task dropped"
+    mismatch.
+    """
+    count = 0
+    in_fence = False
+    for line in text.splitlines():
+        if in_fence or line.lstrip().startswith("```"):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+            continue
+        if _INCOMPLETE_CHECKBOX_RE.match(line):
+            count += 1
+    return count
+
+
 def _now_iso_utc() -> str:
     """Return the current UTC instant as an ISO 8601 string.
 

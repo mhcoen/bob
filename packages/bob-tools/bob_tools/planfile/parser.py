@@ -252,6 +252,13 @@ def parse_plan(
     # because trailing content belongs to a task in the current
     # section, not across section boundaries.
     last_parsed_task: _TaskBuilder | None = None
+    # Inside a Markdown code fence (``` ... ```) every line is verbatim
+    # content: a checkbox, heading, or comment inside a fence is an
+    # EXAMPLE, not structure. Without this, ``fmt`` on a plan whose
+    # fenced output block contained ``- [ ] example`` parsed the example
+    # as a real task, assigned it an id, and hoisted it out of the
+    # fence — silently corrupting the block.
+    in_fence = False
 
     def _close_subsection_prose() -> None:
         nonlocal subsection_prose_lines
@@ -265,8 +272,31 @@ def parse_plan(
             current_phase.prose = _finalize_prose(phase_prose_lines)
         phase_prose_lines = None
 
+    def _route_verbatim(line: str) -> None:
+        """Append a non-structural line to the innermost open accumulator.
+
+        Order mirrors the prose fallthrough: preamble while active, then
+        subsection prose, then phase prose, then the most recent task's
+        ``trailing_lines``. A line with no open accumulator is dropped
+        (compat behavior for content before any anchor).
+        """
+        if preamble_active:
+            preamble_lines.append(line)
+        elif subsection_prose_lines is not None:
+            subsection_prose_lines.append(line)
+        elif phase_prose_lines is not None:
+            phase_prose_lines.append(line)
+        elif last_parsed_task is not None:
+            last_parsed_task.trailing_lines.append(line)
+
     for idx, line in enumerate(lines):
         line_number = idx + 1
+
+        if in_fence or line.lstrip().startswith("```"):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+            _route_verbatim(line)
+            continue
 
         heading = _parse_phase_heading(line)
         if heading is not None:
@@ -413,24 +443,13 @@ def parse_plan(
                     current_phase.phase_id = pid
                     current_phase.phase_id_source = "explicit_comment"
                     continue
-            if preamble_active:
-                preamble_lines.append(line)
-            elif subsection_prose_lines is not None:
-                subsection_prose_lines.append(line)
-            elif phase_prose_lines is not None:
-                phase_prose_lines.append(line)
-            elif last_parsed_task is not None:
-                # No prose accumulator is active because the first
-                # task in this section has already been parsed, so
-                # this non-structural line belongs to the most-recent
-                # task's tail. Captured verbatim (no interpretation)
-                # so the renderer can emit it back in original order
-                # — the lossless-canonicalize invariant in design doc
-                # section 3.2 (planfile.md:268).
-                last_parsed_task.trailing_lines.append(line)
-            # else: line outside any active prose region and before
-            # any task in the current section — dropped in compat
-            # mode (no anchor to retain it on; structurally rare).
+            # Route to the innermost open accumulator. Trailing-task
+            # capture is verbatim (no interpretation) so the renderer
+            # can emit it back in original order — the
+            # lossless-canonicalize invariant in design doc section 3.2
+            # (planfile.md:268). A line with no anchor is dropped in
+            # compat mode (structurally rare).
+            _route_verbatim(line)
             continue
 
         _close_subsection_prose()
@@ -572,8 +591,16 @@ def _check_structural_sanity(
     # collision the raw-heading scan otherwise missed, letting a label
     # like ``1.1`` silently mis-resolve to whichever phase came first.
     phase_count = 0
+    # Mirror the parse loop's fence handling: a heading inside a
+    # ``` fence is example content, not structure, and must not trip
+    # the duplicate-heading / multiple-Bugs checks.
+    in_fence = False
 
     for i, line in enumerate(lines):
+        if in_fence or line.lstrip().startswith("```"):
+            if line.lstrip().startswith("```"):
+                in_fence = not in_fence
+            continue
         # Order matters: a single-hash ``# Phase 1: Bootstrapping``
         # is matched by both ``_STAGE_RE`` and ``_H1_RE``. A header is
         # either a stage header OR a plain H1 OR a Bugs header — never

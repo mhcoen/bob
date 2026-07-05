@@ -95,8 +95,11 @@ def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
             _validate_scalar(
                 ruled.text, f"{prefix}.ruled_out[{ruled_index}].text", errors
             )
-        if node.trailing_lines:
-            errors.append(f"{prefix}.trailing_lines must be empty on constructed tasks")
+        # trailing_lines are not rejected: make_task cannot produce them
+        # (no parameter), so a rejection here only ever fired when the
+        # field-stability harness ran over tasks parsed from disk --
+        # where trailing prose/fenced blocks are legitimate, lossless
+        # content. The semantic normalizer clears them before comparing.
 
 
 def _explicit_task_ids(task: Task) -> set[str]:
@@ -165,20 +168,15 @@ def _restore_sentinel_none_ids(
     return dataclasses.replace(task, task_id=task_id, children=children)
 
 
-def _reject_trailing_lines(task: Task) -> None:
-    errors = [
-        f"{_task_path_label(path)}.trailing_lines must be empty on constructed tasks"
-        for path, node in _iter_task_tree_with_paths(task)
-        if node.trailing_lines
-    ]
-    if errors:
-        raise PlanValidationError(errors)
-
-
 def _normalize_task_for_semantic_compare(task: Task, *, depth: int = 0) -> Task:
-    _reject_trailing_lines(task)
+    # trailing_lines are cleared (not rejected) for the semantic compare:
+    # they are lossless positional trivia the parser captures from disk,
+    # rendered back verbatim, and never part of a task's semantic fields.
+    # Rejecting them here made the plan-level field-stability check fail
+    # on every parsed file that carried trailing content.
     return dataclasses.replace(
         task,
+        trailing_lines=(),
         indent_level=depth * 2,
         line_number=0,
         children=tuple(

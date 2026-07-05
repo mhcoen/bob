@@ -24,7 +24,11 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
-from bob_tools.planfile.fileio import _acquire_exclusive_lock, _atomic_write_text
+from bob_tools.planfile.fileio import (
+    ConcurrentUpdateError,
+    _acquire_exclusive_lock,
+    _atomic_write_text,
+)
 from bob_tools.planfile.iteration import _iter_plan_tasks
 from bob_tools.planfile.model import Plan, Task, TaskStatus
 from bob_tools.planfile.parser import parse_plan
@@ -175,18 +179,31 @@ def backfill_file(
     The read pins UTF-8 and the rewrite goes through the same
     lock+atomic-write path as every other writer in this library
     (:func:`~bob_tools.planfile.fileio._acquire_exclusive_lock` around
-    :func:`~bob_tools.planfile.fileio._atomic_write_text`), so a crash
-    mid-write cannot truncate PLAN.md and a concurrent ``save``/``update``
-    cannot interleave with the backfill.
+    :func:`~bob_tools.planfile.fileio._atomic_write_text`). Because the
+    per-task git scan between read and write is slow, the write is
+    guarded against TOCTOU: under the lock the file is re-read and
+    compared to the bytes the plan was computed from; on mismatch (a
+    concurrent ``save``/``update`` landed during the scan) the whole
+    computation retries against the fresh bytes. Persistent contention
+    raises :class:`~bob_tools.planfile.fileio.ConcurrentUpdateError`
+    exactly like :func:`~bob_tools.planfile.fileio.update`, rather than
+    silently clobbering the other writer.
     """
-    text = path.read_text(encoding="utf-8")
-    plan = parse_plan(text, strict=False)
     rel_path = str(path.relative_to(repo_root))
-    new_plan, backfilled, left_null = backfill_plan(
-        plan, rel_path, repo_root=repo_root, run=run
-    )
-    if backfilled:
+    for _ in range(3):
+        text = path.read_text(encoding="utf-8")
+        plan = parse_plan(text, strict=False)
+        new_plan, backfilled, left_null = backfill_plan(
+            plan, rel_path, repo_root=repo_root, run=run
+        )
+        if not backfilled:
+            return backfilled, left_null
         rendered = render_plan(new_plan)
         with _acquire_exclusive_lock(path):
-            _atomic_write_text(path, rendered)
-    return backfilled, left_null
+            current = path.read_text(encoding="utf-8")
+            if current == text:
+                _atomic_write_text(path, rendered)
+                return backfilled, left_null
+        # A concurrent writer landed during the git scan; recompute
+        # from the fresh bytes rather than clobbering its changes.
+    raise ConcurrentUpdateError(path)

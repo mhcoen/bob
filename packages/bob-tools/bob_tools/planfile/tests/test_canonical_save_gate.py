@@ -116,11 +116,14 @@ def test_canonical_rejects_embedded_newline_preamble(tmp_path: Path) -> None:
         save(tmp_path / "PLAN.md", plan)
 
 
-def test_canonical_rejects_non_empty_trailing_lines(tmp_path: Path) -> None:
+def test_canonical_preserves_trailing_lines(tmp_path: Path) -> None:
+    # Trailing lines are lossless parsed-from-disk content; the canonical
+    # gate passes them through and the renderer writes them verbatim.
+    # (The old rejection made runtime saves destroy content fmt keeps.)
     plan = _good_plan()
-    bad_task = dataclasses.replace(_first_task(plan), trailing_lines=("stray line",))
-    with pytest.raises(PlanValidationError):
-        save(tmp_path / "PLAN.md", _replace_first_task(plan, bad_task))
+    task = dataclasses.replace(_first_task(plan), trailing_lines=("  stray line",))
+    save(tmp_path / "PLAN.md", _replace_first_task(plan, task))
+    assert "  stray line" in (tmp_path / "PLAN.md").read_text()
 
 
 def test_canonical_rejects_duplicate_task_ids(tmp_path: Path) -> None:

@@ -353,8 +353,14 @@ def _check_constructed_invariants(
             errors.append(
                 f"{label}.task_id is malformed on constructed task: {task.task_id!r}"
             )
-        if task.trailing_lines:
-            errors.append(f"{label}.trailing_lines must be empty on constructed tasks")
+        # trailing_lines are deliberately NOT rejected here. The
+        # construction API (make_task) cannot produce them, so the old
+        # "must be empty on constructed tasks" invariant only ever fired
+        # on plans parsed from disk -- exactly where trailing prose and
+        # fenced blocks are legitimate, lossless content the renderer
+        # round-trips byte-for-byte. Rejecting them made the runtime
+        # preflight destructively migrate (delete) content that fmt had
+        # just promised to preserve.
 
     _check_non_task_scalar_field_stability(plan, errors)
     _check_each_task_field_stability(plan, errors)

@@ -363,6 +363,7 @@ def project(events: Iterable[Event]) -> PlanState:
     deferred_design_reasoning: list[Event] = []
     seen_writers: set[str] = set()
     seen_event_ids: set[str] = set()
+    seen_writer_seqs: set[tuple[str, int]] = set()
 
     for ev in sorted_events:
         # Idempotence: a duplicated event line (same event_id appended
@@ -376,6 +377,17 @@ def project(events: Iterable[Event]) -> PlanState:
         if ev.event_id in seen_event_ids:
             continue
         seen_event_ids.add(ev.event_id)
+        # Second duplicate class: same (writer_id, seq) under DIFFERENT
+        # event_ids -- produced when a crash drops the seq-file rename
+        # while the appended line survives, so the restarted writer
+        # re-issues the seq with a fresh uuid7. (writer_id, seq) is the
+        # design's per-writer uniqueness key; the event_id dedup above
+        # cannot see this class. Keep the first occurrence in replay
+        # order (deterministic: events are sorted by event_id).
+        writer_seq = (ev.writer_id, ev.seq)
+        if writer_seq in seen_writer_seqs:
+            continue
+        seen_writer_seqs.add(writer_seq)
 
         # High-water marks. T1 fold: every event reaching project() has
         # been validated by the caller and so counts as successfully

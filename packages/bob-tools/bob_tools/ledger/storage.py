@@ -197,12 +197,26 @@ class Storage:
 
     def _persist_seq(self, used_seq: int) -> None:
         self._writers_dir.mkdir(parents=True, exist_ok=True)
-        # Atomic update via write-then-rename. Avoids a torn file if the
-        # process is killed mid-write; readers either see the old value
-        # or the new one.
+        # Atomic + durable update via write-fsync-rename-dirfsync. The
+        # rename alone avoids a torn file, but without fsyncing the temp
+        # file and then the directory a power loss can drop the rename
+        # while an already-appended event line survives -- the restarted
+        # writer then re-issues the same seq under a fresh event_id,
+        # producing exactly the (writer_id, seq) duplicate class that
+        # SeqStateError exists to prevent.
         tmp_path = self._seq_path.with_suffix(".seq.tmp")
-        tmp_path.write_text(str(used_seq))
+        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        try:
+            os.write(fd, str(used_seq).encode("ascii"))
+            os.fsync(fd)
+        finally:
+            os.close(fd)
         os.replace(tmp_path, self._seq_path)
+        dir_fd = os.open(str(self._writers_dir), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
 
     # -- public API ----------------------------------------------------------
 
@@ -257,7 +271,8 @@ class Storage:
             self._events_path.parent.mkdir(parents=True, exist_ok=True)
             line = (event.to_jsonl() + "\n").encode("utf-8")
             # Single write() call; O_APPEND on POSIX serializes appends
-            # whose payload is at most PIPE_BUF.
+            # whose payload is at most PIPE_BUF (larger appends are
+            # serialized by the interprocess lock held here).
             fd = os.open(
                 str(self._events_path),
                 os.O_WRONLY | os.O_APPEND | os.O_CREAT,
@@ -265,6 +280,12 @@ class Storage:
             )
             try:
                 os.write(fd, line)
+                # The ledger is the durable history; an unfsync'd append
+                # can vanish in a power loss AFTER the seq file recorded
+                # the emit, leaving a seq gap the projector cannot
+                # explain. fsync inside the lock keeps append durability
+                # aligned with the seq file's.
+                os.fsync(fd)
             finally:
                 os.close(fd)
 

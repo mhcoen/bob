@@ -1765,3 +1765,37 @@ class TestMagicLineForcesStrict:
         # The magic version is still detected/recorded (only the strict
         # upgrade is suppressed).
         assert plan.magic_version == 1
+
+
+class TestFenceAwareness:
+    """Content inside ``` fences is verbatim, never structure.
+
+    Regression: a checkbox inside a fenced example was parsed as a real
+    task; ``fmt`` then assigned it an id and hoisted it out of the
+    fence, corrupting the block. Headings inside fences likewise must
+    not open phases or trip the structural-sanity duplicate checks.
+    """
+
+    def test_checkbox_inside_fence_is_not_a_task(self) -> None:
+        plan = parse_plan(
+            "# Demo\n\n## Stage 1: Core\n\n"
+            "- [x] T-000001: document the syntax\n"
+            "\n```text\n- [ ] example checkbox inside fence\n```\n"
+        )
+        tasks = plan.phases[0].tasks
+        assert len(tasks) == 1
+        assert tasks[0].trailing_lines == (
+            "",
+            "```text",
+            "- [ ] example checkbox inside fence",
+            "```",
+        )
+
+    def test_heading_inside_fence_does_not_open_section(self) -> None:
+        plan = parse_plan(
+            "# Demo\n\n## Stage 1: Core\n\n"
+            "- [x] T-000001: real task\n"
+            "\n```\n## Bugs\n## Stage 1: fake duplicate\n```\n"
+        )
+        assert len(plan.phases) == 1
+        assert plan.bugs is None

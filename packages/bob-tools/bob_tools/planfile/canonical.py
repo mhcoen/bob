@@ -6,8 +6,8 @@ import warnings
 from pathlib import Path
 
 from bob_tools.planfile._shared import (
-    _INCOMPLETE_CHECKBOX_RE,
     _POSITIONAL_LABEL_RE,
+    _count_unfenced_incomplete_checkboxes,
 )
 from bob_tools.planfile.iteration import (
     _iter_phase_tasks_with_phase,
@@ -79,7 +79,7 @@ def assert_mcloop_canonical(plan: Plan, *, source_path: Path | None = None) -> s
     parsed_normalized = _normalize_plan_for_semantic_compare(reparsed)
     _collect_plan_semantic_diff(intended_normalized, parsed_normalized, errors)
 
-    src_incomplete = len(_INCOMPLETE_CHECKBOX_RE.findall(rendered))
+    src_incomplete = _count_unfenced_incomplete_checkboxes(rendered)
     plan_incomplete = _count_todo_tasks(reparsed)
     if src_incomplete > plan_incomplete:
         dropped = src_incomplete - plan_incomplete

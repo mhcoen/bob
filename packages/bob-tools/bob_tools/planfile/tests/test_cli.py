@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -458,3 +459,34 @@ class TestErrorFilename:
         _print_parse_error(exc, buf, Path("BUGS.md"))
         assert "SOURCE.md invalid at line 5" in buf.getvalue()
         assert "BUGS.md" not in buf.getvalue()
+
+
+class TestTrailingContentSurvivesRuntime:
+    """done/fail must not destroy content fmt preserves.
+
+    Regression: the runtime preflight rejected ``trailing_lines`` and
+    destructively migrated any fmt-canonical file carrying them, so the
+    very next ``bob-plan done`` deleted the user's trailing prose or
+    fenced blocks from disk.
+    """
+
+    def test_done_preserves_trailing_prose_without_migration(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        path = tmp_path / "PLAN.md"
+        path.write_text(
+            "# Demo\n\n## Stage 1: Core\n\n"
+            "- [x] finished thing\n"
+            "  Verified by running the harness.\n\n"
+            "- [ ] next thing\n",
+            encoding="utf-8",
+        )
+        assert main(["fmt", str(path)]) == EXIT_OK
+        text = path.read_text()
+        assert "Verified by running the harness." in text
+        match = re.search(r"- \[ \] (T-\d+):", text)
+        assert match is not None
+        assert main(["done", str(path), match.group(1)]) == EXIT_OK
+        err = capsys.readouterr().err
+        assert "migrating legacy" not in err
+        assert "Verified by running the harness." in path.read_text()

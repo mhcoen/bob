@@ -83,13 +83,15 @@ class PlanPreflightError(Exception):
 def _rebuild_task(task: Task) -> Task:
     """Rebuild ``task`` via :func:`make_task` so it is constructed-stable.
 
-    Drops parser-side position metadata and ``trailing_lines`` (the
-    constructed validator rejects nonempty ``trailing_lines``) while
-    preserving text, status, tags, annotations, deps, ruled-out lines,
-    the existing id, and the created/completed timestamps. Children
-    rebuild recursively.
+    Drops parser-side position metadata while preserving text, status,
+    tags, annotations, deps, ruled-out lines, the existing id, the
+    created/completed timestamps, AND ``trailing_lines``. Trailing lines
+    are lossless user content (a completed task's fenced output block,
+    verification prose); the migration used to drop them, so a single
+    ``done``/``fail`` on a legacy file silently deleted content that
+    ``fmt`` preserves. Children rebuild recursively.
     """
-    return make_task(
+    rebuilt = make_task(
         task.text,
         status=task.status,
         flag_tags=task.flag_tags,
@@ -102,6 +104,9 @@ def _rebuild_task(task: Task) -> Task:
         created_at=task.created_at,
         completed_at=task.completed_at,
     )
+    if task.trailing_lines:
+        rebuilt = dataclasses.replace(rebuilt, trailing_lines=task.trailing_lines)
+    return rebuilt
 
 
 def _rebuild_phase(phase: Phase, *, ordinal: int) -> Phase:

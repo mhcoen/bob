@@ -42,7 +42,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
-from bob_tools.planfile._shared import _INCOMPLETE_CHECKBOX_RE
+from bob_tools.planfile._shared import _count_unfenced_incomplete_checkboxes
 from bob_tools.planfile.canonical import _count_todo_tasks
 from bob_tools.planfile.fileio import load, save
 from bob_tools.planfile.model import (
@@ -137,7 +137,10 @@ def cmd_next(args: argparse.Namespace) -> int:
 def cmd_fmt(args: argparse.Namespace) -> int:
     path = Path(args.path)
     try:
-        text = path.read_text()
+        # Pinned UTF-8 to match every other planfile read/write path; an
+        # unpinned read here would misdecode non-ASCII content on a
+        # non-UTF-8 locale and re-encode the mojibake to disk.
+        text = path.read_text(encoding="utf-8")
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
@@ -155,7 +158,10 @@ def cmd_fmt(args: argparse.Namespace) -> int:
     # The parser only surfaces checkboxes that sit under a ``## Stage``
     # / ``## Phase`` heading; formatting a file with strays would
     # silently drop them from the rewritten file. Refuse instead.
-    src_incomplete = len(_INCOMPLETE_CHECKBOX_RE.findall(text))
+    # Checkbox lines inside ``` fences are example content the parser
+    # (correctly) does not surface as tasks, so exclude them from the
+    # source count or every fenced example would trip this refusal.
+    src_incomplete = _count_unfenced_incomplete_checkboxes(text)
     plan_incomplete = _count_todo_tasks(plan)
     if src_incomplete > plan_incomplete:
         dropped = src_incomplete - plan_incomplete
@@ -177,16 +183,19 @@ def cmd_fmt(args: argparse.Namespace) -> int:
     # being rejected at save time.
     if migrated.magic_version is None:
         migrated = dataclasses.replace(migrated, magic_version=1)
-    # ``fmt`` canonicalizes a file that already exists on disk, so its
-    # tasks legitimately carry the parser's lossless trailing-line
-    # capture (a completed task followed by a fenced output block,
-    # inter-section spacing, ...). The constructed-mode "no
-    # trailing_lines" invariant exists to catch construction-API tasks
-    # that smuggle in raw source lines, not to reject content a file
-    # legitimately had; exempt it here so those lines round-trip to disk
-    # byte-for-byte instead of crashing the canonical save gate.
+    # Task trailing lines (fenced output blocks, inter-section prose)
+    # pass through the canonical gate and round-trip byte-for-byte; the
+    # old "no trailing_lines" invariant was removed from constructed
+    # validation because it only ever fired on parsed-from-disk content.
     try:
-        save(path, migrated, allow_trailing_lines=True)
+        save(path, migrated)
+    except PlanValidationError as exc:
+        # The canonical gate rejected the migrated plan (duplicate ids,
+        # multi-paragraph preamble, ...). These need a hand fix; report
+        # each message as a diagnostic instead of a traceback.
+        for message in exc.messages if exc.messages else [str(exc)]:
+            print(f"{path}: {message}", file=sys.stderr)
+        return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
@@ -213,6 +222,10 @@ def cmd_done(args: argparse.Namespace) -> int:
         return EXIT_TASK_NOT_FOUND
     try:
         save(path, new_plan)
+    except PlanValidationError as exc:
+        for message in exc.messages if exc.messages else [str(exc)]:
+            print(f"{path}: {message}", file=sys.stderr)
+        return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
@@ -240,6 +253,10 @@ def cmd_fail(args: argparse.Namespace) -> int:
         return EXIT_TASK_NOT_FOUND
     try:
         save(path, new_plan)
+    except PlanValidationError as exc:
+        for message in exc.messages if exc.messages else [str(exc)]:
+            print(f"{path}: {message}", file=sys.stderr)
+        return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
