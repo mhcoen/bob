@@ -179,7 +179,7 @@ def test_run_session_none_timeout_disables_wall_clock_cap(
 ) -> None:
     """``timeout=None`` disables the wall-clock cap. A quick subprocess
     finishes with its real exit code rather than being force-killed with
-    the timeout code (-2), proving None is accepted and the guard never
+    the timeout code (TIMEOUT_KILL_EXIT), proving None is accepted and the guard never
     fires."""
     output, exit_code = _subprocess.run_session(
         ["sh", "-c", "sleep 0.3; echo done"],
@@ -205,7 +205,7 @@ def test_run_session_positive_timeout_still_kills_on_wall_clock(
         timeout=1,
         silent=True,
     )
-    assert exit_code == -2
+    assert exit_code == _subprocess.TIMEOUT_KILL_EXIT
 
 
 # --------------------------------------------------------------------
@@ -517,7 +517,7 @@ def test_idle_kill_fires_despite_stale_pending_file(
     A SIGKILL of the session's process group kills the hook before its
     cleanup runs, orphaning the pending file. Honoring the orphan would
     disable the idle kill forever, so stale entries are pruned and the
-    kill still fires (-3).
+    kill still fires (IDLE_KILL_EXIT).
     """
     monkeypatch.setattr(_subprocess, "IDLE_TIMEOUT_S", 0.3)
     pending_dir = tmp_path / ".mcloop" / "pending"
@@ -533,6 +533,6 @@ def test_idle_kill_fires_despite_stale_pending_file(
         timeout=30,
         silent=True,
     )
-    assert exit_code == -3
+    assert exit_code == _subprocess.IDLE_KILL_EXIT
     assert "survived" not in output
     assert not stale.exists()

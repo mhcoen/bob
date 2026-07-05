@@ -12,9 +12,11 @@ Two resolution defects are pinned here so they cannot regress:
 
 from __future__ import annotations
 
+import pytest
+
 from orchestra.executor._executor_common import _format
 from orchestra.executor.guards import GuardContext, evaluate
-from orchestra.spine import Reference, TruthyTest
+from orchestra.spine import Comparison, Literal_, Reference, TruthyTest
 
 
 def _ctx(**inputs: object) -> GuardContext:
@@ -95,3 +97,23 @@ def test_format_substitutes_plain_value() -> None:
 
 def test_format_leaves_missing_key_literal() -> None:
     assert _format("a={a} b={b}", {"a": "1"}) == "a=1 b={b}"
+
+
+def test_ordering_comparison_on_missing_key_raises_named_error() -> None:
+    # A missing key resolves to None so truthiness works for optional
+    # fields, but an ORDERING comparison on that None is a guard
+    # authoring error (usually a typo'd key). The old behavior was a
+    # bare "'<' not supported between NoneType and int" TypeError that
+    # named nothing; the error must now name the reference.
+    ctx = _ctx(foo={"other": 1})
+    expr = Comparison(op="<", left=Reference(parts=("foo", "missing")), right=Literal_(value=3))
+    with pytest.raises(KeyError, match="missing"):
+        evaluate(expr, ctx)
+
+
+def test_equality_comparison_with_missing_key_stays_legal() -> None:
+    # Equality against an absent value is meaningful (absent != value,
+    # absent == absent) and must not raise.
+    ctx = _ctx(foo={"other": 1})
+    expr = Comparison(op="!=", left=Reference(parts=("foo", "missing")), right=Literal_(value=3))
+    assert evaluate(expr, ctx) is True

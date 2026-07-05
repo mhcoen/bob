@@ -19,7 +19,6 @@ from orchestra.adapters import codex_agent as codex_agent_mod
 from orchestra.adapters.codex_agent import (
     DEFAULT_SANDBOX,
     CodexAgentAdapter,
-    _verdict_for_exit_code,
     register,
 )
 from orchestra.spine import InvocationRequest
@@ -262,7 +261,13 @@ def test_invoke_verdict_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     monkeypatch.setattr(codex_agent_mod, "_detect_changed_files", lambda project_dir: [])
     adapter = CodexAgentAdapter()
     prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
-    for exit_code, expected in [(0, "complete"), (-2, "timeout"), (3, "error")]:
+    from orchestra.adapters._subprocess import TIMEOUT_KILL_EXIT
+
+    for exit_code, expected in [
+        (0, "complete"),
+        (TIMEOUT_KILL_EXIT, "timeout"),
+        (3, "error"),
+    ]:
         monkeypatch.setattr(
             codex_agent_mod,
             "run_session",
@@ -275,25 +280,6 @@ def test_invoke_verdict_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
 # --------------------------------------------------------------------
 # verdict mapping helper
-# --------------------------------------------------------------------
-
-
-def test_verdict_for_exit_code_mapping() -> None:
-    assert _verdict_for_exit_code(0) == "complete"
-    # -2 (wall-clock timeout) and -3 (idle-kill) are both genuine
-    # timeouts. run_session kills a stuck session with -3 after
-    # IDLE_TIMEOUT_S; it must not surface as a hard error.
-    assert _verdict_for_exit_code(-2) == "timeout"
-    assert _verdict_for_exit_code(-3) == "timeout"
-    assert _verdict_for_exit_code(1) == "error"
-    # 130 is a deliberate caller-initiated interrupt, not a stuck
-    # session, so it is deliberately classified as error rather than
-    # timeout to avoid retrying a run the caller asked to abort.
-    assert _verdict_for_exit_code(130) == "error"
-
-
-# --------------------------------------------------------------------
-# describe() and class attributes
 # --------------------------------------------------------------------
 
 

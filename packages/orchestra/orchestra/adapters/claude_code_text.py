@@ -29,6 +29,7 @@ from orchestra.adapters._subprocess import (
     extract_final_text,
     run_session,
     timeout_s_from_ms,
+    verdict_for_exit_code,
     write_log,
 )
 from orchestra.errors import OrchestraError
@@ -208,7 +209,7 @@ class ClaudeCodeTextAdapter:
         # so callers see the answer, not the entire transcript. The
         # raw stream is preserved at log_path for debugging.
         final_text = extract_final_text(output)
-        verdict = _verdict_for_exit_code(exit_code)
+        verdict = verdict_for_exit_code(exit_code)
         return {
             "output": final_text,
             "verdict": verdict,
@@ -321,35 +322,6 @@ def _looks_throttled(output: str) -> bool:
         return False
     lo = output.lower()
     return any(marker in lo for marker in _THROTTLE_MARKERS)
-
-
-def _verdict_for_exit_code(exit_code: int) -> str:
-    """Map a subprocess exit code to a runner verdict.
-
-    Mirrors the convention the executor's ``_derive_outcome`` uses for
-    the ``model`` and ``agent`` backings: ``complete`` on zero,
-    ``timeout`` on either timeout sentinel, ``error`` on any other
-    nonzero. The full exit code is preserved in ``payload.fields`` so
-    the adapter caller can read it back.
-
-    ``run_session`` distinguishes two kinds of forced kill. ``-2`` is
-    the wall-clock timeout, raised when the run exceeds the per-call
-    ``timeout`` bound. ``-3`` is the idle-kill, raised when no stream
-    activity arrives for ``IDLE_TIMEOUT_S`` and the session is judged
-    stuck. Both are genuine timeouts because the session did not finish
-    on its own and a retry is reasonable, so both map to ``timeout``.
-
-    ``130`` is a deliberate interrupt, a caller-initiated cancel via
-    ``set_interrupted``. That is not a stuck session, so it is
-    deliberately not a timeout. It falls through to ``error`` so
-    upstream retry logic does not relaunch a run the caller asked to
-    abort.
-    """
-    if exit_code == 0:
-        return "complete"
-    if exit_code in (-2, -3):
-        return "timeout"
-    return "error"
 
 
 def register(registry: Any, *, default_model: str | None = None) -> None:

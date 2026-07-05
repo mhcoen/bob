@@ -90,6 +90,26 @@ def evaluate(expr: GuardExpr, ctx: GuardContext) -> bool:
     if isinstance(expr, Comparison):
         left = ctx.resolve(expr.left)
         right = expr.right.value if isinstance(expr.right, Literal_) else ctx.resolve(expr.right)
+        # A missing dict key resolves to None so a TruthyTest on an
+        # optional payload field reads as false. An ORDERING comparison
+        # on that None is a guard-authoring error (usually a typo'd
+        # key); raise a message naming the reference instead of the
+        # bare "'<' not supported between NoneType and int" TypeError
+        # that named nothing. Equality against None stays legal
+        # (absent == absent, absent != value).
+        if expr.op in ("<", "<=", ">", ">="):
+            if left is None:
+                raise KeyError(
+                    f"guard comparison {expr.left}: reference resolved "
+                    f"to None (missing key?); ordering comparison "
+                    f"{expr.op!r} needs a present value"
+                )
+            if right is None:
+                raise KeyError(
+                    f"guard comparison {expr.right}: reference resolved "
+                    f"to None (missing key?); ordering comparison "
+                    f"{expr.op!r} needs a present value"
+                )
         return _cmp(expr.op, left, right)
     if isinstance(expr, NotExpr):
         return not evaluate(expr.inner, ctx)

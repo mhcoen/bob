@@ -34,6 +34,7 @@ from orchestra.adapters._subprocess import (
     build_session_env,
     run_session,
     timeout_s_from_ms,
+    verdict_for_exit_code,
     write_log,
 )
 from orchestra.adapters.claude_code_agent import _detect_changed_files
@@ -159,7 +160,7 @@ class CodexAgentAdapter:
         # Codex emits the final assistant text on stdout (not
         # stream-json), so the captured output is the answer. Pass it
         # through unchanged.
-        verdict = _verdict_for_exit_code(exit_code)
+        verdict = verdict_for_exit_code(exit_code)
         return {
             "output": output,
             "verdict": verdict,
@@ -216,35 +217,6 @@ class CodexAgentAdapter:
         # .mcloop/active-pid file, transcript logs, or the prepare()
         # summary.
         return cmd
-
-
-def _verdict_for_exit_code(exit_code: int) -> str:
-    """Map a subprocess exit code to a runner verdict.
-
-    Mirrors the convention the executor's ``_derive_outcome`` uses for
-    the ``model`` and ``agent`` backings: ``complete`` on zero,
-    ``timeout`` on either timeout sentinel, ``error`` on any other
-    nonzero. The full exit code is preserved in ``payload.fields`` so
-    the adapter caller can read it back.
-
-    ``run_session`` distinguishes two kinds of forced kill. ``-2`` is
-    the wall-clock timeout, raised when the run exceeds the per-call
-    ``timeout`` bound. ``-3`` is the idle-kill, raised when no stream
-    activity arrives for ``IDLE_TIMEOUT_S`` and the session is judged
-    stuck. Both are genuine timeouts because the session did not finish
-    on its own and a retry is reasonable, so both map to ``timeout``.
-
-    ``130`` is a deliberate interrupt, a caller-initiated cancel via
-    ``set_interrupted``. That is not a stuck session, so it is
-    deliberately not a timeout. It falls through to ``error`` so
-    upstream retry logic does not relaunch a run the caller asked to
-    abort.
-    """
-    if exit_code == 0:
-        return "complete"
-    if exit_code in (-2, -3):
-        return "timeout"
-    return "error"
 
 
 def register(registry: Any, *, default_model: str | None = None) -> None:

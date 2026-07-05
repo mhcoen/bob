@@ -22,7 +22,6 @@ import pytest
 from orchestra.adapters import codex_text as codex_text_mod
 from orchestra.adapters.codex_text import (
     CodexTextAdapter,
-    _verdict_for_exit_code,
     register,
 )
 from orchestra.spine import InvocationRequest
@@ -363,13 +362,15 @@ def test_invoke_returns_complete_verdict_on_zero_exit(
     assert payload["transcript_ref"] == str(tmp_path / "log")
 
 
-def test_invoke_returns_timeout_verdict_on_minus_two(
+def test_invoke_returns_timeout_verdict_on_wall_clock_kill(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from orchestra.adapters._subprocess import TIMEOUT_KILL_EXIT
+
     monkeypatch.setattr(
         codex_text_mod,
         "run_session",
-        lambda cmd, cwd, env, timeout, silent, **kw: ("partial", -2),
+        lambda cmd, cwd, env, timeout, silent, **kw: ("partial", TIMEOUT_KILL_EXIT),
     )
     monkeypatch.setattr(
         codex_text_mod,
@@ -380,7 +381,7 @@ def test_invoke_returns_timeout_verdict_on_minus_two(
     prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
     assert payload["verdict"] == "timeout"
-    assert payload["fields"]["exit_code"] == -2
+    assert payload["fields"]["exit_code"] == TIMEOUT_KILL_EXIT
 
 
 def test_invoke_returns_error_verdict_on_other_nonzero(
@@ -405,25 +406,6 @@ def test_invoke_returns_error_verdict_on_other_nonzero(
 
 # --------------------------------------------------------------------
 # verdict mapping
-# --------------------------------------------------------------------
-
-
-def test_verdict_for_exit_code_mapping() -> None:
-    assert _verdict_for_exit_code(0) == "complete"
-    # -2 (wall-clock timeout) and -3 (idle-kill) are both genuine
-    # timeouts. run_session kills a stuck session with -3 after
-    # IDLE_TIMEOUT_S; it must not surface as a hard error.
-    assert _verdict_for_exit_code(-2) == "timeout"
-    assert _verdict_for_exit_code(-3) == "timeout"
-    assert _verdict_for_exit_code(1) == "error"
-    # 130 is a deliberate caller-initiated interrupt, not a stuck
-    # session, so it is deliberately classified as error rather than
-    # timeout to avoid retrying a run the caller asked to abort.
-    assert _verdict_for_exit_code(130) == "error"
-
-
-# --------------------------------------------------------------------
-# describe() and class attributes
 # --------------------------------------------------------------------
 
 

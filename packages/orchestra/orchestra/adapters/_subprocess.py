@@ -8,8 +8,8 @@ package preserve mcloop's runtime behavior bit-for-bit:
   routing (deepseek, kimi, openai, etc.) per ``_apply_provider_env``,
 - stream-json line-by-line output capture with head-and-tail
   truncation,
-- monotonic-clock timeout that exit-codes -2 and kills the process
-  group,
+- monotonic-clock timeout that exit-codes TIMEOUT_KILL_EXIT and kills
+  the process group,
 - ``.mcloop/active-pid`` publishing plus a watchdog subprocess that
   kills the inner CLI if mcloop dies,
 - ``.mcloop/pending`` Telegram-approval polling with a ``denied``
@@ -112,19 +112,54 @@ no progress on that channel is a true "stuck" signal — distinct from
 "working slowly". Prevents the wall-clock cap from punishing
 legitimate long-but-progressing work."""
 
+TIMEOUT_KILL_EXIT: int = -102
+"""Sentinel exit code for a run_session wall-clock kill. Deliberately
+outside the kernel signal range (Popen reports a signal-killed child as
+``-signum``, and no platform defines a signal anywhere near 102), so a
+child that dies from a REAL SIGINT (-2) or SIGQUIT (-3) can never be
+mistaken for one of our own kills. The old -2/-3 sentinels collided
+with exactly those signals, misclassifying externally-killed runs as
+timeouts and retrying deliberately-cancelled work."""
+
+IDLE_KILL_EXIT: int = -103
+"""Sentinel exit code for a run_session idle-timeout kill. Same
+non-signal-range rationale as :data:`TIMEOUT_KILL_EXIT`."""
+
 
 def timeout_s_from_ms(timeout_ms: int | None, default_s: int) -> int:
     """Convert a request's ``timeout_ms`` to whole seconds for ``run_session``.
 
-    Ceil-divides so a sub-second cap does not truncate to 0, which the
-    session loop treats as "no wall-clock timeout", and floors any
-    explicit cap at 1s. Returns *default_s* when no cap was requested.
-    Shared by every adapter's ``prepare`` so the conversion cannot
-    drift per adapter.
+    Ceil-divides so a sub-second cap can never truncate to 0, and
+    floors any explicit cap at 1s (``run_session`` rejects a
+    non-positive timeout outright; "no wall-clock cap" is spelled
+    ``None``). Returns *default_s* when no cap was requested. Shared by
+    every adapter's ``prepare`` so the conversion cannot drift per
+    adapter.
     """
     if timeout_ms is None:
         return default_s
     return max(1, (timeout_ms + 999) // 1000)
+
+
+def verdict_for_exit_code(exit_code: int) -> str:
+    """Map a run_session exit code to a runner verdict.
+
+    Shared by all four real adapters (it interprets sentinels that
+    ``run_session`` owns, so it lives beside them): ``complete`` on
+    zero; ``timeout`` on either of run_session's own kill sentinels
+    (:data:`TIMEOUT_KILL_EXIT` wall-clock, :data:`IDLE_KILL_EXIT`
+    idle) — both are genuine timeouts because the session did not
+    finish on its own and a retry is reasonable; ``error`` on any other
+    nonzero, including ``130`` (a deliberate caller-initiated interrupt
+    via ``set_interrupted`` — not a stuck session, so upstream retry
+    logic must not relaunch a run the caller asked to abort) and
+    negative signal codes from a child killed externally.
+    """
+    if exit_code == 0:
+        return "complete"
+    if exit_code in (TIMEOUT_KILL_EXIT, IDLE_KILL_EXIT):
+        return "timeout"
+    return "error"
 
 
 PROGRESS_QUEUE_INTERVAL: float = 3.0
@@ -845,7 +880,7 @@ def run_session(
     own session, publishes ``.mcloop/active-pid``, spawns a watchdog,
     streams stdout (with stderr merged), polls ``.mcloop/pending`` for
     Telegram approvals, returns exit 1 on a ``denied`` file, returns
-    exit -2 and kills the process group on timeout, and bounds the
+    exit TIMEOUT_KILL_EXIT and kills the process group on timeout, and bounds the
     captured output with a head-plus-tail buffer.
 
     Allocates a per-call ``SessionState`` and registers it as the
@@ -884,6 +919,14 @@ def run_session(
             f"timeout must be a positive number of seconds or None, got {timeout}; "
             "pass None to disable the wall-clock cap"
         )
+    # Decode the prompt BEFORE spawning anything: a non-UTF-8 byte
+    # raises here, in the caller's frame, while there is no child
+    # process, watchdog, or pid file to leak. (Previously the decode
+    # sat after those resources were live, so a bad byte stranded a
+    # running child.)
+    stdin_text: str | None = None
+    if stdin_bytes is not None:
+        stdin_text = stdin_bytes.decode("utf-8")
     session = SessionState()
     previous = _current_session()
     _set_current_session(session)
@@ -940,13 +983,13 @@ def run_session(
     # blocks the parent on write() while the child blocks writing to its
     # own full stdout pipe, and no timeout in the loop below could break
     # it because the loop had not been reached yet.
-    if stdin_bytes is not None and process.stdin is not None:
+    if stdin_text is not None and process.stdin is not None:
         stdin_stream = process.stdin
-        stdin_text = stdin_bytes.decode("utf-8")
+        prompt_text = stdin_text
 
         def _writer() -> None:
             try:
-                stdin_stream.write(stdin_text)
+                stdin_stream.write(prompt_text)
                 stdin_stream.flush()
             except (BrokenPipeError, OSError):
                 # The CLI may close stdin early after consuming the
@@ -987,7 +1030,7 @@ def run_session(
                 except OSError:
                     process.kill()
                 process.wait()
-                return _assemble(head_lines, tail_lines, dropped), -2
+                return _assemble(head_lines, tail_lines, dropped), TIMEOUT_KILL_EXIT
             if (time.monotonic() - last_event_time) > IDLE_TIMEOUT_S:
                 if not silent:
                     elapsed_min = (time.monotonic() - last_event_time) / 60.0
@@ -1001,7 +1044,7 @@ def run_session(
                 except OSError:
                     process.kill()
                 process.wait()
-                return _assemble(head_lines, tail_lines, dropped), -3
+                return _assemble(head_lines, tail_lines, dropped), IDLE_KILL_EXIT
             # Bailout: if the reader thread is gone AND no buffered
             # lines remain AND the subprocess has exited, return now.
             # Covers the case where the reader crashed in the for-line
