@@ -8,6 +8,41 @@
 
 ## Observations
 
+- 2026-07-05 [5] [T-000005] Fixed the action-tag+text round-trip break by
+  making the **renderer refuse** the ambiguous combination (design doc
+  section 4.3 grammar `ActionTag ← "[AUTO:" Word "]" WS Text?` defines args
+  as the remainder to end of line, so the parser option "delimit args" is
+  ruled out — the design doc wins). `_render_task_lines`
+  (`planfile/renderer.py`) now raises `PlanValidationError` when
+  `action_tag is not None and text` is non-empty; that is the hard backstop
+  for *any* `render_plan` caller, closing the gap the task named ("make_task
+  guards ... but other Task constructors do not"). A second, earlier layer
+  in `_validate_task_for_construction` (`planfile/construction.py`) appends a
+  path-labeled `...action_tag combined with non-empty ...text ... failed to
+  round-trip` error so `make_task` / `validate_plan(constructed=True)` reject
+  it before ever rendering, preserving the existing per-field diagnostic
+  vocabulary (`test_make_task_rejects_d1_scalar_leaks[action_tag]` still
+  sees both `action_tag` and `failed to round-trip` in the message).
+  Note the invariant is "action_tag present ⇒ text empty" regardless of
+  whether `args` is empty — even `[AUTO:run]` + text collapses on re-parse.
+  Property test added in `test_generative.py`
+  (`test_action_tag_args_and_text_combination_round_trips_or_is_refused`):
+  over seeded `(action, args, text)` triples it asserts empty-text
+  round-trips and non-empty-text is refused by both `render_plan` and
+  `make_task`. The existing generator already avoided this combination by
+  construction (its module docstring documents the mutual exclusion), so no
+  generator change was needed.
+- 2026-07-05 [5] [T-000005] Pre-existing, out-of-scope lint failure noticed
+  while running the checks: `ruff check .` reports one `UP038` in
+  `tests/conftest.py:22` (`isinstance(cmd, (list, tuple))`). That file is an
+  mcloop auto-injected LLM guard (`# mcloop:llm-guard`, "Auto-injected by
+  mcloop"), so I did not modify it — treating it like the mcloop:wrap
+  managed blocks. It is unrelated to this task and in none of the three
+  files I changed; the sanctioned `mcloop verify` scoped run (which lints
+  only the changed files) passes clean. Flagging for the user to decide
+  whether the auto-injected template should be regenerated with the
+  `X | Y` isinstance form.
+
 - 2026-07-05 [4] [T-000004] Fixed by adding an `allow_cleared_magic`
   toggle to `validate_plan` / `_check_constructed_invariants`
   (parallel to the existing `require_acceptance` toggle): when set it

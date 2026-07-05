@@ -48,11 +48,12 @@ import random
 
 import pytest
 
-from bob_tools.planfile import parse_plan, render_plan
+from bob_tools.planfile import make_task, parse_plan, render_plan
 from bob_tools.planfile.model import (
     BugsSection,
     Phase,
     Plan,
+    PlanValidationError,
     RuledOut,
     Subsection,
     Task,
@@ -488,6 +489,93 @@ def test_parse_render_plan_equals_plan_modulo_line_numbers(iterations: int) -> N
         assert normalize_positions(reparsed) == normalize_positions(plan), (
             f"seed={seed}: parse(render(plan)) != plan modulo line numbers"
         )
+
+
+def _action_task(action: str, args: str, text: str, status: TaskStatus) -> Task:
+    """Build a single task carrying an action tag plus optional body text."""
+    return Task(
+        task_id="T-000001",
+        text=text,
+        status=status,
+        flag_tags=(),
+        action_tag=(action, args),
+        annotations=(),
+        deps=(),
+        children=(),
+        ruled_out=(),
+        indent_level=0,
+        line_number=0,
+    )
+
+
+def _single_task_plan(task: Task) -> Plan:
+    """Wrap ``task`` in a minimal magic-line plan with one phase."""
+    return Plan(
+        magic_version=1,
+        project_title="Generated Plan",
+        preamble="",
+        phases=(
+            Phase(
+                phase_id="phase_001",
+                phase_id_source="explicit_comment",
+                ordinal=1,
+                keyword="Phase",
+                title="P",
+                prose="",
+                subsections=(),
+                tasks=(task,),
+                line_number=0,
+            ),
+        ),
+        bugs=None,
+        source_path=None,
+    )
+
+
+@pytest.mark.parametrize("iterations", _ITERATIONS_PARAM)
+def test_action_tag_args_and_text_combination_round_trips_or_is_refused(
+    iterations: int,
+) -> None:
+    """Property: over Tasks combining an action tag, args, and body text,
+    the ambiguous case is refused rather than silently corrupted.
+
+    The parser reads everything after ``[AUTO:<action>]`` to end of line
+    as the action args (design doc section 4.3 grammar
+    ``ActionTag ← "[AUTO:" Word "]" WS Text?``). So:
+
+    * **Empty text** (any args): the task is representable and round-trips
+      — ``parse(render(task))`` recovers the same ``action_tag`` and an
+      empty ``text``.
+    * **Non-empty text** (any args): the combination is unrepresentable —
+      re-parse would fold the text into the args and blank ``text`` — so
+      both :func:`render_plan` and :func:`make_task` raise
+      :class:`PlanValidationError` instead of emitting a line that breaks
+      the ``parse(render(plan)) == plan`` contract.
+
+    This is exactly the tag/args/text combination the generator
+    deliberately never emits (see module docstring), covered here so a
+    regression that re-introduces the silent-collapse bug is caught.
+    """
+    for seed in range(iterations):
+        rng = random.Random(seed)
+        action = rng.choice(_ACTION_NAME_CHOICES)
+        args = _words(rng, 0, 3)
+        status = rng.choice(_STATUS_CHOICES)
+        text = _words(rng, 1, 4)  # non-empty by construction
+
+        # Empty text is representable and must round-trip.
+        empty_plan = _single_task_plan(_action_task(action, args, "", status))
+        reparsed = parse_plan(render_plan(empty_plan))
+        assert normalize_positions(reparsed) == normalize_positions(empty_plan), (
+            f"seed={seed}: action_tag with empty text did not round-trip"
+        )
+
+        # Non-empty text alongside the action tag is refused by both the
+        # renderer and make_task rather than silently losing the text.
+        with pytest.raises(PlanValidationError):
+            render_plan(_single_task_plan(_action_task(action, args, text, status)))
+        with pytest.raises(PlanValidationError):
+            make_task(text, action_tag=(action, args))
 
 
 @pytest.mark.parametrize("iterations", _ITERATIONS_PARAM)

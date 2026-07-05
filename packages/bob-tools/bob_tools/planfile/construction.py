@@ -58,6 +58,17 @@ def _validate_task_for_construction(task: Task, errors: list[str]) -> None:
                 errors.append(
                     f"{prefix}.action_tag.action has invalid action {action!r}"
                 )
+            if node.text:
+                # The parser reads everything after [AUTO:<action>] to end
+                # of line as the action args (design doc section 4.3 grammar
+                # ``ActionTag ← "[AUTO:" Word "]" WS Text?``), so a task with
+                # both an action_tag and body text cannot round-trip: on
+                # re-parse the text folds into args and text becomes empty.
+                errors.append(
+                    f"{prefix}.action_tag combined with non-empty "
+                    f"{prefix}.text {node.text!r} failed to round-trip: the "
+                    f"action tag consumes all trailing text as args"
+                )
         for annotation_index, (key, value) in enumerate(node.annotations):
             _validate_scalar(
                 key, f"{prefix}.annotations[{annotation_index}].key", errors

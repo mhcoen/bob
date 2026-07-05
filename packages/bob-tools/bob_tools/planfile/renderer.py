@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import dataclasses
 
+from bob_tools.planfile._shared import _task_ref
 from bob_tools.planfile.model import (
     BugsSection,
     Phase,
     Plan,
+    PlanValidationError,
     Subsection,
     Task,
     TaskStatus,
@@ -166,6 +168,26 @@ def _render_task_lines(task: Task, *, depth: int) -> list[str]:
     indent = "  " * depth
     child_indent = "  " * (depth + 1)
     status_char = _STATUS_CHAR[task.status]
+
+    if task.action_tag is not None and task.text:
+        # An action tag serializes as ``[AUTO:<action>] <args>`` with the
+        # args running to end of line; the parser (parser.py
+        # ``_extract_action_tag``) reads all trailing text back as args and
+        # leaves ``text`` empty, per the design doc section 4.3 grammar
+        # (``ActionTag ← "[AUTO:" Word "]" WS Text?``). A task carrying both
+        # an action_tag and body text is therefore unrepresentable in
+        # canonical form: rendering it would silently break the
+        # ``parse(render(plan)) == plan`` contract by folding the text into
+        # the args on the next parse. ``make_task``'s round-trip harness
+        # already rejects this, but the renderer must refuse too so that no
+        # other Task constructor can slip an un-round-trippable task through.
+        raise PlanValidationError(
+            [
+                f"task {_task_ref(task)} has action_tag {task.action_tag!r} "
+                f"and non-empty text {task.text!r}, which cannot round-trip: "
+                f"the [AUTO:...] tag consumes all trailing text as args"
+            ]
+        )
 
     body_parts: list[str] = []
     if task.task_id is not None:
