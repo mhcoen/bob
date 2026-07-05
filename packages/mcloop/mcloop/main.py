@@ -2032,6 +2032,16 @@ def run_loop(
         active_model_for_summary = active_entry.model
         last_error = ""
         terminal_task_failure = False
+        # Circuit breaker (T-000037): stop a task that keeps failing the
+        # SAME check instead of thrashing every tier (and its multi-hour
+        # limit-waits) on a gate no model can satisfy. Only a repeated
+        # *identical* check-command failure trips it; a different failure
+        # signature resets the count as genuine progress. Threshold is two
+        # tiers' worth of retries, so a single tier's retries never trip it
+        # but two tiers failing the same gate proves it is model-independent.
+        gate_failure_signature: str | None = None
+        gate_failure_count = 0
+        circuit_breaker_threshold = max_retries * 2
         while True:
             active_selection = _select_chain_entry(
                 chain,
@@ -2860,6 +2870,11 @@ def run_loop(
                     success = True
                     break
                 else:
+                    if check_result.command == gate_failure_signature:
+                        gate_failure_count += 1
+                    else:
+                        gate_failure_signature = check_result.command
+                        gate_failure_count = 1
                     last_error = f"Command: {check_result.command}\n" + _tail(
                         check_result.output, 50
                     )
@@ -2872,6 +2887,17 @@ def run_loop(
                         flush=True,
                     )
                     _print_error_tail(check_result.output)
+                    if gate_failure_count >= circuit_breaker_threshold:
+                        cb_msg = (
+                            f"Circuit breaker: task {label} failed the same check"
+                            f" {gate_failure_count} times across model tiers"
+                            f" ({check_result.command}). No model can satisfy this"
+                            " gate; stopping the task instead of thrashing the chain."
+                        )
+                        print(formatting.error_msg(cb_msg), flush=True)
+                        notify(cb_msg, level="error")
+                        terminal_task_failure = True
+                        break
 
             if success:
                 break

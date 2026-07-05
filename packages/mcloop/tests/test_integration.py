@@ -334,6 +334,56 @@ def test_checks_fail_then_pass(
     assert calls[0] == ("All tasks completed!", "info")
 
 
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_circuit_breaker_stops_repeated_identical_check_failure(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """A task that keeps failing the SAME check stops via the circuit
+    breaker after two tiers' worth of retries, instead of grinding every
+    tier (and its limit-waits). Regression for the overnight thrash: a
+    deterministic gate failure is model-independent, so trying more tiers
+    is pure waste.
+    """
+    md = _make_project(tmp_path, "- [ ] Needs a gate no model can pass\n")
+    mock_run.return_value = _ok_run_result()
+    # The identical failing command every attempt = a deterministic gate.
+    mock_checks.return_value = CheckResult(
+        passed=False, output="unaccounted behavioral change", command="mypy ."
+    )
+
+    with _isolated_git_state():
+        result = run_loop(
+            md,
+            max_retries=3,
+            no_audit=True,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="claude", model="kimi-k2.6"),
+                ChainEntry(cli="claude", model="deepseek-v4-pro"),
+                ChainEntry(cli="codex", model="gpt-5.5"),
+            ],
+        )
+
+    assert not result.ok
+    # Breaker trips at max_retries * 2 == 6, NOT all four tiers * 3 == 12.
+    assert mock_checks.call_count == 6
+    assert mock_run.call_count == 6
+    assert any("Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args)
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit", return_value="abc123")
