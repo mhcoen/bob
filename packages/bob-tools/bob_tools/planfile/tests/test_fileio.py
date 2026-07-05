@@ -495,6 +495,56 @@ def test_save_magic_false_drops_magic_line(tmp_path: Path) -> None:
     assert "<!-- bob-plan-format:" not in path.read_text()
 
 
+def test_save_canonical_magic_false_succeeds(tmp_path: Path) -> None:
+    """T-000004 regression: a canonical save of a magic-less plan succeeds.
+
+    ``save(validation='canonical', magic=False)`` clears ``magic_version``
+    to ``None`` for a loose queue. Before the fix, the constructed-mode
+    gate inside ``_render_for_validation`` unconditionally appended a
+    ``magic_version must be 1`` error, so this raised
+    :class:`PlanValidationError` and ``assert_mcloop_canonical`` — which
+    is documented to accept a cleared magic line — was never reached. The
+    documented loose-queue path is now usable without falling back to
+    ``validation='unchecked'``.
+    """
+    path = tmp_path / "BUGS.md"
+    plan = parse_plan(_CANONICAL_PLAN)
+    assert plan.magic_version == 1
+    save(path, plan, validation="canonical", magic=False)
+    text = path.read_text()
+    assert "<!-- bob-plan-format:" not in text
+    assert "T-000001: only task" in text
+
+
+def test_update_canonical_magic_false_succeeds(tmp_path: Path) -> None:
+    """T-000004 regression (update path): canonical + magic=False commits.
+
+    The in-lock save inside :func:`update` routes through the same
+    ``_render_for_validation`` gate as :func:`save`, so it was equally
+    broken. This exercises the mutation entry point end-to-end on a
+    magic-less loose queue under the default canonical mode.
+    """
+    path = tmp_path / "BUGS.md"
+    path.write_text(_CANONICAL_PLAN)
+    returned = update(
+        path, _retitle("Retitled loose queue"), validation="canonical", magic=False
+    )
+    assert returned.magic_version is None
+    text = path.read_text()
+    assert "<!-- bob-plan-format:" not in text
+    assert "# Retitled loose queue" in text
+
+
+def test_save_canonical_magic_false_still_rejects_idless(tmp_path: Path) -> None:
+    """GUARD: the magic-less canonical save still enforces every OTHER
+    constructed-mode invariant. Clearing magic must not relax mcloop's R2
+    id-less contract, so an id-less task is still rejected."""
+    path = tmp_path / "BUGS.md"
+    plan = parse_plan(_IDLESS_PLAN)
+    with pytest.raises(PlanValidationError):
+        save(path, plan, validation="canonical", magic=False)
+
+
 def test_save_magic_true_keeps_magic_line(tmp_path: Path) -> None:
     """Default magic=True is unchanged: a canonical plan keeps its magic line."""
     path = tmp_path / "PLAN.md"

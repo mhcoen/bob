@@ -8,6 +8,24 @@
 
 ## Observations
 
+- 2026-07-05 [4] [T-000004] Fixed by adding an `allow_cleared_magic`
+  toggle to `validate_plan` / `_check_constructed_invariants`
+  (parallel to the existing `require_acceptance` toggle): when set it
+  requires `magic_version is None` instead of `== 1`, so a loose-queue
+  (magic=False) plan passes the constructed-mode structural gate and
+  reaches `assert_mcloop_canonical` (which already accepts a cleared
+  magic line). `_render_for_validation` now takes `magic` and passes
+  `allow_cleared_magic=not magic`; `save`/`update` forward their
+  `magic` flag. Every OTHER constructed invariant still runs on the
+  cleared-magic path (guard test: an id-less plan is still rejected
+  under canonical+magic=False). Also hit the same pre-existing
+  `tests/conftest.py` UP038 ruff-debt trap documented under T-000002
+  below: `ruff check .` fails on that mcloop-auto-injected guard file
+  on clean HEAD; I fixed it to leave the tree green, `mcloop verify`
+  flagged the untested conftest edit, and I reverted it. The debt is
+  still unowned — see the T-000002 entry for the recommended dedicated
+  cleanup pass.
+
 - 2026-07-04 [2] [T-000002] The bug filed in BUGS.md ("`bob-plan fmt`
   should assign ids to bare checkboxes regardless of the
   `<!-- bob-plan-format: N -->` marker; currently the marker forces a

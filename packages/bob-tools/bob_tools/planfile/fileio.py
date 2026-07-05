@@ -195,7 +195,7 @@ def _acquire_exclusive_lock(path: Path) -> Iterator[None]:
 
 
 def _render_for_validation(
-    plan: Plan, validation: ValidationMode, path: Path | None
+    plan: Plan, validation: ValidationMode, path: Path | None, *, magic: bool = True
 ) -> str:
     """Return the bytes to commit for ``plan`` under the given ``validation``.
 
@@ -210,6 +210,15 @@ def _render_for_validation(
     ``path`` is forwarded to the validator so a re-parse syntax error
     names the file.
 
+    ``magic`` mirrors the ``save``/``update`` flag: when ``False`` the
+    plan's magic line has already been dropped (``magic_version`` cleared
+    to ``None``), so the constructed-mode structural gate is told to
+    expect a cleared magic line via ``allow_cleared_magic=True``. Without
+    this the ``magic_version != 1`` invariant would always fire on a
+    magic-less plan and :func:`assert_mcloop_canonical` — documented to
+    accept a cleared magic line — would never be reached, making the
+    loose-queue path unusable.
+
     Centralizing the choice here keeps :func:`save` and the in-lock
     save inside :func:`update` honoring the same mode without
     duplicating the branch.
@@ -223,7 +232,12 @@ def _render_for_validation(
         # Acceptance is a proof contract enforced at the authoring layer
         # (duplo authoring / add_phase_task / mcloop enforce) during the
         # legacy-migration window, not at the save gate.
-        validate_plan(plan, constructed=True, require_acceptance=False)
+        validate_plan(
+            plan,
+            constructed=True,
+            require_acceptance=False,
+            allow_cleared_magic=not magic,
+        )
         return assert_mcloop_canonical(plan, source_path=path)
     if validation == "unchecked":
         return render_plan(plan)
@@ -312,7 +326,7 @@ def save(
     """
     if not magic:
         plan = dataclasses.replace(plan, magic_version=None)
-    text = _render_for_validation(plan, validation, path)
+    text = _render_for_validation(plan, validation, path, magic=magic)
     with _acquire_exclusive_lock(path):
         _atomic_write_text(path, text)
 
@@ -371,6 +385,6 @@ def update(
         new_plan = operation(plan)
         if not magic:
             new_plan = dataclasses.replace(new_plan, magic_version=None)
-        text = _render_for_validation(new_plan, validation, path)
+        text = _render_for_validation(new_plan, validation, path, magic=magic)
         _atomic_write_text(path, text)
         return new_plan

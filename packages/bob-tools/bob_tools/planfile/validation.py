@@ -174,7 +174,11 @@ def _check_trailing_annotation(task: Task, errors: list[str]) -> None:
 
 
 def validate_plan(
-    plan: Plan, *, constructed: bool = False, require_acceptance: bool = True
+    plan: Plan,
+    *,
+    constructed: bool = False,
+    require_acceptance: bool = True,
+    allow_cleared_magic: bool = False,
 ) -> None:
     """Validate structural and referential integrity of ``plan``.
 
@@ -232,6 +236,19 @@ def validate_plan(
     runs. It exists solely for legacy-corruption repair where the
     declared-acceptance migration is intentionally incomplete; default
     ``True`` preserves every existing caller exactly.
+
+    ``allow_cleared_magic`` also only takes effect under
+    ``constructed=True``. When ``False`` (default) the magic invariant
+    requires ``magic_version == 1``, preserving every existing caller
+    exactly. When ``True`` it instead requires ``magic_version is None``
+    — the loose-queue (magic=False) save path, where the magic line has
+    been intentionally dropped (mcloop's BUGS.md). This lets the
+    storage-integrity gate enforce every OTHER constructed-mode
+    invariant on a magic-less plan before it reaches
+    :func:`assert_mcloop_canonical`, which is documented to accept a
+    cleared magic line. Without it, the ``magic_version != 1`` check
+    would always fire on a cleared plan and the loose-queue path would
+    be unreachable.
     """
     errors: list[str] = []
 
@@ -259,7 +276,11 @@ def validate_plan(
 
     if constructed:
         _check_constructed_invariants(
-            plan, errors, known_ids, require_acceptance=require_acceptance
+            plan,
+            errors,
+            known_ids,
+            require_acceptance=require_acceptance,
+            allow_cleared_magic=allow_cleared_magic,
         )
 
     if errors:
@@ -272,6 +293,7 @@ def _check_constructed_invariants(
     known_ids: set[str],
     *,
     require_acceptance: bool = True,
+    allow_cleared_magic: bool = False,
 ) -> None:
     """Add v4 Contract 4 ``constructed=True`` violations to ``errors``.
 
@@ -282,7 +304,16 @@ def _check_constructed_invariants(
     field-stability via the Stage 10 harness, then acceptance
     declarations for leaf implementation tasks.
     """
-    if plan.magic_version != 1:
+    if allow_cleared_magic:
+        # Loose-queue (magic=False) save path: the magic line has been
+        # intentionally dropped, so magic_version must be cleared (None).
+        # Any other value means the caller cleared magic inconsistently.
+        if plan.magic_version is not None:
+            errors.append(
+                f"plan.magic_version must be cleared (None) on a magic-less "
+                f"constructed plan, got {plan.magic_version!r}"
+            )
+    elif plan.magic_version != 1:
         errors.append(
             f"plan.magic_version must be 1 on constructed plans, "
             f"got {plan.magic_version!r}"
