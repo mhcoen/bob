@@ -56,6 +56,16 @@ class TestStructuralCorruptionRejection:
                 2,
                 id="duplicate_phase_ordinals",
             ),
+            pytest.param(
+                # A ledger-form phase lands at positional ordinal 1 and a
+                # bare-digit stage header explicitly claims ordinal 1: the
+                # collision only shows up once the positional ordinal is
+                # modelled, so this pins the mixed-form regression.
+                "# P\n## Phase phase_001: A\n- [ ] x\n## Stage 1: B\n- [ ] y\n",
+                "duplicate Phase/Stage 1",
+                2,
+                id="duplicate_ordinals_mixed_heading_forms",
+            ),
         ],
     )
     def test_rejection_raises_with_message_and_line(
@@ -74,6 +84,14 @@ class TestStructuralCorruptionRejection:
         assert err.line == expected_line, (
             f"expected line {expected_line}; got {err.line}"
         )
+
+    def test_mixed_forms_with_distinct_ordinals_parse(self) -> None:
+        """A ledger-form phase (ordinal 1) followed by ``## Stage 2`` is
+        legitimate: the positional-ordinal check must not fire when the
+        assigned ordinals differ across heading forms."""
+        text = "# P\n## Phase phase_001: A\n- [ ] x\n## Stage 2: B\n- [ ] y\n"
+        plan = parse_plan(text)
+        assert [p.ordinal for p in plan.phases] == [1, 2]
 
 
 class TestCompatModeToleratesMalformedTags:

@@ -8,6 +8,21 @@
 
 ## Observations
 
+- 2026-07-05 [10] [T-000009] Duplicate phase ordinals across mixed heading
+  forms now caught by `_check_structural_sanity`. Root cause: the check
+  scanned raw lines and only counted `_STAGE_RE` (bare-digit) headings, but
+  the parser assigns ledger-form phases (`## Phase phase_001:`) a positional
+  ordinal `len(phases_b) + 1` (parser.py ~298). A positionally-first ledger
+  phase (ordinal 1) plus an explicit `## Stage 1` therefore both held ordinal
+  1 uncaught, and `_resolve_positional_label` silently returned the first, so
+  `1.1` mis-resolved. Fix: the check now advances a `phase_count` for every
+  phase heading (both forms) and records the ledger form's positional ordinal
+  into the same `stage_nums` map, so the mixed-form collision is flagged like
+  any duplicate. WATCH: the positional-ordinal rule (`len(phases_b) + 1`) is
+  now duplicated in `_check_structural_sanity` and the parse loop; if the
+  parser ever changes how ledger phases get their ordinal, both sites must
+  move together or the sanity check will disagree with the parsed model.
+
 - 2026-07-05 [9] [T-000010] `bob-plan fmt` crash on trailing code block fixed.
   Root cause: the canonical save gate (`fileio._render_for_validation`) ran
   `validate_plan(constructed=True)`, which rejects any task carrying

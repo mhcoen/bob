@@ -543,10 +543,14 @@ def _check_structural_sanity(
        producing two copies of the document's top header.
     2. Multiple Bugs sections (any heading level) — there should
        only ever be one.
-    3. Duplicate phase/stage ordinals across stage headers — two
-       headers numbered ``Phase 2``, for example. This breaks any
-       label that prefixes with the stage number and almost always
-       signals merged content from two attempts at the same phase.
+    3. Duplicate phase/stage ordinals — two headers numbered
+       ``Phase 2``, for example. This breaks any label that prefixes
+       with the stage number and almost always signals merged content
+       from two attempts at the same phase. Ordinals are compared
+       across heading forms: a bare-digit ``## Stage 1`` and a
+       ledger-form ``## Phase phase_001`` that lands at positional
+       ordinal 1 collide just as two ``## Stage 1`` headers would, and
+       the mixed-form case is caught too.
 
     Each anomaly has been observed in real PLAN.md corruption
     incidents and none has a legitimate use; auto-fixing is
@@ -559,6 +563,15 @@ def _check_structural_sanity(
     h1_titles: dict[str, list[int]] = {}
     bugs_lines: list[int] = []
     stage_nums: dict[int, list[int]] = {}
+    # Positional ordinal assignment must mirror the parser: every phase
+    # heading (bare-digit stage form *and* ledger form) advances the
+    # phase count, and a ledger-form phase inherits ``len(phases_b) + 1``
+    # as its ordinal (parser.py ~298). Tracking that here lets the
+    # duplicate-ordinal check catch a stage-form ``## Stage 1`` colliding
+    # with a positionally-first ledger-form ``## Phase phase_001`` — a
+    # collision the raw-heading scan otherwise missed, letting a label
+    # like ``1.1`` silently mis-resolve to whichever phase came first.
+    phase_count = 0
 
     for i, line in enumerate(lines):
         # Order matters: a single-hash ``# Phase 1: Bootstrapping``
@@ -568,7 +581,19 @@ def _check_structural_sanity(
         # not double-counted as an H1 duplicate and a stage duplicate.
         stage_match = _STAGE_RE.match(line)
         if stage_match is not None:
+            phase_count += 1
             stage_nums.setdefault(int(stage_match.group("num")), []).append(i)
+            continue
+
+        # Ledger-form phases (``## Phase phase_001:``) do not match
+        # ``_STAGE_RE`` but still occupy a positional ordinal. Checked
+        # after the stage form so a bare-digit ``## Phase 1:`` is
+        # consumed above and never double-counted here, exactly as the
+        # parser resolves ``_parse_phase_heading`` before the ledger path.
+        ledger_match = _LEDGER_PHASE_HEADER_RE.match(line)
+        if ledger_match is not None:
+            phase_count += 1
+            stage_nums.setdefault(phase_count, []).append(i)
             continue
 
         if _BUGS_RE.match(line):
