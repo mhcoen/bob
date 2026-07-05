@@ -17,6 +17,7 @@ Exercises each subcommand (``validate``, ``next``, ``fmt``, ``done``,
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
@@ -26,8 +27,10 @@ from bob_tools.planfile.cli import (
     EXIT_INVALID_PLAN,
     EXIT_OK,
     EXIT_TASK_NOT_FOUND,
+    _print_parse_error,
     main,
 )
+from bob_tools.planfile.model import PlanSyntaxError
 
 STRICT_PLAN = """<!-- bob-plan-format: 1 -->
 
@@ -357,3 +360,45 @@ class TestFail:
         captured = capsys.readouterr()
         assert rc == EXIT_TASK_NOT_FOUND
         assert captured.err
+
+
+class TestErrorFilename:
+    """Parse-error diagnostics must name the file actually being processed.
+
+    Regression for the ``bob-plan fmt BUGS.md`` bug: the error read
+    "PLAN.md invalid at line N" regardless of the input argument,
+    because a path-less :class:`PlanSyntaxError` falls back to the
+    hardcoded "PLAN.md" in ``__str__``. The CLI now binds the real path
+    before formatting, so the reported filename always matches the input.
+    """
+
+    @pytest.mark.parametrize("command", ["validate", "next", "fmt"])
+    def test_reported_path_matches_input_argument(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], command: str
+    ) -> None:
+        path = tmp_path / "BUGS.md"
+        path.write_text(INVALID_PLAN)
+        rc = main([command, str(path)])
+        captured = capsys.readouterr()
+        assert rc == EXIT_INVALID_PLAN
+        assert "BUGS.md invalid" in captured.err
+        assert "PLAN.md" not in captured.err
+
+    def test_binds_cli_path_onto_pathless_error(self) -> None:
+        # A PlanSyntaxError from a nested re-parse can arrive with
+        # ``path is None``; the CLI must stamp the file it was handed
+        # rather than let ``__str__`` fall back to "PLAN.md".
+        exc = PlanSyntaxError("boom", 127, 1, None)
+        buf = io.StringIO()
+        _print_parse_error(exc, buf, Path("BUGS.md"))
+        assert "BUGS.md invalid at line 127" in buf.getvalue()
+        assert "PLAN.md" not in buf.getvalue()
+
+    def test_does_not_override_existing_path(self) -> None:
+        # When the exception already carries a path, the CLI must not
+        # clobber it with the argument passed for the None case.
+        exc = PlanSyntaxError("boom", 5, 1, Path("SOURCE.md"))
+        buf = io.StringIO()
+        _print_parse_error(exc, buf, Path("BUGS.md"))
+        assert "SOURCE.md invalid at line 5" in buf.getvalue()
+        assert "BUGS.md" not in buf.getvalue()

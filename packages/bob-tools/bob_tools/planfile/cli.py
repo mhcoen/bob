@@ -73,7 +73,15 @@ def _settlements_to_json(settlements: Sequence[Settlement]) -> str:
     return json.dumps([dataclasses.asdict(s) for s in settlements], indent=2)
 
 
-def _print_parse_error(exc: PlanSyntaxError, stream: IO[str]) -> None:
+def _print_parse_error(exc: PlanSyntaxError, stream: IO[str], path: Path) -> None:
+    # A PlanSyntaxError raised from a nested re-parse may not carry the
+    # source path (``exc.path is None``), in which case ``__str__`` falls
+    # back to the hardcoded "PLAN.md" and misnames whatever file the user
+    # actually passed — e.g. ``bob-plan fmt BUGS.md`` reporting "PLAN.md
+    # invalid at line N". The CLI knows the file being processed, so bind
+    # it before formatting so the diagnostic always names the real target.
+    if exc.path is None:
+        exc.path = path
     print(str(exc), file=stream)
 
 
@@ -87,7 +95,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     try:
         plan = load(path)
     except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
+        _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
@@ -106,7 +114,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     try:
         plan = load(path)
     except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
+        _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
     except OSError as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
@@ -142,7 +150,7 @@ def cmd_fmt(args: argparse.Namespace) -> int:
     try:
         plan = parse_plan(text, source_path=path, force_strict_from_magic=False)
     except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
+        _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
     # The parser only surfaces checkboxes that sit under a ``## Stage``
     # / ``## Phase`` heading; formatting a file with strays would
@@ -182,7 +190,7 @@ def cmd_done(args: argparse.Namespace) -> int:
     try:
         plan = preflight_runtime_plan(path, notice=lambda m: print(m, file=sys.stderr))
     except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
+        _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
     except PlanPreflightError as exc:
         print(str(exc), file=sys.stderr)
@@ -209,7 +217,7 @@ def cmd_fail(args: argparse.Namespace) -> int:
     try:
         plan = preflight_runtime_plan(path, notice=lambda m: print(m, file=sys.stderr))
     except PlanSyntaxError as exc:
-        _print_parse_error(exc, sys.stderr)
+        _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
     except PlanPreflightError as exc:
         print(str(exc), file=sys.stderr)
