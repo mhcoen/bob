@@ -808,6 +808,63 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     return modified, untracked
 
 
+def _rollback_batch_changes(
+    project_dir: Path,
+    pre_batch_modified: list[str],
+    pre_batch_untracked: list[str],
+) -> None:
+    """Discard uncommitted changes a batch attempt made, preserving
+    files that were already dirty before the batch started.
+
+    Selective rollback: only files the batch touched are reverted or
+    removed. NUL-delimited (``-z``) output is exempt from
+    ``core.quotepath`` escaping so non-ASCII and newline-containing
+    names round-trip verbatim. ``--relative`` matches
+    :func:`_snapshot_worktree`'s diff exactly -- without it, a project
+    dir nested inside a larger repo (a workspace package) yields
+    repo-root-prefixed paths that never match the snapshot, silently
+    defeating both the preserve set and the checkout.
+
+    Every non-success exit from a batch attempt must call this before
+    returning: the retry loop re-snapshots the worktree on re-entry, so
+    partial edits left behind get absorbed into the next attempt's
+    "pre-batch" baseline -- permanently shielded from rollback and
+    eventually committed unreviewed.
+    """
+    import shutil
+
+    current_modified = _git(
+        ["git", "diff", "--name-only", "--relative", "-z"],
+        cwd=project_dir,
+        label="batch rollback diff",
+    )
+    pre_mod_set = set(pre_batch_modified)
+    for f in _split_nul_paths(current_modified.stdout):
+        if f not in pre_mod_set:
+            _git(
+                ["git", "checkout", "--", f],
+                cwd=project_dir,
+                label=f"batch rollback {f}",
+            )
+    # Remove only new untracked files created by the batch.
+    current_untracked = _git(
+        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+        cwd=project_dir,
+        label="batch rollback untracked",
+    )
+    pre_untracked_set = set(pre_batch_untracked)
+    for f in _split_nul_paths(current_untracked.stdout):
+        if f not in pre_untracked_set:
+            fpath = project_dir / f
+            # A symlink must be unlinked even when it points at a
+            # directory: is_dir() follows the link and rmtree raises
+            # on symlinks (and would delete the link target's contents).
+            if fpath.is_symlink() or fpath.is_file():
+                fpath.unlink()
+            elif fpath.is_dir():
+                shutil.rmtree(fpath)
+
+
 def _get_git_hash(project_dir: Path) -> str:
     """Return current HEAD commit hash."""
     if not _has_git_repo(project_dir):

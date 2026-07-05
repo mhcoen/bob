@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import hashlib
+import re
 import select
 import shlex
 import subprocess
@@ -83,8 +85,8 @@ from mcloop.git_ops import (
     _has_uncommitted_changes,
     _push_or_die,
     _read_task_baseline,
+    _rollback_batch_changes,
     _snapshot_worktree,
-    _split_nul_paths,
     _stage_safe,
     _worktree_status,
     _write_task_baseline,
@@ -559,6 +561,39 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
     return usable
 
 
+def _gate_failure_signature(command: str, output: str) -> tuple[str, str]:
+    """Fingerprint a check failure for the circuit breaker.
+
+    Returns ``(command_head, content_digest)``:
+
+    * ``command_head`` is the tool actually failing (basename of the
+      executable, or the module for ``python -m <mod>`` forms, or the
+      whole pseudo-command for parenthesized gates like
+      ``(gate: unaccounted behavioral change)``). Scoped commands embed
+      per-attempt absolute file paths; comparing raw command strings
+      made every attempt look "different" and the breaker never fired.
+    * ``content_digest`` hashes the failure tail with digits stripped
+      (durations, counts, seeds) and lines deduped+sorted (test-order
+      randomization). Identical gate output across attempts -> same
+      digest -> the counter accumulates; a progressing task (different
+      failures each attempt) -> different digest -> reset.
+    """
+    if command.startswith("("):
+        head = command
+    else:
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            parts = command.split()
+        head = Path(parts[0]).name if parts else command.strip()
+        if head.startswith("python") and len(parts) >= 3 and parts[1] == "-m":
+            head = parts[2]
+    tail_lines = _tail(output, 30).splitlines()
+    normalized = sorted({re.sub(r"\d+", "#", line.strip()) for line in tail_lines if line.strip()})
+    digest = hashlib.sha1("\n".join(normalized).encode("utf-8", "replace")).hexdigest()[:12]
+    return (head, digest)
+
+
 def _notify_model_switch(
     from_model: str | None,
     to_model: str | None,
@@ -890,13 +925,34 @@ def _run_batch(
     # NOT consume a retry attempt or feed the limit text back as prior
     # errors. Re-entering _run_batch waits out the limit via the
     # top-of-function get_available_cli / wait_for_reset before retrying.
-    if is_session_limited(result.output, result.exit_code) or is_rate_limited(
-        result.output, result.exit_code
-    ):
+    #
+    # Classification is deliberately narrow. The limit detectors
+    # substring-match, and a batch working on rate-limit-related code (a
+    # BUGS.md task about 429 handling) legitimately has limit vocabulary
+    # in its transcript. Two guards keep that from being read as a limit:
+    # a timeout (-2) or stall (-200) exit is never a limit (those
+    # sentinels mean the loop killed the session itself), and only the
+    # transcript TAIL is scanned -- a genuine CLI limit error terminates
+    # the session and is the last thing it prints, while an incidental
+    # mention sits mid-transcript. Without these, a misclassified session
+    # looped forever: no attempt consumed, no bound, edits laundered.
+    limit_scan = _tail(result.output, 15)
+    hit_limit = result.exit_code not in (TIMEOUT_EXIT_CODE, STALL_EXIT_CODE) and (
+        is_session_limited(limit_scan, result.exit_code)
+        or is_rate_limited(limit_scan, result.exit_code)
+    )
+    if hit_limit:
         rate_state.mark_limited(active_cli, cooldown=SESSION_LIMIT_POLL)
         limit_msg = f"Batch: {active_cli} rate/session-limited; waiting for reset before retry."
         print(formatting.system_msg(limit_msg), flush=True)
         notify(limit_msg, level="warning")
+        # The session may have made partial edits before hitting the
+        # limit. Roll them back NOW: the retry loop re-snapshots the
+        # worktree on re-entry, so anything left here would be absorbed
+        # into the next attempt's "pre-batch" baseline -- permanently
+        # shielded from rollback and eventually committed as if it were
+        # reviewed work.
+        _rollback_batch_changes(project_dir, pre_batch_modified, pre_batch_untracked)
         return "limited", _tail(result.output, 50)
 
     if not result.success:
@@ -905,6 +961,11 @@ def _run_batch(
             formatting.error_msg(f"Batch session failed ({elapsed})"),
             flush=True,
         )
+        # Same laundering hazard as the limited path: each batch attempt
+        # starts from a clean slate (the checks-failed path below has
+        # always rolled back), so a failed session's partial edits must
+        # not survive into the next attempt's baseline either.
+        _rollback_batch_changes(project_dir, pre_batch_modified, pre_batch_untracked)
         return "failed", _tail(result.output, 50)
 
     if not _has_meaningful_changes(project_dir):
@@ -918,7 +979,10 @@ def _run_batch(
         return "failed", "Batch produced no file changes and no acceptance evidence"
 
     _lifecycle._current_phase = "checks"
-    run_autofix(project_dir)
+    # Scope autofix to the session's own edits; an unscoped run would
+    # fold pre-existing unrelated formatting drift into this batch's
+    # commit.
+    run_autofix(project_dir, changed_files=_changed_files(project_dir))
     changed_files = _changed_files(project_dir)
     if not changed_files and _has_uncommitted_changes(project_dir):
         print(
@@ -1008,43 +1072,9 @@ def _run_batch(
     )
     _check_tail = _tail(check_result.output, 50)
     _batch_error = f"Command: {check_result.command}\n{_check_tail}"
-    # Discard uncommitted changes from the failed batch,
-    # preserving files that were dirty before the batch started.
-    # Selective rollback: only revert files the batch actually touched.
-    # NUL-delimited (-z) output is exempt from core.quotepath escaping,
-    # so non-ASCII and newline-containing names round-trip verbatim.
-    current_modified = _git(
-        ["git", "diff", "--name-only", "-z"],
-        cwd=project_dir,
-        label="batch rollback diff",
-    )
-    pre_mod_set = set(pre_batch_modified)
-    for f in _split_nul_paths(current_modified.stdout):
-        if f not in pre_mod_set:
-            _git(
-                ["git", "checkout", "--", f],
-                cwd=project_dir,
-                label=f"batch rollback {f}",
-            )
-    # Remove only new untracked files created by the batch.
-    current_untracked = _git(
-        ["git", "ls-files", "--others", "--exclude-standard", "-z"],
-        cwd=project_dir,
-        label="batch rollback untracked",
-    )
-    pre_untracked_set = set(pre_batch_untracked)
-    for f in _split_nul_paths(current_untracked.stdout):
-        if f not in pre_untracked_set:
-            fpath = project_dir / f
-            # A symlink must be unlinked even when it points at a
-            # directory: is_dir() follows the link and rmtree raises
-            # on symlinks (and would delete the link target's contents).
-            if fpath.is_symlink() or fpath.is_file():
-                fpath.unlink()
-            elif fpath.is_dir():
-                import shutil
-
-                shutil.rmtree(fpath)
+    # Discard uncommitted changes from the failed batch, preserving
+    # files that were dirty before the batch started.
+    _rollback_batch_changes(project_dir, pre_batch_modified, pre_batch_untracked)
     return "failed", _batch_error
 
 
@@ -1859,6 +1889,14 @@ def run_loop(
                 batch_prior_errors = ""
                 batch_model = current_model
                 batch_attempt = 0
+                # Runaway backstop for the limited path. A genuine limit
+                # legitimately cycles many times (a 5-hour cap at 10-min
+                # cooldowns is ~30 cycles), so the bound is generous --
+                # but it must exist: a session misclassified as limited
+                # consumes no attempt, so without a ceiling the loop
+                # retries forever, burning a full session per cycle.
+                batch_limited_cycles = 0
+                _MAX_BATCH_LIMITED_CYCLES = 50
                 while batch_attempt < max_retries:
                     batch_attempt += 1
                     if batch_attempt > 1:
@@ -1902,6 +1940,17 @@ def run_loop(
                         # next entry waits for reset. Fall over to the
                         # configured fallback model, mirroring the non-batch
                         # chain-advance path.
+                        batch_limited_cycles += 1
+                        if batch_limited_cycles >= _MAX_BATCH_LIMITED_CYCLES:
+                            msg = (
+                                f"Batch: {batch_limited_cycles} consecutive"
+                                " limited cycles; treating as failure"
+                                " (runaway-misclassification backstop)."
+                            )
+                            print(formatting.error_msg(msg), flush=True)
+                            notify(msg, level="error")
+                            batch_prior_errors = batch_detail
+                            continue
                         if fallback_model and batch_model != fallback_model:
                             batch_model = fallback_model
                             print(
@@ -2033,13 +2082,18 @@ def run_loop(
         last_error = ""
         terminal_task_failure = False
         # Circuit breaker (T-000037): stop a task that keeps failing the
-        # SAME check instead of thrashing every tier (and its multi-hour
-        # limit-waits) on a gate no model can satisfy. Only a repeated
-        # *identical* check-command failure trips it; a different failure
-        # signature resets the count as genuine progress. Threshold is two
-        # tiers' worth of retries, so a single tier's retries never trip it
-        # but two tiers failing the same gate proves it is model-independent.
-        gate_failure_signature: str | None = None
+        # SAME WAY instead of thrashing every tier (and its multi-hour
+        # limit-waits) on a gate no model can satisfy. The signature is
+        # (command head, digest of the normalized failure content), NOT
+        # the raw command string: scoped commands embed changed-file
+        # paths that vary per attempt (raw equality would reset on every
+        # attempt and never trip on exactly the thrash this exists for),
+        # while a progressing task failing the same command with
+        # shrinking failure content produces a different digest each
+        # time and correctly resets the count. Threshold is two tiers'
+        # worth of retries, so a single tier's retries never trip it but
+        # two tiers failing identically proves it is model-independent.
+        gate_failure_signature: tuple[str, str] | None = None
         gate_failure_count = 0
         circuit_breaker_threshold = max_retries * 2
         while True:
@@ -2220,7 +2274,9 @@ def run_loop(
                     # command-exit or waived acceptance could commit
                     # unformatted code that surfaced a phase late at the
                     # boundary's unscoped format check (T-000034).
-                    run_autofix(project_dir)
+                    # Scoped to the session's own edits so a waived task
+                    # cannot commit unrelated project-wide reformatting.
+                    run_autofix(project_dir, changed_files=_changed_files(project_dir))
 
                     if declared_acceptance.kind in ("pytest", "coverage"):
                         changed_files = _changed_files(project_dir)
@@ -2650,7 +2706,8 @@ def run_loop(
                     break
 
                 _lifecycle._current_phase = "checks"
-                run_autofix(project_dir)
+                # Scoped to the session's own edits; see run_autofix.
+                run_autofix(project_dir, changed_files=_changed_files(project_dir))
                 changed_files = _changed_files(project_dir)
                 if not changed_files and _has_uncommitted_changes(project_dir):
                     cumulative_committed = _committed_files_since(
@@ -2870,10 +2927,11 @@ def run_loop(
                     success = True
                     break
                 else:
-                    if check_result.command == gate_failure_signature:
+                    signature = _gate_failure_signature(check_result.command, check_result.output)
+                    if signature == gate_failure_signature:
                         gate_failure_count += 1
                     else:
-                        gate_failure_signature = check_result.command
+                        gate_failure_signature = signature
                         gate_failure_count = 1
                     last_error = f"Command: {check_result.command}\n" + _tail(
                         check_result.output, 50

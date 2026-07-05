@@ -7587,7 +7587,10 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off") as mock_check_off,
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8388,6 +8391,9 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git directly, so it needs its own patch.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8429,6 +8435,9 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git directly, so it needs its own patch.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8464,7 +8473,10 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8513,7 +8525,10 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8569,7 +8584,10 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8616,7 +8634,10 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8674,6 +8695,9 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git directly, so it needs its own patch.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8786,6 +8810,9 @@ def test_run_batch_rollback_untracked_symlink_to_dir_unlinked(tmp_path):
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
         patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git directly, so it needs its own patch.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect),
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")
@@ -8828,7 +8855,10 @@ def test_run_batch_rollback_filename_with_embedded_newline(tmp_path):
         patch("mcloop.main._has_uncommitted_changes", return_value=False),
         patch("mcloop.main._worktree_status", return_value=""),
         patch("mcloop.main.run_checks") as mock_checks,
-        patch("mcloop.main._git", side_effect=git_side_effect) as mock_git,
+        patch("mcloop.main._git", side_effect=git_side_effect),
+        # The selective rollback lives in git_ops (_rollback_batch_changes)
+        # and calls git_ops._git; the rollback assertions inspect that mock.
+        patch("mcloop.git_ops._git", side_effect=git_side_effect) as mock_git,
         patch("mcloop.main.check_off"),
     ):
         mock_run.return_value = MagicMock(success=True, output="done")

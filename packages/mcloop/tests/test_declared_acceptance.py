@@ -8,7 +8,7 @@ import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import pytest
 from plan_fixtures import canonical_plan_text
@@ -171,7 +171,9 @@ def test_pytest_acceptance_routes_to_scoped_run_checks() -> None:
         result = _run_one(plan)
 
     assert result.ok
-    mock_autofix.assert_called_once_with(root)
+    # autofix is scoped to the session's changed files so it cannot
+    # sweep unrelated pre-existing formatting drift into the commit.
+    mock_autofix.assert_called_once_with(root, changed_files=ANY)
     mock_checks.assert_called_once_with(root, changed_files=["pkg/widget.py"])
 
 
@@ -194,7 +196,7 @@ def test_command_exit_acceptance_runs_autofix_before_the_check() -> None:
         _loop_patches(root, changed_files=["pkg/widget.py"]),
         patch(
             "mcloop.main.run_autofix",
-            side_effect=lambda _dir: order.append("autofix"),
+            side_effect=lambda _dir, changed_files=None: order.append("autofix"),
         ),
         patch("mcloop.main.run_command_acceptance", side_effect=fake_acceptance),
     ):
@@ -224,7 +226,9 @@ def test_waived_acceptance_runs_autofix() -> None:
         result = _run_one(plan)
 
     assert result.ok
-    mock_autofix.assert_called_once_with(root)
+    # autofix is scoped to the session's changed files so it cannot
+    # sweep unrelated pre-existing formatting drift into the commit.
+    mock_autofix.assert_called_once_with(root, changed_files=ANY)
 
 
 def _init_git_repo(root: Path) -> None:

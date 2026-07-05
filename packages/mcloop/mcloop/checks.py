@@ -171,16 +171,26 @@ def _resolve_project_venv_command(project_dir: Path, parts: list[str]) -> list[s
     workspace venv is left unresolved and dies with
     ``Command not found: mypy`` even though the tool is installed --
     while a globally-installed ``ruff`` silently passes, hiding the gap.
-    Falls back to the bare name (resolved on PATH) when no venv on the
-    path to the filesystem root provides the tool.
+
+    The walk stops at the repository / workspace boundary (a directory
+    containing ``.git``) or the user's home directory -- each is still
+    CHECKED, but nothing above it is. Walking all the way to ``/`` let
+    a stray ``~/.venv`` hijack bare tools for every project under home
+    that lacked its own venv, running checks under an interpreter
+    without the project's deps and producing baffling import-error
+    "failures". Falls back to the bare name (resolved on PATH) when no
+    venv within the boundary provides the tool.
     """
     if not parts or "/" in parts[0]:
         return parts
     tool = parts[0]
+    home = Path.home()
     for base in (project_dir, *project_dir.parents):
         candidate = base / ".venv" / "bin" / tool
         if candidate.exists():
             return [str(candidate), *parts[1:]]
+        if (base / ".git").exists() or base == home:
+            break
     return parts
 
 
@@ -194,7 +204,10 @@ def get_check_commands(project_dir: str | Path) -> list[str]:
     return _detect_commands(project_dir, config)
 
 
-def run_autofix(project_dir: str | Path) -> None:
+def run_autofix(
+    project_dir: str | Path,
+    changed_files: list[str] | None = None,
+) -> None:
     """Run ruff auto-fixers to clear style issues before verification.
 
     Runs ``ruff check --fix`` (fixes lint violations) and ``ruff format``
@@ -202,6 +215,17 @@ def run_autofix(project_dir: str | Path) -> None:
     strings where possible). This is a separate step from verification
     so that callers can choose whether to allow side effects. Read-only
     paths (no-op detection, full-suite, stage-boundary) should skip this.
+
+    ``changed_files`` scopes the fixers to the ``.py`` files the session
+    actually touched. The task loop MUST pass it: an unscoped run
+    reformats every pre-existing unformatted file in the project, and
+    those edits land in ``changed_files`` afterwards and get silently
+    committed under the current task's message (a waived-acceptance
+    task could commit purely unrelated workspace-wide reformatting
+    noise). ``None`` keeps the whole-project sweep for callers whose
+    job is repo-wide cleanup (the audit cycle). When ``changed_files``
+    is given but contains no existing ``.py`` file, the fixers are
+    skipped entirely.
 
     Both commands are safe to run here: the pipeline snapshots the
     worktree *after* autofix and *before* run_checks, so any changes
@@ -211,12 +235,21 @@ def run_autofix(project_dir: str | Path) -> None:
     check commands.
     """
     project_dir = Path(project_dir)
-    for fix_cmd in ["ruff check --fix .", "ruff format ."]:
+    if changed_files is None:
+        targets = ["."]
+    else:
+        targets = [f for f in changed_files if f.endswith(".py") and (project_dir / f).is_file()]
+        if not targets:
+            return
+    for fix_cmd in (
+        ["ruff", "check", "--fix", *targets],
+        ["ruff", "format", *targets],
+    ):
         # Resolve through the project venv exactly like run_checks does:
         # if ruff is only installed in <project>/.venv/bin, a bare "ruff"
         # would silently no-op here (FileNotFoundError is swallowed)
         # while the verification commands still find and enforce it.
-        parts = _resolve_project_venv_command(project_dir, shlex.split(fix_cmd))
+        parts = _resolve_project_venv_command(project_dir, fix_cmd)
         try:
             subprocess.run(
                 parts,

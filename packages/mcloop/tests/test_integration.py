@@ -384,6 +384,109 @@ def test_circuit_breaker_stops_repeated_identical_check_failure(
     assert any("Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args)
 
 
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_circuit_breaker_trips_despite_path_churn_in_command(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """The breaker keys on failure CONTENT, not the raw command string.
+
+    Regression: scoped commands embed per-attempt absolute file paths;
+    raw string equality reset the counter on every attempt, so the
+    breaker never fired on exactly the deterministic-gate thrash it was
+    built for.
+    """
+    md = _make_project(tmp_path, "- [ ] Gate failure with churning paths\n")
+    mock_run.return_value = _ok_run_result()
+    counter = iter(range(100))
+    mock_checks.side_effect = lambda *a, **k: CheckResult(
+        passed=False,
+        output="Gate failed: unaccounted behavioral change",
+        # Same tool, same failure, different scoped file list each time.
+        command=f"/abs/venv/bin/pytest /abs/tests/test_{next(counter)}.py",
+    )
+
+    with _isolated_git_state():
+        result = run_loop(
+            md,
+            max_retries=3,
+            no_audit=True,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="claude", model="kimi-k2.6"),
+                ChainEntry(cli="claude", model="deepseek-v4-pro"),
+            ],
+        )
+
+    assert not result.ok
+    assert mock_checks.call_count == 6
+    assert any("Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args)
+
+
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks")
+@patch("mcloop.main.run_task")
+def test_circuit_breaker_does_not_trip_on_progressing_failures(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """Different failure content each attempt = progress; no breaker.
+
+    A model shrinking a failure set (different failing tests each
+    attempt, same command) must be allowed to exhaust the normal
+    retry/tier budget rather than being killed by the breaker.
+    """
+    md = _make_project(tmp_path, "- [ ] Slowly converging task\n")
+    mock_run.return_value = _ok_run_result()
+    counter = iter(range(100))
+    mock_checks.side_effect = lambda *a, **k: CheckResult(
+        passed=False,
+        # Same command, genuinely different failure content each time.
+        output=f"FAILED tests/test_x.py::test_case_variant_{chr(97 + next(counter))}",
+        command="pytest tests/",
+    )
+
+    with _isolated_git_state():
+        result = run_loop(
+            md,
+            max_retries=3,
+            no_audit=True,
+            chain=[
+                ChainEntry(cli="claude", model="opus"),
+                ChainEntry(cli="claude", model="kimi-k2.6"),
+            ],
+        )
+
+    assert not result.ok
+    # Full budget consumed: 2 tiers x 3 retries, no early breaker kill.
+    assert mock_checks.call_count == 6
+    assert not any(
+        "Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args
+    )
+
+
 @patch("mcloop.main.notify")
 @patch("mcloop.main._checkpoint")
 @patch("mcloop.main._commit", return_value="abc123")
