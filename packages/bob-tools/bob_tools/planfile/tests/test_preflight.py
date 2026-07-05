@@ -51,6 +51,22 @@ _CORRUPT_DUP_IDS = (
     "- [ ] T-000001: Duplicate id task\n"
 )
 
+# Corrupt: two independent duplicate-id pairs — normalization cannot
+# resolve either, so validation reports two distinct messages.
+_CORRUPT_TWO_ERRORS = (
+    "<!-- bob-plan-format: 1 -->\n"
+    "\n"
+    "# Demo\n"
+    "\n"
+    "## Phase 1: Core\n"
+    "<!-- phase_id: phase_001 -->\n"
+    "\n"
+    "- [ ] T-000001: Build the widget\n"
+    "- [ ] T-000001: Duplicate of one\n"
+    "- [ ] T-000002: Wire it up\n"
+    "- [ ] T-000002: Duplicate of two\n"
+)
+
 
 def test_clean_legacy_plan_is_migrated_and_mutatable(tmp_path: Path) -> None:
     path = tmp_path / "PLAN.md"
@@ -93,3 +109,18 @@ def test_corrupt_plan_is_refused_and_left_unchanged(tmp_path: Path) -> None:
     assert any("duplicate task id T-000001" in e for e in excinfo.value.errors)
     assert excinfo.value.path == path
     assert path.read_text() == before
+
+
+def test_multiple_validation_errors_surface_individually(tmp_path: Path) -> None:
+    path = tmp_path / "PLAN.md"
+    path.write_text(_CORRUPT_TWO_ERRORS)
+
+    with pytest.raises(PlanPreflightError) as excinfo:
+        preflight_runtime_plan(path, notice=lambda _m: None)
+
+    # Two independent validation errors are preserved as two separate
+    # entries rather than collapsed into a single joined string.
+    errors = excinfo.value.errors
+    assert len(errors) == 2
+    assert any("duplicate task id T-000001" in e for e in errors)
+    assert any("duplicate task id T-000002" in e for e in errors)

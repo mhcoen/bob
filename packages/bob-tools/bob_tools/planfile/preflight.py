@@ -185,9 +185,7 @@ def preflight_runtime_plan(
     try:
         validate_plan(normalized, constructed=True, require_acceptance=False)
     except PlanValidationError as exc:
-        errors = (
-            exc.args[0] if exc.args and isinstance(exc.args[0], list) else [str(exc)]
-        )
+        errors = exc.messages if exc.messages else [str(exc)]
         raise PlanPreflightError(path, list(errors)) from exc
 
     if notice is not None:

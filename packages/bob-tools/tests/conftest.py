@@ -19,7 +19,7 @@ def _mcloop_block_real_llm_calls(
     _real_popen = _mcloop_subprocess.Popen
 
     def _is_llm_binary(cmd: object) -> bool:
-        if isinstance(cmd, (list, tuple)) and cmd:
+        if isinstance(cmd, list | tuple) and cmd:
             binary = str(cmd[0])
             return (
                 binary in ("claude", "codex")
