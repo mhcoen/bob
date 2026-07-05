@@ -355,10 +355,16 @@ def is_auto_task(task: Task) -> bool:
     """Classify AUTO via planfile action tags, with checklist text fallback.
 
     See :func:`is_user_task` for the rationale on the dual-source check.
+    The text fallback is anchored to the LEADING position (like the
+    planfile parser, which only recognizes an action tag there, and like
+    the ``[USER]`` fallback above): a ``[AUTO:...]`` token appearing later
+    in the description is prose, not a directive. Otherwise a bug task
+    whose text merely *mentions* ``[AUTO:run]`` -- e.g. one describing the
+    action-tag parser itself -- gets mis-run as an empty AUTO action.
     """
     if task.action_tag is not None:
         return True
-    return bool(_AUTO_TAG_RE.search(task.text))
+    return _AUTO_TAG_RE.match(task.text.strip()) is not None
 
 
 def user_task_instructions(task: Task) -> str:

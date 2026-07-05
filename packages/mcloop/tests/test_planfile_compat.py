@@ -43,6 +43,30 @@ def test_auto_user_helpers_are_planfile_tag_backed(tmp_path: Path) -> None:
     assert shim.parse_auto_task(auto) == ("run_cli", "./verify.sh --fast")
 
 
+def test_bug_task_mentioning_auto_tag_in_prose_is_not_auto(tmp_path: Path) -> None:
+    """A task whose description merely mentions ``[AUTO:...]`` is a normal
+    task, not an AUTO directive.
+
+    Regression: a bug task describing the action-tag parser -- text like
+    "the renderer emits ``[AUTO:run] --fast``" -- was mis-classified as an
+    AUTO task because the text fallback searched for the tag anywhere
+    instead of only at the leading position, then ran an empty auto action
+    and failed the whole task.
+    """
+    path = tmp_path / "BUGS.md"
+    path.write_text(
+        "# Demo\n\n"
+        "## Bugs\n\n"
+        "- [ ] T-000005: A Task with an action-tag argument and body text"
+        " does not round-trip: the renderer emits `[AUTO:run] --fast the"
+        " description` but the parser mis-reads it.\n"
+    )
+    task = shim.parse(path)[0]
+
+    assert not shim.is_auto_task(task)
+    assert task.action_tag is None
+
+
 def test_parse_preserves_structured_annotations() -> None:
     scratch = Path(".scratch/tests/planfile-compat-annotations")
     shutil.rmtree(scratch, ignore_errors=True)
