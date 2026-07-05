@@ -248,6 +248,15 @@ def _apply_provider_env(
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
     env["ENABLE_TOOL_SEARCH"] = "1"
+    # Parity with orchestra's apply_provider_env: an isolated
+    # CLAUDE_CONFIG_DIR per provider prevents cross-contamination of
+    # conversation history, MCP configs, and permission state across
+    # providers. ``~`` is expanded here -- a raw env_overrides entry
+    # passes the tilde through verbatim, which the CLI treats as a
+    # literal directory name.
+    claude_config_dir = config.get("claude_config_dir")
+    if claude_config_dir:
+        env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(str(claude_config_dir))
     for key, value in env_overrides.items():
         env[str(key)] = str(value)
 
@@ -999,6 +1008,10 @@ def _run_session(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        # Parity with orchestra's run_session: one invalid UTF-8 byte in
+        # the stream must not kill the reader and truncate all captured
+        # output (the final result record is usually what's lost).
+        errors="replace",
         env=session_env,
         start_new_session=True,
     )
@@ -1056,9 +1069,18 @@ def _run_session(
 
     def _reader() -> None:
         assert process.stdout is not None
-        for line in process.stdout:
-            line_q.put(line)
-        line_q.put(_SENTINEL)
+        try:
+            for line in process.stdout:
+                line_q.put(line)
+        except Exception:
+            # Parity with orchestra's run_session: a decode error or a
+            # pipe closed mid-read must not strand the main loop waiting
+            # for a SENTINEL that never arrives (it would print dots
+            # until the wall-clock kill and burn the attempt as a bogus
+            # timeout).
+            pass
+        finally:
+            line_q.put(_SENTINEL)
 
     t = threading.Thread(target=_reader, daemon=True)
     t.start()
@@ -1193,6 +1215,12 @@ def _run_session(
                         )
                         shown_waiting = True
                         continue
+            # Parity with orchestra's run_session: if the reader thread
+            # died AND nothing is buffered AND the process has exited,
+            # stop now instead of dotting until the wall-clock kill --
+            # covers a reader that crashed without queueing a SENTINEL.
+            if not t.is_alive() and line_q.empty() and process.poll() is not None:
+                break
             # Print a progress dot
             now = time.monotonic()
             if now - last_dot >= PROGRESS_DOT_INTERVAL:

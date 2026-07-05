@@ -394,10 +394,20 @@ def apply_provider_env(
       ``~/.claude-kimi`` or ``~/.claude-deepseek`` to prevent
       cross-contamination of conversation history, MCP configs, and
       permissions state across providers.
+    - ``env_overrides`` (dict): raw key/value pairs applied LAST (after
+      every routing variable), for native and third-party models alike.
+      Parity with mcloop's ``_apply_provider_env`` -- silently dropping
+      them here meant the same ~/.mcloop/config.json executor block
+      routed a session differently depending on which backend ran it.
     """
-    if provider_for_model(model) is None:
-        return
     config = executor or {}
+    env_overrides = config.get("env_overrides") or {}
+    if not isinstance(env_overrides, dict):
+        env_overrides = {}
+    if provider_for_model(model) is None:
+        for key, value in env_overrides.items():
+            env[str(key)] = str(value)
+        return
     base_url = config.get("base_url") or DEFAULT_PROVIDER_BASE_URL
     auth_token_env = config.get("auth_token_env", "OPENROUTER_API_KEY")
     auth_token = os.environ.get(auth_token_env, "")
@@ -417,6 +427,8 @@ def apply_provider_env(
     claude_config_dir = config.get("claude_config_dir")
     if claude_config_dir:
         env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(str(claude_config_dir))
+    for key, value in env_overrides.items():
+        env[str(key)] = str(value)
 
 
 def build_session_env(
