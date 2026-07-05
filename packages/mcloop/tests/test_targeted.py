@@ -34,6 +34,28 @@ def test_map_multiple(tmp_path):
     assert result == ["tests/test_checks.py", "tests/test_runner.py"]
 
 
+def test_map_per_subpackage_tests_dir(tmp_path):
+    """A source maps to a namesake test in a tests/ dir beside it.
+
+    Regression (T-000038): bob-tools keeps
+    ``bob_tools/planfile/tests/test_cli.py`` next to
+    ``bob_tools/planfile/cli.py``, not in a top-level ``tests/``. The
+    mapper previously searched only ``<project>/tests`` and missed it, so
+    a correct, tested CLI fix was reported as an unaccounted behavioral
+    change and thrashed the whole model chain.
+    """
+    src = tmp_path / "pkg" / "planfile"
+    src.mkdir(parents=True)
+    (src / "cli.py").write_text("")
+    (src / "tests").mkdir()
+    (src / "tests" / "test_cli.py").write_text("from pkg.planfile import cli\n")
+
+    result = map_to_tests(["pkg/planfile/cli.py"], tmp_path)
+    assert result == ["pkg/planfile/tests/test_cli.py"]
+    accounts = account_changed_inputs(["pkg/planfile/cli.py"], tmp_path)
+    assert not accounts[0].unmapped
+
+
 def test_map_no_matching_test(tmp_path):
     """Source file with no corresponding test returns empty."""
     (tmp_path / "tests").mkdir()

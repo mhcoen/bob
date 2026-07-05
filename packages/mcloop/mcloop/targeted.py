@@ -147,9 +147,38 @@ def _sibling_tests(p: Path, project_dir: Path) -> set[str]:
     return {_rel(f, project_dir) for f in directory.glob("test_*.py") if f.is_file()}
 
 
+def _candidate_tests_dirs(p: Path, project_dir: Path) -> list[Path]:
+    """Test roots to search for a changed source file's namesake test.
+
+    Covers both the single top-level ``tests/`` layout and the
+    per-subpackage ``pkg/sub/tests/`` convention (e.g. bob-tools keeps
+    ``bob_tools/planfile/tests/test_cli.py`` beside
+    ``bob_tools/planfile/cli.py``, not in a top-level ``tests/``). Returns
+    the top-level ``tests/`` plus a ``tests/`` dir beside the source and
+    beside each of its ancestor packages up to the project root -- deduped
+    and existing-only, nearest-first so the closest namesake wins.
+    """
+    dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def add(d: Path) -> None:
+        key = str(d)
+        if key not in seen and d.is_dir():
+            seen.add(key)
+            dirs.append(d)
+
+    ancestor = p.parent
+    while True:
+        add(project_dir / ancestor / "tests")
+        if ancestor == Path("."):
+            break
+        ancestor = ancestor.parent
+    add(project_dir / "tests")
+    return dirs
+
+
 def _map_one(
     p: Path,
-    tests_dir: Path,
     project_dir: Path,
 ) -> tuple[set[str], str, str]:
     """Return ``(test_files, reason, k_module)`` for a single changed
@@ -170,15 +199,21 @@ def _map_one(
             return siblings, "", ""
         return set(), "test-support file with no sibling tests", ""
 
-    # Python source module: map by module name.
+    # Python source module: map by module name across every candidate
+    # tests dir on the path from the source up to the project root.
     if p.suffix == ".py":
         stem = p.stem
         if stem.startswith("__"):
             return set(), f"package/dunder module ({name}); no name-based mapping", ""
-        files = _concrete_test_files(stem, tests_dir, project_dir)
+        tests_dirs = _candidate_tests_dirs(p, project_dir)
+        files: set[str] = set()
+        for tests_dir in tests_dirs:
+            files |= _concrete_test_files(stem, tests_dir, project_dir)
         if files:
             return files, "", ""
-        k_files = _k_referencing_tests(stem, tests_dir, project_dir)
+        k_files: set[str] = set()
+        for tests_dir in tests_dirs:
+            k_files |= _k_referencing_tests(stem, tests_dir, project_dir)
         if k_files:
             return k_files, "", stem
         return set(), f"no test_{stem}.py and no test references module '{stem}'", ""
@@ -202,7 +237,6 @@ def account_changed_inputs(
     unmapped inputs instead of shipping them untested.
     """
     project_dir = Path(project_dir)
-    tests_dir = project_dir / "tests"
     accounts: list[InputAccount] = []
     seen: set[str] = set()
 
@@ -215,7 +249,7 @@ def account_changed_inputs(
         if not _is_behavior_relevant(p):
             continue
 
-        files, reason, k_module = _map_one(p, tests_dir, project_dir)
+        files, reason, k_module = _map_one(p, project_dir)
         if files:
             accounts.append(
                 InputAccount(
