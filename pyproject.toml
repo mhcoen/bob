@@ -12,6 +12,7 @@ addopts = "-n auto --import-mode=importlib"
 timeout = 60
 markers = [
     "integration: marks tests as integration tests (deselect with '-m not integration')",
+    "slow: marks tests as slow; auto-skipped unless invoked with -m slow",
 ]
 
 [dependency-groups]
