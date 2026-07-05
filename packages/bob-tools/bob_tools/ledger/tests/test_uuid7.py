@@ -28,7 +28,10 @@ def _reset_generator_state(monkeypatch: pytest.MonkeyPatch) -> None:
 def _patch_clock(monkeypatch: pytest.MonkeyPatch, seconds: list[float]) -> None:
     """Make ``time.time`` yield the given values, one per uuid7() call."""
     it = iter(seconds)
-    monkeypatch.setattr(_uuid7.time, "time", lambda: next(it))
+    # Target by dotted path (not ``_uuid7.time``): the module imports
+    # ``time`` without re-exporting it, so an attribute access trips
+    # mypy strict's no-implicit-reexport.
+    monkeypatch.setattr("bob_tools.ledger._uuid7.time.time", lambda: next(it))
 
 
 def test_backward_clock_step_still_monotonic(monkeypatch: pytest.MonkeyPatch) -> None:
