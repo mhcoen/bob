@@ -530,8 +530,8 @@ def test_run_checks_unmapped_non_behavioral_change_passes(tmp_path):
     calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
     # Linter scoped to the changed file; no pytest because nothing maps and
     # the change is provably inert.
-    assert ("ruff", "check", "pkg/zzwidget.py") in calls
-    assert ("ruff", "format", "--check", "pkg/zzwidget.py") in calls
+    assert ("ruff", "check", "--force-exclude", "pkg/zzwidget.py") in calls
+    assert ("ruff", "format", "--check", "--force-exclude", "pkg/zzwidget.py") in calls
     assert not any(c and c[0] == "pytest" for c in calls)
 
 

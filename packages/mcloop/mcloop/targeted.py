@@ -396,4 +396,14 @@ def targeted_linter_command(
     parts = cmd.split()
     # Drop the trailing "." (whole repo) and append the explicit file list.
     assert parts[-1] == ".", f"unexpected linter cmd shape: {cmd!r}"
-    return " ".join(parts[:-1] + python_files)
+    parts = parts[:-1]
+    # ruff honors its configured exclude list for "." but NOT for
+    # explicitly named files unless --force-exclude is passed. Without
+    # it the scoped VERIFICATION side gates on files the project
+    # deliberately excludes, while run_autofix (which does pass
+    # --force-exclude) refuses to fix them -- a changed, excluded,
+    # unformatted file then fails checks forever. mypy has no such
+    # flag; its exclude interaction is unchanged.
+    if parts and Path(parts[0]).name == "ruff" and "--force-exclude" not in parts:
+        parts = [*parts, "--force-exclude"]
+    return " ".join(parts + python_files)

@@ -10,6 +10,7 @@ from mcloop.targeted import (
     account_changed_inputs,
     is_test_command,
     map_to_tests,
+    targeted_linter_command,
     targeted_pytest_command,
 )
 
@@ -297,8 +298,8 @@ def test_run_checks_with_targeted(tmp_path):
         # .py files, pytest is scoped to their mapped tests. Parallel
         # execution means order is non-deterministic.
         calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
-        assert ("ruff", "check", "mcloop/checks.py") in calls
-        assert ("ruff", "format", "--check", "mcloop/checks.py") in calls
+        assert ("ruff", "check", "--force-exclude", "mcloop/checks.py") in calls
+        assert ("ruff", "format", "--check", "--force-exclude", "mcloop/checks.py") in calls
         # pytest is scoped via the explicit resolved form: a resolved
         # executable prefix plus a fully-qualified node path.
         base = Path(tmp_path).resolve()
@@ -335,8 +336,8 @@ def test_run_checks_targeted_only_test_files_changed(tmp_path):
         # Parallel execution means order is non-deterministic.
         assert mock_run.call_count == 3
         calls = {tuple(c[0][0]) for c in mock_run.call_args_list}
-        assert ("ruff", "check", "tests/test_foo.py") in calls
-        assert ("ruff", "format", "--check", "tests/test_foo.py") in calls
+        assert ("ruff", "check", "--force-exclude", "tests/test_foo.py") in calls
+        assert ("ruff", "format", "--check", "--force-exclude", "tests/test_foo.py") in calls
         base = Path(tmp_path).resolve()
         expected_node = str(base / "tests/test_foo.py")
         pytest_calls = [c for c in calls if expected_node in c]
@@ -439,3 +440,51 @@ def test_run_checks_no_changed_files_runs_full(tmp_path):
         assert ("ruff", "check", ".") in calls
         assert ("ruff", "format", "--check", ".") in calls
         assert ("pytest",) in calls
+
+
+class TestForceExcludeOnScopedRuff:
+    """Scoped ruff verification must honor configured excludes.
+
+    Regression (reproduced end-to-end in the audit): explicit file
+    paths bypass ruff's exclude unless --force-exclude is passed, so a
+    changed ruff-excluded unformatted file failed `ruff format --check
+    <files>` forever while run_autofix (which passes --force-exclude)
+    refused to fix it -- a permanent acceptance-gate wedge.
+    """
+
+    def test_scoped_ruff_gets_force_exclude(self):
+        cmd = targeted_linter_command("ruff check .", ["a.py", "b.py"])
+        assert cmd == "ruff check --force-exclude a.py b.py"
+        cmd = targeted_linter_command("ruff format --check .", ["a.py"])
+        assert cmd == "ruff format --check --force-exclude a.py"
+
+    def test_venv_resolved_ruff_gets_force_exclude(self):
+        cmd = targeted_linter_command("/proj/.venv/bin/ruff check .", ["a.py"])
+        assert cmd == "/proj/.venv/bin/ruff check --force-exclude a.py"
+
+    def test_mypy_unchanged(self):
+        cmd = targeted_linter_command("mypy .", ["a.py"])
+        assert cmd == "mypy a.py"
+
+    def test_scoped_ruff_execution_skips_excluded_file(self, tmp_path):
+        """End-to-end with real ruff: the exact wedge scenario now passes."""
+        import shlex
+        import subprocess
+
+        (tmp_path / "pyproject.toml").write_text(
+            '[tool.ruff]\nextend-exclude = ["generated.py"]\n'
+        )
+        (tmp_path / "generated.py").write_text("x=1;y=2\n")
+        (tmp_path / "clean.py").write_text("z = 3\n")
+        cmd = targeted_linter_command("ruff format --check .", ["generated.py", "clean.py"])
+        proc = subprocess.run(shlex.split(cmd), cwd=tmp_path, capture_output=True, text=True)
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        # Control: without --force-exclude the same invocation fails on
+        # the excluded file (the pre-fix wedge).
+        bare = subprocess.run(
+            ["ruff", "format", "--check", "generated.py", "clean.py"],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+        )
+        assert bare.returncode != 0
