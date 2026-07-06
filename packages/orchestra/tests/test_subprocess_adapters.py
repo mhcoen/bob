@@ -197,7 +197,8 @@ def test_run_session_positive_timeout_still_kills_on_wall_clock(
     fast_progress: None,
 ) -> None:
     """The guard still works for a legitimate positive cap: a process
-    that outlives its wall-clock timeout is killed and returns -2."""
+    that outlives its wall-clock timeout is killed and returns
+    TIMEOUT_KILL_EXIT (-102)."""
     _, exit_code = _subprocess.run_session(
         ["sh", "-c", "sleep 5"],
         tmp_path,
