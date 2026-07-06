@@ -466,8 +466,25 @@ def _run_video_frame_pipeline(
     if not video_frames:
         _record_video_completion(results, fail_open_paths=fail_open_paths)
         return [], accepted_frames_by_path
+    # Persist only VETTED frames to .duplo/references/. Fail-open kept
+    # frames still feed this run's in-memory design input (starving a
+    # whole run on a transient Vision outage would be worse), but the
+    # references store is a permanent ratchet with no healing pass --
+    # junk written there survives every later run, so unvetted frames
+    # must not reach it. Their videos are also not marked processed
+    # (above), so the next run re-filters and stores the vetted set.
+    vetted_frames = [f for f in video_frames if f not in fail_open_paths]
+    if len(vetted_frames) < len(video_frames):
+        withheld = len(video_frames) - len(vetted_frames)
+        print(
+            f"{indent}  Withholding {withheld} unvetted (fail-open) frame(s)"
+            " from .duplo/references/ until a clean re-filter."
+        )
+    if not vetted_frames:
+        _record_video_completion(results, fail_open_paths=fail_open_paths)
+        return video_frames, accepted_frames_by_path
     print(f"{indent}Describing UI states \u2026")
-    frame_descs = describe_frames(video_frames)
+    frame_descs = describe_frames(vetted_frames)
     for fd in frame_descs:
         print(f"{indent}  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
     frame_entries = [

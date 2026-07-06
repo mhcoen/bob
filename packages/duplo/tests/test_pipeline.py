@@ -10148,3 +10148,59 @@ class TestFailOpenCompletionRecording:
         keys = list(recorded)
         assert any("vetted.mp4" in k for k in keys)
         assert not any("omitted.mp4" in k for k in keys)
+
+
+class TestFailOpenFramesNotStored:
+    """Unvetted (fail-open) frames never reach .duplo/references/.
+
+    Regression: describe/store ran on ALL kept frames including
+    fail-open ones, persisting junk into the references store -- a
+    permanent ratchet with no healing pass -- while the video was
+    correctly left unrecorded for re-filtering. The junk therefore
+    survived every later run.
+    """
+
+    def test_store_receives_only_vetted_frames(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        _write_duplo_json(tmp_path, {"source_url": "", "features": []})
+        vid = tmp_path / "demo.mp4"
+        vid.write_bytes(b"MP4" * 500)
+
+        from unittest.mock import patch
+
+        from duplo.frame_describer import FrameDescription
+        from duplo.frame_filter import FilterDecision
+        from duplo.pipeline import _analyze_new_files
+        from duplo.video_extractor import ExtractionResult
+
+        frames_dir = tmp_path / ".duplo" / "video_frames"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        vetted = frames_dir / "frame001.png"
+        vetted.write_bytes(b"PNG" * 100)
+        unvetted = frames_dir / "frame002.png"
+        unvetted.write_bytes(b"PNG" * 100)
+
+        vid_result = ExtractionResult(source=vid, frames=[vetted, unvetted])
+        decisions = [
+            FilterDecision(path=vetted, keep=True, reason="clear UI"),
+            FilterDecision(path=unvetted, keep=True, reason="not classified"),
+        ]
+        desc = FrameDescription(path=vetted, state="main", detail="ok")
+
+        with (
+            patch("duplo.pipeline.extract_all_videos", return_value=[vid_result]),
+            patch("duplo.pipeline.filter_frames", return_value=decisions),
+            patch("duplo.pipeline.apply_filter", return_value=[vetted, unvetted]),
+            patch("duplo.pipeline.describe_frames", return_value=[desc]) as mock_desc,
+            patch("duplo.pipeline.store_accepted_frames", return_value=[]) as mock_store,
+            patch(
+                "duplo.pipeline.extract_design",
+                return_value=DesignRequirements(colors={}, source_images=[]),
+            ),
+        ):
+            _analyze_new_files(["demo.mp4"])
+
+        mock_desc.assert_called_once_with([vetted])
+        stored_paths = [e["path"] for e in mock_store.call_args[0][0]]
+        assert vetted in stored_paths
+        assert unvetted not in stored_paths
