@@ -792,7 +792,7 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     modified: list[str] = []
     untracked: list[str] = []
     diff_result = _git(
-        ["git", "diff", "--name-only", "--relative", "-z"],
+        ["git", "diff", "--no-renames", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="snapshot modified",
     )
@@ -805,7 +805,7 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     # then surfaced in the next attempt's diff-vs-HEAD and was laundered
     # into its commit. Fold the staged set into `modified`.
     staged_result = _git(
-        ["git", "diff", "--cached", "--name-only", "--relative", "-z"],
+        ["git", "diff", "--no-renames", "--cached", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="snapshot staged",
     )
@@ -854,8 +854,12 @@ def _rollback_batch_changes(
     # survive it, and a batch-staged NEW file is invisible to both the
     # unstaged diff and `ls-files --others`. After restore --staged the
     # file falls through to the ordinary modified/untracked passes below.
+    # --no-renames on every diff here and in the snapshot: with rename
+    # detection on, a batch `git mv a b` prints only `b`, so the staged
+    # DELETION of `a` survived rollback, was shielded as "pre-batch
+    # dirty" by the next snapshot, and laundered into a later commit.
     current_staged = _git(
-        ["git", "diff", "--cached", "--name-only", "--relative", "-z"],
+        ["git", "diff", "--no-renames", "--cached", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="batch rollback staged",
     )
@@ -867,7 +871,7 @@ def _rollback_batch_changes(
                 label=f"batch rollback unstage {f}",
             )
     current_modified = _git(
-        ["git", "diff", "--name-only", "--relative", "-z"],
+        ["git", "diff", "--no-renames", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="batch rollback diff",
     )

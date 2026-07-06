@@ -7571,7 +7571,7 @@ def test_run_batch_checks_fail_rolls_back(tmp_path):
     args = _make_batch_args(tmp_path)
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="changed.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
@@ -8377,7 +8377,7 @@ def test_run_batch_rollback_preserves_pre_batch_untracked(tmp_path):
     pre_file.write_text("pre-existing")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="scratch.txt\0notes.md\0batch_new.py\0")
@@ -8424,7 +8424,7 @@ def test_run_batch_rollback_removes_new_untracked_dir(tmp_path):
     (new_dir / "result.txt").write_text("batch output")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="batch_output\0")
@@ -8460,7 +8460,7 @@ def test_run_batch_rollback_selective_checkout_with_pre_modified(tmp_path):
     args = _make_batch_args(tmp_path)
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="keep_dirty.py\0batch_file.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
@@ -8515,7 +8515,7 @@ def test_run_batch_rollback_no_pre_modified_selective_checkout(tmp_path):
     args = _make_batch_args(tmp_path)
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="new_file.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="")
@@ -8570,7 +8570,7 @@ def test_run_batch_rollback_mixed_modified_and_untracked(tmp_path):
     pre_untracked.write_text("user notes")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             # Both pre-dirty and batch-touched files show as modified
             return MagicMock(returncode=0, stdout="pre_dirty.py\0batch_touched.py\0")
         if cmd[1:3] == ["ls-files", "--others"]:
@@ -8624,7 +8624,7 @@ def test_run_batch_rollback_git_diff_empty_stdout(tmp_path):
     batch_file.write_text("new content")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="new_output.py\0")
@@ -8678,7 +8678,7 @@ def test_run_batch_rollback_multiple_new_untracked_with_pre_existing(tmp_path):
     batch2.write_text("gen b")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(
@@ -8799,7 +8799,7 @@ def test_run_batch_rollback_untracked_symlink_to_dir_unlinked(tmp_path):
     os.symlink(target, link)
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="link_to_dir\0")
@@ -8845,7 +8845,7 @@ def test_run_batch_rollback_filename_with_embedded_newline(tmp_path):
     pre.write_text("pre-existing")
 
     def git_side_effect(cmd, cwd, **kwargs):
-        if cmd[1:3] == ["diff", "--name-only"]:
+        if cmd[1] == "diff" and "--name-only" in cmd and "--cached" not in cmd:
             return MagicMock(returncode=0, stdout="")
         if cmd[1:3] == ["ls-files", "--others"]:
             return MagicMock(returncode=0, stdout="keep.txt\0weird\nname.txt\0")
@@ -12019,3 +12019,45 @@ def test_batch_rollback_reverts_staged_changes(tmp_path):
         ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
     ).stdout
     assert status.strip() == "", f"residue after rollback: {status!r}"
+
+
+def test_batch_rollback_reverts_git_mv(tmp_path):
+    """A batch `git mv` must be fully reverted by rollback.
+
+    Regression (real git): rename detection made `git diff --cached
+    --name-only` print only the DESTINATION path, so the staged
+    deletion of the source escaped rollback, was shielded as
+    "pre-batch dirty" by the next snapshot, and laundered into a later
+    commit -- while the worktree copy of the file was lost.
+    """
+    import subprocess as sp
+
+    from mcloop.git_ops import _rollback_batch_changes, _snapshot_worktree
+
+    def git(*args):
+        sp.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "T")
+    git("config", "diff.renames", "true")
+    src = tmp_path / "module.py"
+    src.write_text("content\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "baseline")
+
+    pre_modified, pre_untracked = _snapshot_worktree(tmp_path)
+
+    git("mv", "module.py", "renamed.py")
+
+    _rollback_batch_changes(tmp_path, pre_modified, pre_untracked)
+
+    assert src.exists() and src.read_text() == "content\n"
+    assert not (tmp_path / "renamed.py").exists()
+    status = sp.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status.strip() == "", f"residue after rollback: {status!r}"
+    # And the NEXT snapshot must see a clean tree (nothing shielded).
+    post_modified, post_untracked = _snapshot_worktree(tmp_path)
+    assert post_modified == [] and post_untracked == []
