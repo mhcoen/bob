@@ -270,7 +270,6 @@ class Storage:
 
             self._events_path.parent.mkdir(parents=True, exist_ok=True)
             line = (event.to_jsonl() + "\n").encode("utf-8")
-            created = not self._events_path.exists()
             # Single write() call; O_APPEND on POSIX serializes appends
             # whose payload is at most PIPE_BUF (larger appends are
             # serialized by the interprocess lock held here).
@@ -280,6 +279,13 @@ class Storage:
                 0o644,
             )
             try:
+                # "Creating" is judged by the file being EMPTY at open,
+                # not by a pre-open exists() check: if a previous
+                # creating append materialized the file via O_CREAT but
+                # failed before its write (ENOSPC), an exists() check
+                # would skip the directory fsync forever, reopening the
+                # original durability window on that pathological path.
+                created = os.fstat(fd).st_size == 0
                 os.write(fd, line)
                 # The ledger is the durable history; an unfsync'd append
                 # can vanish in a power loss AFTER the seq file recorded

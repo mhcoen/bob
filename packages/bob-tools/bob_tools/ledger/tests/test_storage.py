@@ -526,3 +526,49 @@ def test_first_append_fsyncs_ledger_directory(
     )
     again = [d for d in synced_dirs if d == str(tmp_path)]
     assert not again, "non-creating append paid a directory fsync"
+
+
+def test_dir_fsync_recovers_after_failed_creating_append(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A failed first append must not permanently skip the dir fsync.
+
+    Regression: the created flag came from a pre-open exists() check,
+    so a creating append that materialized the file via O_CREAT but
+    died before writing (ENOSPC) left an empty file -- and every later
+    successful append computed created=False, never fsyncing the
+    directory entry.
+    """
+    import os as _os
+
+    from bob_tools.ledger.storage import EVENTS_FILENAME
+
+    # Simulate the aftermath of a failed creating append: file exists, empty.
+    (tmp_path / EVENTS_FILENAME).touch()
+
+    synced_dirs: list[str] = []
+    real_fsync = _os.fsync
+    real_open = _os.open
+    fd_paths: dict[int, str] = {}
+
+    def tracking_open(path: str, flags: int, *a: object, **k: object) -> int:
+        fd = real_open(path, flags, *a, **k)  # type: ignore[arg-type]
+        fd_paths[fd] = str(path)
+        return fd
+
+    def tracking_fsync(fd: int) -> None:
+        path = fd_paths.get(fd, "")
+        if _os.path.isdir(path):
+            synced_dirs.append(path)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(_os, "open", tracking_open)
+    monkeypatch.setattr(_os, "fsync", tracking_fsync)
+
+    writer = Storage(tmp_path, writer_id="w1")
+    writer.append(
+        event_type=EventType.PHASE_STARTED,
+        payload=make_phase_started_payload(phase_id="phase_001", title="t"),
+        run_id="r1",
+    )
+    assert str(tmp_path) in synced_dirs, "empty-file append did not fsync the dir"
