@@ -80,7 +80,7 @@ from duplo.verification_extractor import (
     format_verification_tasks,
     load_frame_descriptions,
 )
-from duplo.frame_filter import apply_filter, filter_frames
+from duplo.frame_filter import FAIL_OPEN_REASONS, apply_filter, filter_frames
 from duplo.video_extractor import ExtractionResult, extract_all_videos
 from duplo.hasher import _hash_file, compute_hashes, diff_hashes, load_hashes, save_hashes
 from bob_tools.planfile import (
@@ -326,32 +326,39 @@ def _processed_video_key(video: Path) -> str:
 def _record_video_completion(
     results: list[ExtractionResult],
     *,
-    filter_failed_open: bool = False,
+    fail_open_paths: frozenset[Path] | set[Path] = frozenset(),
 ) -> None:
     """Record videos that completed the frame pipeline in the manifest.
 
     Videos whose extraction errored are not recorded, so they are
-    retried on the next run. ``filter_failed_open`` means the Vision
-    filter could not actually filter (CLI error or unparseable verdict)
-    and fail-open kept EVERY frame; recording completion then would
-    freeze that unfiltered junk set as the permanent "accepted" frames
-    with no retry until the video's content changes. Skip recording so
-    the next run re-filters and self-heals a transient Vision outage.
+    retried on the next run. ``fail_open_paths`` is the set of frame
+    paths whose Vision decision failed open (CLI error, unparseable
+    verdict, or a frame the response simply omitted -- see
+    ``frame_filter.FAIL_OPEN_REASONS``): a video ANY of whose frames
+    fail-opened is skipped, because recording it would freeze an
+    unvetted frame set as the permanent "accepted" frames with no
+    retry until the video's content changes. The check is per video,
+    not global, so one flaky Vision batch does not block manifest
+    recording (and force re-extraction) for every fully-vetted video
+    in the run.
     """
-    if filter_failed_open:
-        print(
-            "  Vision filter failed open (kept all frames); not marking"
-            " video(s) processed so the next run re-filters."
-        )
-        return
     entries: dict[str, str] = {}
+    skipped = 0
     for vr in results:
         if vr.error:
+            continue
+        if fail_open_paths and any(f in fail_open_paths for f in vr.frames):
+            skipped += 1
             continue
         try:
             entries[_processed_video_key(vr.source)] = _hash_file(vr.source)
         except OSError:
             continue
+    if skipped:
+        print(
+            f"  Vision filter failed open on {skipped} video(s); not"
+            " marking them processed so the next run re-filters."
+        )
     if entries:
         record_processed_videos(entries)
 
@@ -438,10 +445,10 @@ def _run_video_frame_pipeline(
         return [], {}
     print(f"{indent}Filtering frames with Vision \u2026")
     decisions = filter_frames(video_frames)
-    # Fail-open decisions mean Vision never actually vetted the frames;
-    # completion must not be recorded for this run (see
-    # _record_video_completion).
-    filter_failed_open = any(d.reason in ("cli error", "parse error") for d in decisions)
+    # Fail-open decisions (including frames the response simply
+    # omitted) mean Vision never vetted those frames; completion must
+    # not be recorded for their videos (see _record_video_completion).
+    fail_open_paths = {d.path for d in decisions if d.reason in FAIL_OPEN_REASONS}
     video_frames = apply_filter(decisions)
     kept = sum(1 for d in decisions if d.keep)
     rejected = len(decisions) - kept
@@ -457,7 +464,7 @@ def _run_video_frame_pipeline(
     accepted_frames_by_path = _accepted_frames_by_source(filtered_results)
 
     if not video_frames:
-        _record_video_completion(results, filter_failed_open=filter_failed_open)
+        _record_video_completion(results, fail_open_paths=fail_open_paths)
         return [], accepted_frames_by_path
     print(f"{indent}Describing UI states \u2026")
     frame_descs = describe_frames(video_frames)
@@ -475,7 +482,7 @@ def _run_video_frame_pipeline(
     stored = store_accepted_frames(frame_entries)
     if stored:
         print(f"{indent}  Stored {len(stored)} frame(s) in .duplo/references/")
-    _record_video_completion(results, filter_failed_open=filter_failed_open)
+    _record_video_completion(results, fail_open_paths=fail_open_paths)
     return video_frames, accepted_frames_by_path
 
 

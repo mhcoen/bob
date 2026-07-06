@@ -10111,3 +10111,40 @@ class TestProcessedVideoGating:
         assert mock_filter.call_count == 1
         assert mock_describe.call_count == 1
         assert mock_store.call_count == 1
+
+
+class TestFailOpenCompletionRecording:
+    """Fail-open Vision decisions must block manifest recording per video.
+
+    Regressions: (a) a syntactically valid response that simply OMITS
+    frames ("not classified") is the third fail-open path -- checking
+    only cli/parse errors let it freeze unvetted frame sets; (b) the
+    check is per video, so one flaky batch does not block manifest
+    recording for every fully-vetted video in the run.
+    """
+
+    def _extraction(self, tmp_path, name, frames):
+        from duplo.video_extractor import ExtractionResult
+
+        src = tmp_path / "ref" / name
+        src.parent.mkdir(parents=True, exist_ok=True)
+        src.write_bytes(b"video-bytes-" + name.encode())
+        return ExtractionResult(source=src, frames=frames, error=None)
+
+    def test_not_classified_blocks_that_video(self, tmp_path, monkeypatch):
+        from duplo.frame_filter import FAIL_OPEN_REASONS
+        from duplo.pipeline import _record_video_completion
+
+        assert "not classified" in FAIL_OPEN_REASONS
+        monkeypatch.chdir(tmp_path)
+        frame = tmp_path / "f1.png"
+        vetted_frame = tmp_path / "f2.png"
+        omitted = self._extraction(tmp_path, "omitted.mp4", [frame])
+        vetted = self._extraction(tmp_path, "vetted.mp4", [vetted_frame])
+
+        recorded: dict = {}
+        monkeypatch.setattr("duplo.pipeline.record_processed_videos", lambda e: recorded.update(e))
+        _record_video_completion([omitted, vetted], fail_open_paths={frame})
+        keys = list(recorded)
+        assert any("vetted.mp4" in k for k in keys)
+        assert not any("omitted.mp4" in k for k in keys)

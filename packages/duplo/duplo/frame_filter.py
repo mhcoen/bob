@@ -136,6 +136,16 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
     return results
 
 
+# Reasons meaning Vision never actually vetted the frame: the CLI call
+# failed, the response was unparseable, or a syntactically valid
+# response simply omitted the frame (an empty/short decisions array is
+# a common LLM failure mode). Every fail-open decision keeps the frame,
+# so callers deciding whether a video's frame set is trustworthy must
+# check against THIS set, not an ad-hoc subset -- the "not classified"
+# path was missed once and quietly froze unvetted frame sets.
+FAIL_OPEN_REASONS = frozenset({"cli error", "parse error", "not classified"})
+
+
 def apply_filter(decisions: list[FilterDecision]) -> list[Path]:
     """Return kept frame paths and delete rejected frames from disk."""
     kept: list[Path] = []
