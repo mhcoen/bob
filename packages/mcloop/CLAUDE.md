@@ -31,8 +31,6 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/audit.py** - Audit functions: run checks, commit passing changes, report failures. Writes output to `.mcloop/audit-report.md`. Defines `AuditResult` enum (no_bugs, fixed, failed, skipped).
 
-**mcloop/checklist.py** - Markdown checklist parser: read and write `- [ ]` items in PLAN.*md files. `purge_completed_bugs` removes checked items from BUGS.md.
-
 **mcloop/checks.py** - Run a project's test/lint suite. Side-effect-free; `run_autofix` is a separate function. Scopes ruff and pytest to changed files via helpers in `targeted`.
 
 **mcloop/claude_md_check.py** - Freshness check for the project manifest and LLM-driven diff summarization. `check_claude_md_freshness` reads CLAUDE.md only. `auto_update_claude_md` sends the git diff to a cheap LLM and appends the summary to NOTES.md; CLAUDE.md is never written to.
@@ -71,7 +69,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/output.py** - Display functions: task status, error tails, diff summaries, terminal run summary.
 
-**mcloop/plan_split.py** - Split-plan management: extract next phase from PLAN.md into CURRENT_PLAN.md, mark completed phases, transition between phases, ensure BUGS.md and CURRENT_PLAN.md exist on startup.
+**mcloop/_planfile_compat.py** - Compatibility layer over `bob_tools.planfile`: canonical fence-aware parsing, checkbox check-off/mark-failed writers, and the split-plan helpers that superseded the retired `checklist.py` / `plan_split.py` modules.
 
 **mcloop/process_monitor.py** - Launch, monitor, and inspect subprocesses. `kill_process_group` and `start_new_session=True` prevent shell=True orphans. GUI launch tracks pre-existing PIDs to avoid killing unrelated user instances.
 
@@ -109,8 +107,6 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **tests/test_args.py** - Tests for CLI argument parsing and run_loop helpers: RunStatus, exit codes, BuildResult, worktree status, autofix metadata-only detection, terminal_failure sentinel, run summary schema, stop-after-stage / stop-after-one, split-plan task routing (BUGS.md + CURRENT_PLAN.md), and phase-boundary messaging.
 
-**tests/test_checklist.py** - Tests for checklist parsing, manipulation, and fallback nearest-match logic.
-
 **tests/test_checks.py** - Tests for check command detection, pytest normalization, side-effect-free run_checks, and autofix separation.
 
 **tests/test_claude_md_check.py** - Tests for freshness check, the diff-summary → NOTES.md pipeline, and `_parse_llm_response`. Pins the invariant that CLAUDE.md is not written.
@@ -140,8 +136,6 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 **tests/test_notify.py** - Tests for Telegram and iMessage notifications.
 
 **tests/test_output.py** - Tests for output and display functions, including `_print_summary` stop_reason precedence.
-
-**tests/test_plan_split.py** - Tests for `mcloop.plan_split`: extract_next_phase, mark_phase_complete, get_current_phase_name, ensure_current_plan, transition_phase, ensure_bugs_file, full three-phase round-trip, idempotency, and corruption surfacing.
 
 **tests/test_process_monitor.py** - Tests for subprocess launching and monitoring: GUI launch with pre-existing PIDs, kill_process_group, start_new_session, run_cli group-kill paths.
 
