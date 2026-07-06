@@ -482,9 +482,7 @@ def test_circuit_breaker_does_not_trip_on_progressing_failures(
     assert not result.ok
     # Full budget consumed: 2 tiers x 3 retries, no early breaker kill.
     assert mock_checks.call_count == 6
-    assert not any(
-        "Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args
-    )
+    assert not any("Circuit breaker" in c.args[0] for c in mock_notify.call_args_list if c.args)
 
 
 @patch("mcloop.main.notify")
@@ -1496,3 +1494,52 @@ def test_audit_notifies_bugs_fixed(
 
     calls = _notify_calls(mock_notify)
     assert any("Audit complete" in msg for msg, _ in calls)
+
+
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=False)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_single_chain_stall_with_limit_vocabulary_is_not_limit_polled(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """A killed session whose transcript merely CONTAINS limit vocabulary
+    must not enter the single-chain limit-poll loop.
+
+    Regression: the non-batch path scanned the FULL transcript with no
+    kill-sentinel exclusion, so a single-chain task editing rate-limit
+    code that then stalled (exit STALL_EXIT_CODE) was classified as
+    session-limited -- attempt refunded, 10-minute sleep, retry,
+    forever. The exact unbounded loop already fixed for batches.
+    """
+    from mcloop.runner import STALL_EXIT_CODE
+
+    md = _make_project(tmp_path, "- [ ] Fix the session limit detector\n")
+    mock_run.return_value = _fail_run_result(
+        output="working on is_session_limited...\nsession limit reached\nusage cap\n"
+        + "unrelated tail line\n" * 20,
+        exit_code=STALL_EXIT_CODE,
+    )
+
+    with _isolated_git_state():
+        result = run_loop(
+            md,
+            max_retries=2,
+            no_audit=True,
+            chain=[ChainEntry(cli="claude", model="opus")],
+        )
+
+    assert not result.ok
+    # Attempts were CONSUMED (no refund loop): exactly max_retries runs.
+    assert mock_run.call_count == 2
+    assert not any("Polling every" in c.args[0] for c in mock_notify.call_args_list if c.args)

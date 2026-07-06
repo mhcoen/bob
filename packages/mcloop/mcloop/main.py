@@ -567,6 +567,13 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
 # not end because a provider rejected it, whatever its transcript says.
 _KILL_SENTINELS = (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE)
 
+# Runaway backstop shared by both limited-retry loops (batch and
+# single-chain poll): a genuine 5-hour cap at 10-minute cooldowns is
+# ~30 cycles, so 50 never interrupts a real wait, but a session
+# misclassified as limited consumes no attempt and would otherwise
+# cycle forever.
+_MAX_LIMITED_CYCLES = 50
+
 
 def _gate_failure_signature(command: str, output: str) -> tuple[str, str]:
     """Fingerprint a check failure for the circuit breaker.
@@ -1904,7 +1911,6 @@ def run_loop(
                 # consumes no attempt, so without a ceiling the loop
                 # retries forever, burning a full session per cycle.
                 batch_limited_cycles = 0
-                _MAX_BATCH_LIMITED_CYCLES = 50
                 while batch_attempt < max_retries:
                     batch_attempt += 1
                     if batch_attempt > 1:
@@ -1949,7 +1955,7 @@ def run_loop(
                         # configured fallback model, mirroring the non-batch
                         # chain-advance path.
                         batch_limited_cycles += 1
-                        if batch_limited_cycles >= _MAX_BATCH_LIMITED_CYCLES:
+                        if batch_limited_cycles >= _MAX_LIMITED_CYCLES:
                             msg = (
                                 f"Batch: {batch_limited_cycles} consecutive"
                                 " limited cycles; treating as failure"
@@ -2141,6 +2147,13 @@ def run_loop(
             attempt = 0
             last_error = ""
             limit_hit = False
+            # Runaway backstop for the single-chain limit-poll path,
+            # mirroring the batch one: a genuine 5-hour cap at 10-min
+            # polls is ~30 cycles, so the bound is generous -- but a
+            # session MISCLASSIFIED as limited consumes no attempt, and
+            # without a ceiling this loop retried forever (the exact
+            # unbounded-misclassification bug fixed for batches).
+            limited_poll_cycles = 0
             while attempt < max_retries:
                 attempt += 1
                 result = run_task(
@@ -2162,12 +2175,31 @@ def run_loop(
                     executor_override=active_entry.executor,
                 )
 
-                if is_session_limited(
-                    result.output,
+                # Same narrowing as the batch path (_run_batch): a
+                # kill-sentinel exit is never a limit, and only the
+                # transcript TAIL is scanned, so a task editing
+                # rate-limit code cannot misread its own vocabulary
+                # as a 429 and cycle without consuming attempts.
+                limit_scan = _tail(result.output, 15)
+                genuinely_ended = result.exit_code not in _KILL_SENTINELS
+
+                if genuinely_ended and is_session_limited(
+                    limit_scan,
                     result.exit_code,
                 ):
                     _checkpoint(project_dir)
                     if len(chain) == 1:
+                        limited_poll_cycles += 1
+                        if limited_poll_cycles >= _MAX_LIMITED_CYCLES:
+                            msg = (
+                                f"Task {label}: {limited_poll_cycles} consecutive"
+                                " session-limit poll cycles; treating as failure"
+                                " (runaway-misclassification backstop)."
+                            )
+                            print(formatting.error_msg(msg), flush=True)
+                            notify(msg, level="error")
+                            last_error = _tail(result.output, 50)
+                            continue
                         notify(
                             "Session limit reached. Polling every 10m.",
                             level="warning",
@@ -2207,7 +2239,7 @@ def run_loop(
                     limit_hit = True
                     break
 
-                if is_rate_limited(result.output, result.exit_code):
+                if genuinely_ended and is_rate_limited(limit_scan, result.exit_code):
                     rate_state.mark_limited(active_entry.cli)
                     notify(
                         f"Rate-limited on {active_entry.cli}. Trying next tier.",
