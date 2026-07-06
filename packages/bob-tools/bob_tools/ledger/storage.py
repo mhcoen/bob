@@ -270,6 +270,7 @@ class Storage:
 
             self._events_path.parent.mkdir(parents=True, exist_ok=True)
             line = (event.to_jsonl() + "\n").encode("utf-8")
+            created = not self._events_path.exists()
             # Single write() call; O_APPEND on POSIX serializes appends
             # whose payload is at most PIPE_BUF (larger appends are
             # serialized by the interprocess lock held here).
@@ -288,6 +289,18 @@ class Storage:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            if created:
+                # fsync(file) makes the CONTENT durable, but the very
+                # first append also creates the directory entry, and
+                # that lives in the directory inode. Without a dir
+                # fsync a power loss can drop the whole events file
+                # while the seq file (whose writes do fsync their dir)
+                # survives at seq N -- an unexplainable gap-from-zero.
+                dir_fd = os.open(str(self._events_path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
 
         return event
 

@@ -475,3 +475,54 @@ class TestAppendLocking:
                 run_id="r-1",
             )
         assert ev.seq == 0
+
+
+def test_first_append_fsyncs_ledger_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The append that CREATES the events file must fsync its directory.
+
+    Regression: file-content fsync alone leaves the new directory entry
+    volatile; a power loss could drop the whole events file while the
+    dir-fsync'd seq file survives at seq N -- a gap-from-zero the
+    projector cannot explain. Only the creating append pays the extra
+    fsync; subsequent appends must not.
+    """
+    import os as _os
+
+    synced_dirs: list[str] = []
+    real_fsync = _os.fsync
+    real_open = _os.open
+    fd_paths: dict[int, str] = {}
+
+    def tracking_open(path: str, flags: int, *a: object, **k: object) -> int:
+        fd = real_open(path, flags, *a, **k)  # type: ignore[arg-type]
+        fd_paths[fd] = str(path)
+        return fd
+
+    def tracking_fsync(fd: int) -> None:
+        path = fd_paths.get(fd, "")
+        if _os.path.isdir(path):
+            synced_dirs.append(path)
+        return real_fsync(fd)
+
+    monkeypatch.setattr(_os, "open", tracking_open)
+    monkeypatch.setattr(_os, "fsync", tracking_fsync)
+
+    writer = Storage(tmp_path, writer_id="w1")
+    writer.append(
+        event_type=EventType.PHASE_STARTED,
+        payload=make_phase_started_payload(phase_id="phase_001", title="t"),
+        run_id="r1",
+    )
+    first = [d for d in synced_dirs if d == str(tmp_path)]
+    assert first, "creating append did not fsync the ledger directory"
+
+    synced_dirs.clear()
+    writer.append(
+        event_type=EventType.PHASE_STARTED,
+        payload=make_phase_started_payload(phase_id="phase_001", title="t"),
+        run_id="r1",
+    )
+    again = [d for d in synced_dirs if d == str(tmp_path)]
+    assert not again, "non-creating append paid a directory fsync"
