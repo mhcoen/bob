@@ -2139,6 +2139,14 @@ def run_loop(
         gate_failure_signature: tuple[str, str] | None = None
         gate_failure_count = 0
         circuit_breaker_threshold = max_retries * 2
+        # Limit-classification backstop for the LAST chain tier. Lower
+        # tiers exhaust on a limit hit and the chain advances, but the
+        # last tier is deliberately never exhausted on limits (a real
+        # quota resets), so a PERSISTENTLY misclassified rate limit on
+        # a sole tier looped forever at one session per cooldown. Bound
+        # total limit hits per task; 50 waits at >=5-minute cooldowns
+        # is 4+ hours of waiting on one task -- past any real reset.
+        task_limit_hits = 0
         while True:
             active_selection = _select_chain_entry(
                 chain,
@@ -3043,7 +3051,18 @@ def run_loop(
             if terminal_task_failure:
                 break
             if limit_hit:
+                task_limit_hits += 1
                 if active_chain_idx < len(chain) - 1:
+                    exhausted_chain_indices.add(active_chain_idx)
+                elif task_limit_hits >= _MAX_LIMITED_CYCLES:
+                    msg = (
+                        f"Task {label}: {task_limit_hits} limit-classified"
+                        f" sessions on the final tier ({active_entry.model});"
+                        " treating the tier as exhausted"
+                        " (runaway-misclassification backstop)."
+                    )
+                    print(formatting.error_msg(msg), flush=True)
+                    notify(msg, level="error")
                     exhausted_chain_indices.add(active_chain_idx)
                 continue
             # The tier exhausted its retries without a quota/rate limit; record

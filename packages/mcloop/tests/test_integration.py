@@ -1543,3 +1543,57 @@ def test_single_chain_stall_with_limit_vocabulary_is_not_limit_polled(
     # Attempts were CONSUMED (no refund loop): exactly max_retries runs.
     assert mock_run.call_count == 2
     assert not any("Polling every" in c.args[0] for c in mock_notify.call_args_list if c.args)
+
+
+@patch("mcloop.runner.ensure_subscription_preflight")
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main.run_task")
+def test_sole_tier_persistent_rate_limit_is_bounded(
+    mock_run,
+    mock_checkpoint,
+    mock_notify,
+    mock_preflight,
+    tmp_path,
+):
+    """A persistently limit-classified sole tier must not loop forever.
+
+    Regression: the last chain tier is never exhausted on a limit hit
+    (real quotas reset), so a session that ALWAYS classified as
+    rate-limited cycled indefinitely at one session per cooldown. The
+    per-task backstop now exhausts the tier after _MAX_LIMITED_CYCLES
+    hits and the task fails normally.
+    """
+    from mcloop.main import _MAX_LIMITED_CYCLES
+
+    md = _make_project(tmp_path, "- [ ] Some task\n")
+    mock_run.return_value = _fail_run_result(
+        output="Rate limit exceeded. Please try again later.\n", exit_code=1
+    )
+
+    released = []
+
+    def fake_wait(rate_state, notify_fn, enabled_clis=None):
+        released.append(1)
+        return "claude"
+
+    with (
+        _isolated_git_state(),
+        patch("mcloop.main.wait_for_reset", side_effect=fake_wait),
+        patch("mcloop.main.SESSION_LIMIT_POLL", 0),
+    ):
+        result = run_loop(
+            md,
+            max_retries=2,
+            no_audit=True,
+            chain=[ChainEntry(cli="claude", model="opus")],
+        )
+
+    assert not result.ok
+    # Bounded: no more sessions than the backstop allows (+ slack).
+    assert mock_run.call_count <= _MAX_LIMITED_CYCLES + 2
+    assert any(
+        "runaway-misclassification backstop" in c.args[0]
+        for c in mock_notify.call_args_list
+        if c.args
+    )
