@@ -68,7 +68,7 @@ class CodexAgentAdapter:
     exit_code TIMEOUT_KILL_EXIT (-102) on expiry (IDLE_KILL_EXIT,
     -103, on stream-idle kills). The executor honors this flag so it does
     not impose a second timer on top, which would race the adapter
-    and discard the structured -2 payload."""
+    and discard the structured kill-sentinel payload."""
 
     def __init__(
         self,

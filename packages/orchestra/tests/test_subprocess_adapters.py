@@ -536,3 +536,64 @@ def test_idle_kill_fires_despite_stale_pending_file(
     assert exit_code == _subprocess.IDLE_KILL_EXIT
     assert "survived" not in output
     assert not stale.exists()
+
+
+def test_dead_child_with_held_pipe_and_pending_file_reaps_promptly(
+    tmp_path: Path,
+    fast_progress: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A dead child whose grandchild still holds the pipe must be
+    reaped within the timeout, pending approval or not.
+
+    Regression (HIGH): with a live pending file the old freeze guard
+    skipped into the liveness bailout, whose stdout.close() blocked on
+    the reader thread's lock until the grandchild exited -- escaping
+    every timeout (an 8s cap stretched to the grandchild's lifetime)
+    and masking the kill sentinel with the child's raw exit code. The
+    bailout now group-kills first, forcing pipe EOF.
+    """
+    import os
+    import time
+
+    pending = tmp_path / ".mcloop" / "pending"
+    pending.mkdir(parents=True)
+    # A pending file naming a live pid (our own) so the approval
+    # freeze condition is genuinely met.
+    (pending / str(os.getpid())).write_text("probe approval")
+
+    start = time.monotonic()
+    output, exit_code = _subprocess.run_session(
+        # Child exits 7 immediately; grandchild keeps the merged pipe
+        # open for 30s. Pre-fix this returned only after ~30s.
+        ["sh", "-c", "sleep 30 & exit 7"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=8,
+        silent=True,
+    )
+    elapsed = time.monotonic() - start
+    assert elapsed < 8, f"bailout blocked for {elapsed:.1f}s on a held pipe"
+    assert exit_code == 7
+
+
+def test_stale_denied_file_is_cleared_at_session_start(
+    tmp_path: Path,
+    fast_progress: None,
+) -> None:
+    """A denied file left by an orphaned hook from a PREVIOUS session
+    must not kill the next session's first silent stretch."""
+    pending = tmp_path / ".mcloop" / "pending"
+    pending.mkdir(parents=True)
+    (pending / "denied").write_text("stale denial from a dead session")
+
+    output, exit_code = _subprocess.run_session(
+        ["sh", "-c", "sleep 0.3; echo survived"],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=30,
+        silent=True,
+    )
+    assert exit_code == 0
+    assert "survived" in output
+    assert not (pending / "denied").exists()

@@ -1022,6 +1022,15 @@ def run_session(
     dropped = 0
 
     pending_dir = cwd / ".mcloop" / "pending"
+    # A `denied` file present BEFORE this session ever ran is by
+    # definition stale — an orphaned hook from a previous session that
+    # was denied after its session already returned. Consuming it here
+    # would kill this session's first silent stretch with a
+    # "Permission denied" that belongs to a dead session. Clear it.
+    try:
+        (pending_dir / "denied").unlink(missing_ok=True)
+    except OSError:
+        pass
     shown_waiting = False
     last_dot = time.monotonic()
     started = time.monotonic()
@@ -1128,11 +1137,30 @@ def run_session(
                     last_dot = now
                 # Liveness check: if the subprocess has exited but the
                 # reader thread is stuck (stdout buffer never returned
-                # EOF — can happen when the CLI dies early), force-
-                # close stdout to unblock the reader and bail out with
-                # whatever we collected. Without this the main loop
-                # waits forever for a SENTINEL that never arrives.
+                # EOF — can happen when the CLI dies early), reap and
+                # bail out with whatever we collected. Without this the
+                # main loop waits forever for a SENTINEL that never
+                # arrives. Kill the PROCESS GROUP first: a grandchild
+                # (permission hook, daemonized helper) can hold the
+                # write end of the merged pipe, and stdout.close() from
+                # here blocks on the reader thread's lock until that
+                # writer exits — which escaped every timeout above
+                # (verified: a held pipe stretched an 8s timeout to the
+                # grandchild's full lifetime and masked the kill
+                # sentinel). Group-killing forces pipe EOF, so the
+                # reader unblocks and close() cannot hang.
                 if process.poll() is not None:
+                    # poll() has reaped the child, so getpgid(pid) would
+                    # fail; the child was spawned with
+                    # start_new_session=True, making the group id equal
+                    # to its pid — kill the group by that id directly
+                    # (raises ProcessLookupError once the group is
+                    # empty, which is the good case).
+                    try:
+                        os.killpg(process.pid, 9)
+                    except OSError:
+                        pass
+                    reader_thread.join(timeout=2.0)
                     try:
                         if process.stdout is not None:
                             process.stdout.close()
