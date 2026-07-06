@@ -218,7 +218,7 @@ def validate_plan(
     ordinals unique and contiguous ``1..N``; ``keyword`` in ``{"Phase",
     "Stage"}``; every phase has ``phase_id`` and ``phase_id_source !=
     "none"``; every task carries a ``T-NNNNNN`` id; no duplicate phase
-    ids; no ``trailing_lines`` on any task; and semantic field-stability
+    ids; and semantic field-stability
     over every task plus the non-task scalars (``project_title``,
     ``preamble``, each ``Phase.title`` / ``Phase.prose``, each
     ``Subsection.title`` / ``Subsection.prose``) per the v4 R3 oracle.
@@ -231,7 +231,7 @@ def validate_plan(
     ``require_acceptance`` only takes effect under ``constructed=True``.
     When ``False`` it suppresses ONLY the leaf-acceptance check; every
     other constructed-mode invariant (magic_version, ordinals,
-    phase_id, duplicate ids, task id/format, trailing_lines, scalar
+    phase_id, duplicate ids, task id/format, scalar
     field-stability incl. the embedded-newline preamble check) still
     runs. It exists solely for legacy-corruption repair where the
     declared-acceptance migration is intentionally incomplete; default
@@ -299,7 +299,7 @@ def _check_constructed_invariants(
 
     Order matches the contract text so error output is stable across
     runs: magic_version, phase ordinals, per-phase keyword and
-    phase_id, duplicate phase ids, per-task id and trailing_lines,
+    phase_id, duplicate phase ids, per-task id,
     non-task scalar field-stability oracles (v4 R3), per-task
     field-stability via the Stage 10 harness, then acceptance
     declarations for leaf implementation tasks.

@@ -676,11 +676,13 @@ class _StateExecMixin(_ExecutorMixinBase):
         will need the slice-2 cancellation contract.
 
         Adapters that manage their own timeout (the claude_code text
-        and agent adapters return exit_code -2 from a wall-clock
-        capped run_session) declare ``manages_own_timeout = True`` so
+        and agent adapters return TIMEOUT_KILL_EXIT, -102, from a
+        wall-clock capped run_session, or IDLE_KILL_EXIT, -103, on
+        stream idle) declare ``manages_own_timeout = True`` so
         the executor never wraps them in this thread-based timer.
         Wrapping would race the adapter's own loop and could discard
-        its structured -2 payload before run_session returned.
+        its structured kill-sentinel payload before run_session
+        returned.
 
         For dispatcher adapters that fan out to a per-role adapter,
         the actual adapter that will run is stashed on

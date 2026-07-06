@@ -2,7 +2,7 @@
 
 ``save(validation="canonical")`` enforces the constructed-mode STRUCTURAL
 invariants (magic_version, contiguous ordinals, no duplicate ids, task id
-presence, no trailing_lines, scalar field-stability including the
+presence, scalar field-stability including the
 embedded-newline preamble check) and the mcloop canonical-input contract,
 but NOT declared-acceptance completeness — acceptance is an authoring-layer
 contract, deferred at the save gate during the legacy-migration window.

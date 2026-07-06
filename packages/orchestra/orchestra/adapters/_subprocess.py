@@ -1091,15 +1091,20 @@ def run_session(
                         process.wait()
                         return _assemble(head_lines, tail_lines, dropped), 1
                     pending = _live_pending_approvals(pending_dir)
-                    if pending:
-                        # A human approval is in flight. This is a wait,
-                        # not idleness: freeze the idle clock so the
-                        # session is not killed mid-approval. The hook
-                        # itself times out (POLL_TIMEOUT) and responds
-                        # deny, which removes the pending file and
-                        # resumes the stream, so this cannot wait
-                        # forever. Stale files from killed hook
-                        # processes are pruned by the helper.
+                    if pending and process.poll() is None:
+                        # A human approval is in flight AND the child is
+                        # still alive. This is a wait, not idleness:
+                        # freeze the idle clock so the session is not
+                        # killed mid-approval. The hook itself times out
+                        # (POLL_TIMEOUT) and responds deny, which
+                        # removes the pending file and resumes the
+                        # stream, so this cannot wait forever. Stale
+                        # files from killed hook processes are pruned by
+                        # the helper. The poll() guard keeps a pending
+                        # file from ANOTHER live session on the same
+                        # project from freezing the clock for a child
+                        # that already exited. The liveness bailout
+                        # below then reaps it promptly.
                         last_event_time = time.monotonic()
                         if not shown_waiting:
                             count = len(pending)

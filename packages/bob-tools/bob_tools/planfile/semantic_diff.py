@@ -70,15 +70,15 @@ def _normalize_bugs_for_semantic_compare(bugs: BugsSection) -> BugsSection:
 def _normalize_task_for_position(task: Task, *, depth: int) -> Task:
     """Clear position fields and ``trailing_lines`` on ``task`` and its tree.
 
-    The Stage 10 task-only normalizer rejects nonempty ``trailing_lines``
-    rather than clearing them, because at construction time any opaque
-    retained markdown is precisely the escape hatch Path 1 forbids.
-    McLoop's canonical input contract is intentionally narrower: it
-    normalizes ``trailing_lines`` as position/source trivia while the
-    R1-equivalent count check below catches the meaningful leak class —
-    checkbox lines that did not surface as tasks. That lets canonical
-    save operate on mcloop-canonical plans regardless of whether they
-    were produced by the construction API.
+    Both this normalizer and the Stage 10 task-only one CLEAR
+    ``trailing_lines`` for the semantic compare (they are retained
+    verbatim by parse/render, so they are source trivia to the
+    comparison, not semantic content — the old reject-nonempty rule
+    was removed when parsed-from-disk trailing content was
+    legitimized). The R1-equivalent count check below still catches
+    the meaningful leak class: checkbox lines that did not surface as
+    tasks. That lets canonical save operate on mcloop-canonical plans
+    regardless of whether they were produced by the construction API.
     """
     return dataclasses.replace(
         task,
