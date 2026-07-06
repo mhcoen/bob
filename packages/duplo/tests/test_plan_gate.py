@@ -523,3 +523,24 @@ def test_fenced_verify_example_is_never_deleted() -> None:
     )
     outcome = run_plan_sanity_gate(plan)
     assert "something no phase builds" in outcome.plan_text
+
+
+def test_builder_suffix_outside_punctuation_class_still_registers_feat() -> None:
+    # Regression: a builder line ending in "?", a quote, or a
+    # parenthetical parsed feats=() -- the feat never entered
+    # built_features and the matching STRICT-FORM verify task was
+    # silently deleted by the repair pass.
+    for suffix in ["?", '"', " (critical)"]:
+        plan = _plan(
+            _phase(
+                1,
+                "Core",
+                f"- [ ] T-000001: Implement the exporter [feat: exporter]{suffix}\n"
+                "- [ ] T-000002: Verify: the exporter handles empty input"
+                " [feat: exporter]",
+            )
+        )
+        outcome = run_plan_sanity_gate(plan)
+        assert "Verify: the exporter handles empty input" in outcome.plan_text, (
+            f"strict-form verify deleted for builder suffix {suffix!r}"
+        )

@@ -320,6 +320,18 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
                     feats.extend(_annotation_values(anno.group(2)))
             body = body[: trailing.start()].rstrip()
         body = _TASK_ID_RE.sub("", body)
+        # Feat annotations the trailing parse could not claim (a
+        # suffix outside the tolerated punctuation class -- "?", a
+        # closing quote, a parenthetical like "(critical)" -- or a
+        # mid-line position) still register. A missed BUILDER feat
+        # silently deleted its matching strict-form verify task; the
+        # module's bias-toward-not-flagging contract prefers counting
+        # a prose-mentioned feat as built over destroying work.
+        for anno in _ANNO_RE.finditer(body):
+            if anno.group(1) == "feat":
+                for value in _annotation_values(anno.group(2)):
+                    if value not in feats:
+                        feats.append(value)
         feat_names = tuple(feats)
         tasks.append(
             _ParsedTask(
