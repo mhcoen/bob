@@ -86,7 +86,7 @@ def _contains_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
 
 
-def _count_unfenced_incomplete_checkboxes(text: str) -> int:
+def count_unfenced_incomplete_checkboxes(text: str) -> int:
     """Count incomplete-checkbox lines outside ``` fences.
 
     The parser treats content inside a Markdown code fence as verbatim

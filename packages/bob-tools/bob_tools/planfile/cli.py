@@ -42,7 +42,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import IO
 
-from bob_tools.planfile._shared import _count_unfenced_incomplete_checkboxes
+from bob_tools.planfile._shared import count_unfenced_incomplete_checkboxes
 from bob_tools.planfile.canonical import _count_todo_tasks
 from bob_tools.planfile.fileio import load, save
 from bob_tools.planfile.model import (
@@ -161,7 +161,7 @@ def cmd_fmt(args: argparse.Namespace) -> int:
     # Checkbox lines inside ``` fences are example content the parser
     # (correctly) does not surface as tasks, so exclude them from the
     # source count or every fenced example would trip this refusal.
-    src_incomplete = _count_unfenced_incomplete_checkboxes(text)
+    src_incomplete = count_unfenced_incomplete_checkboxes(text)
     plan_incomplete = _count_todo_tasks(plan)
     if src_incomplete > plan_incomplete:
         dropped = src_incomplete - plan_incomplete

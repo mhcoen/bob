@@ -43,17 +43,20 @@ even though the phase-bearing portion is canonical-looking.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Literal
 
-from bob_tools.planfile import Plan, TaskStatus
+from bob_tools.planfile import Plan, TaskStatus, count_unfenced_incomplete_checkboxes
 from bob_tools.planfile import Task as PlanTask
 
-# Matches the same incomplete-checkbox shape that ``mcloop.checklist``
-# (legacy) accepted and that the canonical parser refuses to surface
-# when no ``## Stage`` / ``## Phase`` header is in scope.
-_INCOMPLETE_RE = re.compile(r"^\s*- \[ \] .+$", re.MULTILINE)
+# The incomplete-checkbox count MUST share bob-tools' fence rule: the
+# canonical parser treats a checkbox inside a ``` fence as verbatim
+# example content, so a fence-unaware count here would exceed the
+# parsed task count for any plan carrying a fenced example, and the R1
+# discriminator would reject a file that bob-plan fmt itself blesses --
+# a permanent startup wedge whose prescribed remediation (fmt) is a
+# no-op. The shared counter keeps the two sides of the contract from
+# diverging again.
 
 R1Verdict = Literal["ALLOW", "REJECT_GRAMMAR_NARROWED"]
 R2Verdict = Literal["ALLOW", "REJECT_ID_LESS_TASKS"]
@@ -120,7 +123,7 @@ def discriminate_r1(source_text: str, plan: Plan) -> tuple[R1Verdict, str]:
     a diagnostic log; it carries the actual count values so failures
     are debuggable.
     """
-    src_incomplete = len(_INCOMPLETE_RE.findall(source_text))
+    src_incomplete = count_unfenced_incomplete_checkboxes(source_text)
     plan_incomplete = _count_incomplete_tasks(plan)
     if src_incomplete > plan_incomplete:
         dropped = src_incomplete - plan_incomplete

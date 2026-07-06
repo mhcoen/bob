@@ -13,6 +13,9 @@ All exported names are implemented and live.
 
 from __future__ import annotations
 
+from bob_tools.planfile._shared import (
+    count_unfenced_incomplete_checkboxes,
+)
 from bob_tools.planfile.canonical import (
     assert_mcloop_canonical,
     resolve_task_context,
@@ -103,6 +106,7 @@ __all__ = [
     "check_consistency",
     "clear_failed",
     "complete_task",
+    "count_unfenced_incomplete_checkboxes",
     "fail_task",
     "load",
     "make_task",

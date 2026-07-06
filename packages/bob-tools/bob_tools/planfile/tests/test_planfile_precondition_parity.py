@@ -88,27 +88,36 @@ from bob_tools.planfile import (
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures" / "parity"
 
-_MCLOOP_ROOT = Path("/Users/mhcoen/proj/mcloop")
+# Workspace sibling: packages/mcloop next to packages/bob-tools. The
+# old hardcoded /Users/mhcoen/proj/mcloop pointed at the VESTIGIAL
+# standalone checkout, so parity was silently verified against stale
+# code (which is exactly how the fence-parity wedge shipped: the live
+# predicate diverged while the corpus kept passing against the relic).
+_MCLOOP_ROOT = Path(__file__).parents[4] / "mcloop"
 
 
 def _load_mcloop_precondition() -> Any | None:
-    """Import ``mcloop._planfile_precondition`` from the sibling project, or None.
+    """Import ``mcloop._planfile_precondition`` (live copy), or None.
 
-    bob_tools intentionally does not depend on mcloop, so the module
-    is not on the venv's import path. The sibling project's source
-    tree is prepended to :data:`sys.path` at runtime so the parity
-    test can import the live module on a dev machine where both repos
-    are checked out. Returns ``None`` when the source file is missing
-    or the import fails for any reason; the parametrized tests skip
-    cleanly in that case instead of erroring.
+    In the bob workspace venv mcloop is editable-installed, so a plain
+    import resolves to the live ``packages/mcloop`` source — preferred.
+    The sys.path fallback covers a checkout without the editable
+    install. Returns ``None`` when neither works; the parametrized
+    tests skip cleanly instead of erroring.
     """
+    try:
+        from mcloop import _planfile_precondition  # type: ignore[import-not-found]
+
+        return _planfile_precondition
+    except Exception:
+        pass
     target = _MCLOOP_ROOT / "mcloop" / "_planfile_precondition.py"
     if not target.is_file():
         return None
     if str(_MCLOOP_ROOT) not in sys.path:
         sys.path.insert(0, str(_MCLOOP_ROOT))
     try:
-        from mcloop import _planfile_precondition  # type: ignore[import-not-found]
+        from mcloop import _planfile_precondition
     except Exception:
         return None
     return _planfile_precondition
@@ -184,6 +193,15 @@ _TEXT_FIXTURES: tuple[tuple[str, Path, str], ...] = (
     (
         "canonical_pass_bugs_only",
         FIXTURES_DIR / "canonical_pass_bugs_only.md",
+        "ACCEPT",
+    ),
+    (
+        # A fenced checkbox example must not read as a dropped task on
+        # EITHER side of the parity contract (the fence-unaware count in
+        # mcloop's precondition used to reject what fmt blesses,
+        # wedging startup with a no-op remediation).
+        "canonical_pass_fenced_example",
+        FIXTURES_DIR / "canonical_pass_fenced_example.md",
         "ACCEPT",
     ),
     (
