@@ -39,7 +39,13 @@ _TASK_LINE_RE = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\]\s*(?P<body>.*
 # A leading task id token (``T-000002:``) prefixing the description.
 _TASK_ID_RE = re.compile(r"^[A-Za-z]+-\d+:\s*")
 # Trailing run of [feat: "..."] / [fix: "..."] annotations on a task.
-_TRAILING_ANNO_RE = re.compile(r"(\s*\[(?:feat|fix):\s*[^\]]+\])+\s*$")
+# Tolerates trailing punctuation after the run: LLM-authored plans end
+# lines with "." or ")" often enough that requiring the annotation to
+# be the absolute last thing let a single stray character parse
+# ``[feat: exporter].`` as feats=() -- which resurrected the exact
+# silent-delete of feat-annotated verify tasks the T-000003 protection
+# exists to prevent.
+_TRAILING_ANNO_RE = re.compile(r"(\s*\[(?:feat|fix):\s*[^\]]+\])+[\s.,;:!)]*$")
 _ANNO_RE = re.compile(r"\[(feat|fix):\s*([^\]]+)\]")
 _QUOTED_RE = re.compile(r"\"([^\"]+)\"")
 # A task whose description is phrased like a behavior/verification check.
@@ -448,11 +454,22 @@ def orphan_verification_lines(plan_text: str) -> list[int]:
     tasks = _parse_tasks(plan_text)
     build_tasks = [t for t in tasks if not t.is_verification]
     built_features = {_normalize(f) for t in build_tasks for f in t.feats}
+    def _carries_feat(task: _ParsedTask) -> bool:
+        # Belt and suspenders: the trailing-annotation parse tolerates
+        # trailing punctuation, but any feat form it still misses
+        # (mid-line, doubly-suffixed, malformed-but-recognizable) must
+        # ALSO shield the line from mechanical deletion -- the cost of
+        # a false positive here is a hard-stop for a human, the cost of
+        # a false negative is silent destruction of build work.
+        if task.feats:
+            return True
+        return any(m.group(1) == "feat" for m in _ANNO_RE.finditer(task.text))
+
     return [
         t.line_index
         for t in tasks
         if t.is_verification
-        and (bool(_VERIFY_STRICT_RE.match(t.text)) or not t.feats)
+        and (bool(_VERIFY_STRICT_RE.match(t.text)) or not _carries_feat(t))
         and _is_orphan_verification(t, built_features)
     ]
 

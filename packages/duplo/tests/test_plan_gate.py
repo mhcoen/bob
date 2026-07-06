@@ -443,3 +443,21 @@ def test_regression_enforce_hard_stops_loudly_for_unrepairable(tmp_path, capsys)
     # The raised error carries the same report and the plan is left untouched.
     assert "Currency exchange" in excinfo.value.report_text
     assert plan_path.read_text(encoding="utf-8") == plan
+
+
+def test_trailing_punctuation_does_not_defeat_feat_protection() -> None:
+    # Regression: `[feat: exporter].` (trailing period) parsed feats=()
+    # and the line was silently deleted by the repair pass -- the
+    # original T-000003 silent-delete resurrected by one character.
+    for suffix in [".", ",", " (critical)", ")"]:
+        plan = _plan(
+            _phase(
+                1,
+                "Core",
+                f"- [ ] T-000001: Verify the exporter handles empty input"
+                f" [feat: exporter]{suffix}",
+            )
+        )
+        outcome = run_plan_sanity_gate(plan)
+        assert outcome.status == "hard_stop", f"suffix {suffix!r}"
+        assert "Verify the exporter handles empty input" in outcome.plan_text
