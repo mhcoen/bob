@@ -126,14 +126,41 @@ def _parse_decisions(raw: str, frames: list[Path]) -> list[FilterDecision]:
     for i, frame in enumerate(frames):
         if i in by_index:
             item = by_index[i]
-            keep = bool(item.get("keep", True))
-            reason = str(item.get("reason", ""))
+            keep, verdict_ok = _coerce_keep(item.get("keep"))
+            if verdict_ok:
+                reason = str(item.get("reason", ""))
+            else:
+                # An entry without a usable verdict (missing "keep",
+                # or a value like the STRING "false" -- which bool()
+                # read as True, keeping a frame the model rejected and
+                # treating it as vetted) is fail-open, not a vetting.
+                reason = "not classified"
         else:
             keep = True
             reason = "not classified"
         results.append(FilterDecision(path=frame, keep=keep, reason=reason))
 
     return results
+
+
+def _coerce_keep(value: object) -> tuple[bool, bool]:
+    """Return ``(keep, verdict_ok)`` for a raw ``keep`` field.
+
+    ``verdict_ok`` is False when the model gave no usable boolean --
+    the frame is then kept but must be classified fail-open so it is
+    re-filtered next run instead of frozen as vetted.
+    """
+    if isinstance(value, bool):
+        return value, True
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "yes", "1", "keep"):
+            return True, True
+        if lowered in ("false", "no", "0", "reject", "drop"):
+            return False, True
+    if isinstance(value, int) and value in (0, 1):
+        return bool(value), True
+    return True, False
 
 
 # Reasons meaning Vision never actually vetted the frame: the CLI call

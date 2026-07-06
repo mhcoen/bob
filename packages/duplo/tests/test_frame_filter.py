@@ -153,3 +153,54 @@ def test_filter_frames_api_error_keeps_all(tmp_path):
         result = filter_frames(frames)
     assert len(result) == 1
     assert result[0].keep is True
+
+
+class TestKeepCoercion:
+    """Non-boolean keep verdicts must not read as vetted keeps.
+
+    Regression: bool("false") is True, so a string verdict kept the
+    frame AGAINST the model's rejection and treated it as vetted
+    (stored, frozen); a missing keep key likewise defaulted to a
+    vetted keep instead of fail-open.
+    """
+
+    def _decide(self, payload, tmp_path):
+        import json
+
+        from duplo import frame_filter
+
+        frames = [tmp_path / "f0.png"]
+        for f in frames:
+            f.write_bytes(b"png")
+        return frame_filter._parse_decisions(json.dumps(payload), frames)
+
+    def test_string_false_rejects(self, tmp_path):
+        [d] = self._decide(
+            {"decisions": [{"index": 0, "keep": "false", "reason": "blurry"}]},
+            tmp_path,
+        )
+        assert d.keep is False
+        assert d.reason == "blurry"
+
+    def test_missing_keep_is_fail_open(self, tmp_path):
+        from duplo.frame_filter import FAIL_OPEN_REASONS
+
+        [d] = self._decide({"decisions": [{"index": 0}]}, tmp_path)
+        assert d.keep is True
+        assert d.reason in FAIL_OPEN_REASONS
+
+    def test_unparseable_keep_is_fail_open(self, tmp_path):
+        from duplo.frame_filter import FAIL_OPEN_REASONS
+
+        [d] = self._decide(
+            {"decisions": [{"index": 0, "keep": {"weird": 1}, "reason": "x"}]},
+            tmp_path,
+        )
+        assert d.keep is True
+        assert d.reason in FAIL_OPEN_REASONS
+
+    def test_real_booleans_unchanged(self, tmp_path):
+        [d] = self._decide(
+            {"decisions": [{"index": 0, "keep": False, "reason": "junk"}]}, tmp_path
+        )
+        assert d.keep is False and d.reason == "junk"
