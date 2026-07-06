@@ -119,6 +119,16 @@ def extract_scene_frames(
         fallback = _run_ffmpeg_interval_sample(video, output_dir, stem, max_frames)
         if isinstance(fallback, list) and len(fallback) > len(frames):
             frames = fallback
+        elif isinstance(fallback, str) and not frames:
+            # Scene detect legitimately found nothing AND the fallback
+            # errored: this extraction produced zero frames for a
+            # reason that may be transient. Swallowing the error here
+            # returned success with frames=[], which let the
+            # success-only cleanup below wipe every prior frame of
+            # both modes and let the pipeline mark the video processed
+            # -- freezing a zero-frame state. Propagate the failure so
+            # prior frames survive and the video is retried.
+            return ExtractionResult(source=video, frames=[], error=fallback)
 
     before = len(frames)
     frames = deduplicate_frames(frames)

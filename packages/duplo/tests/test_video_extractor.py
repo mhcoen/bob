@@ -382,3 +382,40 @@ class TestSiblingStemIsolation:
         # Previous frames of BOTH modes survive the failed extraction.
         assert prev_scene.exists()
         assert prev_interval.exists()
+
+    def test_zero_scene_frames_plus_failed_fallback_is_an_error(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """0-frame scene success + failed interval fallback must not
+        report success.
+
+        Regression: the fallback's error string was silently discarded,
+        so the result carried error="" with frames=[] -- the
+        success-only cleanup then wiped every prior frame of BOTH modes
+        and the pipeline marked the video processed, freezing a
+        zero-frame state after a transient ffmpeg failure.
+        """
+        from duplo import video_extractor
+
+        out = tmp_path / "frames"
+        out.mkdir()
+        prev_scene = out / "demo_scene_0001.png"
+        prev_scene.write_bytes(b"png")
+        prev_interval = out / "demo_interval_0001.png"
+        prev_interval.write_bytes(b"png")
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(b"vid")
+
+        monkeypatch.setattr(video_extractor, "ffmpeg_available", lambda: True)
+        monkeypatch.setattr(video_extractor, "_run_ffmpeg_scene_detect", lambda *a, **k: [])
+        monkeypatch.setattr(
+            video_extractor,
+            "_run_ffmpeg_interval_sample",
+            lambda *a, **k: "ffmpeg timed out (interval sampling)",
+        )
+        result = video_extractor.extract_scene_frames(video, out, threshold=0.1)
+        assert result.error == "ffmpeg timed out (interval sampling)"
+        assert result.frames == []
+        # Prior interval frames survive (scene pre-clean ran; that
+        # bounded loss is the helper's own documented semantics).
+        assert prev_interval.exists()
