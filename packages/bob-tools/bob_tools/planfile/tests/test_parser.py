@@ -1799,3 +1799,30 @@ class TestFenceAwareness:
         )
         assert len(plan.phases) == 1
         assert plan.bugs is None
+
+    def test_unclosed_fence_raises_structural_error(self) -> None:
+        # An unclosed fence would silently swallow every later heading
+        # and task into verbatim content, invisible to the dropped-task
+        # cross-check (which shares the fence rule). Refuse loudly.
+        with pytest.raises(PlanSyntaxError, match="unclosed code fence"):
+            parse_plan(
+                "# Demo\n\n## Stage 1: Core\n\n"
+                "- [x] T-000001: task with output\n"
+                "  ```text\n  some output, fence never closed\n\n"
+                "## Stage 2: Swallowed\n\n"
+                "- [ ] T-000002: this task would vanish\n"
+            )
+
+    def test_deeply_indented_backticks_are_not_fences(self) -> None:
+        # CommonMark: a fence marker indented 4+ spaces is indented
+        # code, not a fence. Treating it as a toggle swallowed real
+        # tasks sitting between two deeply-indented backtick runs.
+        plan = parse_plan(
+            "# Demo\n\n## Stage 1: Core\n\n"
+            "- [x] T-000001: first\n"
+            "    ```\n"
+            "- [ ] T-000002: real task, must survive\n"
+            "    ```\n"
+        )
+        ids = [t.task_id for t in plan.phases[0].tasks]
+        assert "T-000002" in ids

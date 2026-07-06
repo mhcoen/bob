@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn, Protocol
 
+from bob_tools.planfile._shared import is_fence_line
 from bob_tools.planfile.model import (
     BugsSection,
     Phase,
@@ -292,8 +293,8 @@ def parse_plan(
     for idx, line in enumerate(lines):
         line_number = idx + 1
 
-        if in_fence or line.lstrip().startswith("```"):
-            if line.lstrip().startswith("```"):
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
                 in_fence = not in_fence
             _route_verbatim(line)
             continue
@@ -595,11 +596,13 @@ def _check_structural_sanity(
     # ``` fence is example content, not structure, and must not trip
     # the duplicate-heading / multiple-Bugs checks.
     in_fence = False
+    fence_open_line = -1
 
     for i, line in enumerate(lines):
-        if in_fence or line.lstrip().startswith("```"):
-            if line.lstrip().startswith("```"):
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
                 in_fence = not in_fence
+                fence_open_line = i if in_fence else -1
             continue
         # Order matters: a single-hash ``# Phase 1: Bootstrapping``
         # is matched by both ``_STAGE_RE`` and ``_H1_RE``. A header is
@@ -637,6 +640,22 @@ def _check_structural_sanity(
                 h1_titles.setdefault(title, []).append(i)
 
     problems: list[tuple[int, str]] = []
+
+    # An unclosed fence at EOF swallows every later heading and task
+    # into verbatim content, and the dropped-task cross-check is blind
+    # by construction (it shares the same fence rule). Structural text
+    # silently vanishing from the parsed model with no diagnostic is
+    # corruption; refuse loudly and name the opening line.
+    if in_fence:
+        problems.append(
+            (
+                fence_open_line + 1,
+                f"unclosed code fence opened at line {fence_open_line + 1}: "
+                "everything after it would be treated as verbatim fence "
+                "content (headings and tasks included); close the fence "
+                "with ```",
+            )
+        )
 
     for title, line_nums in h1_titles.items():
         if len(line_nums) > 1:

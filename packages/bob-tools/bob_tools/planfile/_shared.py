@@ -86,6 +86,22 @@ def _contains_newline(value: str) -> bool:
     return "\n" in value or "\r" in value
 
 
+def is_fence_line(line: str) -> bool:
+    """Return True when ``line`` opens or closes a ``` code fence.
+
+    THE fence predicate: the parser, the structural-sanity scan, and
+    the incomplete-checkbox counters must all share it or the fence
+    rule drifts (a wedge class already shipped once). Per CommonMark, a
+    fence marker indented four or more spaces is indented CODE, not a
+    fence -- treating it as a toggle silently swallowed real tasks
+    between two deeply-indented backtick runs. Task trailing lines are
+    captured at two-space child indents, so the < 4 bound keeps every
+    legitimate fenced output block recognized.
+    """
+    stripped = line.lstrip()
+    return stripped.startswith("```") and (len(line) - len(stripped)) < 4
+
+
 def count_unfenced_incomplete_checkboxes(text: str) -> int:
     """Count incomplete-checkbox lines outside ``` fences.
 
@@ -98,8 +114,8 @@ def count_unfenced_incomplete_checkboxes(text: str) -> int:
     count = 0
     in_fence = False
     for line in text.splitlines():
-        if in_fence or line.lstrip().startswith("```"):
-            if line.lstrip().startswith("```"):
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
                 in_fence = not in_fence
             continue
         if _INCOMPLETE_CHECKBOX_RE.match(line):
