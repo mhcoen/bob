@@ -798,6 +798,21 @@ def _snapshot_worktree(project_dir: Path) -> tuple[list[str], list[str]]:
     )
     if diff_result.returncode == 0:
         modified = _split_nul_paths(diff_result.stdout)
+    # Staged changes are dirty state too: `git diff` alone is
+    # unstaged-only and `ls-files --others` skips the index, so a file
+    # the user had `git add`ed before the batch was invisible to the
+    # snapshot -- and a file the BATCH staged escaped rollback entirely,
+    # then surfaced in the next attempt's diff-vs-HEAD and was laundered
+    # into its commit. Fold the staged set into `modified`.
+    staged_result = _git(
+        ["git", "diff", "--cached", "--name-only", "--relative", "-z"],
+        cwd=project_dir,
+        label="snapshot staged",
+    )
+    if staged_result.returncode == 0:
+        for f in _split_nul_paths(staged_result.stdout):
+            if f not in modified:
+                modified.append(f)
     untracked_result = _git(
         ["git", "ls-files", "--others", "--exclude-standard", "-z"],
         cwd=project_dir,
@@ -833,12 +848,29 @@ def _rollback_batch_changes(
     """
     import shutil
 
+    pre_mod_set = set(pre_batch_modified)
+    # First unstage anything the batch itself staged: `git checkout -- f`
+    # restores the worktree from the INDEX, so a batch-staged edit would
+    # survive it, and a batch-staged NEW file is invisible to both the
+    # unstaged diff and `ls-files --others`. After restore --staged the
+    # file falls through to the ordinary modified/untracked passes below.
+    current_staged = _git(
+        ["git", "diff", "--cached", "--name-only", "--relative", "-z"],
+        cwd=project_dir,
+        label="batch rollback staged",
+    )
+    for f in _split_nul_paths(current_staged.stdout):
+        if f not in pre_mod_set:
+            _git(
+                ["git", "restore", "--staged", "--", f],
+                cwd=project_dir,
+                label=f"batch rollback unstage {f}",
+            )
     current_modified = _git(
         ["git", "diff", "--name-only", "--relative", "-z"],
         cwd=project_dir,
         label="batch rollback diff",
     )
-    pre_mod_set = set(pre_batch_modified)
     for f in _split_nul_paths(current_modified.stdout):
         if f not in pre_mod_set:
             _git(

@@ -7988,13 +7988,19 @@ def test_run_loop_batch_disabled_by_config(tmp_path):
 # ── _snapshot_worktree ──
 
 
-def test_snapshot_worktree_captures_modified_and_untracked(tmp_path):
-    """_snapshot_worktree returns modified tracked files and untracked files."""
+def test_snapshot_worktree_captures_modified_staged_and_untracked(tmp_path):
+    """_snapshot_worktree unions unstaged and STAGED changes plus untracked.
+
+    Regression: `git diff` alone is unstaged-only, so a file the user
+    had `git add`ed before the batch was invisible to the snapshot and
+    a batch-staged file escaped rollback.
+    """
     diff_out = MagicMock(returncode=0, stdout="src/main.py\0lib/utils.py\0")
+    staged_out = MagicMock(returncode=0, stdout="lib/utils.py\0staged_only.py\0")
     ls_out = MagicMock(returncode=0, stdout="new_file.txt\0tmp.log\0")
-    with patch("mcloop.git_ops._git", side_effect=[diff_out, ls_out]):
+    with patch("mcloop.git_ops._git", side_effect=[diff_out, staged_out, ls_out]):
         modified, untracked = _snapshot_worktree(tmp_path)
-    assert modified == ["src/main.py", "lib/utils.py"]
+    assert modified == ["src/main.py", "lib/utils.py", "staged_only.py"]
     assert untracked == ["new_file.txt", "tmp.log"]
 
 
@@ -11969,3 +11975,47 @@ def test_gate_failure_signature_stable_across_addresses_and_tmp_paths():
     # ...while genuinely different failures still differ.
     c = _gate_failure_signature("pytest tests/", "FAILED test_y - ValueError")
     assert c != a
+
+
+def test_batch_rollback_reverts_staged_changes(tmp_path):
+    """Batch-staged edits and staged-new files must not survive rollback.
+
+    Regression (real git): `git diff` is unstaged-only and `ls-files
+    --others` skips the index, so a batch that ran `git add` had its
+    staged edit survive `git checkout -- f` (which restores from the
+    INDEX) and its staged new file escape both passes -- then surface
+    in the next attempt's diff-vs-HEAD and get laundered into that
+    attempt's commit.
+    """
+    import subprocess as sp
+
+    from mcloop.git_ops import _rollback_batch_changes, _snapshot_worktree
+
+    def git(*args):
+        sp.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "T")
+    tracked = tmp_path / "tracked.py"
+    tracked.write_text("original\n")
+    git("add", "-A")
+    git("commit", "-q", "-m", "baseline")
+
+    pre_modified, pre_untracked = _snapshot_worktree(tmp_path)
+    assert pre_modified == [] and pre_untracked == []
+
+    # The "batch" edits a tracked file and STAGES it, and stages a new file.
+    tracked.write_text("batch edit\n")
+    staged_new = tmp_path / "staged_new.py"
+    staged_new.write_text("laundered\n")
+    git("add", "tracked.py", "staged_new.py")
+
+    _rollback_batch_changes(tmp_path, pre_modified, pre_untracked)
+
+    assert tracked.read_text() == "original\n"
+    assert not staged_new.exists()
+    status = sp.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert status.strip() == "", f"residue after rollback: {status!r}"
