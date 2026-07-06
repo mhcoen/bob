@@ -241,9 +241,13 @@ def run_autofix(
         targets = [f for f in changed_files if f.endswith(".py") and (project_dir / f).is_file()]
         if not targets:
             return
+    # --force-exclude: ruff honors its configured exclude list for "."
+    # but NOT for explicitly named files, so the scoped form would
+    # reformat files the project deliberately excludes (e.g. mcloop's
+    # own telegram-permission-hook.py) and commit the noise.
     for fix_cmd in (
-        ["ruff", "check", "--fix", *targets],
-        ["ruff", "format", *targets],
+        ["ruff", "check", "--fix", "--force-exclude", *targets],
+        ["ruff", "format", "--force-exclude", *targets],
     ):
         # Resolve through the project venv exactly like run_checks does:
         # if ruff is only installed in <project>/.venv/bin, a bare "ruff"

@@ -765,8 +765,8 @@ def test_run_autofix_calls_ruff_fix_and_format(mock_run, tmp_path):
     run_autofix(tmp_path)
     assert mock_run.call_count == 2
     cmds = [call[0][0] for call in mock_run.call_args_list]
-    assert cmds[0] == ["ruff", "check", "--fix", "."]
-    assert cmds[1] == ["ruff", "format", "."]
+    assert cmds[0] == ["ruff", "check", "--fix", "--force-exclude", "."]
+    assert cmds[1] == ["ruff", "format", "--force-exclude", "."]
 
 
 def test_try_salvage_does_not_extend_noqa_like_comment(tmp_path):
@@ -811,8 +811,8 @@ def test_run_autofix_prefers_project_venv_ruff(mock_run, tmp_path):
     mock_run.return_value = ok
     run_autofix(tmp_path)
     cmds = [call[0][0] for call in mock_run.call_args_list]
-    assert cmds[0] == [str(venv_ruff), "check", "--fix", "."]
-    assert cmds[1] == [str(venv_ruff), "format", "."]
+    assert cmds[0] == [str(venv_ruff), "check", "--fix", "--force-exclude", "."]
+    assert cmds[1] == [str(venv_ruff), "format", "--force-exclude", "."]
 
 
 @patch("mcloop.checks.subprocess.run")
@@ -960,3 +960,25 @@ def test_detect_app_type_no_run_command(tmp_path):
 def test_detect_app_type_autodetected_npm(tmp_path):
     (tmp_path / "package.json").write_text('{"scripts": {"start": "node ."}}')
     assert detect_app_type(tmp_path) == "web"
+
+
+def test_scoped_autofix_honors_ruff_exclude(tmp_path, monkeypatch):
+    """Scoped autofix must not reformat files ruff excludes.
+
+    Regression: explicit file paths bypass ruff's configured exclude
+    unless --force-exclude is passed, so a session touching an excluded
+    file got it reformatted and silently committed.
+    """
+    (tmp_path / "pyproject.toml").write_text('[tool.ruff]\nextend-exclude = ["generated.py"]\n')
+    excluded = tmp_path / "generated.py"
+    ugly = "x=1;y=2\n"
+    excluded.write_text(ugly)
+    included = tmp_path / "normal.py"
+    included.write_text("z=3;w=4\n")
+
+    from mcloop.checks import run_autofix
+
+    run_autofix(tmp_path, changed_files=["generated.py", "normal.py"])
+
+    assert excluded.read_text() == ugly, "excluded file was reformatted"
+    assert included.read_text() != "z=3;w=4\n", "included file untouched"
