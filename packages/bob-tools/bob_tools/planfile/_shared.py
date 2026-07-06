@@ -91,15 +91,20 @@ def is_fence_line(line: str) -> bool:
 
     THE fence predicate: the parser, the structural-sanity scan, and
     the incomplete-checkbox counters must all share it or the fence
-    rule drifts (a wedge class already shipped once). Per CommonMark, a
-    fence marker indented four or more spaces is indented CODE, not a
-    fence -- treating it as a toggle silently swallowed real tasks
-    between two deeply-indented backtick runs. Task trailing lines are
-    captured at two-space child indents, so the < 4 bound keeps every
-    legitimate fenced output block recognized.
+    rule drifts (a wedge class already shipped once).
+
+    A backtick run toggles a fence at ANY indent. CommonMark would
+    treat a 4-space-indented marker as indented code, but the plan
+    grammar has no indented-code construct and its containers nest by
+    TWO spaces -- a fenced example under a depth-1 child task
+    legitimately sits at column 4, and an absolute indent bound made
+    such files fail to load in strict mode (shipped and reverted). The
+    cost is that literal backtick runs inside deeply-indented plain
+    text still toggle; the structural-sanity scan's unclosed-fence
+    diagnostic turns the unbalanced cases loud instead of silently
+    swallowing structure.
     """
-    stripped = line.lstrip()
-    return stripped.startswith("```") and (len(line) - len(stripped)) < 4
+    return line.lstrip().startswith("```")
 
 
 def count_unfenced_incomplete_checkboxes(text: str) -> int:

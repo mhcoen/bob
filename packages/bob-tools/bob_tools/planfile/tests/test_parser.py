@@ -1813,16 +1813,37 @@ class TestFenceAwareness:
                 "- [ ] T-000002: this task would vanish\n"
             )
 
-    def test_deeply_indented_backticks_are_not_fences(self) -> None:
-        # CommonMark: a fence marker indented 4+ spaces is indented
-        # code, not a fence. Treating it as a toggle swallowed real
-        # tasks sitting between two deeply-indented backtick runs.
+    def test_fenced_example_under_nested_child_task_parses(self) -> None:
+        # A depth-1 child task's fenced example sits at 4-space indent.
+        # An absolute <4 indent bound on the fence rule made this file
+        # fail to load in strict mode (fence unrecognized, the example
+        # checkbox read as a real id-less task). Fences must toggle at
+        # any indent because plan containers nest by two spaces.
         plan = parse_plan(
-            "# Demo\n\n## Stage 1: Core\n\n"
-            "- [x] T-000001: first\n"
+            "<!-- bob-plan-format: 1 -->\n\n# Demo\n\n"
+            "## Stage 1: Core\n<!-- phase_id: phase_001 -->\n\n"
+            "- [x] T-000001: parent\n"
+            "  - [x] T-000002: child with example\n"
+            "    ```text\n"
+            "    - [ ] example checkbox inside nested fence\n"
             "    ```\n"
-            "- [ ] T-000002: real task, must survive\n"
-            "    ```\n"
+            "- [ ] T-000003: next real task\n"
         )
-        ids = [t.task_id for t in plan.phases[0].tasks]
-        assert "T-000002" in ids
+        phase = plan.phases[0]
+        ids = [t.task_id for t in phase.tasks]
+        assert "T-000003" in ids
+        child = phase.tasks[0].children[0]
+        assert child.task_id == "T-000002"
+        assert any("example checkbox" in ln for ln in child.trailing_lines)
+
+    def test_unbalanced_deep_indent_backticks_fail_loudly(self) -> None:
+        # Any-indent toggling means a stray deeply-indented backtick
+        # run opens a fence; the EOF diagnostic must catch it loudly
+        # rather than silently swallowing subsequent structure.
+        with pytest.raises(PlanSyntaxError, match="unclosed code fence"):
+            parse_plan(
+                "# Demo\n\n## Stage 1: Core\n\n"
+                "- [x] T-000001: first\n"
+                "    ```\n"
+                "- [ ] T-000002: would be swallowed silently otherwise\n"
+            )
