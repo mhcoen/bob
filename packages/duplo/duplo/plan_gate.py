@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from duplo.plan_sanity import (
+    _TASK_LINE_RE,
     KIND_PHASE_IDS,
     KIND_VERIFY_WITHOUT_BUILD,
     PlanSanityReport,
@@ -185,6 +186,11 @@ def _format_stop_report(
     return "\n".join(lines)
 
 
+def _count_task_lines(plan_text: str) -> int:
+    """Count checkbox task lines (checked or not) in the plan body."""
+    return sum(1 for line in plan_text.splitlines() if _TASK_LINE_RE.match(line))
+
+
 def run_plan_sanity_gate(
     plan_text: str,
     *,
@@ -222,6 +228,22 @@ def run_plan_sanity_gate(
     # Every present class is repairable: repair once, re-validate once.
     repaired, changes = _repair(plan_text, set(kinds))
     report_after = check_plan_sanity(repaired, scope_include=scope_include, spec=spec)
+    if report_after.ok and _count_task_lines(plan_text) > 0 and _count_task_lines(repaired) == 0:
+        # A "repair" that deleted EVERY task is not a repair: a plan
+        # made entirely of orphan verification lines (e.g. strict-form
+        # tasks whose builders were all elsewhere) would be emptied,
+        # validate clean, and be reported "repaired" -- mcloop then
+        # starts on a zero-task plan and immediately declares the phase
+        # complete. Emptying the plan is a human decision; stop loudly.
+        stop = _format_stop_report(report=report, persistent=True, changes=changes)
+        return GateOutcome(
+            status="hard_stop",
+            plan_text=plan_text,
+            changes=changes,
+            report_before=report,
+            report_after=report_after,
+            stop_report=stop,
+        )
     if report_after.ok:
         return GateOutcome(
             status="repaired",

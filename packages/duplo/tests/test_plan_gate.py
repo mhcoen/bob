@@ -461,3 +461,22 @@ def test_trailing_punctuation_does_not_defeat_feat_protection() -> None:
         outcome = run_plan_sanity_gate(plan)
         assert outcome.status == "hard_stop", f"suffix {suffix!r}"
         assert "Verify the exporter handles empty input" in outcome.plan_text
+
+
+def test_repair_that_empties_the_plan_hard_stops() -> None:
+    # A plan consisting solely of orphan strict-form verification lines
+    # would be "repaired" to zero tasks, validate clean, and let mcloop
+    # declare the phase instantly complete. Emptying is a human call.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Verify: type text and press enter\n"
+            "- [ ] T-000002: Verify: the counter increments",
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert outcome.status == "hard_stop"
+    # The original plan is returned untouched, not the emptied body.
+    assert "T-000001" in outcome.plan_text
+    assert "T-000002" in outcome.plan_text
