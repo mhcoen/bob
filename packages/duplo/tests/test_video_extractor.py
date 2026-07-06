@@ -332,3 +332,53 @@ def test_deduplicate_no_pillow(tmp_path):
     with patch("duplo.video_extractor._PILLOW", False):
         result = deduplicate_frames(frames)
     assert result == frames
+
+
+class TestSiblingStemIsolation:
+    """Frame matching is exact-name, never prefix.
+
+    Regression: extracting demo.mp4 deleted/collected the frames of a
+    sibling demo_scene.mp4 (demo_scene_scene_0001.png starts with the
+    demo_scene_ prefix), destroying another video's accepted frames on
+    every run. Also: cleanup now runs only AFTER a successful
+    extraction, so a transient ffmpeg failure preserves the previous
+    run's frames of both modes.
+    """
+
+    def test_mode_frame_re_does_not_match_sibling_stems(self) -> None:
+        from duplo.video_extractor import _mode_frame_re
+
+        demo = _mode_frame_re("demo")
+        assert demo.match("demo_scene_0001.png")
+        assert demo.match("demo_interval_0002.png")
+        assert not demo.match("demo_scene_scene_0001.png")
+        assert not demo.match("demo_scene_interval_0001.png")
+        assert not demo.match("demo_interval_scene_0001.png")
+        assert not demo.match("demo_scene_0001.orig")
+        sibling = _mode_frame_re("demo_scene")
+        assert sibling.match("demo_scene_scene_0001.png")
+        assert not sibling.match("demo_scene_0001.png")
+
+    def test_failed_extraction_preserves_previous_frames(self, tmp_path, monkeypatch) -> None:
+        from duplo import video_extractor
+
+        out = tmp_path / "frames"
+        out.mkdir()
+        prev_scene = out / "demo_scene_0001.png"
+        prev_scene.write_bytes(b"png")
+        prev_interval = out / "demo_interval_0001.png"
+        prev_interval.write_bytes(b"png")
+        video = tmp_path / "demo.mp4"
+        video.write_bytes(b"vid")
+
+        monkeypatch.setattr(video_extractor, "ffmpeg_available", lambda: True)
+        monkeypatch.setattr(
+            video_extractor,
+            "_run_ffmpeg_scene_detect",
+            lambda *a, **k: "ffmpeg timed out",
+        )
+        result = video_extractor.extract_scene_frames(video, out)
+        assert result.error == "ffmpeg timed out"
+        # Previous frames of BOTH modes survive the failed extraction.
+        assert prev_scene.exists()
+        assert prev_interval.exists()

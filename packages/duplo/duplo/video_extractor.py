@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -24,6 +25,19 @@ class ExtractionResult:
     source: Path
     frames: list[Path]
     error: str = ""
+
+
+def _mode_frame_re(stem: str, mode: str | None = None) -> re.Pattern[str]:
+    """Exact filename pattern for this video's extracted frames.
+
+    Anchored on the FULL name (``{stem}_{mode}_{digits}.png``), not a
+    prefix: prefix matching made extracting ``demo.mp4`` clean and
+    collect the frames of a sibling ``demo_scene.mp4`` (whose files
+    ``demo_scene_scene_0001.png`` start with the ``demo_scene_`` prefix)
+    -- deleting another video's accepted frames on every run.
+    """
+    mode_pat = mode if mode is not None else "(?:scene|interval)"
+    return re.compile(rf"^{re.escape(stem)}_{mode_pat}_\d+\.png$")
 
 
 def ffmpeg_available() -> bool:
@@ -66,18 +80,6 @@ def extract_scene_frames(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = video.stem
-
-    # Clean BOTH mode prefixes up front, not just the mode about to run.
-    # Each ffmpeg helper cleans only its own prefix, so when a replaced
-    # video flips the winning mode (v1 smooth -> interval frames; v2 has
-    # hard cuts -> scene frames), the losing mode's stale frames from
-    # the PREVIOUS content would survive on disk and every later
-    # frame-reuse pass would return the union -- feeding old-content
-    # frames into design extraction and SPEC autogen.
-    for stale_prefix in (f"{stem}_scene_", f"{stem}_interval_"):
-        for old in output_dir.iterdir():
-            if old.name.startswith(stale_prefix) and old.name.endswith(".png"):
-                old.unlink()
 
     frames = _run_ffmpeg_scene_detect(video, output_dir, stem, threshold, max_frames)
     if isinstance(frames, str):
@@ -124,6 +126,19 @@ def extract_scene_frames(
         # Informational — caller sees the deduplicated list.
         pass
 
+    # Success-only cleanup of this video's stale frames from BOTH modes:
+    # anything matching this stem's frame pattern that is not in the
+    # final set (the losing mode's files from a previous run, this
+    # run's scene files when the interval fallback won). Running the
+    # cleanup only after a successful extraction means a transient
+    # ffmpeg failure leaves the previous run's accepted frames intact
+    # instead of destroying both modes before any frame exists.
+    frames_set = set(frames)
+    stale_re = _mode_frame_re(stem)
+    for old in output_dir.iterdir():
+        if stale_re.match(old.name) and old not in frames_set:
+            old.unlink()
+
     return ExtractionResult(source=video, frames=frames)
 
 
@@ -135,10 +150,12 @@ def _run_ffmpeg_scene_detect(
     max_frames: int,
 ) -> list[Path] | str:
     """Run ffmpeg scene detection and return frame paths or error string."""
-    # Remove stale frames from prior runs so they don't appear in results.
-    prefix = f"{stem}_scene_"
+    # Remove this video's stale scene frames so they don't appear in
+    # results. Exact-name match: see _mode_frame_re for why prefix
+    # matching is wrong (sibling-stem collisions).
+    scene_re = _mode_frame_re(stem, "scene")
     for old in output_dir.iterdir():
-        if old.name.startswith(prefix) and old.name.endswith(".png"):
+        if scene_re.match(old.name):
             old.unlink()
 
     safe_stem = stem.replace("%", "%%")
@@ -168,11 +185,10 @@ def _run_ffmpeg_scene_detect(
     if proc.returncode != 0:
         return f"ffmpeg failed (exit {proc.returncode}): {proc.stderr.strip()}"
 
-    # Collect extracted frames in order.
-    prefix = f"{stem}_scene_"
-    frames = sorted(
-        p for p in output_dir.iterdir() if p.name.startswith(prefix) and p.name.endswith(".png")
-    )
+    # Collect extracted frames in order (exact-name match; a sibling
+    # video named ``{stem}_scene`` must not be swept into this list).
+    scene_re = _mode_frame_re(stem, "scene")
+    frames = sorted(p for p in output_dir.iterdir() if scene_re.match(p.name))
     return frames
 
 
@@ -188,9 +204,9 @@ def _run_ffmpeg_interval_sample(
     Used when scene detection finds no transitions (smooth screencasts,
     animations). Extracts one frame every *interval* seconds.
     """
-    prefix = f"{stem}_interval_"
+    interval_re = _mode_frame_re(stem, "interval")
     for old in output_dir.iterdir():
-        if old.name.startswith(prefix) and old.name.endswith(".png"):
+        if interval_re.match(old.name):
             old.unlink()
 
     safe_stem = stem.replace("%", "%%")
@@ -220,9 +236,7 @@ def _run_ffmpeg_interval_sample(
     if proc.returncode != 0:
         return f"ffmpeg failed (exit {proc.returncode}): {proc.stderr.strip()}"
 
-    frames = sorted(
-        p for p in output_dir.iterdir() if p.name.startswith(prefix) and p.name.endswith(".png")
-    )
+    frames = sorted(p for p in output_dir.iterdir() if interval_re.match(p.name))
     return frames
 
 
