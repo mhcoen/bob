@@ -10204,3 +10204,32 @@ class TestFailOpenFramesNotStored:
         stored_paths = [e["path"] for e in mock_store.call_args[0][0]]
         assert vetted in stored_paths
         assert unvetted not in stored_paths
+
+
+def test_stored_accepted_frames_do_not_cross_sibling_stems(tmp_path, monkeypatch):
+    """demo.mp4's stored-frame lookup must not sweep in demo_scene.mp4's.
+
+    Regression: prefix matching attributed sibling-stem frames
+    (demo_scene_scene_0001.png starts with demo_scene_) to the
+    shorter-stem video, feeding wrong-source frames into role-based
+    design composition.
+    """
+    monkeypatch.chdir(tmp_path)
+    from duplo.pipeline import _stored_accepted_frames
+
+    frames_dir = tmp_path / ".duplo" / "video_frames"
+    frames_dir.mkdir(parents=True)
+    own = frames_dir / "demo_scene_0001.png"
+    own.write_bytes(b"png")
+    sibling = frames_dir / "demo_scene_scene_0001.png"
+    sibling.write_bytes(b"png")
+
+    demo = tmp_path / "ref" / "demo.mp4"
+    demo.parent.mkdir()
+    demo.write_bytes(b"vid")
+    demo_scene = tmp_path / "ref" / "demo_scene.mp4"
+    demo_scene.write_bytes(b"vid")
+
+    lookup = _stored_accepted_frames([demo, demo_scene])
+    assert [p.name for p in lookup[demo]] == ["demo_scene_0001.png"]
+    assert [p.name for p in lookup[demo_scene]] == ["demo_scene_scene_0001.png"]

@@ -83,7 +83,7 @@ from duplo.verification_extractor import (
 from bob_tools.planfile import iter_unfenced_lines
 
 from duplo.frame_filter import FAIL_OPEN_REASONS, apply_filter, filter_frames
-from duplo.video_extractor import ExtractionResult, extract_all_videos
+from duplo.video_extractor import _mode_frame_re, ExtractionResult, extract_all_videos
 from duplo.hasher import _hash_file, compute_hashes, diff_hashes, load_hashes, save_hashes
 from bob_tools.planfile import (
     Plan,
@@ -403,12 +403,13 @@ def _stored_accepted_frames(videos: list[Path]) -> dict[Path, list[Path]]:
         return {}
     lookup: dict[Path, list[Path]] = {}
     for video in videos:
-        prefixes = (f"{video.stem}_scene_", f"{video.stem}_interval_")
-        frames = sorted(
-            p
-            for p in frames_dir.iterdir()
-            if p.name.endswith(".png") and p.name.startswith(prefixes)
-        )
+        # Exact-name pattern, not a prefix: startswith("demo_scene_")
+        # swept sibling demo_scene.mp4's frames into demo.mp4's
+        # accepted set, feeding wrong-source frames into role-based
+        # design composition (the collision class video_extractor's
+        # cleanup fix eliminated -- reuse its pattern helper).
+        frame_re = _mode_frame_re(video.stem)
+        frames = sorted(p for p in frames_dir.iterdir() if frame_re.match(p.name))
         if frames:
             lookup[video] = frames
     return lookup
