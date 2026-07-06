@@ -726,6 +726,19 @@ def main() -> None:
         except SubscriptionPreflightError as exc:
             print(f"\n!!! {exc}\n", file=sys.stderr)
             sys.exit(exc.exit_code)
+        except UnicodeDecodeError as exc:
+            # A non-UTF-8 PLAN.md / BUGS.md read anywhere in startup
+            # (fileio.load, the compat parse, the canonical gate) is an
+            # expected user-input condition, not an internal bug: name
+            # the problem and exit like the other plan-input rejects
+            # instead of dumping a raw traceback. bob-plan's CLI got
+            # the same treatment; this covers mcloop's own read paths.
+            print(
+                f"\n!!! plan input is not valid UTF-8: {exc}\n"
+                "    Re-encode PLAN.md / BUGS.md as UTF-8 and re-run.\n",
+                file=sys.stderr,
+            )
+            sys.exit(2)
     finally:
         try:
             shutdown_lifecycle()

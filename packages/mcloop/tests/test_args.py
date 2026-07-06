@@ -12061,3 +12061,23 @@ def test_batch_rollback_reverts_git_mv(tmp_path):
     # And the NEXT snapshot must see a clean tree (nothing shielded).
     post_modified, post_untracked = _snapshot_worktree(tmp_path)
     assert post_modified == [] and post_untracked == []
+
+
+def test_non_utf8_plan_is_a_diagnostic_not_a_traceback(tmp_path, monkeypatch, capsys):
+    """mcloop startup on a Latin-1 PLAN.md exits 2 with a message.
+
+    Regression: only the bob-plan CLI caught UnicodeDecodeError; the
+    decode error from mcloop's own plan reads escaped main() as a raw
+    traceback.
+    """
+    from mcloop.main import main
+
+    (tmp_path / "PLAN.md").write_bytes("## Bugs\n- [ ] caf\xe9\n".encode("latin-1"))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["mcloop", "--no-audit"])
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "not valid UTF-8" in err
+    assert "Traceback" not in err
