@@ -603,7 +603,18 @@ def _gate_failure_signature(command: str, output: str) -> tuple[str, str]:
         if head.startswith("python") and len(parts) >= 3 and parts[1] == "-m":
             head = parts[2]
     tail_lines = _tail(output, 30).splitlines()
-    normalized = sorted({re.sub(r"\d+", "#", line.strip()) for line in tail_lines if line.strip()})
+
+    def _norm(line: str) -> str:
+        # Strip run-to-run noise so an IDENTICAL logical failure hashes
+        # identically across attempts: hex object addresses
+        # (<Widget object at 0x7f8a2b...>), temp paths whose mkdtemp
+        # suffix is letters (digit-stripping alone missed them), then
+        # bare digit runs (durations, counts, seeds).
+        line = re.sub(r"0[xX][0-9a-fA-F]+", "0x#", line.strip())
+        line = re.sub(r"(?:/tmp|/private/tmp|/var/folders)/\S+", "<tmp>", line)
+        return re.sub(r"\d+", "#", line)
+
+    normalized = sorted({_norm(line) for line in tail_lines if line.strip()})
     digest = hashlib.sha1("\n".join(normalized).encode("utf-8", "replace")).hexdigest()[:12]
     return (head, digest)
 

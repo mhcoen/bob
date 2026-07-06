@@ -11944,3 +11944,28 @@ def test_run_summary_normal_success_no_stop_reason(tmp_path):
     assert status.status == "success"
     assert captured.get("terminal_status") == "success"
     assert captured.get("stop_reason", "") == ""
+
+
+def test_gate_failure_signature_stable_across_addresses_and_tmp_paths():
+    """Identical logical failures hash identically despite hex object
+    addresses and mkdtemp letter suffixes.
+
+    Regression: digit-stripping alone left `0x7f8a...` and
+    `/tmp/tmpabcxyz/...` varying per attempt, so a genuinely stuck task
+    produced a different digest every retry and the circuit breaker
+    never fired on exactly the deterministic thrash it exists for.
+    """
+    from mcloop.main import _gate_failure_signature
+
+    a = _gate_failure_signature(
+        "pytest tests/",
+        "FAILED test_x - <Widget object at 0x7f8a2b3c4d5e> in /tmp/tmpab3xk2/f.py after 12s",
+    )
+    b = _gate_failure_signature(
+        "pytest tests/",
+        "FAILED test_x - <Widget object at 0x105e9f210> in /tmp/tmpqz9wm4/f.py after 47s",
+    )
+    assert a == b
+    # ...while genuinely different failures still differ.
+    c = _gate_failure_signature("pytest tests/", "FAILED test_y - ValueError")
+    assert c != a
