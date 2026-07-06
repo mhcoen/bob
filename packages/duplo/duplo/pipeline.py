@@ -80,6 +80,8 @@ from duplo.verification_extractor import (
     format_verification_tasks,
     load_frame_descriptions,
 )
+from bob_tools.planfile import iter_unfenced_lines
+
 from duplo.frame_filter import FAIL_OPEN_REASONS, apply_filter, filter_frames
 from duplo.video_extractor import ExtractionResult, extract_all_videos
 from duplo.hasher import _hash_file, compute_hashes, diff_hashes, load_hashes, save_hashes
@@ -1549,7 +1551,9 @@ def _observed_phase_count(plan_text: str) -> int:
     references like ``## Notes about Phase 1`` are excluded by the
     leading-keyword requirement.
     """
-    return sum(1 for line in plan_text.splitlines() if _OBSERVED_PHASE_HEADER_RE.match(line))
+    return sum(
+        1 for _, line in iter_unfenced_lines(plan_text) if _OBSERVED_PHASE_HEADER_RE.match(line)
+    )
 
 
 def _run_phase_generation_loop(

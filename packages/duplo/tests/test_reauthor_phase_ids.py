@@ -204,3 +204,26 @@ def test_generated_saved_plan_has_unique_sequential_phase_id_comments() -> None:
     assert ids == expected
     assert len(ids) == phase_count
     assert len(ids) == len(set(ids))
+
+
+def test_fenced_phase_header_is_not_parsed_or_stamped():
+    """A ``## Phase ...`` heading inside a ``` fence is example content.
+
+    Regression: parse_plan_phases counted it (corrupting lineage) and
+    stamp_sequential_phase_ids rewrote it, inserting a phase_id comment
+    into the middle of a fenced example.
+    """
+    text = (
+        "# Demo\n\n"
+        "## Phase 1: Real\n"
+        "<!-- phase_id: phase_001 -->\n\n"
+        "- [ ] T-000001: show the syntax\n\n"
+        "  ```markdown\n"
+        "  ## Phase 9: Example only\n"
+        "  ```\n"
+    )
+    headers = parse_plan_phases(text)
+    assert [h.title for h in headers] == ["Real"]
+    stamped = stamp_sequential_phase_ids(text)
+    assert "## Phase 9: Example only" in stamped
+    assert stamped.count("<!-- phase_id:") == 1

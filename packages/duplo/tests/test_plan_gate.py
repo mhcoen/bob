@@ -480,3 +480,46 @@ def test_repair_that_empties_the_plan_hard_stops() -> None:
     # The original plan is returned untouched, not the emptied body.
     assert "T-000001" in outcome.plan_text
     assert "T-000002" in outcome.plan_text
+
+
+def test_fenced_checkbox_cannot_mask_the_empty_repair_guard() -> None:
+    # Round-2 audit reproduction: a plan whose only REAL tasks are
+    # droppable orphan verifications, plus a fenced "- [ ] example"
+    # block. Fence-unaware counting saw the fenced line as a surviving
+    # task, so the emptying repair sailed through as "repaired" and
+    # mcloop then started on a zero-task plan. The count (and the
+    # orphan classifier itself) are now fence-aware: hard stop,
+    # original text intact.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Verify: type text and press enter\n"
+            "\n"
+            "  ```text\n"
+            "  - [ ] example checkbox inside fence\n"
+            "  ```",
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert outcome.status == "hard_stop"
+    assert "T-000001" in outcome.plan_text
+
+
+def test_fenced_verify_example_is_never_deleted() -> None:
+    # A fenced "- [ ] Verify ..." example must be invisible to the
+    # orphan classifier: pre-fix it was classified and DELETED from
+    # inside its fence by the repair pass.
+    plan = _plan(
+        _phase(
+            1,
+            "Core",
+            "- [ ] T-000001: Implement the exporter [feat: exporter]\n"
+            "\n"
+            "  ```text\n"
+            "  - [ ] Verify: something no phase builds\n"
+            "  ```",
+        )
+    )
+    outcome = run_plan_sanity_gate(plan)
+    assert "something no phase builds" in outcome.plan_text

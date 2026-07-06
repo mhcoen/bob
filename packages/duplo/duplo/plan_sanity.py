@@ -26,6 +26,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
+from bob_tools.planfile import iter_unfenced_lines
+
 from duplo.reauthor_phase_ids import parse_plan_phases
 
 # Stable violation-kind tags. A downstream repair gate dispatches on
@@ -300,7 +302,11 @@ def _parse_tasks(plan_text: str) -> list[_ParsedTask]:
     :func:`_is_verification`.
     """
     tasks: list[_ParsedTask] = []
-    for index, line in enumerate(plan_text.splitlines()):
+    # Fence-aware scan: a checkbox inside a ``` fence is verbatim
+    # example content. Classifying it fed the ORPHAN-DELETION repair a
+    # fenced example line to remove, and counted it as a surviving
+    # task in downstream guards (masking the empty-repair hard stop).
+    for index, line in iter_unfenced_lines(plan_text):
         match = _TASK_LINE_RE.match(line)
         if match is None:
             continue
@@ -454,6 +460,7 @@ def orphan_verification_lines(plan_text: str) -> list[int]:
     tasks = _parse_tasks(plan_text)
     build_tasks = [t for t in tasks if not t.is_verification]
     built_features = {_normalize(f) for t in build_tasks for f in t.feats}
+
     def _carries_feat(task: _ParsedTask) -> bool:
         # Belt and suspenders: the trailing-annotation parse tolerates
         # trailing punctuation, but any feat form it still misses

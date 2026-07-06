@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from bob_tools.planfile import iter_unfenced_lines
+
 from duplo.plan_sanity import (
     _TASK_LINE_RE,
     KIND_PHASE_IDS,
@@ -187,8 +189,13 @@ def _format_stop_report(
 
 
 def _count_task_lines(plan_text: str) -> int:
-    """Count checkbox task lines (checked or not) in the plan body."""
-    return sum(1 for line in plan_text.splitlines() if _TASK_LINE_RE.match(line))
+    """Count checkbox task lines (checked or not) in the plan body.
+
+    Fence-aware: a fenced ``- [ ]`` example must not count, or a plan
+    whose real tasks were all deleted by the repair pass would appear
+    to still have one and slip past the empty-repair hard stop.
+    """
+    return sum(1 for _, line in iter_unfenced_lines(plan_text) if _TASK_LINE_RE.match(line))
 
 
 def run_plan_sanity_gate(

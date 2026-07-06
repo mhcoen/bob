@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from bob_tools.planfile._shared import (
     count_unfenced_incomplete_checkboxes,
+    is_fence_line,
+    iter_unfenced_lines,
 )
 from bob_tools.planfile.canonical import (
     assert_mcloop_canonical,
@@ -108,6 +110,8 @@ __all__ = [
     "complete_task",
     "count_unfenced_incomplete_checkboxes",
     "fail_task",
+    "is_fence_line",
+    "iter_unfenced_lines",
     "load",
     "make_task",
     "migrate",

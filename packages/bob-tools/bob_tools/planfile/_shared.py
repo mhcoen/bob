@@ -107,6 +107,26 @@ def is_fence_line(line: str) -> bool:
     return line.lstrip().startswith("```")
 
 
+def iter_unfenced_lines(text: str) -> list[tuple[int, str]]:
+    """Return ``(index, line)`` pairs for lines outside ``` fences.
+
+    The shared building block for any consumer that scans plan text
+    line-by-line for structure (checkbox tasks, phase headings,
+    annotations): content inside a fence is verbatim example material
+    and must be invisible to counting, classification, and especially
+    DESTRUCTIVE line edits. Fence marker lines themselves are excluded.
+    """
+    out: list[tuple[int, str]] = []
+    in_fence = False
+    for index, line in enumerate(text.splitlines()):
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
+                in_fence = not in_fence
+            continue
+        out.append((index, line))
+    return out
+
+
 def count_unfenced_incomplete_checkboxes(text: str) -> int:
     """Count incomplete-checkbox lines outside ``` fences.
 

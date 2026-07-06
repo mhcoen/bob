@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Mapping
+from bob_tools.planfile import is_fence_line
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -95,7 +96,15 @@ def parse_plan_phases(plan_text: str) -> list[ParsedHeader]:
     """
     headers: list[ParsedHeader] = []
     lines = plan_text.splitlines()
+    in_fence = False
     for i, line in enumerate(lines):
+        # A ``## Phase ...`` heading inside a ``` fence is example
+        # content; parsing it corrupts lineage and the stamper would
+        # rewrite it.
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
+                in_fence = not in_fence
+            continue
         match = _HEADER_RE.match(line)
         if match is None:
             continue
@@ -142,8 +151,17 @@ def stamp_sequential_phase_ids(plan_text: str) -> str:
     counter = 0
     index = 0
     total = len(lines)
+    in_fence = False
     while index < total:
         line = lines[index]
+        # Fenced example headers round-trip verbatim; stamping one
+        # would rewrite quoted example content.
+        if in_fence or is_fence_line(line):
+            if is_fence_line(line):
+                in_fence = not in_fence
+            out.append(line)
+            index += 1
+            continue
         header = _PHASE_HEADER_REWRITE_RE.match(line)
         if header is None:
             out.append(line)
