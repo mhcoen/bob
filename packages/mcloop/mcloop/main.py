@@ -1987,7 +1987,12 @@ def run_loop(
                         batch_attempt -= 1
                         continue
                     # Genuine failure on the merits: carry the error tail
-                    # into the next retry as prior_errors.
+                    # into the next retry as prior_errors, and reset the
+                    # limited-cycle counter -- the backstop bounds
+                    # CONSECUTIVE limited classifications, and a real
+                    # attempt in between proves the loop is not stuck in
+                    # the misclassification cycle it guards against.
+                    batch_limited_cycles = 0
                     batch_prior_errors = batch_detail
                 if batch_handled == "success":
                     if active_file == plan_path and active_phase_name:
@@ -2265,6 +2270,11 @@ def run_loop(
                     pending_switch_reason = f"{active_entry.model} rate-limited"
                     limit_hit = True
                     break
+
+                # Past both limit branches: this was a genuine attempt,
+                # so the consecutive-limited-poll backstop resets (it
+                # bounds CONSECUTIVE misclassifications only).
+                limited_poll_cycles = 0
 
                 if not result.success:
                     last_error = _tail(result.output, 50)
