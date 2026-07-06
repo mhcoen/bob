@@ -27,6 +27,7 @@ import pytest
 from bob_tools.planfile.cli import (
     EXIT_INVALID_PLAN,
     EXIT_OK,
+    EXIT_OTHER,
     EXIT_TASK_NOT_FOUND,
     _print_parse_error,
     main,
@@ -490,3 +491,40 @@ class TestTrailingContentSurvivesRuntime:
         err = capsys.readouterr().err
         assert "migrating legacy" not in err
         assert "Verified by running the harness." in path.read_text()
+
+
+class TestNonUtf8Input:
+    """A non-UTF-8 plan file exits with a diagnostic, never a traceback.
+
+    Regression: every CLI read path caught OSError only, so a Latin-1
+    or binary PLAN.md raised UnicodeDecodeError straight through main()
+    -- an uncaught traceback where mcloop and shell scripts expect a
+    clean nonzero exit.
+    """
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["validate"],
+            ["fmt"],
+            ["next"],
+            ["done", "--", "T-000001"],
+            ["fail", "--", "T-000001", "--reason", "x"],
+        ],
+        ids=["validate", "fmt", "next", "done", "fail"],
+    )
+    def test_latin1_file_is_a_diagnostic_not_a_traceback(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        argv: list[str],
+    ) -> None:
+        bad = tmp_path / "PLAN.md"
+        bad.write_bytes("## Bugs\n- [ ] caf\xe9\n".encode("latin-1"))
+        cmd, rest = argv[0], argv[1:]
+        rest = [a for a in rest if a != "--"]
+        code = main([cmd, str(bad), *rest])
+        assert code == EXIT_OTHER
+        err = capsys.readouterr().err
+        assert "error reading" in err
+        assert "Traceback" not in err

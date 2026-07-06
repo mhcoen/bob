@@ -97,7 +97,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     except PlanSyntaxError as exc:
         _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     try:
@@ -116,7 +116,7 @@ def cmd_next(args: argparse.Namespace) -> int:
     except PlanSyntaxError as exc:
         _print_parse_error(exc, sys.stderr, path)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     try:
@@ -141,7 +141,7 @@ def cmd_fmt(args: argparse.Namespace) -> int:
         # unpinned read here would misdecode non-ASCII content on a
         # non-UTF-8 locale and re-encode the mojibake to disk.
         text = path.read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     # ``fmt`` is the canonicalization entry point, so it must accept the
@@ -196,7 +196,7 @@ def cmd_fmt(args: argparse.Namespace) -> int:
         for message in exc.messages if exc.messages else [str(exc)]:
             print(f"{path}: {message}", file=sys.stderr)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     return EXIT_OK
@@ -212,7 +212,7 @@ def cmd_done(args: argparse.Namespace) -> int:
     except PlanPreflightError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     try:
@@ -226,7 +226,7 @@ def cmd_done(args: argparse.Namespace) -> int:
         for message in exc.messages if exc.messages else [str(exc)]:
             print(f"{path}: {message}", file=sys.stderr)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     print(_settlements_to_json(settlements))
@@ -243,7 +243,7 @@ def cmd_fail(args: argparse.Namespace) -> int:
     except PlanPreflightError as exc:
         print(str(exc), file=sys.stderr)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error reading {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     try:
@@ -257,7 +257,7 @@ def cmd_fail(args: argparse.Namespace) -> int:
         for message in exc.messages if exc.messages else [str(exc)]:
             print(f"{path}: {message}", file=sys.stderr)
         return EXIT_INVALID_PLAN
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"error writing {path}: {exc}", file=sys.stderr)
         return EXIT_OTHER
     print(_settlements_to_json(settlements))
