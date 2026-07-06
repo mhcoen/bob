@@ -44,8 +44,17 @@ SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
 SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
 # Session exit-code sentinels. Negative values double as "killed by signal N"
 # in Popen.returncode, so a custom sentinel must stay out of the POSIX/RT
-# signal range (-1..-64) to avoid colliding with a signal-killed child.
-TIMEOUT_EXIT_CODE = -2  # wall-clock timeout
+# signal range (-1..-64) to avoid colliding with a signal-killed child. The
+# old -2 violated exactly that: a child killed by a real SIGINT read as a
+# wall-clock timeout. -102/-103 mirror orchestra's TIMEOUT_KILL_EXIT /
+# IDLE_KILL_EXIT byte-for-byte so orchestra-routed results flowing through
+# code_edit into RunResult.exit_code hit the same consumer comparisons as
+# direct-path results (the parity-mirrors contract).
+TIMEOUT_EXIT_CODE = -102  # wall-clock timeout (== orchestra TIMEOUT_KILL_EXIT)
+IDLE_EXIT_CODE = -103  # orchestra idle-kill (mirror of IDLE_KILL_EXIT; the
+# direct path has no idle kill of its own, but orchestra-routed sessions
+# surface this code and consumers must classify it as a timeout, not an
+# ordinary failure)
 STALL_EXIT_CODE = -200  # repeated-identical-action stall (out of signal range)
 STALL_REPEAT_THRESHOLD = 4  # consecutive identical tool signatures before abort
 
@@ -983,7 +992,7 @@ def _run_session(
     """Run a CLI session, stream output, return (output, exit_code).
 
     If *timeout* seconds elapse, the process group is killed and
-    exit code -2 is returned.
+    TIMEOUT_EXIT_CODE (-102) is returned.
 
     *timeout* is a whole-second wall-clock cap. Pass ``None`` to
     disable the cap (the idle/stall guards still apply); that is the

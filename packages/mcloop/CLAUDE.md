@@ -85,7 +85,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **mcloop/reviewer.py** - AI-powered diff reviewer using an OpenAI-compatible API.
 
-**mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 30 minutes) and returns exit code -2 on timeout.
+**mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 30 minutes) and returns TIMEOUT_EXIT_CODE (-102, outside the signal range) on timeout.
 
 **mcloop/run_summary.py** - RunSummary / TaskEntry / CheckEntry schema and JSON writer. Produces dated summaries plus `latest.json` on every run_loop exit.
 

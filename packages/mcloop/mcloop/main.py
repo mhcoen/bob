@@ -153,6 +153,7 @@ from mcloop.run_summary import (
 )
 from mcloop.runner import (
     DEFAULT_TASK_TIMEOUT,
+    IDLE_EXIT_CODE,
     INVESTIGATION_TOOLS,
     STALL_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
@@ -561,6 +562,12 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
     return usable
 
 
+# Exit codes meaning "the loop or orchestra killed this session itself"
+# (wall-clock, idle, stall). Never limit-classify these: the session did
+# not end because a provider rejected it, whatever its transcript says.
+_KILL_SENTINELS = (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE)
+
+
 def _gate_failure_signature(command: str, output: str) -> tuple[str, str]:
     """Fingerprint a check failure for the circuit breaker.
 
@@ -930,14 +937,15 @@ def _run_batch(
     # substring-match, and a batch working on rate-limit-related code (a
     # BUGS.md task about 429 handling) legitimately has limit vocabulary
     # in its transcript. Two guards keep that from being read as a limit:
-    # a timeout (-2) or stall (-200) exit is never a limit (those
-    # sentinels mean the loop killed the session itself), and only the
-    # transcript TAIL is scanned -- a genuine CLI limit error terminates
-    # the session and is the last thing it prints, while an incidental
-    # mention sits mid-transcript. Without these, a misclassified session
-    # looped forever: no attempt consumed, no bound, edits laundered.
+    # a timeout, idle-kill, or stall exit is never a limit (those
+    # sentinels mean the loop or orchestra killed the session itself),
+    # and only the transcript TAIL is scanned -- a genuine CLI limit
+    # error terminates the session and is the last thing it prints,
+    # while an incidental mention sits mid-transcript. Without these, a
+    # misclassified session looped forever: no attempt consumed, no
+    # bound, edits laundered.
     limit_scan = _tail(result.output, 15)
-    hit_limit = result.exit_code not in (TIMEOUT_EXIT_CODE, STALL_EXIT_CODE) and (
+    hit_limit = result.exit_code not in _KILL_SENTINELS and (
         is_session_limited(limit_scan, result.exit_code)
         or is_rate_limited(limit_scan, result.exit_code)
     )
@@ -2217,10 +2225,15 @@ def run_loop(
 
                 if not result.success:
                     last_error = _tail(result.output, 50)
-                    if result.exit_code == TIMEOUT_EXIT_CODE:
+                    if result.exit_code in (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE):
                         timeout_m = (task_timeout or DEFAULT_TASK_TIMEOUT) // 60
+                        kind = (
+                            "timed out"
+                            if result.exit_code == TIMEOUT_EXIT_CODE
+                            else "was idle-killed (no stream activity)"
+                        )
                         notify(
-                            f"Task {label} timed out after {timeout_m}m.",
+                            f"Task {label} {kind} after up to {timeout_m}m.",
                             level="warning",
                         )
                     elif result.exit_code == STALL_EXIT_CODE:

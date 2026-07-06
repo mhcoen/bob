@@ -2213,3 +2213,25 @@ def test_subsession_applies_third_party_provider_env(invoke, tmp_path):
     assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
     assert env["ANTHROPIC_API_KEY"] == ""
+
+
+def test_kill_sentinels_mirror_orchestra_and_avoid_signal_range():
+    """The parity contract for exit-code sentinels.
+
+    Orchestra-routed results flow through code_edit into
+    RunResult.exit_code and hit the same consumer comparisons as
+    direct-path results, so the two mirrors' sentinels must be
+    byte-equal -- and outside the POSIX signal range, or a child killed
+    by a real signal (Popen returncode -signum) reads as one of our own
+    kills (the old -2 collided with SIGINT exactly that way).
+    """
+    from mcloop.runner import IDLE_EXIT_CODE, STALL_EXIT_CODE, TIMEOUT_EXIT_CODE
+
+    try:
+        from orchestra.adapters._subprocess import IDLE_KILL_EXIT, TIMEOUT_KILL_EXIT
+    except ImportError:
+        pytest.skip("orchestra not installed alongside mcloop")
+    assert TIMEOUT_EXIT_CODE == TIMEOUT_KILL_EXIT
+    assert IDLE_EXIT_CODE == IDLE_KILL_EXIT
+    for sentinel in (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE):
+        assert sentinel < -64, f"{sentinel} is inside the signal range"
