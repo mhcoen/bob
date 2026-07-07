@@ -4,7 +4,7 @@
   <img src="images/bob-poster.png" alt="Bob is back. Vibe coding does not have Bob." width="40%">
 <p align="center">
 <video width="320" height="240" controls>
-  <source src="video/bob_is_back_dont_let_friends_vibe_code.mp4" type="video/mp4">
+  <source src="videos/bob_is_back_dont_let_friends_vibe_code.mp4" type="video/mp4">
   Your browser does not support the video tag.
 </video>
 </p>
