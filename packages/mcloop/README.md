@@ -638,16 +638,18 @@ allowance on a task that cannot succeed:
   `max_retries * 2` consecutive times — two tiers' worth — is stopped
   with a notification naming the unsatisfiable gate, instead of
   thrashing every model in the chain on a gate no model can satisfy.
-- **Limit backstops.** Sessions killed by McLoop itself (wall-clock
-  timeout, idle kill, or repeated-action stall — exit sentinels -102,
-  -103, -200) are never classified as rate/session limits, and only
-  the transcript tail is scanned for limit vocabulary, so a task that
-  merely *edits* rate-limit code cannot be misread as limited. Real
-  limit waits are bounded at 50 consecutive cycles per task (about
-  4-8 hours); past that the tier is treated as exhausted and the task
-  fails loudly. Note the deliberate tradeoff: a genuine weekly cap
-  whose reset is further out than that will trip the backstop —
-  re-run after the reset.
+- **Limit backstops.** Task and batch sessions killed by McLoop
+  itself (wall-clock timeout, idle kill, or repeated-action stall —
+  exit sentinels -102, -103, -200) are never classified as
+  rate/session limits, and only the transcript tail is scanned for
+  limit vocabulary, so a task that merely *edits* rate-limit code
+  cannot be misread as limited. Limit waits are bounded at 50 cycles
+  (about 4-8 hours): consecutive cycles for batches and the
+  single-tier poll loop (a genuine attempt resets the count), total
+  per task on the final chain tier, which is then treated as
+  exhausted so the task fails loudly. Note the deliberate tradeoff:
+  a genuine weekly cap whose reset is further out than that will
+  trip the backstop — re-run after the reset.
 - **Batch rollback.** A failed or limited batch attempt has its
   uncommitted changes selectively rolled back — including staged
   files and renames — so nothing unverified leaks into the next
@@ -1078,9 +1080,10 @@ checks whether the markers are intact and re-injects from
 `.mcloop/wrap/` if they were removed. The wrapper survives Claude
 Code edits automatically.
 
-If the same error reaches its third diagnostic attempt, McLoop marks
-it as unresolvable, prints the context, and stops rather than
-looping indefinitely.
+The same error gets at most three diagnostic attempts; when a fourth
+would begin, McLoop marks it unresolvable and prints the context.
+The run aborts only when every open error is unresolvable —
+otherwise it continues, skipping the stuck one.
 
 To instrument a project that was NOT built by McLoop, use
 `mcloop wrap` manually from that project's directory.
@@ -1636,14 +1639,13 @@ mcloop --cli codex
 mcloop --cli codex --model gpt-5.4
 ```
 
-McLoop's direct-path Codex sessions use `codex exec --full-auto`,
-Codex's shorthand for the workspace-write sandbox with approvals
-disabled: write access to the project directory and `/tmp`, no
-ability to modify files outside the workspace. (The Orchestra codex
-adapters spell the same policy explicitly as `--ask-for-approval
-never --sandbox workspace-write`.) Claude Code sessions use
-PreToolUse hooks for permission control instead of an OS-level
-sandbox.
+McLoop's direct-path Codex sessions use `codex exec --full-auto`:
+write access to the project directory and `/tmp`, no ability to
+modify files outside the workspace. (The Orchestra `codex_agent`
+adapter spells its policy explicitly as `--ask-for-approval never
+--sandbox workspace-write`; `codex_text` deliberately runs
+`--sandbox read-only`.) Claude Code sessions use PreToolUse hooks
+for permission control instead of an OS-level sandbox.
 
 Both backends default to subscription billing. Set `"billing": "api"`
 to use API credits instead.
@@ -1946,7 +1948,7 @@ matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 - Python >= 3.12
 - `git` on PATH (McLoop requires git for checkpointing and recovery)
 - `claude` CLI on PATH (or `codex` CLI when using `--cli codex`)
-- a git remote named `origin` if you want pushes (no remote = pushes are skipped)
+- a configured git remote if you want pushes (no remote = pushes are skipped)
 - macOS for iMessage notifications (Telegram works anywhere)
 - Playwright (optional, for web app investigation only)
 
