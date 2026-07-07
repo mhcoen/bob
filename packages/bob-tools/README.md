@@ -387,6 +387,7 @@ bob-tools/
   bob_tools/
     __init__.py
     bob_cli.py               the `bob` umbrella CLI (hook install)
+    tests/                   tests for the umbrella CLI
     planfile/
       __init__.py            public re-exports — the planfile API surface
       model.py               typed Plan / Phase / Task / Outcome / etc.
@@ -404,7 +405,7 @@ bob-tools/
       scheduling.py          next_tasks
       iteration.py           bug_count and tree walks
       preflight.py           preflight_runtime_plan (runtime read gate)
-      backfill.py            created_at backfill from git history
+      backfill.py            completed_at backfill from git history
       operations.py          backward-compat re-export shim over the above
       fileio.py              load / save / update with concurrent-update detection
       plan_artifact.py       sanitize_plan_artifact + PlanArtifactRejected
