@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Orchestra has moved past design. The design phase is complete; six design documents are on disk under `design/`. The runner spine for slice 1 is implemented under `orchestra/` (at the repo root) with unit tests and end-to-end tests under `tests/`. Slice 2 (versioned-workspace profile + real shell adapter) is the next planned increment but is not started.
+Orchestra is shipped and in production use as the workflow runtime behind mcloop's multi-model coding patterns and duplo's council mode. The design phase (six documents under `design/`) is complete and the runner is implemented well beyond the original slice 1: real subprocess adapters (Claude Code and Codex, text and agent variants, plus direct-endpoint Kimi/DeepSeek text bindings), a public `run_workflow` API (`api/`), packaged `.orc` workflows (`workflows/`, 15 files including code_edit patterns, the ask/refine/pair conversational verbs, council_four, parallel_thinking, iterate_until_acceptable), a REPL, config-driven verbs and role bindings (`config.py`), progress reporting, and a calibration subpackage.
 
-The implementation is Python 3.12. The build is editable: `pip install -e '.[dev]'` from the repo root. Tests run with `pytest` from the repo root.
+The implementation is Python 3.12. The build is editable: `pip install -e '.[dev]'` from the repo root (or use the bob workspace venv). Tests run with `pytest` from the package root (~756 tests).
 
 ## Repository layout
 
@@ -15,37 +15,28 @@ orchestra/                             # repo root (also the Python package name
   pyproject.toml                       # editable install, pytest/ruff/mypy config
   README.md
   CLAUDE.md
-  design/                              # design documents (frozen for slice 1)
-    orchestra-design.md                # conceptual model + factoring
-    orchestra-result-schemas.md        # result envelope, payload shapes, counters
-    orchestra-grammar.md               # EBNF + reserved words + reference resolution
-    orchestra-runner.md                # runner architecture
-    orchestra-implementation-plan.md   # slice 1 plan (the document this code implements)
-    orchestra-acid-tests.md            # cover for the three acid-test workflows
-    orchestra-acid-test-1-design-loop.md
-    orchestra-acid-test-2-council.md
-    orchestra-acid-test-3-mcloop.md
+  design/                              # design documents (~30: core six + slice plans + audits)
   orchestra/                           # implementation (Python package)
     spine.py                           # IR dataclasses + result envelope types
     errors.py                          # exception hierarchy
-    adapters/                          # adapter contract + slice-1 mocks
+    adapters/                          # subprocess session layer (_subprocess.py) +
+                                       #   claude_code_text/agent, codex_text/agent, mocks
+    api/                               # run_workflow entry point, dispatch, registry,
+                                       #   role bindings, validators, transcript
+    workflows/                         # packaged .orc files + prompt templates
     executor/                          # state machine, parsers, guards
     loader/                            # lexer, parser, validator
     log/                               # JSONL writer + truncation-tolerant reader
     registry/                          # profile registry + core registrations
     resume/                            # log replay + resume hook dispatch
     store/                             # SQLite-backed artifact store
-    cli.py                             # `orchestra run` and `orchestra resume`
-  tests/
-    fixtures/slice1/echo.orc           # the slice-1 workflow under test
-    test_store.py                      # unit tests
-    test_log.py
-    test_registry.py
-    test_loader.py
-    test_adapters.py
-    test_resume.py
-    test_e2e.py                        # tests A, B, C from the impl plan
-    test_e2e_determinism.py            # byte-identical-log check
+    calibration/                       # decision-consistency calibration harness
+    config.py                          # ~/.orchestra/config.json + project overrides
+    cli.py                             # `orchestra run/resume/help`, verbs, REPL entry
+    repl.py                            # interactive REPL
+    progress.py, transforms.py, prompts.py, schema.py, payloads.py,
+    prompt_snapshot.py, visibility.py  # supporting modules
+  tests/                               # ~40 test modules + fixtures/ + helpers/
 ```
 
 ## Documents and reading order
@@ -63,17 +54,12 @@ When picking up the project, read in this order:
 
 For code review, always inspect the current working-tree files from disk immediately before making claims. If the user says files were edited, discard prior analysis and re-open the files. Every finding about existing code must be backed by current file and line evidence from the working tree. Do not rely on fetched refs, prior commits, cached snapshots, summaries, or previous review text.
 
-## Slice 1 status
+## Implementation notes worth carrying forward
 
-Implemented. The slice exercises the spine end-to-end with mocks: loader -> validator -> executor -> adapter -> result parser -> artifact store -> log -> resume.
-
-Known limitations and notes worth carrying forward:
-
-- **Prompt paths are quoted strings in the parser, not bare paths.** The grammar doc's worked example uses bare paths (`prompt file prompts/designer.md`), but the slice-1 lexer treats `/` as an unknown character. The fixture `tests/fixtures/slice1/echo.orc` uses quoted paths to compensate. Slice 2+ should reconcile this — either by extending the lexer to recognize a path-shaped token after `prompt file` / `prompt template`, or by amending the grammar doc's worked example to use quoted strings.
-- **Step budget resets on resume.** The executor's `_step_count` is per-instance, not persisted. A resumed run starts fresh at zero. This is acceptable for slice 1 (no test exercises a long-running budget across resume) but should be fixed in slice 2 by replaying the count from the log.
-- **Crash between `state_exit` and `transition` is treated as case 2 by replay.** The state would be re-entered on resume, duplicating work. The window is small (single fsync cycle) but the case is wrong. A future slice should add a `state_committed` log record or detect this case explicitly.
-- **`_dispatch_parsers` doesn't return tentative handles to the caller if the parser raises after a partial write.** The slice's identity parser writes nothing before raising, so this is moot for slice 1; a future slice that adds parsers which write multiple artifacts before potentially raising must structure handle accumulation differently.
-- **Resume hooks dispatch is exercised with an empty hook set.** No `resume_hook` records are emitted in slice 1. The dispatch path is wired and tested.
+- Prompt paths in `.orc` files are quoted strings, not bare paths (the lexer treats `/` as an unknown character outside strings).
+- The subprocess session layer (`adapters/_subprocess.py`) owns wall-clock and idle enforcement: kill sentinels are `TIMEOUT_KILL_EXIT = -102` and `IDLE_KILL_EXIT = -103` (outside the POSIX signal range; mirrored byte-for-byte by mcloop's runner), Telegram pending-approval files freeze the idle clock only while the child is alive, a stale `denied` file is cleared at session start, and the liveness bailout group-kills before closing the pipe so a grandchild holding stdout cannot outrun the timeout.
+- Adapters declare `manages_own_timeout = True`; the executor never wraps them in a second timer.
+- Adapters never write to the artifact store directly; parsers stage tentative writes and the executor commits them.
 
 ## Running the tests
 
@@ -93,17 +79,9 @@ orchestra resume <run_id>
 
 Run state lives in `~/.orchestra/runs/<run_id>/` by default; override with `--data-root <path>` on the top-level command.
 
-## Slice ordering
+## Direction
 
-Per the implementation plan's "Slice 2 preview" section:
-
-- **Slice 2:** versioned-workspace profile (git-workspace artifact, `mode` keyword, checkpoint mechanism, resume hook), real shell adapter, a trimmed Test 3 fixture exercising shell + workspace + interrupted-shell-state resume.
-- **Slice 3:** code profile (`require_diff`, `runs`, `continue_on_fail`, the check-errors parser).
-- **Slice 4:** real model adapters (Claude API first, then `claude -p` and `codex exec` subprocess adapters).
-- **Slice 5:** persistent agents and the agent-history parser.
-- **Slice 6:** multi-actor states and join semantics, exercised by Test 2 (council).
-
-Beyond slice 6: real human adapters (Telegram), verdict schemas, retry policy. Order is governed by the next acid-test workflow's needs, not by feature completeness.
+Slices 1 through 6 of the original implementation plan are shipped (workspace/shell, code profile, real model adapters, persistent agents, multi-actor states). Remaining direction from the plan: real human adapters beyond the Telegram approval hook, richer verdict schemas, and retry policy. Order is governed by what the next consumer workflow needs (mcloop patterns, duplo council), not by feature completeness.
 
 ## Design commitments that are easy to drift from
 
