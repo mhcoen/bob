@@ -107,12 +107,13 @@ The `*_text` adapters are read-only and used for synthesis or
 discussion roles. The `*_agent` adapters can edit the workspace and
 are used for the single mutating step in a code-edit workflow.
 
-Third-party models (DeepSeek, Moonshot/Kimi, GLM, Gemini, others) are
-reached by pointing Claude Code at an OpenRouter endpoint with
-`OPENROUTER_API_KEY`. Those calls are billed per token by OpenRouter
-at the underlying provider's rate. The role binding mechanism is the
-same regardless of billing — the model name in the binding determines
-the provider, and environment variables determine the endpoint.
+Third-party models are reached by pointing Claude Code at the
+provider's own Anthropic-compatible endpoint: the shipped bindings
+route Kimi to `api.moonshot.ai` with `MOONSHOT_API_KEY` and DeepSeek
+to `api.deepseek.com` with `DEEPSEEK_API_KEY`, billed per token by
+the provider directly. The role binding mechanism is the same
+regardless of billing — the model name in the binding determines the
+provider, and environment variables determine the endpoint.
 
 Some providers offer free access. Hugging Face's Inference API has a
 free tier covering many open-weight models. Google's Gemini has a
@@ -134,9 +135,9 @@ Models currently in development use:
 - **Claude Opus** and **Claude Sonnet** (Anthropic, via subscription).
   Used for synthesis-shaped roles where the goal is reconciling or
   judging.
-- **Kimi K2.6** (Moonshot, via OpenRouter). Used for divergent-thinking
+- **Kimi K2.6** (Moonshot, direct endpoint). Used for divergent-thinking
   roles — drafter, proposer, contrarian.
-- **DeepSeek V4 Pro** (DeepSeek, via OpenRouter). Used as a third
+- **DeepSeek V4 Pro** (DeepSeek, direct endpoint). Used as a third
   opinion when confirmation matters more than novelty.
 
 This is a snapshot of what works on this codebase today, not a
@@ -207,12 +208,12 @@ without knowing which model or which role produced each one.
 
 ### Iterate Until Acceptable
 
-A responder writes a draft. A judge decides whether it is good
-enough. If not, the judge sends it back with feedback for another
-round, capped at N rounds. The responder and judge slots are
-themselves workflows — a council can play the responder, a
-draft-then-adjudicate pair can play the judge. The substitutability is
-the point.
+A proposer writes a draft, a reviewer critiques it, and a judge
+decides whether it is good enough. If not, the judge sends it back
+with feedback for another round, capped at N rounds. Each slot is an
+ordinary role binding, so any configured model can fill any slot;
+composing whole workflows into the slots (a council as the proposer)
+is a design direction, not something the shipped `.orc` implements.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/iterate_until_acceptable.png" alt="Iterate Until Acceptable architecture" width="90%">
@@ -220,14 +221,15 @@ the point.
 
 ### Parallel Thinking
 
-N models analyze the input in parallel. A reconciler digests their
-outputs into a single response. The slots are deliberately
-underspecified: an analyst can be doing analysis, summarization,
-translation, scoring, or anything else expressible as a prompt. A
-reconciler can synthesize, vote, measure inter-model agreement, flag
-divergence, or check whether one model's output looks like a
-paraphrase of another's. The shape is fan-out then fan-in; the
-behavior comes from the prompts in the configuration.
+A framer shapes the question, then five panelists analyze it in
+parallel. The panelist slots are deliberately underspecified: a
+panelist can be doing analysis, summarization, translation, scoring,
+or anything else expressible as a prompt. The shipped `.orc` collects
+the five perspectives verbatim (the closing step is a bookkeeping
+transform, not a synthesis model call) — the caller reads the
+panelists' outputs side by side. A reconciler state that synthesizes,
+votes, or measures inter-model agreement is a natural extension but
+is not part of the shipped workflow.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/mhcoen/bob/main/packages/orchestra/design/figures/parallel_thinking.png" alt="Parallel Thinking architecture (N=2 and N=3)" width="70%">
@@ -326,9 +328,10 @@ seven (framer, the five lens roles, chairman). `ask_anonymous_reviewers`
 needs eight (framer, panelist_1 through panelist_5, reviewer,
 synthesizer). The validator rejects an invocation that does not bind
 every required role for the chosen workflow. The other conversational
-verbs need fewer: `ask` only `responder`; `refine` only `proposer`,
-`critic`, `synthesizer`; `pair` only `drafter` and `adjudicator`.
-Drop the bindings you do not use.
+verbs need fewer: `ask` only `responder`; `refine` needs `proposer`,
+`critic`, `synthesizer`, and `responder` (a final answer state);
+`pair` needs `drafter`, `adjudicator`, and `responder`. Drop the
+bindings a workflow does not require.
 
 ## CLI surface
 
@@ -340,7 +343,9 @@ orchestra <verb> <question>
 
 No quoting around the question. The verb names a workflow; the rest
 of the line is the question. Verbs are user-defined in
-`~/.orchestra/config.json` — rename, add, remove freely.
+`~/.orchestra/config.json` — rename, add, remove freely, with three
+reserved names: `run`, `resume`, and `help` are built-in commands and
+shadow any same-named verb.
 
 While a verb runs, orchestra prints one line to stderr per role as
 each sequential state starts and finishes:
@@ -480,6 +485,7 @@ result = run_workflow(
         "project_dir": "/path/to/project",
         "description": "...",
         "task_label": "T1",
+        "task_id": "T-000001",
         "check_commands": ["pytest"],
         "is_bug_task": False,
     },
