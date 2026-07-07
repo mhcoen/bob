@@ -569,9 +569,11 @@ A second file at `<project>/.orchestra/config.json` is supported as
 an advanced override for individual projects that genuinely need
 different bindings (an experiment, a one-off model pin, a workflow
 the global config does not declare). Most projects should not have
-this file. McLoop prints a one-time stderr note when it detects a
-project-local override, so an accidentally-checked-in file does not
-silently shadow the global config.
+this file. McLoop prints a multi-line stderr banner (once per
+process, and again at the start of every later run) when it detects
+a project-local override, until the file is acknowledged with
+`mcloop ack-orchestra-override` — so an accidentally-checked-in file
+does not silently shadow the global config.
 
 The merge rule is replace, not nest: a role, verb, or workflow
 defined in the project config replaces the global entry of the same
@@ -615,8 +617,10 @@ A role binding has three required keys (plus an optional fourth):
 
 - `adapter` — which adapter implementation. Currently shipped:
   `claude_code_text` (read-only Claude Code, used for text-role
-  states) and `claude_code_agent` (full edit-capable Claude Code,
-  used for edit-agent states).
+  states), `claude_code_agent` (full edit-capable Claude Code, used
+  for edit-agent states), their Codex counterparts `codex_text` and
+  `codex_agent`, and the direct-endpoint text variants
+  `claude_code_text_kimi` and `claude_code_text_deepseek`.
 - `model` — model name passed to the adapter (`fable`, `opus`,
   `sonnet`, `kimi-k2.6`, `deepseek-v4-pro`, etc.).
 - `parameters` — adapter-specific extras, usually `{}`.
@@ -736,12 +740,14 @@ orchestra/
   store/          # artifact store (SQLite-backed)
   registry/       # profile registry
   executor/       # state machine + parser dispatch
-  adapters/       # adapter interface + Claude Code adapters + mocks
+  adapters/       # subprocess session layer + Claude Code and Codex
+                  # adapters (text/agent) + mocks
   log/            # JSONL logger and reader
   resume/         # log replay + resume hook dispatch
   workflows/      # packaged .orc files and prompt templates
   prompts.py      # prompt builders (verbatim lifts from McLoop)
-  api.py          # run_workflow entry point + WorkflowRunResult
+  api/            # run_workflow entry point + WorkflowRunResult
+                  # (dispatch, registry, bindings, validators, transcript)
   config.py       # .orchestra/config.json schema, loader, merge
   cli.py          # command-line entry point
 tests/
