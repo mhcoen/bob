@@ -3495,7 +3495,7 @@ def _parse_args() -> argparse.Namespace:
         "--timeout",
         type=int,
         default=None,
-        help="Per-task timeout in seconds (default: 1800 = 30 minutes)",
+        help="Per-task timeout in seconds (default: 3600 = 60 minutes)",
     )
     parser.add_argument(
         "--retry",
