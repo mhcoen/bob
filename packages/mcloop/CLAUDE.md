@@ -2,9 +2,9 @@
 
 ## Plan Layout
 
-mcloop works two canonical planfile-format files directly; the old split-plan design (a CURRENT_PLAN.md extracted per phase) is fully retired and its machinery (`ensure_current_plan`, `transition_phase`, `mark_phase_complete`) no longer exists in the code.
+mcloop works PLAN.md and BUGS.md directly; the old split-plan design (a CURRENT_PLAN.md extracted per phase) is fully retired and its machinery (`ensure_current_plan`, `transition_phase`, `mark_phase_complete`) no longer exists in the code.
 
-**PLAN.md** is the roadmap: every phase (`## Stage N:` / `## Phase phase_NNN:` headings) with its tasks, in one file. The loop reads and checks off tasks through the bob-tools planfile API (`_planfile_compat`), which preserves canonical form on every write. Both files must pass the canonical-input gate (`_planfile_precondition.enforce_canonical`) at startup; the prescribed remediation for a non-canonical file is `bob-plan fmt`.
+**PLAN.md** is the roadmap: every phase (`## Stage N:` / `## Phase phase_NNN:` headings) with its tasks, in one canonical planfile-format file. The loop reads and checks off tasks through the bob-tools planfile API (`_planfile_compat`), which preserves canonical form on every write. At startup PLAN.md must pass the runtime preflight (`_enforce_canonical_inputs` -> `preflight_runtime_plan`): a cleanly-migratable non-canonical file is auto-migrated in place, and a corrupt one raises with a fix-by-hand diagnostic. BUGS.md is deliberately NOT canonical-gated -- it is a loose bug queue read with a tolerant parse.
 
 **BUGS.md** is a standalone bug backlog with checkbox items. It is treated as bug-only mode by run_loop: when any item is unchecked, only bug tasks are worked, and feature tasks in PLAN.md are blocked until BUGS.md is empty. Reviewer findings and crash diagnostics append to BUGS.md; completed bug tasks are purged from the file. The audit system's structured report file is separate (see below) and does not collide with BUGS.md.
 
@@ -57,7 +57,7 @@ mcloop works two canonical planfile-format files directly; the old split-plan de
 
 **mcloop/investigator.py** - Generate investigation plans and gather bug context. Contains the debugging playbook and crash report filtering by process name.
 
-**mcloop/lifecycle.py** - Process lifecycle: interrupt state, orphan cleanup, active-process tracking. `_check_interrupted` accepts active_paths for split-plan skip/describe targeting. The signal handler writes an "interrupted" run summary before `os._exit(130)` via the writer `run_loop` registers with `set_interrupt_summary_writer`; `_build_and_write_summary` clears the hook when a run writes its terminal summary normally.
+**mcloop/lifecycle.py** - Process lifecycle: interrupt state, orphan cleanup, active-process tracking. `_check_interrupted` accepts active_paths so skip/describe prompts target the right file (PLAN.md vs BUGS.md). The signal handler writes an "interrupted" run summary before `os._exit(130)` via the writer `run_loop` registers with `set_interrupt_summary_writer`; `_build_and_write_summary` clears the hook when a run writes its terminal summary normally.
 
 **mcloop/main.py** - CLI entry point and run loop. Defines `RunStatus`, `BuildResult`. Orchestrates task execution, checks, commits, reviewer spawn, audit, and run-summary writing. Supports `--stop-after-stage`, `--stop-after-one`, `--timeout`, and the `maintain` subcommand.
 
@@ -67,7 +67,7 @@ mcloop works two canonical planfile-format files directly; the old split-plan de
 
 **mcloop/output.py** - Display functions: task status, error tails, diff summaries, terminal run summary.
 
-**mcloop/_planfile_compat.py** - Compatibility layer over `bob_tools.planfile`: canonical fence-aware parsing, checkbox check-off/mark-failed writers, and the split-plan helpers that superseded the retired `checklist.py` / `plan_split.py` modules.
+**mcloop/_planfile_compat.py** - Compatibility layer over `bob_tools.planfile`: canonical fence-aware parsing, checkbox check-off/mark-failed writers, and the plan/bugs routing helpers that superseded the retired `checklist.py` / `plan_split.py` modules.
 
 **mcloop/process_monitor.py** - Launch, monitor, and inspect subprocesses. `kill_process_group` and `start_new_session=True` prevent shell=True orphans. GUI launch tracks pre-existing PIDs to avoid killing unrelated user instances.
 
@@ -81,7 +81,7 @@ mcloop works two canonical planfile-format files directly; the old split-plan de
 
 **mcloop/reviewer.py** - AI-powered diff reviewer using an OpenAI-compatible API.
 
-**mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 30 minutes) and returns TIMEOUT_EXIT_CODE (-102, outside the signal range) on timeout.
+**mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 3600s = 60 minutes) and returns TIMEOUT_EXIT_CODE (-102, outside the signal range) on timeout.
 
 **mcloop/run_summary.py** - RunSummary / TaskEntry / CheckEntry schema and JSON writer. Produces dated summaries plus `latest.json` on every run_loop exit.
 
@@ -127,7 +127,7 @@ mcloop works two canonical planfile-format files directly; the old split-plan de
 
 **tests/test_investigator.py** - Tests for investigation plan generation and bug context.
 
-**tests/test_lifecycle.py** - Tests for interrupt state, orphan cleanup, and split-plan skip targeting.
+**tests/test_lifecycle.py** - Tests for interrupt state, orphan cleanup, and per-file skip targeting.
 
 **tests/test_maintain.py** - Tests for maintain mode: MAINTAIN.md parsing, prompt building, output parsing, MaintainSummary, log writing, run_maintain loop, MAINTAIN_TOOLS propagation, and `stop_after_one`.
 
