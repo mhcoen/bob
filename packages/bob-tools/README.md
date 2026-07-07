@@ -108,6 +108,15 @@ comments, the `T-NNNNNN` identifiers, the checkbox markers
 `## Bugs` section. The parser recognises each by position and form
 and rejects anything outside the grammar.
 
+Two grammar features worth calling out. Markdown code fences are
+first-class: a ``` line toggles a fence at any indent, everything
+inside is verbatim example content (a `- [ ]` line inside a fence is
+never a task), and an unclosed fence at end-of-file is a loud parse
+error naming the opening line rather than a silent swallow of
+everything after it. And tasks may carry `trailing_lines` — prose or
+fenced output blocks under the task line — which round-trip
+byte-for-byte through canonical save.
+
 What the planfile API guarantees:
 
 - **Parse-then-validate.** `parse_plan` reads markdown and produces a
@@ -134,10 +143,12 @@ What the planfile API guarantees:
   describe what changed, so callers can journal mutations to the
   ledger without re-deriving them.
 
-- **Concurrent-update detection.** `load`, `save`, and `update`
-  implement an mtime+content check so two writers racing on the same
-  `PLAN.md` produce a `ConcurrentUpdateError` rather than a silent
-  last-write-wins clobber.
+- **Concurrent-update detection.** `update` re-reads the file under
+  an exclusive sidecar lock and compares it byte-for-byte against the
+  text its plan was parsed from; a mismatch raises
+  `ConcurrentUpdateError` rather than silently last-write-wins
+  clobbering. `save` locks and writes atomically; `load` is a plain
+  strict read.
 
 - **mcloop canonicality assertion.** `assert_mcloop_canonical` is a
   precondition McLoop applies before any mutation, so the plan is
@@ -201,9 +212,10 @@ namespace travels through every API surface:
 
 Grammar: `XX` is exactly two ASCII letters (`[A-Za-z]{2}`). Case
 is preserved on round-trip and is not normalized; pick a casing
-convention and stick to it. Two letters gives 676 namespace slots,
-which is overkill for the bob workspace and deliberately too short
-to encourage hierarchy — namespaces identify files, not topics.
+convention and stick to it. Two case-sensitive letters give 2,704
+namespace slots, which is overkill for the bob workspace and
+deliberately too short to encourage hierarchy — namespaces identify
+files, not topics.
 
 ##### `resolve_global` — cross-file task lookup
 
@@ -244,16 +256,25 @@ a namespace-allocation bug worth flagging).
 
 ### `bob-plan` — the planfile CLI
 
-`pip install` adds a `bob-plan` script to your environment. Five
-subcommands, all operating on a `PLAN.md` path:
+`pip install` adds two scripts: `bob-plan` (below) and `bob`, the
+workspace umbrella CLI (`bob install` wires the Telegram permission
+hook). `bob-plan` has five subcommands, all operating on a `PLAN.md`
+path:
 
 ```
 bob-plan validate PATH                  # parse and validate; exit 1 on failure
-bob-plan fmt PATH                       # load, migrate, save in canonical form
+bob-plan fmt PATH                       # parse leniently, migrate, save canonical
 bob-plan next PATH                      # print the next actionable T-NNNNNN: text
 bob-plan done PATH TASK_ID              # validate, complete, save; emit Settlements as JSON
-bob-plan fail PATH TASK_ID --reason ... # validate, fail, save; emit the Settlement as JSON
+bob-plan fail PATH TASK_ID --reason ... # validate, fail, save; emit Settlements as JSON
 ```
+
+`fmt` deliberately parses leniently (a magic-lined file with id-less
+tasks is exactly what it exists to repair) and REFUSES with exit 1 —
+file untouched — when unfenced incomplete checkboxes sit outside any
+`## Stage` / `## Phase` heading, because formatting would silently
+drop them. `done` and `fail` both print a JSON *array* of Settlement
+objects on stdout.
 
 Exit codes are uniform across subcommands: `0` on success, `1` on
 parse or validation failure, `2` if a referenced task id is not in
@@ -273,7 +294,9 @@ event, with each event tagged to the `PLAN.md` element that caused it.
 
 The ledger captures execution evidence and design reasoning so plans
 can be re-authored from the ledger rather than re-derived from the
-codebase. When McLoop commits, when Duplo reauthors, when Vroom
+codebase. Appends are durable: each event line is fsync'd before the
+lock releases, and the append that creates the events file also
+fsyncs the ledger directory so the file itself survives a power loss. When McLoop commits, when Duplo reauthors, when Vroom
 reflects (in the designed system), the ledger is what they read and
 what they write.
 
@@ -363,12 +386,26 @@ bob-tools/
   design/                    slice design docs (plan-ledger.md plus slice-{b,c,d})
   bob_tools/
     __init__.py
+    bob_cli.py               the `bob` umbrella CLI (hook install)
     planfile/
       __init__.py            public re-exports — the planfile API surface
       model.py               typed Plan / Phase / Task / Outcome / etc.
-      parser.py              markdown → Plan
+      parser.py              markdown → Plan (fence-aware; loud on unclosed fences)
       renderer.py            Plan → canonical markdown
-      operations.py          deterministic mutations (complete, fail, add, ...)
+      _shared.py             shared regexes + the fence rule (is_fence_line,
+                             iter_unfenced_lines, count_unfenced_incomplete_checkboxes)
+      status.py              complete / fail / reset / clear / purge mutations
+      task_addition.py       add_task / add_phase_task / add_bug_task
+      migration.py           migrate + replace_phase (id assignment)
+      construction.py        make_task + constructed-mode validation
+      validation.py          validate_plan (incl. canonical-save invariants)
+      canonical.py           assert_mcloop_canonical + task-context resolution
+      semantic_diff.py       render/reparse semantic-equality oracle
+      scheduling.py          next_tasks
+      iteration.py           bug_count and tree walks
+      preflight.py           preflight_runtime_plan (runtime read gate)
+      backfill.py            created_at backfill from git history
+      operations.py          backward-compat re-export shim over the above
       fileio.py              load / save / update with concurrent-update detection
       plan_artifact.py       sanitize_plan_artifact + PlanArtifactRejected
       cli.py                 bob-plan entry point
