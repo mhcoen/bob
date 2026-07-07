@@ -1,21 +1,19 @@
 # Project Manifest
 
-## Plan Layout (Split-Plan Design)
+## Plan Layout
 
-mcloop separates a project's roadmap across three files to keep per-session token usage low while preserving full context for human readers.
+mcloop works two canonical planfile-format files directly; the old split-plan design (a CURRENT_PLAN.md extracted per phase) is fully retired and its machinery (`ensure_current_plan`, `transition_phase`, `mark_phase_complete`) no longer exists in the code.
 
-**PLAN.md** is the master roadmap containing every phase. It is only modified at phase transitions, when `mark_phase_complete` bulk-checks the just-finished phase. It is safe for the user to edit during a run; the loop never writes to it on per-task commits.
+**PLAN.md** is the roadmap: every phase (`## Stage N:` / `## Phase phase_NNN:` headings) with its tasks, in one file. The loop reads and checks off tasks through the bob-tools planfile API (`_planfile_compat`), which preserves canonical form on every write. Both files must pass the canonical-input gate (`_planfile_precondition.enforce_canonical`) at startup; the prescribed remediation for a non-canonical file is `bob-plan fmt`.
 
-**CURRENT_PLAN.md** holds only the active phase, extracted from PLAN.md by `ensure_current_plan` at startup or by `transition_phase` when a phase finishes. Each Claude Code session works exclusively against this file plus BUGS.md. Users must not edit CURRENT_PLAN.md while mcloop is running, because checkpoint commits will overwrite their edits.
+**BUGS.md** is a standalone bug backlog with checkbox items. It is treated as bug-only mode by run_loop: when any item is unchecked, only bug tasks are worked, and feature tasks in PLAN.md are blocked until BUGS.md is empty. Reviewer findings and crash diagnostics append to BUGS.md; completed bug tasks are purged from the file. The audit system's structured report file is separate (see below) and does not collide with BUGS.md.
 
-**BUGS.md** is a standalone bug backlog with checkbox items. It is treated as bug-only mode by run_loop: when any item is unchecked, only bug tasks are worked, and feature tasks in CURRENT_PLAN.md are blocked until BUGS.md is empty. Reviewer findings and crash diagnostics append to BUGS.md. The audit system's structured report file is separate (see below) and does not collide with BUGS.md.
+### Phase boundaries
 
-### Phase transition lifecycle
-
-1. The loop selects tasks from BUGS.md (priority) and CURRENT_PLAN.md until both have no actionable unchecked items.
-2. When CURRENT_PLAN.md is fully checked off, the loop runs the full test suite (unscoped) and the build at the phase boundary.
-3. On success, `transition_phase` bulk-checks the completed phase in PLAN.md, extracts the next unchecked phase from PLAN.md into CURRENT_PLAN.md (or unlinks CURRENT_PLAN.md if no phases remain), and the loop breaks. Every phase boundary ends the run; the user re-runs `mcloop` to start the next phase. Per-task checks remain scoped to the files touched by each commit.
-4. When `transition_phase` returns None (no more phases), the post-loop runs the audit cycle.
+1. The loop selects tasks from BUGS.md (priority) and the current PLAN.md phase until no actionable unchecked items remain in the phase.
+2. At the phase boundary it runs the full test suite (unscoped) and the build.
+3. On success it advances into the next phase and keeps going by default; `--stop-after-stage` stops at the boundary instead. Per-task checks remain scoped to the files touched by each commit.
+4. When no phases remain, the post-loop runs the audit cycle.
 
 ### Bugs vs. audit reports
 
@@ -105,7 +103,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **tests/test_app_interact.py** - Tests for macOS GUI app interaction.
 
-**tests/test_args.py** - Tests for CLI argument parsing and run_loop helpers: RunStatus, exit codes, BuildResult, worktree status, autofix metadata-only detection, terminal_failure sentinel, run summary schema, stop-after-stage / stop-after-one, split-plan task routing (BUGS.md + CURRENT_PLAN.md), and phase-boundary messaging.
+**tests/test_args.py** - Tests for CLI argument parsing and run_loop helpers: RunStatus, exit codes, BuildResult, worktree status, autofix metadata-only detection, terminal_failure sentinel, run summary schema, stop-after-stage / stop-after-one, task routing (BUGS.md + PLAN.md), and phase-boundary messaging.
 
 **tests/test_checks.py** - Tests for check command detection, pytest normalization, side-effect-free run_checks, and autofix separation.
 
@@ -125,7 +123,7 @@ mcloop separates a project's roadmap across three files to keep per-session toke
 
 **tests/test_idea_cmd.py** - Tests for the idea subcommand (IDEAS.md creation and append).
 
-**tests/test_integration.py** - Integration tests: full loop with mocked subprocesses, `_make_project` helper that creates PLAN.md and CURRENT_PLAN.md together.
+**tests/test_integration.py** - Integration tests: full loop with mocked subprocesses, `_make_project` helper that sets up a canonical PLAN.md.
 
 **tests/test_investigator.py** - Tests for investigation plan generation and bug context.
 
