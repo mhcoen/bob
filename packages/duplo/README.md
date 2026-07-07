@@ -146,9 +146,10 @@ edit SPEC.md to describe what you're building, then run `duplo`.
    below for the full structure.
 
 4. **(Optional) Drop reference files into `ref/`** — screenshots,
-   videos, PDFs, design mockups. `duplo init` scans `ref/` and writes
-   `proposed:` entries into `## References` for you to confirm; files
-   added later that you never list simply get default handling, so
+   videos, PDFs, design mockups. `duplo init URL` (or
+   `--from-description`) scans `ref/` and writes `proposed:` entries
+   into `## References` for you to confirm; bare `duplo init` writes
+   an empty template. Files you never list get default handling, so
    declare a role for anything whose treatment matters.
 
 5. **Run `duplo`** to scrape the declared sources, analyze
@@ -282,8 +283,11 @@ All forms accept the `--deep` and `--force` flags below.
    the response omitted), the frame still feeds the current run's
    in-memory analysis but is withheld from `.duplo/references/` and
    its video is left unrecorded so the next run re-filters it; a
-   failed extraction likewise preserves the previous run's frames
-   and retries.
+   failed extraction leaves the video unrecorded so it is retried
+   next run (the retry re-extracts; a failing scene pass will have
+   already cleared that video's own prior scene-mode frames, but
+   interval-mode frames and everything in `.duplo/references/`
+   survive).
 
 3. **Extracts visual design from images.** Sends reference screenshots
    and accepted video frames to Claude Vision to extract colors, fonts,
@@ -483,8 +487,8 @@ This means you can safely re-run `duplo` at any point without
 losing work. Add more reference material, run duplo, and only
 new tasks for uncovered features or design refinements are added.
 
-All state lives in `.duplo/` (McLoop adds it to `.gitignore` when it
-initializes the repo):
+All state lives in `.duplo/` (McLoop includes it in the `.gitignore`
+it writes when initializing a repo that has none):
 `duplo.json` for selections, features (with implementation status),
 phases, issues, roadmap, preferences, sources, reference URLs,
 design requirements, frame descriptions, doc structures, and
@@ -723,7 +727,10 @@ combination — the channels are complementary, not redundant:
   and text files you drop into the `ref/` directory. Declare each
   one under `## References` with a role (`visual-target`,
   `behavioral-target`, `docs`, `counter-example`, or `ignore`) so
-  Duplo knows how to use it. Unknown role names drop the entry. Images feed design extraction; videos are
+  Duplo knows how to use it. Unknown role names are filtered out of
+  the entry with a diagnostic; an entry whose roles are all unknown
+  is kept but demoted to `ignore` — so a typo narrows authority, it
+  never widens it. Images feed design extraction; videos are
   frame-extracted; PDFs and text files feed feature analysis.
 - **Prose in `## Purpose`, `## Architecture`, `## Design`,
   `## Behavior`, `## Notes`.** Freeform intent and constraints
@@ -831,9 +838,10 @@ gitignores it automatically.
 ## Inspecting runs
 
 Every LLM call in a run is logged under `.duplo/logs/<run_id>/`.
-`duplo logs` summarizes the most recent run (call count, models,
-timing, and per-call log paths); `duplo logs RUN_ID` shows a specific
-run, and `--dir PATH` points it at another project's log directory.
+`duplo logs` summarizes the most recent run — call count and, per
+call, the call site, model, execution route (legacy vs council),
+duration, and token usage; `duplo logs RUN_ID` shows a specific run,
+and `--dir PATH` points it at another project's log directory.
 
 ## Requirements
 
