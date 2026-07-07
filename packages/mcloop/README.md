@@ -111,10 +111,12 @@ between sessions:
   release of a model from a provider, regenerate a manifest from the
   current source tree, check that pinned versions match the latest
   stable releases, or anything else that can be expressed as "the
-  desired state is X; check it; fix it if it isn't." When an invariant
-  needs human judgment (e.g. an ambiguous choice between multiple new
-  options), the session asks via Telegram and waits up to ten minutes
-  before falling back to its best independent decision.
+  desired state is X; check it; fix it if it isn't." Sessions run
+  with the same Telegram permission hook as ordinary tasks, so a
+  session that reaches for a gated tool pauses for your approval
+  (auto-denied after ten minutes); there is no separate
+  ask-a-question channel, so write invariants decisively enough that
+  the model can act on its own judgment.
 
   Example invariants:
 
@@ -235,7 +237,7 @@ mcloop --allow-web-tools  # Enable WebFetch and WebSearch tools for sessions
 mcloop --retry            # Reset failed [!] markers and retry
 mcloop --stop-after-stage # Complete current stage then exit
 mcloop --stop-after-one   # Run exactly one task then exit
-mcloop --timeout 3600     # Per-task timeout in seconds (default: 1800)
+mcloop --timeout 1800     # Per-task timeout in seconds (default: 3600)
 mcloop --no-plan-ledger   # Disable Plan Ledger writes for this run
 mcloop --no-auto-reauthor # Disable automatic Plan re-author on threshold crossing
 mcloop --model sonnet --fallback-model opus    # Fall back to opus if sonnet fails
@@ -522,9 +524,9 @@ after a successful commit and check-off, before pulling the next task.
 
 After each successful commit, McLoop pushes to the remote. If the
 push fails, McLoop stops immediately rather than continuing with
-work that has no remote safety net. If no remote exists, it creates
-a private GitHub repo with `gh repo create` and sets up the origin
-automatically.
+work that has no remote safety net. If no remote exists, the push
+step is a no-op — set up an origin yourself if you want the remote
+safety net.
 
 Before any tasks run, McLoop commits all pending changes and pushes
 them to the remote. If this pre-flight push fails, McLoop exits
@@ -625,6 +627,36 @@ If you use [RTK](https://github.com/rtk-ai/rtk) to reduce token usage, the
 hook automatically unwraps `rtk proxy` commands before matching. So
 `Bash(ruff:*)` in your allowlist will also permit `rtk proxy ruff check .`.
 
+## Runaway protection
+
+Several independent guards keep an unattended run from burning your
+allowance on a task that cannot succeed:
+
+- **Circuit breaker.** McLoop fingerprints each gate failure (command
+  head plus a normalized digest of the failure tail, with addresses,
+  temp paths, and numbers stripped). A task that fails the SAME way
+  `max_retries * 2` consecutive times — two tiers' worth — is stopped
+  with a notification naming the unsatisfiable gate, instead of
+  thrashing every model in the chain on a gate no model can satisfy.
+- **Limit backstops.** Sessions killed by McLoop itself (wall-clock
+  timeout, idle kill, or repeated-action stall — exit sentinels -102,
+  -103, -200) are never classified as rate/session limits, and only
+  the transcript tail is scanned for limit vocabulary, so a task that
+  merely *edits* rate-limit code cannot be misread as limited. Real
+  limit waits are bounded at 50 consecutive cycles per task (about
+  4-8 hours); past that the tier is treated as exhausted and the task
+  fails loudly. Note the deliberate tradeoff: a genuine weekly cap
+  whose reset is further out than that will trip the backstop —
+  re-run after the reset.
+- **Batch rollback.** A failed or limited batch attempt has its
+  uncommitted changes selectively rolled back — including staged
+  files and renames — so nothing unverified leaks into the next
+  attempt's baseline or gets laundered into a later commit.
+- **Scoped checks honor excludes.** Both the autofixers and the
+  scoped verification commands pass `--force-exclude` to ruff, so a
+  changed file the project deliberately excludes can neither be
+  reformatted behind your back nor wedge the acceptance gate.
+
 ## Notifications
 
 McLoop sends Telegram notifications for task completions, failures, rate limits,
@@ -684,9 +716,11 @@ order and skips auto-detection entirely:
 The `check_timeout` key sets the per-command timeout in seconds
 (default: 300). Increase this for projects with large test suites.
 
-Check commands run in parallel using `concurrent.futures`, so the
-total check time is the duration of the slowest command, not the
-sum of all commands.
+Check commands run sequentially in list order and stop at the first
+failure, so a broken lint never buries the test failure that matters
+under later noise — order your fastest checks first. (An earlier
+parallel implementation was removed because it violated this
+short-circuit contract.)
 
 ### Auto-detection rules
 
@@ -741,10 +775,11 @@ tests from the first run.
 
 ### Stages
 
-PLAN.md can be divided into stages using `## Stage N:` headers.
-McLoop completes all tasks in the current stage, then stops. Run
-`mcloop` again to start the next stage. This lets you test between
-stages and give feedback before continuing.
+PLAN.md can be divided into stages using `## Stage N:` headers. At
+each stage boundary McLoop runs the full (unscoped) test suite and
+the build, then advances into the next stage and keeps going by
+default. Pass `--stop-after-stage` to stop at the boundary instead —
+useful when you want to test and give feedback between stages.
 
 ```markdown
 ## Stage 1: Scaffold
@@ -800,8 +835,13 @@ McLoop collects all unchecked children up to the first `[USER]`
 or `[AUTO]` boundary, combines their text into a single numbered
 prompt ("Do all of the following in order: 1. ... 2. ... 3. ..."),
 and runs one session. If checks pass, all batched children are
-checked off in a single commit. If the batch fails, McLoop
-automatically falls back to running each subtask individually.
+checked off in a single commit. If the batch exhausts its retries,
+the parent and every child are marked failed and the run stops —
+McLoop deliberately does not fall back to per-subtask execution,
+because a batch body is written as a coherent unit whose subtasks
+may not stand alone. Between attempts, the batch's uncommitted
+changes (including anything it staged) are selectively rolled back
+so no unverified edit survives into the next attempt's baseline.
 
 Batching is most effective for late-stage, well-specified tasks
 where each subtask is essentially pseudocode. Early-stage tasks
@@ -1038,9 +1078,9 @@ checks whether the markers are intact and re-injects from
 `.mcloop/wrap/` if they were removed. The wrapper survives Claude
 Code edits automatically.
 
-If the same error triggers diagnostic insertion more than 3 times,
-McLoop marks it as unresolvable, prints the context, and stops
-rather than looping indefinitely.
+If the same error reaches its third diagnostic attempt, McLoop marks
+it as unresolvable, prints the context, and stops rather than
+looping indefinitely.
 
 To instrument a project that was NOT built by McLoop, use
 `mcloop wrap` manually from that project's directory.
@@ -1511,8 +1551,10 @@ The summary schema:
 | `commit_hashes` | array | Git hashes for all commits produced |
 
 Each task entry contains: `task_id`, `label`, `text`, `outcome`
-(`"success"` or `"failed"`), `elapsed` (seconds), `model`, `attempts`,
-and `commit_hash` (empty if the task did not produce a commit).
+(`"success"`, `"failed"`, or `"skipped"`), `elapsed` (seconds),
+`model`, `attempts`, `commit_hash` (empty if the task did not produce
+a commit), plus the backend-parity fields `success`, `exit_code`,
+`log_path`, and `changed_files`.
 
 Each check entry contains: `command`, `passed`, and `elapsed`
 (seconds).
@@ -1594,11 +1636,14 @@ mcloop --cli codex
 mcloop --cli codex --model gpt-5.4
 ```
 
-Codex sessions use `codex exec --ask-for-approval never --sandbox
-workspace-write`, which gives the agent write access to the project
-directory and `/tmp` but no network access and no ability to modify
-files outside the workspace. Claude Code sessions use PreToolUse
-hooks for permission control instead of an OS-level sandbox.
+McLoop's direct-path Codex sessions use `codex exec --full-auto`,
+Codex's shorthand for the workspace-write sandbox with approvals
+disabled: write access to the project directory and `/tmp`, no
+ability to modify files outside the workspace. (The Orchestra codex
+adapters spell the same policy explicitly as `--ask-for-approval
+never --sandbox workspace-write`.) Claude Code sessions use
+PreToolUse hooks for permission control instead of an OS-level
+sandbox.
 
 Both backends default to subscription billing. Set `"billing": "api"`
 to use API credits instead.
@@ -1766,7 +1811,7 @@ configured chain to a one-off single-tier run using the selected CLI
 and model. With no `chain` key, existing `model` and `fallback_model`
 configs continue to work and are converted internally to a two-entry
 chain using the same CLI. With neither key present, McLoop defaults to
-one tier: `{"cli": "claude", "model": "opus"}`.
+one tier: `{"cli": "claude", "model": "fable"}`.
 
 ### Configuration reference
 
@@ -1901,7 +1946,7 @@ matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 - Python >= 3.12
 - `git` on PATH (McLoop requires git for checkpointing and recovery)
 - `claude` CLI on PATH (or `codex` CLI when using `--cli codex`)
-- `gh` CLI on PATH (for automatic GitHub repo creation)
+- a git remote named `origin` if you want pushes (no remote = pushes are skipped)
 - macOS for iMessage notifications (Telegram works anywhere)
 - Playwright (optional, for web app investigation only)
 
@@ -1995,9 +2040,12 @@ and keeps sessions moving. McLoop prints whitelist suggestions at
 the end of each run.
 
 **Use stages for large projects.** Divide PLAN.md into stages with
-`## Stage N:` headers. McLoop completes one stage and stops, giving
+`## Stage N:` headers, and run with `--stop-after-stage` when you
+want a checkpoint: McLoop then completes one stage and stops, giving
 you a chance to test and give feedback before it consumes more of
-your allowance on the next stage.
+your allowance on the next stage. (Without the flag it advances
+through stages automatically, gating each boundary on the full test
+suite and build.)
 
 **Run overnight or during off-peak hours.** If your plan has
 time-based rate limits, long McLoop runs benefit from starting when
@@ -2012,11 +2060,12 @@ you have.
 
 The continuous reviewer described above sends diffs to an
 OpenAI-compatible REST endpoint. That covers OpenRouter, direct
-provider APIs, and local servers like Ollama. It does not cover
-Claude Code or Codex used through their subscriptions, because
-those are CLI-driven, not REST endpoints. Wiring subscription-based
-Claude Code or Codex into the reviewer is on McLoop's roadmap via
-the Orchestra adapters, but is not yet shipped.
+provider APIs, and local servers like Ollama. Subscription-based
+Claude Code and Codex are ALSO supported as reviewer backends: set
+`"backend": "claude_code"` or `"backend": "codex"` in the reviewer
+config and the review runs through the Orchestra adapters on your
+subscription, no API key consumed (see "Three review backends"
+above).
 
 The reviewer model does not need to generate code, only read diffs
 and identify problems, so strong reasoning matters more than code
