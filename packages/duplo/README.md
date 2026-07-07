@@ -40,7 +40,8 @@ PLAN.md duplo produces is a formal document with a defined grammar:
 stable task identifiers (`T-NNNNNN`) on every task, structured
 annotations (`[feat: "Feature Name"]` linking tasks to feature
 records, `[fix: "description"]` linking tasks to known issues),
-phase boundaries marked with `## Stage N:` headers, and the canonical
+phase boundaries marked with `## Phase phase_NNN:` headers (the
+parser also accepts the `## Stage N:` form), and the canonical
 structure that the bob-tools planfile library enforces and McLoop
 operates against deterministically.
 
@@ -145,9 +146,10 @@ edit SPEC.md to describe what you're building, then run `duplo`.
    below for the full structure.
 
 4. **(Optional) Drop reference files into `ref/`** — screenshots,
-   videos, PDFs, design mockups. On the next `duplo` run, any file
-   not yet listed in `## References` will be surfaced so you can
-   assign it a role.
+   videos, PDFs, design mockups. `duplo init` scans `ref/` and writes
+   `proposed:` entries into `## References` for you to confirm; files
+   added later that you never list simply get default handling, so
+   declare a role for anything whose treatment matters.
 
 5. **Run `duplo`** to scrape the declared sources, analyze
    references, extract features and visual design, and generate
@@ -242,7 +244,10 @@ All forms accept the `--deep` and `--force` flags below.
 - Exits `0` on success.
 - Exits `1` if `SPEC.md` already exists and `--force` was not
   passed, or if `--from-description` points at a missing file.
-- Exits `2` on an invalid URL (not `http://` or `https://`).
+- Exits `2` on an invalid URL (not `http://` or `https://`) in the
+  URL-only form. With `--from-description` also present, URL
+  validation is deferred so errors can stack, and that path exits
+  `1`.
 - If both the URL and the description file are invalid, both
   errors are printed before exit so you don't have to fix them
   one at a time.
@@ -264,11 +269,21 @@ All forms accept the `--deep` and `--force` flags below.
    `## References`, not inferred from file contents.
 
 2. **Extracts frames from videos.** If video files are present and
-   ffmpeg is installed, extracts frames at scene-change points,
-   deduplicates near-identical frames using perceptual hashing, and
-   filters them with Claude Vision to keep only clear UI screenshots.
-   Each accepted frame is described (e.g., "settings panel", "main
-   dashboard") and stored in `.duplo/references/`.
+   ffmpeg is installed, extracts frames at scene-change points
+   (falling back to interval sampling for smooth videos with no hard
+   cuts), deduplicates near-identical frames using perceptual
+   hashing, and filters them with Claude Vision to keep only clear
+   UI screenshots. Each vetted frame is described (e.g., "settings
+   panel", "main dashboard") and stored in `.duplo/references/`.
+   Processed videos are recorded in a per-video manifest
+   (`.duplo/processed_videos.json`) so unchanged videos are skipped
+   on later runs. The pipeline fails open safely: when Vision cannot
+   actually vet a frame (CLI error, unparseable verdict, or a frame
+   the response omitted), the frame still feeds the current run's
+   in-memory analysis but is withheld from `.duplo/references/` and
+   its video is left unrecorded so the next run re-filters it; a
+   failed extraction likewise preserves the previous run's frames
+   and retries.
 
 3. **Extracts visual design from images.** Sends reference screenshots
    and accepted video frames to Claude Vision to extract colors, fonts,
@@ -280,10 +295,12 @@ All forms accept the `--deep` and `--force` flags below.
 
 5. **Crawls product documentation.** Follows links from the product
    URL, prioritizing documentation, features, and API references over
-   marketing and legal pages. Follows documentation links even if they
-   leave the main domain (docs are often hosted separately). Extracts
-   code examples as input/expected output pairs, plus feature tables,
-   operation lists, and function references.
+   marketing and legal pages. The deep crawl stays same-origin;
+   documentation links that leave the main domain (docs are often
+   hosted separately) are not followed inline but are appended to
+   `## Sources` as `discovered: true` entries and scraped on a later
+   pass. Extracts code examples as input/expected output pairs, plus
+   feature tables, operation lists, and function references.
 
 6. **Downloads embedded media.** Scans fetched HTML pages for
    ``<video>``, ``<source>``, ``<img>``, and ``<picture>`` tags.
@@ -424,10 +441,7 @@ the next phase:
    phase highlighted as a recommendation. You can accept the
    recommendation, modify it, or pick entirely different features.
 
-4. **Issue selection.** Shows open issues from `duplo.json` and
-   asks which should be addressed in this phase.
-
-5. **Plan generation.** Generates a PLAN.md scoped to the selected
+4. **Plan generation.** Generates a PLAN.md scoped to the selected
    features and issues. Every task line is annotated with
    `[feat: ...]` or `[fix: ...]` so the next phase completion can
    track status deterministically. Parent tasks whose subtasks are
@@ -444,21 +458,23 @@ The update cycle is non-destructive. Running `duplo` again never
 removes or overwrites existing code, plans, or configuration:
 
 - **PLAN.md:** New feature tasks are appended to the end of the
-  file. Bug-fix tasks are inserted into the ``## Bugs`` section
-  (created automatically on first plan generation). Existing
-  checked and unchecked items are preserved exactly as they are.
-  Appends go through the planfile API, so task IDs are unique
-  across the file and the canonical structure is preserved across
-  edits.
+  file. Bug-fix tasks are inserted into the ``## Bugs`` section,
+  which is created on demand when the first bug task is appended
+  (via `duplo fix` or `investigate`) — plan generation itself never
+  emits one. Existing checked and unchecked items are preserved
+  exactly as they are. Appends go through the planfile API, so task
+  IDs are unique across the file and the canonical structure is
+  preserved across edits.
 - **CLAUDE.md:** Overwritten on every run that produces it.
   CLAUDE.md is a derived artifact owned by duplo (the file header
   reads "Auto-generated by duplo -- do not edit manually."). For
   machine-specific overrides, use `local.md` (see below).
-- **mcloop.json:** New check commands are merged in. Existing
-  commands are never removed or modified.
-- **README.md:** New sections are appended by heading. Existing
-  content is not replaced.
-- **SPEC.md:** Never modified by Duplo. This is your document.
+- **SPEC.md:** Yours to author; Duplo makes exactly two kinds of
+  scoped, marked edits and nothing else: cross-origin documentation
+  URLs it discovers are appended to `## Sources` as
+  `discovered: true` entries, and the `## Design` section's
+  AUTO-GENERATED block is refreshed from design extraction. Your
+  prose is never rewritten.
 - **Code and project files:** Duplo never modifies files that
   McLoop or the user created. It only writes to its own state
   directory (`.duplo/`) and the configuration files above.
@@ -467,7 +483,8 @@ This means you can safely re-run `duplo` at any point without
 losing work. Add more reference material, run duplo, and only
 new tasks for uncovered features or design refinements are added.
 
-All state lives in `.duplo/` (added to `.gitignore` automatically):
+All state lives in `.duplo/` (McLoop adds it to `.gitignore` when it
+initializes the repo):
 `duplo.json` for selections, features (with implementation status),
 phases, issues, roadmap, preferences, sources, reference URLs,
 design requirements, frame descriptions, doc structures, and
@@ -475,7 +492,11 @@ feedback; `product.json` for confirmed product identity
 (`product_name`, `source_url`, `app_name`) so subsequent runs skip
 re-validation; `references/` for processed reference files;
 `examples/` for extracted code examples; `raw_pages/` for scraped
-HTML content; `file_hashes.json` for change detection.
+HTML content; `file_hashes.json` for change detection;
+`video_frames/` for extracted frames and `processed_videos.json`
+for the per-video completion manifest; `site_media/` for downloaded
+page media; `ledger/` for the Plan Ledger event log; and `logs/` for
+per-run LLM-call logs (browse them with `duplo logs`).
 
 ## Migrating existing projects
 
@@ -554,6 +575,7 @@ diagnosis on each one:
 duplo fix "labeled expressions don't evaluate"
 duplo fix "wrong background color" "window should be square"
 duplo fix --file BUGS.md            # one bug per paragraph
+duplo fix --images bug1.png ...     # attach screenshots to the diagnosis
 duplo fix --screenshot              # capture app screenshot + interactive input
 duplo fix                           # interactive input
 ```
@@ -567,10 +589,12 @@ diagnoses, Duplo falls back to appending a raw ``- [ ] Fix: ...``
 line per bug with a ``[fix: "..."]`` annotation so phase
 completion can still track resolution.
 
-The ``## Bugs`` section is created automatically by ``save_plan()``
-on first plan generation and aligns with McLoop's contract:
-McLoop prioritises unchecked items in ``## Bugs`` before any
-feature tasks.
+The ``## Bugs`` section is created on demand when the first bug
+task is appended (plan generation itself strips any ``## Bugs``
+heading from generated content — the section is owned by the fix
+flow, not the planner) and aligns with McLoop's contract: McLoop
+prioritises unchecked items in ``## Bugs`` before any feature
+tasks.
 
 ### `duplo investigate`
 
@@ -633,7 +657,7 @@ Arguments and flags:
 - `EVENT_ID` *(positional, required)* — the `event_id` of the
   `threshold_crossed` event that triggered the re-author. Found
   in the ledger output, in the Telegram notification that fires
-  on drift, or by running ``cat .duplo/ledger/events.jsonl |
+  on drift, or by running ``cat .duplo/ledger/PLAN.events.jsonl |
   grep threshold_crossed``.
 - `--plan PATH` — plan file to re-author. Default: `PLAN.md`.
 - `--ledger-dir PATH` — ledger directory. Default:
@@ -654,8 +678,9 @@ audit trail continues to resolve them.
 ### Council mode
 
 For plan generation and re-authoring, Duplo can route the work
-through a **council** — a small panel of LLM roles (drafter,
-critics, chair) that produce, critique, and synthesize the plan
+through a **council** — Orchestra's `council_four` workflow: a
+framer shapes the brief, four proposers draft in parallel, and a
+synthesizer merges their plans into one (about six LLM calls),
 rather than relying on a single model. This is most useful when
 the stakes are high (large rewrites, expensive missing scope) and
 the cost of more model calls is acceptable. Council mode runs on
@@ -689,14 +714,16 @@ combination — the channels are complementary, not redundant:
 
 - **URLs under `## Sources`.** Live product sites and documentation
   that Duplo should scrape. Each entry can declare a role
-  (`product-reference`, `docs-reference`, `counter-example`) and a
-  scrape depth. These drive feature extraction, code-example
+  (`product-reference`, `docs`, `counter-example`) and a scrape
+  depth. Role names are validated strictly — an unknown role (a typo
+  like `docs-reference`) drops the entry rather than silently
+  widening its authority. These drive feature extraction, code-example
   mining, and embedded-media download.
 - **Files in `ref/`.** Screenshots, videos, PDFs, design mockups,
   and text files you drop into the `ref/` directory. Declare each
   one under `## References` with a role (`visual-target`,
-  `behavioral-reference`, `docs`, `counter-example`) so Duplo
-  knows how to use it. Images feed design extraction; videos are
+  `behavioral-target`, `docs`, `counter-example`, or `ignore`) so
+  Duplo knows how to use it. Unknown role names drop the entry. Images feed design extraction; videos are
   frame-extracted; PDFs and text files feed feature analysis.
 - **Prose in `## Purpose`, `## Architecture`, `## Design`,
   `## Behavior`, `## Notes`.** Freeform intent and constraints
@@ -797,8 +824,16 @@ pyproject.toml. Adding a new profile is a single Python file in
 For machine-specific facts that no shipped profile can anticipate
 (custom toolchain paths, GPU flags, port conflicts), create a
 `local.md` file in the project root. Its contents are injected
-into both the planner prompt and CLAUDE.md. This file is
-gitignored by default.
+into both the planner prompt and CLAUDE.md. Add it to your
+.gitignore yourself if it holds machine-private paths — nothing
+gitignores it automatically.
+
+## Inspecting runs
+
+Every LLM call in a run is logged under `.duplo/logs/<run_id>/`.
+`duplo logs` summarizes the most recent run (call count, models,
+timing, and per-call log paths); `duplo logs RUN_ID` shows a specific
+run, and `--dir PATH` points it at another project's log directory.
 
 ## Requirements
 
@@ -806,9 +841,9 @@ gitignored by default.
 - [McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
 - `claude` CLI on PATH
 - macOS for appshot screenshot verification
-- [Playwright](https://playwright.dev/) for reference screenshots
-  (`playwright install chromium` after pip install). Only needed on
-  first run if the product URL has documentation pages to screenshot.
+- [Playwright](https://playwright.dev/) is currently a declared
+  dependency but unused at runtime (the reference-screenshot flow it
+  served is dormant); no browser install is needed.
 - [ffmpeg](https://ffmpeg.org/) on PATH for video frame extraction
   (optional). Install with `brew install ffmpeg`. If not installed,
   video files are skipped with a warning.
@@ -858,18 +893,20 @@ implementation (naming specific files, functions, conditions, and
 values), the gap between description and code is small and the
 agent is essentially transcribing. When a task description is short
 and abstract, the gap is large and the agent must make design
-decisions that benefit from a dedicated session. Duplo estimates
-this gap using the ratio of concrete identifiers (file paths,
-function names, flag names, explicit conditionals) to total words,
-along with a Claude API call during plan generation, to decide
-which task groups to batch.
+decisions that benefit from a dedicated session. The judgment is
+made by the plan-generation model itself: the planner prompt
+instructs it to mark `[BATCH]` only on parents whose subtasks are
+all specific enough (naming files, functions, conditions, values)
+to execute without design decisions.
 
 When McLoop encounters a `[BATCH]` parent, it combines all unchecked
 children (up to the first `[USER]` or `[AUTO]` boundary) into a
 single numbered prompt and runs one session. If checks pass, all
-children are checked off in one commit. If the batch fails, McLoop
-automatically falls back to running each subtask individually. No
-work is lost on failure. When the continuous code reviewer is enabled,
+children are checked off in one commit. If the batch exhausts its
+retries, McLoop marks the parent and children failed and stops
+(batch bodies are coherent units, so it deliberately does not fall
+back to per-subtask execution); each failed attempt's uncommitted
+changes are rolled back, so no unverified work leaks forward. When the continuous code reviewer is enabled,
 batched tasks are reviewed as a single diff after the batch commit.
 
 For the install/uninstall feature (17 subtasks at ~2 minutes each),
