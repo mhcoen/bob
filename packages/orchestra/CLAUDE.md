@@ -81,7 +81,7 @@ Run state lives in `~/.orchestra/runs/<run_id>/` by default; override with `--da
 
 ## Direction
 
-Slices 1 through 6 of the original implementation plan are shipped (workspace/shell, code profile, real model adapters, persistent agents, multi-actor states). Remaining direction from the plan: real human adapters beyond the Telegram approval hook, richer verdict schemas, and retry policy. Order is governed by what the next consumer workflow needs (mcloop patterns, duplo council), not by feature completeness.
+Of the original implementation plan: slice 1 (spine), slice 4 (real model adapters), and slice 6 (multi-actor states and joins, exercised by parallel_thinking) are shipped; slice 3's code-profile grammar (`require_diff`, `runs`, `continue_on_fail`, `mode`) parses and validates but is served only by the mock shell adapter; slice 2's real shell adapter and versioned-workspace profile and slice 5's persistent agents were bypassed in favor of the api/ + subprocess-adapter path that production consumers actually needed (`context_policy` parses but nothing consumes it). Remaining direction: real shell/workspace if a consumer demands it, persistent agents, real human adapters beyond the Telegram approval hook, richer verdict schemas, and retry policy. Order is governed by what the next consumer workflow needs (mcloop patterns, duplo council), not by feature completeness.
 
 ## Design commitments that are easy to drift from
 
