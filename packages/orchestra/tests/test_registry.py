@@ -99,7 +99,7 @@ def test_bare_codex_identifier_resolves_to_a_chatgpt_account_model():
     reg = with_core()
     ident = reg.model_identifiers["codex"]
     assert ident.adapter == "codex_text"
-    assert ident.model == "gpt-5.5"
+    assert ident.model == "gpt-5.6-sol"
     assert ident.model != "gpt-5-codex"
 
 

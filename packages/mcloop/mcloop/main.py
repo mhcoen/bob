@@ -215,7 +215,7 @@ def _legacy_chain(
     model: str | None,
     fallback_model: str | None,
 ) -> list[ChainEntry]:
-    primary_model = model or "fable"
+    primary_model = model or "opus"
     chain = [ChainEntry(cli=cli, model=primary_model)]
     if fallback_model and fallback_model != primary_model:
         chain.append(ChainEntry(cli=cli, model=fallback_model))

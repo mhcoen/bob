@@ -100,7 +100,7 @@ drafter, anything, binds to either by name. Set `adapter` to
 binding:
 
 ```json
-{"roles": {"proposer": {"adapter": "codex_text", "model": "gpt-5.5"}}}
+{"roles": {"proposer": {"adapter": "codex_text", "model": "gpt-5.6-sol"}}}
 ```
 
 The `*_text` adapters are read-only and used for synthesis or
@@ -280,25 +280,25 @@ Create `~/.orchestra/config.json`:
     "pair":      { "workflow": "ask_draft_then_adjudicate" }
   },
   "roles": {
-    "responder":   { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "drafter":     { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "adjudicator": { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "proposer":    { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "responder":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "drafter":     { "adapter": "claude_code_text", "model": "kimi-k3", "parameters": {} },
+    "adjudicator": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "proposer":    { "adapter": "claude_code_text", "model": "kimi-k3", "parameters": {} },
     "critic":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "synthesizer": { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
+    "synthesizer": { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
     "framer":          { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "contrarian":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "first_principles":{ "adapter": "claude_code_text", "model": "fable", "parameters": {} },
+    "contrarian":      { "adapter": "claude_code_text", "model": "kimi-k3", "parameters": {} },
+    "first_principles":{ "adapter": "claude_code_text", "model": "opus", "parameters": {} },
     "expansionist":    { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
-    "outsider":        { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
-    "executor_lens":   { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "chairman":        { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "panelist_1":      { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "panelist_2":      { "adapter": "claude_code_text", "model": "kimi-k2.6", "parameters": {} },
+    "outsider":        { "adapter": "claude_code_text", "model": "kimi-k3", "parameters": {} },
+    "executor_lens":   { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "chairman":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "panelist_1":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "panelist_2":      { "adapter": "claude_code_text", "model": "kimi-k3", "parameters": {} },
     "panelist_3":      { "adapter": "claude_code_text", "model": "sonnet", "parameters": {} },
     "panelist_4":      { "adapter": "claude_code_text", "model": "deepseek-v4-pro", "parameters": {} },
-    "panelist_5":      { "adapter": "claude_code_text", "model": "fable", "parameters": {} },
-    "reviewer":        { "adapter": "claude_code_text", "model": "fable", "parameters": {} }
+    "panelist_5":      { "adapter": "claude_code_text", "model": "opus", "parameters": {} },
+    "reviewer":        { "adapter": "claude_code_text", "model": "opus", "parameters": {} }
   },
   "workflows": {
     "ask_single":                       { "pattern": "ask_single" },
@@ -352,22 +352,22 @@ each sequential state starts and finishes:
 
 ```
 $ orchestra council should I rewrite this service in rust
-[1/7] framer (claude_code_text:fable) ... starting
-[1/7] framer (claude_code_text:fable) ... done in 2.4s
+[1/7] framer (claude_code_text:opus) ... starting
+[1/7] framer (claude_code_text:opus) ... done in 2.4s
 [2-6/7] 5 framer children starting in parallel:
-   contrarian (claude_code_text:kimi-k2.6)
-   first_principles (claude_code_text:fable)
+   contrarian (claude_code_text:kimi-k3)
+   first_principles (claude_code_text:opus)
    expansionist (claude_code_text:sonnet)
-   outsider (claude_code_text:kimi-k2.6)
-   executor_lens (claude_code_text:fable)
+   outsider (claude_code_text:kimi-k3)
+   executor_lens (claude_code_text:opus)
 [2-6/7] contrarian done in 4.1s
 [2-6/7] expansionist done in 4.8s
 [2-6/7] outsider done in 5.2s
 [2-6/7] first_principles done in 6.0s
 [2-6/7] executor_lens done in 6.3s
 [2-6/7] all 5 done, parallel wall-clock 6.3s
-[7/7] chairman (claude_code_text:fable) ... starting
-[7/7] chairman (claude_code_text:fable) ... done in 5.1s
+[7/7] chairman (claude_code_text:opus) ... starting
+[7/7] chairman (claude_code_text:opus) ... done in 5.1s
 [final answer prints here on stdout]
 ```
 
@@ -491,7 +491,7 @@ result = run_workflow(
     },
     config=load_config(Path("/path/to/project")),
     invocation_options={
-        "model": "fable",
+        "model": "opus",
         "timeout": 1800,
         "log_dir": "/path/to/project/logs",
     },
@@ -554,8 +554,8 @@ any other consumer runs against picks up the same bindings.
 ```json
 {
   "roles": {
-    "responder": { "adapter": "claude_code_text",  "model": "fable", "parameters": {} },
-    "editor":    { "adapter": "claude_code_agent", "model": "fable", "tools": "default", "parameters": {} }
+    "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
+    "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
   },
   "workflows": {
     "code_edit": { "pattern": "draft_then_adjudicate" }
@@ -622,7 +622,7 @@ A role binding has three required keys (plus an optional fourth):
   `codex_agent`, and the direct-endpoint text variants
   `claude_code_text_kimi` and `claude_code_text_deepseek`.
 - `model` — model name passed to the adapter (`fable`, `opus`,
-  `sonnet`, `kimi-k2.6`, `deepseek-v4-pro`, etc.).
+  `sonnet`, `kimi-k3`, `deepseek-v4-pro`, etc.).
 - `parameters` — adapter-specific extras, usually `{}`.
 - `tools` — edit-agent roles only. Tool restriction for the agent,
   e.g. `"default"` for the standard McLoop tool set.
@@ -635,8 +635,8 @@ colliding under one binding. A single config can define both:
 
 ```json
 "roles": {
-  "responder": { "adapter": "claude_code_text",  "model": "fable", "parameters": {} },
-  "editor":    { "adapter": "claude_code_agent", "model": "fable", "tools": "default", "parameters": {} }
+  "responder": { "adapter": "claude_code_text",  "model": "opus", "parameters": {} },
+  "editor":    { "adapter": "claude_code_agent", "model": "opus", "tools": "default", "parameters": {} }
 }
 ```
 
@@ -653,7 +653,7 @@ per-role actors are policy.
 "role_bindings": {
   "design": {
     "pattern": "design_loop",
-    "judge_role": { "model": "fable" },
+    "judge_role": { "model": "opus" },
     "reviewer":   { "model": "codex" },
     "max_rounds": 4
   }
@@ -661,7 +661,7 @@ per-role actors are policy.
 ```
 
 The shipped `design` binding wraps the `design_loop` workflow. The
-judge defaults to a strong model (`fable`) for judgement-shaped
+judge defaults to a strong model (`opus`) for judgement-shaped
 calls; the reviewer defaults to a different model (`codex`) so the
 critique is independent of the judge's training data. Workflow
 start refuses to run when both bindings resolve to the same actor,
@@ -674,7 +674,7 @@ A compound role binding leaf may name a short model identifier in
 place of spelling out `adapter` and `model` separately:
 
 ```json
-"judge_role": { "model": "fable" }
+"judge_role": { "model": "opus" }
 ```
 
 Each identifier resolves to an `(adapter, model)` tuple through
@@ -692,9 +692,9 @@ The identifiers shipped today are:
 | `opus`        | `claude_code_text`             | `opus`           |
 | `sonnet`      | `claude_code_text`             | `sonnet`         |
 | `haiku`       | `claude_code_text`             | `haiku`          |
-| `kimi`        | `claude_code_text_kimi`        | `kimi-k2.6`      |
+| `kimi`        | `claude_code_text_kimi`        | `kimi-k3`      |
 | `deepseek`    | `claude_code_text_deepseek`    | `deepseek-v4-pro`|
-| `codex`       | `codex_text`                   | `gpt-5.5`        |
+| `codex`       | `codex_text`                   | `gpt-5.6-sol`        |
 | `gpt-5-codex` | `codex_text`                   | `gpt-5-codex`    |
 
 Long-form bindings (`{"adapter": "...", "model": "..."}`) still
@@ -702,7 +702,7 @@ work and bypass the lookup; the short form is a convenience for
 the common cases. Both forms compose with the same `parameters`,
 `tools`, and `instruction_template` keys.
 
-The bare `codex` identifier resolves to `gpt-5.5`, a model that
+The bare `codex` identifier resolves to `gpt-5.6-sol`, a model that
 ChatGPT-account Codex serves. `gpt-5-codex` is rejected by
 ChatGPT-account Codex with a 400, so it is never the value behind
 the bare identifier. Accounts whose Codex access does permit it can

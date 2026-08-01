@@ -22,11 +22,11 @@ Hardcoded fallback role bindings, used when the project has no
 ``.orchestra/config.json`` (or one without the council roles):
 
   framer:             claude_code_text          (haiku)
-  proposer_code:      claude_code_text          (fable)
-  proposer_codex:     codex_text                (gpt-5.5)
-  proposer_kimi:      claude_code_text_kimi     (kimi-k2.6)
+  proposer_code:      claude_code_text          (opus)
+  proposer_codex:     codex_text                (gpt-5.6-sol)
+  proposer_kimi:      claude_code_text_kimi     (kimi-k3)
   proposer_deepseek:  claude_code_text_deepseek (deepseek-v4-pro)
-  synthesizer:        claude_code_text          (fable)
+  synthesizer:        claude_code_text          (opus)
 
 The four proposers resolve to pairwise distinct (adapter, model)
 tuples (the council fan-out value). The synthesizer shares a model
@@ -99,17 +99,17 @@ _CONFIG_PATH_ENV = "DUPLO_COUNCIL_CONFIG"
 
 _FALLBACK_ROLE_BINDINGS: dict[str, dict[str, Any]] = {
     "framer": {"adapter": "claude_code_text", "model": "haiku"},
-    "proposer_code": {"adapter": "claude_code_text", "model": "fable"},
-    "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
+    "proposer_code": {"adapter": "claude_code_text", "model": "opus"},
+    "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.6-sol"},
     "proposer_kimi": {
         "adapter": "claude_code_text_kimi",
-        "model": "kimi-k2.6",
+        "model": "kimi-k3",
     },
     "proposer_deepseek": {
         "adapter": "claude_code_text_deepseek",
         "model": "deepseek-v4-pro",
     },
-    "synthesizer": {"adapter": "claude_code_text", "model": "fable"},
+    "synthesizer": {"adapter": "claude_code_text", "model": "opus"},
 }
 
 _COUNCIL_REQUIRED_ROLES: tuple[str, ...] = (
@@ -128,8 +128,8 @@ def make_duplo_progress_callback() -> Callable[[Any], None]:
     One line per ``state_enter`` and ``state_exit`` from
     orchestra.run_workflow:
 
-      [duplo] state=propose_kimi model=kimi-k2.6 status=running
-      [duplo] state=propose_kimi model=kimi-k2.6 elapsed=168.9s status=complete
+      [duplo] state=propose_kimi model=kimi-k3 status=running
+      [duplo] state=propose_kimi model=kimi-k3 elapsed=168.9s status=complete
 
     Fan-out boundaries (``fan_out_start`` / ``fan_out_end``) print a
     single header line so the user sees the parallel block exists;

@@ -1164,7 +1164,7 @@ Codex (ChatGPT subscription) backend:
   "reviewer": {
     "enabled": true,
     "backend": "codex",
-    "model": "gpt-5.5"
+    "model": "gpt-5.6-sol"
   }
 }
 ```
@@ -1187,7 +1187,7 @@ codebases.
 
 McLoop prints the reviewer status at startup when configured. The
 status format depends on the backend: `Reviewer: deepseek/deepseek-v3.2
-via openrouter.ai (API key set)` for rest, `Reviewer: gpt-5.5 via
+via openrouter.ai (API key set)` for rest, `Reviewer: gpt-5.6-sol via
 Codex (subscription)` for codex, `Reviewer: claude-opus-4-7 via Claude
 Code (subscription)` for claude_code. Stale review files older than 24
 hours are cleaned up automatically.
@@ -1296,7 +1296,7 @@ Minimal global config that wires `code_edit` to the
 ```json
 {
   "roles": {
-    "drafter":     { "adapter": "claude_code_text",  "model": "kimi-k2.6", "parameters": {} },
+    "drafter":     { "adapter": "claude_code_text",  "model": "kimi-k3", "parameters": {} },
     "adjudicator": { "adapter": "claude_code_text",  "model": "opus",     "parameters": {} },
     "editor":      { "adapter": "claude_code_agent", "model": "opus",     "tools": "default", "parameters": {} }
   },
@@ -1326,7 +1326,7 @@ drafter with a Claude adjudicator:
 ```json
 {
   "roles": {
-    "drafter":     { "adapter": "codex_text",        "model": "gpt-5.5",  "parameters": {} },
+    "drafter":     { "adapter": "codex_text",        "model": "gpt-5.6-sol",  "parameters": {} },
     "adjudicator": { "adapter": "claude_code_text",  "model": "opus",     "parameters": {} },
     "editor":      { "adapter": "claude_code_agent", "model": "opus",     "tools": "default", "parameters": {} }
   }
@@ -1719,13 +1719,13 @@ Worked three-tier example:
       "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
       "enabled": true,
       "cli": "codex",
-      "model": "gpt-5.5"
+      "model": "gpt-5.6-sol"
     },
     {
       "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
       "enabled": true,
       "cli": "claude",
-      "model": "kimi-k2.6",
+      "model": "kimi-k3",
       "executor": {
         "base_url": "https://api.moonshot.ai/anthropic",
         "auth_token_env": "MOONSHOT_API_KEY",
@@ -1768,13 +1768,13 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
       "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
       "enabled": false,
       "cli": "codex",
-      "model": "gpt-5.5"
+      "model": "gpt-5.6-sol"
     },
     {
       "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
       "enabled": false,
       "cli": "claude",
-      "model": "kimi-k2.6",
+      "model": "kimi-k3",
       "executor": {
         "base_url": "https://api.moonshot.ai/anthropic",
         "auth_token_env": "MOONSHOT_API_KEY",
@@ -1799,8 +1799,8 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
 
 The optional `executor` block is applied only to that tier. Set
 `use_slug_model` to `false` for direct-provider endpoints, such as
-Moonshot, that expect the raw model name (`kimi-k2.6`) instead of an
-OpenRouter-style provider slug (`moonshotai/kimi-k2.6`). `env_overrides`
+Moonshot, that expect the raw model name (`kimi-k3`) instead of an
+OpenRouter-style provider slug (`moonshotai/kimi-k3`). `env_overrides`
 is applied after McLoop's standard provider environment block, so it
 can override any generated key or inject provider-specific settings
 such as `CLAUDE_CONFIG_DIR`, `DISABLE_INTERLEAVED_THINKING`, and
@@ -1813,7 +1813,7 @@ configured chain to a one-off single-tier run using the selected CLI
 and model. With no `chain` key, existing `model` and `fallback_model`
 configs continue to work and are converted internally to a two-entry
 chain using the same CLI. With neither key present, McLoop defaults to
-one tier: `{"cli": "claude", "model": "fable"}`.
+one tier: `{"cli": "claude", "model": "opus"}`.
 
 ### Configuration reference
 
@@ -1908,11 +1908,11 @@ kimi_moonshot_fast() {
   CLAUDE_CONFIG_DIR="$HOME/.claude-kimi-fast" \
   ANTHROPIC_BASE_URL="https://api.moonshot.ai/anthropic/" \
   ANTHROPIC_AUTH_TOKEN="$MOONSHOT_API_KEY" \
-  ANTHROPIC_MODEL="kimi-k2.6" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="kimi-k2.6" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="kimi-k2.6" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="kimi-k2.6" \
-  CLAUDE_CODE_SUBAGENT_MODEL="kimi-k2.6" \
+  ANTHROPIC_MODEL="kimi-k3" \
+  ANTHROPIC_DEFAULT_SONNET_MODEL="kimi-k3" \
+  ANTHROPIC_DEFAULT_OPUS_MODEL="kimi-k3" \
+  ANTHROPIC_DEFAULT_HAIKU_MODEL="kimi-k3" \
+  CLAUDE_CODE_SUBAGENT_MODEL="kimi-k3" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
   ENABLE_TOOL_SEARCH=false \
   DISABLE_INTERLEAVED_THINKING=1 \
@@ -1940,7 +1940,7 @@ Inside that subshell, `mcloop` will pick up the variables. mcloop also
 applies these variables automatically when the executor model string
 matches a third-party provider prefix (`deepseek/`, `moonshotai/`,
 `openai/`) or one of the short aliases (`deepseek-v4-pro`,
-`deepseek-v4-flash`, `kimi-k2.6`); the shell function is for invoking
+`deepseek-v4-flash`, `kimi-k3`); the shell function is for invoking
 `claude` interactively outside of mcloop.
 
 ## Requirements
@@ -2094,8 +2094,8 @@ To use any of these as the reviewer, set the model string in
 ```
 
 OpenRouter model strings: `deepseek/deepseek-v3.2`, `z-ai/glm-5`,
-`moonshotai/kimi-k2.6`, `google/gemini-2.5-flash`,
-`google/gemini-2.5-pro`, `openai/gpt-5.5`,
+`moonshotai/kimi-k3`, `google/gemini-2.5-flash`,
+`google/gemini-2.5-pro`, `openai/gpt-5.6-sol`,
 `anthropic/claude-opus-4-7`. Pricing may vary by provider and
 change over time. Check [OpenRouter](https://openrouter.ai) for
 current rates.

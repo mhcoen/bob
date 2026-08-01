@@ -578,7 +578,7 @@ def test_resolve_compound_model_identifiers_fills_in_adapter_and_model() -> None
     assert resolved["judge_role"].adapter == "claude_code_text"
     assert resolved["judge_role"].model == "opus"
     assert resolved["reviewer"].adapter == "codex_text"
-    assert resolved["reviewer"].model == "gpt-5.5"
+    assert resolved["reviewer"].model == "gpt-5.6-sol"
 
 
 def test_resolve_compound_model_identifiers_preserves_explicit_bindings() -> None:
@@ -673,7 +673,7 @@ def test_default_config_carries_design_role_binding() -> None:
     # identities are documented in orchestra/README.md; the test
     # captures the contract that the defaults satisfy the
     # same-actor rule.
-    assert judge.model == "fable"
+    assert judge.model == "opus"
     assert reviewer.model == "codex"
     assert judge.model != reviewer.model
 

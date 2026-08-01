@@ -131,22 +131,32 @@ _KNOWN_MODELS = {
         {
             "fable",
             "claude-fable-5",
+            "claude-mythos-5",
             "opus",
             "sonnet",
             "haiku",
             "opusplan",
+            "claude-opus-5",
+            "claude-sonnet-5",
+            "claude-opus-4-8",
+            "claude-opus-4-7",
             "claude-opus-4-6",
             "claude-sonnet-4-6",
+            "claude-haiku-4-5",
             "claude-opus-4-5-20251101",
             "claude-sonnet-4-5-20250929",
             "claude-haiku-4-5-20251001",
             "deepseek-v4-pro",
             "deepseek-v4-flash",
+            "kimi-k3",
+            "kimi-k2.7-code",
+            "kimi-k2.7-code-highspeed",
             "kimi-k2.6",
         }
     ),
     "codex": frozenset(
         {
+            "gpt-5.6-sol",
             "gpt-5.5",
             "gpt-5.4",
             "gpt-5.4-pro",
@@ -171,6 +181,8 @@ _KNOWN_MODELS = {
 _MODEL_PROVIDERS = {
     "deepseek-v4-pro": "deepseek",
     "deepseek-v4-flash": "deepseek",
+    "kimi-k3": "moonshotai",
+    "kimi-k2.7-code": "moonshotai",
     "kimi-k2.6": "moonshotai",
 }
 
@@ -209,7 +221,7 @@ def _provider_for_model(model: str) -> str | None:
 
 
 def _provider_model_slug(model: str) -> str:
-    """Expand a short alias (``kimi-k2.6``) to its provider slug."""
+    """Expand a short alias (``kimi-k3``) to its provider slug."""
     provider = _MODEL_PROVIDERS.get(model)
     if provider and not model.startswith(provider + "/"):
         return f"{provider}/{model}"

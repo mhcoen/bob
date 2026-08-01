@@ -24,10 +24,10 @@ the longest individual child duration (parallel wall-clock), not the
 sum:
 
     [2-6/7] 5 advisors starting in parallel:
-       contrarian (claude_code_text:kimi-k2.6)
+       contrarian (claude_code_text:kimi-k3)
        first_principles (claude_code_text:fable)
        expansionist (claude_code_text:sonnet)
-       outsider (claude_code_text:kimi-k2.6)
+       outsider (claude_code_text:kimi-k3)
        executor_lens (claude_code_text:fable)
     [2-6/7] contrarian done in 4.1s
     [2-6/7] expansionist done in 4.8s

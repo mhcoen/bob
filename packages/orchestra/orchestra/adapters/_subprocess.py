@@ -90,6 +90,8 @@ BILLING_KEY: dict[str, str] = {
 MODEL_PROVIDERS: dict[str, str] = {
     "deepseek-v4-pro": "deepseek",
     "deepseek-v4-flash": "deepseek",
+    "kimi-k3": "moonshotai",
+    "kimi-k2.7-code": "moonshotai",
     "kimi-k2.6": "moonshotai",
 }
 
@@ -357,7 +359,7 @@ def provider_for_model(model: str) -> str | None:
 
 
 def provider_model_slug(model: str) -> str:
-    """Expand a short alias (``kimi-k2.6``) to its provider slug.
+    """Expand a short alias (``kimi-k3``) to its provider slug.
 
     Lifted from mcloop's ``_provider_model_slug``.
     """
@@ -384,7 +386,7 @@ def apply_provider_env(
       from. Default ``OPENROUTER_API_KEY``.
     - ``use_slug_model`` (bool): when True (default), the model name
       written into the subprocess env is prefixed with the provider
-      slug (``moonshotai/kimi-k2.6``). OpenRouter requires the prefix.
+      slug (``moonshotai/kimi-k3``). OpenRouter requires the prefix.
       Direct provider routing (Moonshot's anthropic-compat endpoint,
       DeepSeek's anthropic-compat endpoint) requires the bare model
       name; set ``use_slug_model: False`` for those.

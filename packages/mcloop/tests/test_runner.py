@@ -2004,16 +2004,39 @@ def test_warn_unknown_model_known_codex(capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_warn_unknown_model_known_codex_gpt_5_5(capsys):
-    """gpt-5.5 is in active production use (bound to proposer_codex
-    in duplo's _FALLBACK_ROLE_BINDINGS) and must not trigger a
-    spurious 'model not recognized' warning when invoked directly
-    via mcloop's codex runner. Pinned so a future _KNOWN_MODELS
-    edit cannot silently drop it from the codex set."""
+def test_warn_unknown_model_known_codex_production_models(capsys):
+    """gpt-5.6-sol is the model this account's Codex CLI serves and is
+    bound to proposer_codex in duplo's _FALLBACK_ROLE_BINDINGS; gpt-5.5
+    is the prior binding and is still servable. Neither may trigger a
+    spurious 'model not recognized' warning when invoked directly via
+    mcloop's codex runner. Pinned so a future _KNOWN_MODELS edit cannot
+    silently drop either from the codex set."""
     from mcloop.runner import _KNOWN_MODELS, warn_unknown_model
 
+    assert "gpt-5.6-sol" in _KNOWN_MODELS["codex"]
     assert "gpt-5.5" in _KNOWN_MODELS["codex"]
+    warn_unknown_model("codex", "gpt-5.6-sol")
     warn_unknown_model("codex", "gpt-5.5")
+    assert capsys.readouterr().out == ""
+
+
+def test_warn_unknown_model_known_current_claude_models(capsys):
+    """The current Anthropic model IDs and the production Kimi tier must
+    not warn. _KNOWN_MODELS drifted a full generation behind the models
+    actually in use once already; this pins the current set so pinning a
+    live model does not produce a misleading 'not recognized' warning."""
+    from mcloop.runner import _KNOWN_MODELS, warn_unknown_model
+
+    current = (
+        "claude-opus-5",
+        "claude-sonnet-5",
+        "claude-fable-5",
+        "claude-haiku-4-5",
+        "kimi-k3",
+    )
+    for model in current:
+        assert model in _KNOWN_MODELS["claude"], model
+        warn_unknown_model("claude", model)
     assert capsys.readouterr().out == ""
 
 
@@ -2077,7 +2100,7 @@ def test_arg_model_overrides_config(tmp_path):
 
 
 def test_default_chain_checks_default_model(tmp_path):
-    """No configured model defaults to the explicit claude/fable tier."""
+    """No configured model defaults to the explicit claude/opus tier."""
     from mcloop.main import run_loop
 
     plan = tmp_path / "PLAN.md"
@@ -2096,7 +2119,7 @@ def test_default_chain_checks_default_model(tmp_path):
         patch("mcloop.main.warn_unknown_model") as mock_warn,
     ):
         run_loop(plan, model=None)
-    mock_warn.assert_called_once_with("claude", "fable")
+    mock_warn.assert_called_once_with("claude", "opus")
 
 
 # --- PID file writing ---

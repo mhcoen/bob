@@ -31,8 +31,11 @@ from orchestra.executor.criteria import check_decision_consistency, mode_for_wor
 
 from duplo.init import _ORCHESTRA_COUNCIL_CONFIG
 from duplo.plan_author_role import (
+    JUDGE_MODEL,
     MAX_ROUNDS,
     PLAN_AUTHOR_CRITERIA,
+    PROPOSER_MODEL,
+    REVIEWER_MODEL,
     ROLE_NAME,
     WORKFLOW_PATTERN,
     plan_author_role_binding,
@@ -111,10 +114,10 @@ def test_role_resolves_with_distinct_enough_bindings():
     reviewer = (resolved["reviewer"].adapter, resolved["reviewer"].model)
     judge = (resolved["judge_role"].adapter, resolved["judge_role"].model)
 
-    # proposer=fable, judge=fable, reviewer=codex.
-    assert proposer == ("claude_code_text", "fable")
-    assert judge == ("claude_code_text", "fable")
-    assert reviewer == ("codex_text", "gpt-5.5")
+    # proposer=opus, judge=opus, reviewer=codex.
+    assert proposer == ("claude_code_text", "opus")
+    assert judge == ("claude_code_text", "opus")
+    assert reviewer == ("codex_text", "gpt-5.6-sol")
 
     # The reviewer is a distinct actor from the judge (independence).
     assert reviewer != judge
@@ -200,9 +203,9 @@ def test_role_binding_dict_matches_declared_constants():
     binding = plan_author_role_binding()
     assert binding["pattern"] == "plan_author"
     assert binding["max_rounds"] == MAX_ROUNDS
-    assert binding["proposer"] == {"model": "fable"}
-    assert binding["reviewer"] == {"model": "codex"}
-    assert binding["judge_role"] == {"model": "fable"}
+    assert binding["proposer"] == {"model": PROPOSER_MODEL}
+    assert binding["reviewer"] == {"model": REVIEWER_MODEL}
+    assert binding["judge_role"] == {"model": JUDGE_MODEL}
     assert len(binding["criteria"]) == len(PLAN_AUTHOR_CRITERIA)
 
 

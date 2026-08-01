@@ -1,22 +1,22 @@
 {
   "chain": [
     {
-      "comment": "Primary Fable tier. Set enabled=false when you intentionally want to skip subscription Fable and start on another backend.",
+      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
       "enabled": true,
       "cli": "claude",
-      "model": "fable"
+      "model": "opus"
     },
     {
-      "comment": "Codex fallover tier for Fable 5-hour or 7-day caps. Set enabled=false for Fable-only runs or when Codex should not touch this repo.",
+      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
       "enabled": true,
       "cli": "codex",
-      "model": "gpt-5.5"
+      "model": "gpt-5.6-sol"
     },
     {
       "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
       "enabled": true,
       "cli": "claude",
-      "model": "kimi-k2.6",
+      "model": "kimi-k3",
       "executor": {
         "base_url": "https://api.moonshot.ai/anthropic",
         "auth_token_env": "MOONSHOT_API_KEY",
@@ -30,7 +30,7 @@
       }
     },
     {
-      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Fable, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
       "enabled": true,
       "cli": "claude",
       "model": "deepseek-v4-pro"

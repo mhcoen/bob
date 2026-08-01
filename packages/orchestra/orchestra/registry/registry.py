@@ -93,7 +93,7 @@ BUILTIN_MODEL_IDENTIFIERS: dict[str, ModelIdentifier] = {
     "kimi": ModelIdentifier(
         name="kimi",
         adapter="claude_code_text_kimi",
-        model="kimi-k2.6",
+        model="kimi-k3",
     ),
     "deepseek": ModelIdentifier(
         name="deepseek",
@@ -101,11 +101,11 @@ BUILTIN_MODEL_IDENTIFIERS: dict[str, ModelIdentifier] = {
         model="deepseek-v4-pro",
     ),
     # Codex via the OpenAI CLI (read-only, text role). The bare
-    # identifier must resolve to a model every Codex account serves.
+    # identifier must resolve to a model the account actually serves.
     # gpt-5-codex is rejected with a 400 by ChatGPT-account Codex, so
     # it is opt-in via its own identifier below and must never be the
     # value behind the bare "codex" identifier.
-    "codex": ModelIdentifier(name="codex", adapter="codex_text", model="gpt-5.5"),
+    "codex": ModelIdentifier(name="codex", adapter="codex_text", model="gpt-5.6-sol"),
     "gpt-5-codex": ModelIdentifier(
         name="gpt-5-codex",
         adapter="codex_text",

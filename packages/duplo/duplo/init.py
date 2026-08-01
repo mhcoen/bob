@@ -180,17 +180,17 @@ def run_init(args: argparse.Namespace) -> None:
 _ORCHESTRA_COUNCIL_CONFIG: dict[str, object] = {
     "roles": {
         "framer": {"adapter": "claude_code_text", "model": "haiku"},
-        "proposer_code": {"adapter": "claude_code_text", "model": "fable"},
-        "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.5"},
+        "proposer_code": {"adapter": "claude_code_text", "model": "opus"},
+        "proposer_codex": {"adapter": "codex_text", "model": "gpt-5.6-sol"},
         "proposer_kimi": {
             "adapter": "claude_code_text_kimi",
-            "model": "kimi-k2.6",
+            "model": "kimi-k3",
         },
         "proposer_deepseek": {
             "adapter": "claude_code_text_deepseek",
             "model": "deepseek-v4-pro",
         },
-        "synthesizer": {"adapter": "claude_code_text", "model": "fable"},
+        "synthesizer": {"adapter": "claude_code_text", "model": "opus"},
     },
     "workflows": {
         "council_four_canonical": {"pattern": "council_four_canonical"},

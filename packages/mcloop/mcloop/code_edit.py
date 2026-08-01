@@ -398,7 +398,7 @@ def _invoke_bug_verify_direct(
     """Direct bug-verify path.
 
     Builds a prepared session so provider routing for third-party
-    model aliases (kimi-k2.6, DeepSeek, any fully qualified provider
+    model aliases (kimi-k3, DeepSeek, any fully qualified provider
     slug) cannot be skipped before ``_run_session`` starts the process.
     """
     from mcloop.prompts import build_bug_verify_prompt
