@@ -27,7 +27,7 @@ Council synthesis is a different shape:
   inputs, no prior turns from the synthesizer's perspective.
 - The synthesizer does not "judge" any single proposal. The verdict
   it emits records agreements, disagreements, rejected options, and
-  criteria compliance ACROSS the four — a structural summary of the
+  criteria compliance ACROSS the four, a structural summary of the
   fan-out, not a quality grade for one proposer.
 
 The original concern was about a model evaluating its own output

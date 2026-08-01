@@ -41,12 +41,12 @@ threshold-crossing for Duplo invocation.
 
 ## Three artifacts
 
-- `PLAN.md` — human-readable current plan of record. Re-authored at
+- `PLAN.md`, human-readable current plan of record. Re-authored at
   thresholds. Not the source of truth.
-- `PLAN.state.json` — machine-readable plan state: phase IDs,
+- `PLAN.state.json`, machine-readable plan state: phase IDs,
   statuses, lineage, modification history, commit links, evidence
   links, supersession relations, abandonment reasons.
-- `PLAN.events.jsonl` — append-only event ledger. Every nontrivial
+- `PLAN.events.jsonl`, append-only event ledger. Every nontrivial
   McLoop action emits one event.
 
 The ledger (events.jsonl + state.json) is the source of truth.
@@ -73,23 +73,23 @@ McLoop emits typed events to `PLAN.events.jsonl`. No behavior
 change. Pure logging.
 
 Event types (initial set):
-- `phase_started` — phase ID, timestamp
-- `phase_completed` — phase ID, commits, artifacts
-- `phase_abandoned` — phase ID, reason
-- `commit_landed` — commit hash, attributed phase ID or null
-- `test_failed` — test ID, phase ID, failure summary
-- `finding_observed` — free-form finding, evidence pointer
-- `invariant_declared` — new correctness invariant, source
+- `phase_started`, phase ID, timestamp
+- `phase_completed`, phase ID, commits, artifacts
+- `phase_abandoned`, phase ID, reason
+- `commit_landed`, commit hash, attributed phase ID or null
+- `test_failed`, test ID, phase ID, failure summary
+- `finding_observed`, free-form finding, evidence pointer
+- `invariant_declared`, new correctness invariant, source
 
 PLAN.state.json initial schema:
-- `phases[]` — { id, status, lineage, evidence_refs, modification_history }
+- `phases[]`, { id, status, lineage, evidence_refs, modification_history }
 - `status` enum: pending, active, completed, abandoned, superseded, split, merged, blocked, provisional
-- `lineage` — predecessor phase IDs, supersession relations
+- `lineage`, predecessor phase IDs, supersession relations
 
 ### Slice B. Threshold rules
 
 A ruleset that classifies events as annotate-only vs trigger-re-
-author. Initial rules conservative — only fire on explicit triggers:
+author. Initial rules conservative, only fire on explicit triggers:
 
 - Commit not attributable to any phase.
 - Phase abandoned by McLoop or human.
@@ -100,7 +100,7 @@ author. Initial rules conservative — only fire on explicit triggers:
 
 When a threshold fires, McLoop emits a `threshold_crossed` event
 and notifies the Plan Steward. Threshold firing does not yet
-trigger re-authoring — Slice B only alerts.
+trigger re-authoring, Slice B only alerts.
 
 ### Slice C. Duplo re-author mode
 
@@ -134,7 +134,7 @@ author, accepts new plan, resumes. The loop is closed.
 
 1. Where does Plan Steward live in the codebase? McLoop subsystem
    for Slice A; reassess after C.
-2. PLAN.state.json schema — JSON Schema definition needed before
+2. PLAN.state.json schema, JSON Schema definition needed before
    Slice A ships.
 3. Threshold rule expression: code, configuration, or both?
 4. Re-author invocation: synchronous (McLoop blocks) or

@@ -10,7 +10,7 @@ typed data. The drafter writes SPEC.md. They're inverse modules
 and share dataclass definitions.
 
 `spec_drafter.py` is a new module. There is no existing
-equivalent in the codebase — today, SPEC.md is entirely
+equivalent in the codebase, today, SPEC.md is entirely
 user-authored, and duplo never writes to it.
 
 
@@ -22,7 +22,7 @@ user-authored, and duplo never writes to it.
    and `## References` sections without disturbing other content.
 3. Insert and update AUTO-GENERATED blocks inside `## Design`
    without overwriting user-authored prose.
-4. Preserve all user edits to all sections — never modify
+4. Preserve all user edits to all sections, never modify
    user content.
 5. Produce SPEC.md that round-trips cleanly through the parser
    (write, read, write again, get the same file).
@@ -153,7 +153,7 @@ The function:
    mirrors the parse-time coercion in PARSER-design.md and
    prevents a one-run-stale-file window where a Phase 4
    drafter infers a counter-example role with a non-`none`
-   scrape and serializes the wrong combination — the parser
+   scrape and serializes the wrong combination, the parser
    would fix it on next read, but the intervening file state
    would be incorrect. `append_sources` fixes it at write
    time so the file is never incorrect. (Phase 3 only
@@ -233,7 +233,7 @@ The tradeoff: a user who changes their `visual-target`
 references and wants updated extraction must explicitly delete
 the block. The block's comment text tells them exactly how.
 This is acceptable because design extraction is the kind of
-thing users want to review before re-running anyway — surfacing
+thing users want to review before re-running anyway, surfacing
 the "do you really want to regenerate" decision is feature, not
 friction.
 
@@ -436,7 +436,7 @@ def _spec_equal_for_round_trip(a: ProductSpec, b: ProductSpec) -> bool:
 ```
 
 The `dropped_*` exclusion matters because `format_spec` does
-not (and should not) serialize those lists — they represent
+not (and should not) serialize those lists, they represent
 entries the parser rejected at read time. A round-tripped
 spec will have empty `dropped_*` lists regardless of what the
 original contained, so including them in the comparator
@@ -446,7 +446,7 @@ Test-generator note: generators producing `ProductSpec`
 instances for this property test MAY populate `dropped_*`
 (the comparator ignores those fields), but a separate test
 pins that `dropped_*` entries round-trip as empty lists
-— documenting the asymmetry rather than hiding it.
+, documenting the asymmetry rather than hiding it.
 
 Run against generated `ProductSpec` instances covering all
 field combinations. Catches any drift between parser and
@@ -471,12 +471,12 @@ This tests the edit-safety property concretely.
 
 The drafter raises specific exceptions for caller handling:
 
-- `SectionNotFound(name)` — append/update called on a section
+- `SectionNotFound(name)`, append/update called on a section
   that doesn't exist in the file.
-- `MalformedSpec(reason)` — parse-during-modify failed because
+- `MalformedSpec(reason)`, parse-during-modify failed because
   the existing file isn't valid SPEC.md format. Caller should
   decide whether to overwrite or bail.
-- `DraftingFailed(reason)` — LLM call in `_draft_from_inputs`
+- `DraftingFailed(reason)`, LLM call in `_draft_from_inputs`
   failed (timeout, parse error, etc.). Caller should fall back
   to template-only draft (the static `SPEC-template.md`
   contents).

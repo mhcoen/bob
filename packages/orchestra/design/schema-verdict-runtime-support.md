@@ -425,7 +425,7 @@ The commit comprises six pieces, in dependency order:
     a state but whose source field is not in the schema's
     `required` list.
 - The minimal test workflow is a stripped Iterate without
-  the actual reviewer/judge model calls — uses
+  the actual reviewer/judge model calls, uses
   mock_model adapters returning canned JSON. This isolates
   the schema mechanism from the workflow design.
 
@@ -526,7 +526,7 @@ each schema branch and the error paths.
    the fact. An alternative is to have adapters ask the model to
    produce schema-conformant output via structured-output APIs
    (Anthropic's tool use, OpenAI's response_format). v0 doesn't
-   do this — the prompt template carries the responsibility. The
+   do this. The prompt template carries the responsibility. The
    trade-off is correctness (structured output is more reliable)
    vs. adapter complexity (each adapter needs schema-handling
    logic). Defer.

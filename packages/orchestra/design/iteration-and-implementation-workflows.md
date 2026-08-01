@@ -5,9 +5,9 @@ Status: Design draft for review
 
 This document specifies three new workflow patterns for orchestra:
 
-1. **Parallel Thinking** — N actors answer in parallel, no synthesizer.
-2. **Iterate Until Acceptable** — Reviewer-Judge loop on a fixed proposal.
-3. **Propose-Review-Judge-Implement** — Controller-driven loop with an
+1. **Parallel Thinking**, N actors answer in parallel, no synthesizer.
+2. **Iterate Until Acceptable**, Reviewer-Judge loop on a fixed proposal.
+3. **Propose-Review-Judge-Implement**, Controller-driven loop with an
    implementer that mutates state inside the cycle.
 
 The three are listed in order of increasing complexity. Each builds
@@ -31,9 +31,9 @@ expose disagreement rather than resolve it.
 
 ### Roles
 
-- **Framer** — reformulates the input into a question every panelist
+- **Framer**, reformulates the input into a question every panelist
   receives.
-- **Panelists 1..N** — answer the framed question independently. N is
+- **Panelists 1..N**, answer the framed question independently. N is
   fixed at 5 in the v0 implementation, matching the Council and
   Anonymous Reviewers shape.
 
@@ -149,10 +149,10 @@ concrete.
 
 ### Roles
 
-- **Proposer** — produces the initial artifact once. Not re-invoked.
-- **Reviewer** — examines the proposal and current judge feedback,
+- **Proposer**, produces the initial artifact once. Not re-invoked.
+- **Reviewer**, examines the proposal and current judge feedback,
   produces a critique.
-- **Judge** — evaluates the reviewer's critique against the original
+- **Judge**, evaluates the reviewer's critique against the original
   proposal, produces a verdict.
 
 ### Distinct-actor constraint and where it is checked
@@ -313,14 +313,14 @@ complete.
 
 ### Roles
 
-- **Proposer** — frames what should be reviewed. Consulted by the
+- **Proposer**, frames what should be reviewed. Consulted by the
   judge on each iteration to decide what to do with the reviewer's
   findings. May be re-invoked to re-frame.
-- **Reviewer** — independent critic. Examines the current state of
+- **Reviewer**, independent critic. Examines the current state of
   the work and produces findings.
-- **Judge** — controller. Invokes the others, decides what to do
+- **Judge**, controller. Invokes the others, decides what to do
   with their outputs, terminates when the work is acceptable.
-- **Implementer** — applies fixes. The only role that mutates the
+- **Implementer**, applies fixes. The only role that mutates the
   workspace.
 
 ### Distinct-actor constraint and where it is checked
@@ -400,14 +400,14 @@ Schema-backed verdict from the judge, four branches:
 
 Three counters bound the loop:
 
-- `attempts.judge < 30` — total judge invocations. The judge's
+- `attempts.judge < 30`, total judge invocations. The judge's
   outcome is what drives every loop continuation, so this cap is
   the primary safety net. Exhaustion routes to `stop` (refuse-on-
   cap, not accept-on-cap: reaching this cap means the judge could
   not converge).
-- `attempts.implement < 20` — total implementer invocations.
+- `attempts.implement < 20`, total implementer invocations.
   Independent of judge cap; bounds runaway fix loops.
-- `attempts.propose < 6` — total proposer invocations including the
+- `attempts.propose < 6`, total proposer invocations including the
   initial proposal. The reframe path reuses the `propose` state, so
   the counter is `attempts.propose`, not `attempts.reframe`. The
   initial proposal counts as attempt 1; up to 5 reframes are
@@ -536,7 +536,7 @@ accepted, asked for re-review, or sent fix instructions to Code.
 ### Open questions
 
 1. The relay mechanism we have been using is Desktop ↔ Code. The
-   workflow's invocation model is straight orchestra — every state's
+   workflow's invocation model is straight orchestra, every state's
    actor is invoked by the orchestra runtime, not via a manual
    relay step. This means the runtime needs adapters that can
    actually drive Codex (already exists: `codex_text`,

@@ -46,13 +46,13 @@ duplo init <url> --from-description FILE   # both inputs combined
 
 Flags:
 
-- `--from-description PATH` — path to a text file (or `-` for
+- `--from-description PATH`, path to a text file (or `-` for
   stdin) containing prose describing what the user wants. The
   prose gets fed to the drafter alongside any URL scrape.
-- `--deep` — opt-in to deep scraping during `init`. Default is
+- `--deep`, opt-in to deep scraping during `init`. Default is
   shallow. Useful if the user knows they want the full crawl
   done up front and doesn't want to re-review `## Sources`.
-- `--force` — overwrite an existing SPEC.md. Default behavior is
+- `--force`, overwrite an existing SPEC.md. Default behavior is
   to error if SPEC.md already exists.
 
 No interactive prompts. No `--yes` flag needed because there's
@@ -116,17 +116,17 @@ The deep scrape is deferred so you can adjust ## Sources first
 
 What gets pre-filled in SPEC.md:
 
-- `## Purpose` — one-sentence inferred description from the
+- `## Purpose`, one-sentence inferred description from the
   scrape (e.g. "A macOS calculator with natural-language
   expressions and inline results.").
-- `## Sources` — one entry for the URL with `role: product-reference`,
+- `## Sources`, one entry for the URL with `role: product-reference`,
   `scrape: deep`, no proposed/discovered flag (user provided
   it explicitly).
 
 What stays as `<FILL IN>`:
 
-- `## Architecture` — duplo can't infer this from a scrape.
-- `## Design` — left as `<FILL IN>` because we have no
+- `## Architecture`; duplo can't infer this from a scrape.
+- `## Design`, left as `<FILL IN>` because we have no
   visual-target references yet. (If `--deep` was passed,
   duplo could extract design from scraped images, but for
   shallow init it doesn't.)
@@ -176,7 +176,7 @@ Specifically:
 - `## Architecture`: filled ONLY when the prose explicitly
   states a language, framework, or platform. Inferring it from
   product identity ("a macOS app, so probably Swift") is not
-  done — architecture is the user's choice and the LLM should
+  done, architecture is the user's choice and the LLM should
   not guess.
 - `## Notes`: contains the original prose verbatim under a
   labeled header. The LLM does not invent or summarize content
@@ -435,7 +435,7 @@ The first `duplo` run after init does:
      DRAFTER-design.md § "Inferring file roles via Vision"
      for the role-proposal prompt; see PIPELINE-design.md
      § `design_extractor.py` for the design-synthesis prompt).
-     Running both is not redundant — they produce different
+     Running both is not redundant, they produce different
      outputs (per-image roles vs. aggregated design
      requirements) and the design-synthesis call is gated
      on the autogen block being absent (write-once-never-
@@ -447,7 +447,7 @@ The first `duplo` run after init does:
 `duplo init` does NOT call any of the existing `_first_run`
 machinery in `main.py`. The two are entirely separate code paths.
 After init, the project is in a state that the existing
-"subsequent run" code can handle (with adjustments — see
+"subsequent run" code can handle (with adjustments; see
 `PIPELINE-design.md`).
 
 
@@ -484,7 +484,7 @@ Dependencies:
 - `duplo.design_extractor.extract_design` (existing) is NOT
   reused for role proposal. Role proposal uses a separate
   Vision prompt specified in DRAFTER-design.md § "Inferring
-  file roles via Vision" — a two-question prompt that returns
+  file roles via Vision", a two-question prompt that returns
   `{description, role}` per image from a fixed enum. The
   module that owns the call is `spec_drafter.py` (same module
   as the rest of the drafter); the prompt lives alongside the

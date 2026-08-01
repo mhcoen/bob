@@ -82,7 +82,7 @@ Validation:
   dropped at parse time with a diagnostic, AND its URL is
   recorded on `ProductSpec` so `validate_for_run` can surface
   a hard error referencing the specific URL. Rationale: an
-  entry without a valid role is unroutable — the pipeline
+  entry without a valid role is unroutable, the pipeline
   cannot pick between deep-crawl (`product-reference`),
   shallow-fetch (`docs`), and never-scrape (`counter-example`)
   without the user saying. Defaulting silently to any of these
@@ -94,13 +94,13 @@ Validation:
   default to `none` with a diagnostic. Defaulting to `none`
   keeps the entry visible in the spec but prevents accidental
   scraping until the user fixes the value. (This is safe to
-  default — unlike role, `none` produces no pipeline action,
+  default, unlike role, `none` produces no pipeline action,
   so silent defaulting cannot widen authority.)
 - **Counter-example coercion happens at parse time, not formatter
   time.** If `role` is `counter-example` and `scrape` is `deep`
   or `shallow`, the parser rewrites `scrape` to `none` on the
   stored `SourceEntry` and emits a diagnostic (the user almost
-  certainly meant `none` — counter-example URLs are declarative
+  certainly meant `none`, counter-example URLs are declarative
   context, never scraped). This is coercion of the STORED VALUE
   in the dataclass, not just a filter applied in
   `format_scrapeable_sources`. Rationale: if coercion happened
@@ -123,7 +123,7 @@ Validation:
   principle propose a `counter-example` entry with a declared
   scrape depth. Phase 4 is responsible for applying the
   equivalent coercion in `spec_drafter.append_sources` before
-  serializing — either by calling a shared
+  serializing, either by calling a shared
   `_coerce_counter_example_scrape(entry)` helper or by
   replicating the rule. The parser will also coerce such an
   entry on the next `read_spec()`, so the invariant self-heals
@@ -255,14 +255,14 @@ Two fields change type from `str` to a structured form
 (`design`, `references`). This breaks any existing caller that
 accessed them as strings. Audit the codebase before implementing:
 
-- `format_spec_for_prompt` — currently uses `spec.raw`, but is
+- `format_spec_for_prompt`, currently uses `spec.raw`, but is
   itself being rewritten (see "Per-stage formatters" below).
-- `format_scope_override_prompt` — uses `spec.scope_include`
+- `format_scope_override_prompt`, uses `spec.scope_include`
   and `spec.scope_exclude`, unaffected.
-- `format_contracts_as_verification` — uses
+- `format_contracts_as_verification`, uses
   `spec.behavior_contracts`, unaffected.
 - Anywhere in `main.py` or other modules accessing
-  `spec.design` or `spec.references` as strings — needs update
+  `spec.design` or `spec.references` as strings, needs update
   to use `spec.design.user_prose` (or `format_design_for_prompt`)
   and `spec.references` as a list.
 
@@ -563,7 +563,7 @@ Errors include:
   excluded (they're inert until the user removes the flag).
   Without this stricter count, a spec with only counter-example
   or proposed references would pass validation despite having
-  no actual build input — the pipeline would then run with no
+  no actual build input; the pipeline would then run with no
   feature-extraction substrate and produce an empty plan.
 
 The role-missing errors and the no-source-no-ref check are
@@ -579,7 +579,7 @@ the user has no entries at all.
 
 `fill_in_design` is a WARNING, not an error. The "URL alone"
 common pattern in SPEC-guide.md is valid even when `## Design`
-has no user prose and no visual-target references — duplo can
+has no user prose and no visual-target references; duplo can
 still proceed by inferring design from scraped product-reference
 pages (see PIPELINE-design.md, design extraction from site
 media). The warning surfaces in the run summary so the user
@@ -602,7 +602,7 @@ safety, since unreviewed entries are already inert.
 `## Purpose` (>= 50 chars), no scrapeable sources, and only
 `proposed: true` references passes validation: the 50-char
 Purpose defeats the no-input check even though no build-bearing
-reference is available. This is intentional — the prose-only
+reference is available. This is intentional, the prose-only
 run is a supported path (per Open Question 5 below: CLIs,
 libraries, behaviorally-specified apps). The existing
 "<n> proposed: true entries" warning surfaces that the
@@ -625,7 +625,7 @@ preservation**: the parser produces a valid `ProductSpec` even
 from old-format SPEC.md files, but with reduced structure. The
 heavier auto-migration work (creating `ref/`, generating a fresh
 SPEC.md from `.duplo/duplo.json` state) is out of scope for the
-parser — see `MIGRATION-design.md`.
+parser; see `MIGRATION-design.md`.
 
 The parser-level behaviors:
 
@@ -644,7 +644,7 @@ The parser-level behaviors:
    add a `## Sources` section.
 
 3. **No `## Notes` section** parses to empty `spec.notes`. No
-   diagnostic — `## Notes` is fully optional.
+   diagnostic, `## Notes` is fully optional.
 
 4. **No `<FILL IN>` markers** in old files means
    `fill_in_purpose` and `fill_in_architecture` stay false.
@@ -668,25 +668,25 @@ stay valid.
 
 Add new tests:
 
-1. `## Sources` parsing — single entry, multiple entries,
+1. `## Sources` parsing, single entry, multiple entries,
    entries with all field combinations, invalid URLs dropped,
    invalid roles dropped (entry removed entirely), invalid
    scrape defaulting to `none`, comment-stripped examples not
    being parsed as real entries.
-2. `## References` parsing — same as Sources, plus path
+2. `## References` parsing, same as Sources, plus path
    restriction to `ref/`, paths with spaces, quoted paths,
    multiple roles per entry, `discovered:` flag rejected.
-3. `<FILL IN>` detection — present in body, present in comment
+3. `<FILL IN>` detection, present in body, present in comment
    (should NOT trigger), present in required section
    (sets flag), absent (flag stays false).
-4. `## Design` AUTO-GENERATED block parsing — block present
+4. `## Design` AUTO-GENERATED block parsing, block present
    (split into user_prose and auto_generated), block absent
    (all goes to user_prose), block with malformed markers
    (treated as no block, all to user_prose).
-5. `fill_in_design` rule — true when user_prose has marker AND
+5. `fill_in_design` rule, true when user_prose has marker AND
    no visual-target references; false when either condition
    fails.
-6. Per-stage formatters — each returns the right filtered list,
+6. Per-stage formatters; each returns the right filtered list,
    each excludes proposed: true, each excludes counter-example
    (where applicable), entries with multiple roles appear in
    each matching formatter, each handles empty input gracefully.
@@ -694,11 +694,11 @@ Add new tests:
    output for a spec containing `proposed: true`,
    `discovered: true`, and `counter-example` entries does NOT
    contain those entries' content. This is the highest-leverage
-   test in the suite — it pins the safety property.
-8. `validate_for_run` — each error condition produces the
+   test in the suite, it pins the safety property.
+8. `validate_for_run`, each error condition produces the
    expected message; valid spec returns empty list;
    `fill_in_design` produces a warning, not an error.
-9. Migration — old-format SPEC.md (with prose `## References`,
+9. Migration, old-format SPEC.md (with prose `## References`,
    no Sources, no Notes) parses without errors, raw content
    preserved in `spec.raw`, diagnostics emitted.
 
@@ -733,7 +733,7 @@ When this becomes mcloop tasks:
 12. Wire `validate_for_run` into `main.py` at run start.
 
 (`canonicalize_url` itself is implemented in Phase 3 pipeline
-work, not parser work — it's a shared helper used by fetcher,
+work, not parser work, it's a shared helper used by fetcher,
 parser, drafter, and orchestrator. Phase 3 lands the function;
 the parser imports and uses it. Order the parser task after
 the `canonicalize_url` task in the Phase 3 PLAN.md.)

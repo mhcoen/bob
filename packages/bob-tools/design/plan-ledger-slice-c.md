@@ -22,7 +22,7 @@ existing PLAN.md, ledger evidence that part of the plan is
 invalidated, re-author with both as input.
 
 The council workflow already accepts `ledger_slice` and
-`design_context` as framer inputs — those slots were wired empty
+`design_context` as framer inputs; those slots were wired empty
 in the canonical path, anticipating this integration. Slice C
 populates them.
 
@@ -116,7 +116,7 @@ Returns the path to the written plan. Side effect: writes a
    (phase_started, phase_abandoned, etc.) and reasoning events
    (design_reasoning_recorded, assumption_falsified,
    invariant_declared). Format: a structured summary, not the
-   raw JSONL — the council framer needs context, not 500 lines
+   raw JSONL; the council framer needs context, not 500 lines
    of envelope.
 
 3. **Build design_context.** Extract from current PLAN.md the
@@ -193,7 +193,7 @@ gets a small update as part of Slice C.
 
 The hardest part of Slice C is making sure phase IDs persist
 across re-authorings. If phase_a in the original plan stays valid
-in the new plan, its ID must not change — otherwise Slice A's
+in the new plan, its ID must not change, otherwise Slice A's
 projector loses continuity (lineage pointers would target
 non-existent phases).
 

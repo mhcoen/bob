@@ -161,8 +161,8 @@ synthesizer, invoked once per phase across a multi-phase build,
 produced `phase_001` for both the first AND second invocation,
 then `phase_002` / `phase_003` / `phase_004` for the rest. The
 re-author lineage validator caught the duplicate at `phase_001`
-and McLoop hard-stopped on `lineage_invalid` — the closed loop
-fired correctly — but the upstream cause was the synthesizer
+and McLoop hard-stopped on `lineage_invalid`, the closed loop
+fired correctly, but the upstream cause was the synthesizer
 authoring a phase identifier each time without context about
 prior invocations.
 

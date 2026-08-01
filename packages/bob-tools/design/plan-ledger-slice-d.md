@@ -72,8 +72,8 @@ Three options for the pause semantics:
      replaces ad-hoc human-mediated consultation."
 
 (iii) **Configurable per crossing.** Some rules trigger hard stop
-      (assumption_falsified — needs human review), others
-      auto-reauthor (exploratory_count_exceeded — mechanical
+      (assumption_falsified, needs human review), others
+      auto-reauthor (exploratory_count_exceeded, mechanical
       response). Per-rule policy in `.orchestra/config.json`.
 
 Recommend **(ii) auto-reauthor** as the default for Slice D, with
@@ -435,7 +435,7 @@ review. Codex's review came back with deltas on Q1, Q3, and Q4
 plus confirmations on Q2 and Q5. The body of this document has
 been updated; the resolutions are summarized here for audit.
 
-**Q1 — Pause semantics.** Resolved: (ii) auto-reauthor by
+**Q1, Pause semantics.** Resolved: (ii) auto-reauthor by
 default with (i) hard-stop as opt-out, plus an explicit
 failure-mode contract: any reauthor invocation failure,
 lineage-validation rejection, or other reauthor exception
@@ -444,14 +444,14 @@ loop on success; failures get the same observable outcome as
 manual hard-stop plus a clear ledger signal of what was
 attempted. See "Failure-mode contract" above.
 
-**Q2 — Threshold evaluation point.** Confirmed: (b) post-task
+**Q2, Threshold evaluation point.** Confirmed: (b) post-task
 only, with a one-shot startup check for externally injected
 events. Codex's framing: "task emits events, thresholds
 evaluate, McLoop either continues or reauthors. A pre-task
 loop check is redundant except for externally injected ledger
 events, and startup covers that case."
 
-**Q3 — Phase ID resolution.** Resolved with a stricter
+**Q3, Phase ID resolution.** Resolved with a stricter
 contract than the original draft proposed: explicit
 `<!-- phase_id: phase_NNN -->` metadata is REQUIRED for
 Duplo- or McLoop-authored planned tasks; ordinal fallback is
@@ -463,14 +463,14 @@ continues. See "Resolution contract" above. Codex's framing:
 is acceptable as compatibility fallback, not as the main
 resolution mechanism."
 
-**Q4 — Multi-runner coordination.** Resolved: out of scope
+**Q4, Multi-runner coordination.** Resolved: out of scope
 for Slice D, with a documented future design path covering
 runner_id, write leases, and optimistic crossing recording.
 See "Multi-runner future path" above. Codex wanted the design
 path documented even though no implementation lands; the
 section above satisfies that.
 
-**Q5 — Auto-reauthor on test_failed.** Confirmed and tightened.
+**Q5, Auto-reauthor on test_failed.** Confirmed and tightened.
 Slice B's rules fire on `assumption_falsified`, not directly
 on `test_failed`. Codex's framing: "A failing test is
 evidence; a falsified assumption is a semantic claim." McLoop

@@ -43,7 +43,7 @@ Seven rules to ship in Slice B:
 
 4. Phase topology changed. Any `phase_split` or `phase_merged`
    event triggers. Codex's review flagged the prior spec's
-   handwave that split/merged "fold into invariant/assumption" —
+   handwave that split/merged "fold into invariant/assumption",
    a topology change is its own class of plan-invalidating event
    and must be explicit, not implicit.
 

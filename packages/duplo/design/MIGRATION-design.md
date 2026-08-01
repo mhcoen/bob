@@ -32,7 +32,7 @@ a minimal new-format SPEC.md from scratch (without copying
 the comment marker) would otherwise stay stuck in migration
 forever because the first signal fails. The `## Sources`
 heading is the lowest-ceremony structural signal the new
-format introduces — any genuinely new-format SPEC.md will
+format introduces, any genuinely new-format SPEC.md will
 have one (even if empty) because it's one of the three input
 channels.
 
@@ -56,7 +56,7 @@ def needs_migration(target_dir: Path) -> bool:
 
 ## Behavior
 
-Migration ships in Phase 2 — *before* `duplo init` exists
+Migration ships in Phase 2, *before* `duplo init` exists
 (`duplo init` ships in Phase 4). The message text therefore has
 two versions:
 
