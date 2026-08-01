@@ -1732,9 +1732,7 @@ Worked three-tier example:
         "use_slug_model": false,
         "env_overrides": {
           "ENABLE_TOOL_SEARCH": "false",
-          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
-          "DISABLE_INTERLEAVED_THINKING": "1",
-          "MAX_THINKING_TOKENS": "0"
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi"
         }
       }
     },
@@ -1781,9 +1779,7 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
         "use_slug_model": false,
         "env_overrides": {
           "ENABLE_TOOL_SEARCH": "false",
-          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
-          "DISABLE_INTERLEAVED_THINKING": "1",
-          "MAX_THINKING_TOKENS": "0"
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi"
         }
       }
     },
@@ -1915,8 +1911,6 @@ kimi_moonshot_fast() {
   CLAUDE_CODE_SUBAGENT_MODEL="kimi-k3" \
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
   ENABLE_TOOL_SEARCH=false \
-  DISABLE_INTERLEAVED_THINKING=1 \
-  MAX_THINKING_TOKENS=0 \
   claude "$@"
 }
 ```
@@ -1932,8 +1926,8 @@ What each variable does:
 | `CLAUDE_CODE_SUBAGENT_MODEL` | Model used when Claude Code spawns sub-agents. |
 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | Suppresses telemetry calls back to Anthropic when you are not using their API. |
 | `CLAUDE_CONFIG_DIR` | Points Claude Code at a separate config directory so the third-party provider's credentials and session state do not collide with the subscription-backed install. |
-| `DISABLE_INTERLEAVED_THINKING` | Set to `1` to disable interleaved thinking blocks. Required for direct-provider endpoints that do not support the Anthropic thinking schema. |
-| `MAX_THINKING_TOKENS` | Set to `0` alongside `DISABLE_INTERLEAVED_THINKING=1` to stop the client from reserving a thinking-token budget on third-party endpoints. |
+| `DISABLE_INTERLEAVED_THINKING` | Set to `1` to disable interleaved thinking blocks. Needed only for direct-provider endpoints that do not support the Anthropic thinking schema. Do NOT set it for Kimi K3, which reasons by default and returns thinking blocks over Moonshot's Anthropic-compatible endpoint; suppressing thinking gives up the reasoning its coding scores are measured with, and Kimi Code's managed surface routes a thinking-disabled K3 request to K2.6 outright. |
+| `MAX_THINKING_TOKENS` | Set to `0` alongside `DISABLE_INTERLEAVED_THINKING=1` to stop the client from reserving a thinking-token budget on third-party endpoints. Same K3 caveat applies: leave both unset on the Kimi tier. |
 | `ENABLE_TOOL_SEARCH` | Enables the deferred-tool-search feature so Claude Code can lazily load tool schemas, which most third-party endpoints support. Set to `false` on endpoints that do not implement it (e.g. Moonshot's Anthropic-compatible API). |
 
 Inside that subshell, `mcloop` will pick up the variables. mcloop also

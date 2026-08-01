@@ -23,9 +23,7 @@
         "use_slug_model": false,
         "env_overrides": {
           "ENABLE_TOOL_SEARCH": "false",
-          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi",
-          "DISABLE_INTERLEAVED_THINKING": "1",
-          "MAX_THINKING_TOKENS": "0"
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi"
         }
       }
     },
