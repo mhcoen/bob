@@ -27,7 +27,7 @@ have been sold, so it gets said plainly.
 A language model is a slot machine that talks. Every call is one
 sample: confident, fluent, and wrong often enough to matter. No prompt
 fixes this, because it is a property of sampling, not of skill. The
-fashionable response is to hand that slot machine *more* control — let
+fashionable response is to hand that slot machine *more* control. Let
 the agent decide what to do next, manage its own memory, steer its own
 loop. Bob thinks that is exactly backwards. You do not put the
 unreliable thing in charge of deciding what happens next.
@@ -49,8 +49,8 @@ What that buys you, and what nobody shipping a single-agent IDE has:
   process is replayable and crash-proof because there is nothing to
   corrupt that git does not already hold.
 - **Disagreement is a primitive, not a product.** Drafting, critique,
-  and reconciliation are configuration. Substitutability — a council
-  *is* a responder, a pair *is* a judge — is a first-class property,
+  and reconciliation are configuration. Substitutability (a council
+  *is* a responder, a pair *is* a judge) is a first-class property,
   not an afterthought bolted on later.
 - **The audit runs on evidence.** A typed, deterministic, append-only
   ledger lets a plan be re-derived from execution history. The drift
@@ -60,7 +60,7 @@ What that buys you, and what nobody shipping a single-agent IDE has:
 And the part that is easy to miss: **Bob is not a better agent. Bob is
 not an agent at all.** Claude Code, Cursor, and the rest of the
 autonomous-IDE pack are instances of the exact thing Bob refuses to
-do — they let the model drive. They are point tools. Bob is a process
+do. They let the model drive. They are point tools. Bob is a process
 with a position, assembled end to end. There is no peer to line it up
 against feature by feature, because the comparison is a category
 error: you do not benchmark a seatbelt against a faster car.
@@ -68,13 +68,13 @@ error: you do not benchmark a seatbelt against a faster car.
 None of the individual mechanisms is new, and Bob will be the first to
 say so. Acceptance gates are old. Replayable state is old. Ensembling
 and adjudication are an active research line. Careful human teams have
-always worked this way — a senior reviews the junior's PR, a design
+always worked this way. A senior reviews the junior's PR, a design
 doc gets read before it is committed to, one person finds the bug and
 another verifies the fix. The mistake-catching long predates LLMs.
 What Bob contributes is the synthesis: those four things, combined
 under the single rule that the model never steers, applied across the
 whole loop. No piece survives a "show me the prior art" challenge
-alone. The combination, end to end, is the contribution — and Bob
+alone. The combination, end to end, is the contribution, and Bob
 would rather state that honestly than oversell it.
 
 The sophistication here is not a clever algorithm. It is the choice of
@@ -142,7 +142,7 @@ Each is the rule above applied at a different scale. They interact: McLoop runs 
 [Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
 product URL, drop in screenshots, PDFs, or a demo video, whatever you
 have. Duplo produces a phased build plan. The quality of the output is
-a direct function of the quality of the plan — and that is on purpose.
+a direct function of the quality of the plan, and that is on purpose.
 The plan is not notes for the agent. The plan *is* the program; the
 agent is just the thing that runs it. Write a vague plan and you get
 vague code, plainly, with nowhere for the model to hide it. That is
@@ -153,7 +153,7 @@ losing.
 sleep or binge Netflix. Autonomous coding sessions for hours or days:
 fresh context per task, tests and lint after every change, only clean
 code committed, automatic audit when the queue is done. Fresh context
-per task is not a performance trick — it is the whole game. The state
+per task is not a performance trick. It is the whole game. The state
 is the repository and its git history, nothing else. There is no
 private conversation only the model has seen, which is why a `kill -9`
 is a shrug instead of a catastrophe. McLoop builds what Duplo
@@ -165,13 +165,13 @@ Orchestra hands different models different jobs and makes them argue,
 interact, and sing harmonies before anything touches the workspace.
 And the argument is not hardcoded: a council can be collapsed to a
 single responder, a pair promoted to a judge, a one-model edit swapped
-for a five-model brawl — by changing configuration, not by rewriting
+for a five-model brawl, by changing configuration, not by rewriting
 anything. Multi-model disagreement is a dial Bob can turn, not a
 feature someone soldered on.
 
 Vroom is Bob reading what shipped and asking what he should have done
 differently. Vroom runs parallel auditors over the work, coalesces
-what they find, and proposes a corrected or expanded plan — and it
+what they find, and proposes a corrected or expanded plan, and it
 does it from the evidence, not from vibes. Every run leaves a typed,
 append-only ledger, so the plan can be re-derived from what actually
 happened instead of hand-patched into looking fine. Eventually Vroom
@@ -202,34 +202,34 @@ passing something deterministic.
 AI coding tools are powerful, but a single model acting alone is not a
 software engineering process. It can skip design, miss edge cases,
 hallucinate APIs, repeat bad approaches, and commit plausible
-nonsense — cheerfully. The problem is not that the model is weak. It
+nonsense, cheerfully. The problem is not that the model is weak. It
 is that nothing deterministic stands between the model's output and
 your repository.
 
 Bob is the missing process layer:
 
-- design before execution — the plan is the program
-- fresh context per task — state is the repo, not a chat log
-- tests and lint after every change — a real check on every boundary
-- review before trust — independent draws where one gate is not enough
-- audit after shipping — the ledger decides whether to re-plan, not
+- design before execution, the plan is the program
+- fresh context per task, state is the repo, not a chat log
+- tests and lint after every change, a real check on every boundary
+- review before trust, independent draws where one gate is not enough
+- audit after shipping, the ledger decides whether to re-plan, not
   the model
-- explicit recovery when something breaks — because the only state is
+- explicit recovery when something breaks, because the only state is
   on disk and in git, there is always a defined state to recover to
 
 The point is not to make coding faster at any cost. It is to make
 autonomous coding slower where it must be slower and faster where it
-can be faster — and to put design back at the front of software
+can be faster, and to put design back at the front of software
 engineering, where it lived before the field stopped writing specs.
 
 ## Status (Bob does not lie about this)
 
-- **Duplo, McLoop, Orchestra** — in active use and built with each
+- **Duplo, McLoop, Orchestra**, in active use and built with each
   other. Real, used daily, building this.
-- **The Plan Ledger** — shipped, in `bob-tools`, with its projector
+- **The Plan Ledger**, shipped, in `bob-tools`, with its projector
   and threshold rules. This is the evidence substrate Vroom stands on.
-- **Vroom as the fully closed loop** — Bob proposing changes on
-  branches, gating them, merging what survives, unattended — is the
+- **Vroom as the fully closed loop**, Bob proposing changes on
+  branches, gating them, merging what survives, unattended, is the
   designed end state and is being closed, not yet closed. The
   scaffolding is real; the last quarter of the loop is still being
   wired, and that is stated here on purpose, because epistemic
@@ -248,7 +248,7 @@ engineering, where it lived before the field stopped writing specs.
 ## Thesis
 
 A coding agent is not a software engineering process. A deterministic
-framework that confines, gates, and composes stochastic actors is —
+framework that confines, gates, and composes stochastic actors is,
 and that framework, not the actors inside it, is where every
 correctness guarantee in this system lives. Bob is that framework.
 Also, Bob would have caught that bug in review.
@@ -258,20 +258,20 @@ Also, Bob would have caught that bug in review.
 The bob ecosystem lives in this repository as a uv workspace. Each
 tool is a package under `packages/`:
 
-- **[Duplo](packages/duplo/)** — design extraction and phased plan
+- **[Duplo](packages/duplo/)**, design extraction and phased plan
   generation.
-- **[McLoop](packages/mcloop/)** — the autonomous execution loop.
-- **[Orchestra](packages/orchestra/)** — the declarative multi-model
+- **[McLoop](packages/mcloop/)**, the autonomous execution loop.
+- **[Orchestra](packages/orchestra/)**, the declarative multi-model
   workflow runner.
-- **[bob-tools](packages/bob-tools/)** — shared infrastructure; the
+- **[bob-tools](packages/bob-tools/)**, shared infrastructure; the
   Plan Ledger and the formal `PLAN.md` library live here.
-- **Vroom** — post-ship audit and the closing of the loop — part of
+- **Vroom**, post-ship audit and the closing of the loop, part of
   the ecosystem, not yet public.
 
 Each package carries its own README with the full surface and its own
 honest status.
 
-Each package also carries its own `PLAN.md` — the canonical,
+Each package also carries its own `PLAN.md`, the canonical,
 machine-owned build document that package is developed against. Plans
 are per-package, not one global plan: McLoop advances each package's
 own `PLAN.md` independently. (Orchestra adopted a `PLAN.md` only late in its development; its
