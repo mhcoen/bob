@@ -75,16 +75,16 @@ cross-file id collisions become user-visible.
 ### [3] [T-000003] `has_waiver` now keys on task identity, with baseline as a fallback (2026-06-04)
 `waivers.has_waiver` no longer requires exact `baseline_sha` equality. It
 matches a recorded waiver when `changed_input` matches AND either the
-current `task_label` matches the record's (the durable key — survives a
+current `task_label` matches the record's (the durable key, survives a
 mid-task commit/checkpoint that advances `.mcloop/task-baseline`) OR the
 exact `baseline_sha` matches (fallback for environments that leave
-`MCLOOP_TASK_LABEL` unset, e.g. native Anthropic models — see
+`MCLOOP_TASK_LABEL` unset, e.g. native Anthropic models; see
 `code_edit.py:419`). The call site `checks._resolve_flagged` reads
 `MCLOOP_TASK_LABEL` and passes it through. Empty task_label + empty
 baseline still never matches, so the gate cannot be blanket-bypassed.
 Assumption worth revisiting: an empty `task_label` recorded by `mcloop
 waive` (unset env) can only ever be matched by baseline equality, so such
-waivers do NOT survive a baseline change — the survival guarantee holds
+waivers do NOT survive a baseline change; the survival guarantee holds
 only when a real task label is present at both record and check time.
 
 ### [1] [T-000001] No-test-needed class draws the line at "carries executable logic", not "is non-.py" (2026-06-04)
@@ -108,7 +108,7 @@ is `coverage_verify._run_coverage`, reached solely through
 `run_checks` → `_resolve_flagged` → `verify_change_covered`. That chain lives
 entirely inside the `if changed_files is not None:` branch of `run_checks`.
 The phase-boundary full-suite call is `run_checks(project_dir)` (main.py ~1435)
-with `changed_files=None`, which short-circuits past that branch — so the full
+with `changed_files=None`, which short-circuits past that branch, so the full
 suite can never run under coverage, never per-iteration beyond the per-task
 gate, and is never agent-invoked (the inner `mcloop verify` adapter routes only
 through the scoped `run_checks(changed_files=...)` form; `verify_cmd.py` ~16
@@ -116,10 +116,10 @@ documents it never calls the unscoped form).
 
 Tests pinning the invariant from both sides:
 - `tests/test_checks.py::test_phase_boundary_full_suite_has_no_coverage_instrumentation`
-  — full-suite path never calls `verify_change_covered`/`_run_coverage` and emits
+ , full-suite path never calls `verify_change_covered`/`_run_coverage` and emits
   no `--cov` flag.
 - `tests/test_coverage_verify.py::test_run_coverage_emits_cov_instrumentation_scoped_to_change`
-  — the scoped path is where `--cov=<dotted module>` + explicit candidate nodes
+ ; the scoped path is where `--cov=<dotted module>` + explicit candidate nodes
   are produced.
 
 Overhead envelope (<=~0.5s/run scoped, ~+9.5% full-suite) is unchanged because
@@ -154,7 +154,7 @@ Key design choices worth revisiting:
   fail-closed behavior, but noted.
 - **Dependent-test discovery is a transitive first-party import walk**
   (`dependent_test_files`). It selects only tests whose import closure reaches
-  the changed module — never the full suite. A test that exercises the module
+  the changed module, never the full suite. A test that exercises the module
   through a non-import path (dynamic import, subprocess, plugin entry point) is
   not discovered and the change would fail closed.
 - **xdist + pytest-cov need no extra config.** pytest-cov combines per-worker
@@ -280,7 +280,7 @@ silent-drop behavior in the tests.
 [2026-07-03] [8] [T-000036] Hook drift detection (check_hook_drift +
 run_loop warning + install refresh) covers only the canonical install
 location ~/.mcloop/hooks/. The incident file in the bug report lived at
-~/.claude/hooks/telegram-permission-hook.py — a prior `bob install`
+~/.claude/hooks/telegram-permission-hook.py, a prior `bob install`
 location. `_merge_settings` already dedupes settings.json entries
 pointing at that path (so the stale copy stops being *invoked* after a
 reinstall), but the stale file itself stays on disk and is not covered
@@ -289,7 +289,7 @@ the gate can go quiet again with no warning; extending the check to any
 telegram-permission-hook.py path referenced by ~/.claude/settings.json
 would close that hole. Also: `mcloop install` now overwrites a drifted
 installed hook with the packaged copy, so local hand-edits to
-~/.mcloop/hooks/* are clobbered by reinstall — intentional (the
+~/.mcloop/hooks/* are clobbered by reinstall, intentional (the
 installed copies are managed artifacts), but worth knowing.
 
 [2026-07-03] [9] [T-000034] The format-on-exit hole was path-specific, not
@@ -304,14 +304,14 @@ acceptance-kind dispatch in main.py so every declared kind formats
 before its check. Second, independent determinism gap fixed in the same
 change: run_autofix built its ruff commands from bare "ruff" and
 swallowed FileNotFoundError, while run_checks resolves tools through
-<project>/.venv/bin via _resolve_project_venv_command — in a project
+<project>/.venv/bin via _resolve_project_venv_command, in a project
 whose ruff is venv-only, autofix silently did nothing while the check
 still enforced formatting. run_autofix now resolves through the venv
 the same way.
 
 [2026-07-03] [9] [T-000034] Test-harness facts learned while writing the
 regression test: (a) tests/conftest.py's autouse guard monkeypatches
-mcloop.main._commit to a stub returning "" for EVERY test — any test
+mcloop.main._commit to a stub returning "" for EVERY test, any test
 asserting on real committed content must re-patch
 mcloop.main._commit with git_ops._commit and use a self-contained repo
 under tmp_path. (b) The shared _scratch_project helper returns a
@@ -322,7 +322,7 @@ meaning some test on the same xdist worker changes cwd. Tests that only
 use the returned Path consistently are immune, but anything relying on
 a stable on-disk location is not. (c) In sandboxed Claude Code
 sessions, `git init` under the repo tree fails with exit 128
-("cannot copy ... templates/hooks/... Operation not permitted" — the
+("cannot copy ... templates/hooks/... Operation not permitted", the
 .git write freeze), while `git init` under /tmp works; another reason
 real-git tests must live in tmp_path. A partial
 .scratch/gitprobe/.git from one such failed probe was left behind this
@@ -336,7 +336,7 @@ The observed incident says "task-level acceptance (pytest) passed" while
 the file failed the boundary's format check. If the task had used the
 declared `[accept: pytest]` kind, run_autofix would have formatted the
 file before the gate, so the most consistent explanations are: the task
-declared its pytest run as `command-exit` (no autofix, no ruff — the
+declared its pytest run as `command-exit` (no autofix, no ruff, the
 exact hole closed by this fix), or the writer project's ruff was
 venv-only so run_autofix silently no-oped (the second hole closed by
 this fix). Not confirmed against the writer run's logs.
@@ -391,13 +391,13 @@ this may select many test files in a real run, widening a "targeted" run
 toward the full suite. It only runs when the conventional file lookup
 finds nothing, so it errs toward more coverage, but if targeted-run speed
 regresses this scan is the likely cause. The match is filename-agnostic
-text containment, not a true pytest `-k` node — `k_module` is recorded on
+text containment, not a true pytest `-k` node, `k_module` is recorded on
 the account for callers that may later want to emit an actual `-k` flag.
 
 
 ### [14.3] [T-000386] verify adapter treats an empty changed-set as fail-closed (2026-06-01)
 `mcloop/verify_cmd.run_verify` distinguishes three outcomes from
-`git_ops._changed_files_since`: `None` (cannot resolve — empty baseline,
+`git_ops._changed_files_since`: `None` (cannot resolve, empty baseline,
 no repo, or git error), `[]` (baseline resolves but nothing changed), and
 a non-empty list. Both `None` and `[]` exit non-zero (`EXIT_FAIL_CLOSED`)
 and never reach `run_checks`. The `[]` case is a deliberate design choice:
@@ -418,7 +418,7 @@ expected-fail / unexpected-pass) is currently judged as no-signal and would
 fail `run_checks`. Such pure xfail/xpass runs are rare in practice and were
 not among the four required invalid cases, so the simpler literal predicate
 was chosen. If this ever bites, fold xfailed/xpassed into the "executed"
-count — the structured counts are already parsed and available.
+count; the structured counts are already parsed and available.
 
 ### [76.2] Codex CLI flag change (2026-03-14)
 Codex CLI no longer accepts `--ask-for-approval never --sandbox workspace-write`.
@@ -445,7 +445,7 @@ handles it.
 ### [7.3.1-7.3.3] mcloop maintain cannot connect to API from spawned session (2026-04-09)
 Both attempts to run `mcloop maintain` failed with `FailedToOpenSocket`
 after exhausting all 10 retries. The spawned Claude Code subprocess
-cannot reach the API. This is an infrastructure issue — the maintain
+cannot reach the API. This is an infrastructure issue, the maintain
 mechanism itself parsed invariants, built prompts, and handled failures
 correctly. Live verification blocked until API connectivity is resolved.
 
@@ -536,7 +536,7 @@ gate) and in maintain mode still exit without writing a summary, same
 as before. (3) _build_and_write_summary clears the hook because every
 call site is a terminal write followed by return; a future
 mid-run summary write would silently end interrupt coverage for the
-rest of that run — keep the one-terminal-write-per-run invariant.
+rest of that run; keep the one-terminal-write-per-run invariant.
 
 [2026-07-03] [6] [T-000033] Batch rollback switched to -z NUL-delimited
 git output. `git diff --name-only -z` / `git ls-files --others
@@ -554,7 +554,7 @@ raises on symlinks and aborted the rollback mid-way.
 test_run_summary_interrupted_run (T-000032) failed once under xdist
 with failure_detail "Interrupted by signal" instead of "User
 interrupted during session limit wait", and its captured stdout never
-showed the "Session limit reached" print — some time.sleep other than
+showed the "Session limit reached" print, some time.sleep other than
 main.py's session-limit poll fired first. The test's patch of
 mcloop.main.time.sleep patches the shared time module process-wide,
 so any stray sleeper triggers the interrupt writer while

@@ -11,7 +11,7 @@
   exists yet (T-000020 created only the writer), so the rename is safe;
   `test_call_log.py` was updated to match. New fields: `call_site`
   (caller label, defaults to `""`), `attempt` (the attempt number the
-  record describes — the successful attempt on success, `_MAX_ATTEMPTS`
+  record describes, the successful attempt on success, `_MAX_ATTEMPTS`
   on exhausted failure), and `outcome`.
 - 2026-05-28 [4.2] [T-000021]: `outcome` distinguishes `"timeout"` from
   `"error"` via substring match on the ClaudeCliError message
@@ -35,7 +35,7 @@
   four workspace PLAN.md files, `pytest` passes deterministically with
   `-p no:randomly` (6137 passed, 118 skipped). Run with the default
   randomized order it surfaces 30-42 pre-existing failures and 6-117
-  errors that vary run-to-run — purely test-isolation flakiness in
+  errors that vary run-to-run, purely test-isolation flakiness in
   packages/duplo/tests (e.g. `AttributeError: module 'duplo' has no
   attribute 'spec_writer'` from `monkeypatch.setattr` reaching for a
   submodule the test order has not yet imported). The check command as
@@ -74,7 +74,7 @@
   pre-existing and not introduced by the backfill.
 
 - 2026-05-26 [1.3] [T-000003]: The canonical-validator warning is gated
-  on `Plan.task_namespace is not None` — files that never opted in to
+  on `Plan.task_namespace is not None`, files that never opted in to
   the namespace scheme stay silent so the existing corpus does not
   acquire a deprecation drumbeat. The warning fires only when a
   namespaced plan still carries an unprefixed id, which is the
@@ -85,7 +85,7 @@
   which I interpret as no-warning-without-declared-namespace.
 - 2026-05-26 [1.3] [T-000003]: `task_namespace` lives on `Plan` and is
   recognized in the preamble before the first phase/bugs heading. The
-  parser does not enforce uniqueness across declarations — a repeated
+  parser does not enforce uniqueness across declarations, a repeated
   `<!-- task_namespace: ... -->` comment last-write-wins, matching the
   existing `_PHASE_ID_COMMENT_RE` policy. The structural-sanity check
   was deliberately not extended to flag duplicates; if that ends up
@@ -95,7 +95,7 @@
   in `packages/duplo/tests/` from notes [1.2] is unchanged. The bare
   `pytest` invocation surfaces 20-30 failures/errors in the duplo
   pipeline/status/phase5_integration files that all pass in isolation
-  and have no relationship to the planfile namespace work — most
+  and have no relationship to the planfile namespace work, most
   surface as `AttributeError: module 'duplo' has no attribute 'main'`
   from `_clean_argv` fixture's `monkeypatch.setattr("duplo.main.
   _check_migration", ...)` when the duplo.main submodule hasn't been
@@ -109,7 +109,7 @@
   spread across `test_reauthor.py`, `test_saver.py`,
   `test_platform_integration.py`, and `test_main.py` instead. The
   shifting failure set across runs with no intervening code change is
-  itself the diagnostic — every failure traces to xdist worker order
+  itself the diagnostic, every failure traces to xdist worker order
   and `monkeypatch.setattr("duplo.main.…", …)` reaching for a submodule
   the worker has not yet imported, not to any T-000003 change.
 
@@ -126,7 +126,7 @@
   `monkeypatch.setattr("duplo.main.X", ...)` raised `AttributeError:
   module 'duplo' has no attribute 'main'`. Random test order made the
   failure set shift run-to-run because xdist assigns tests to workers
-  arbitrarily — sometimes the polluting test ran before duplo tests
+  arbitrarily, sometimes the polluting test ran before duplo tests
   on the same worker, sometimes not. Fix: convert every assignment
   to `monkeypatch.setitem(sys.modules, ...)` so pytest restores the
   prior entries on teardown; thread `monkeypatch` through the helper
@@ -166,7 +166,7 @@
   per state_exit to `<run_dir>/transcript.jsonl`, fsynced per line,
   guarded by a thread lock so concurrent fan-out completions cannot
   interleave bytes. `run_role` no longer rewrites the file at
-  end-of-run — the file is already on disk. A crash mid-run leaves
+  end-of-run; the file is already on disk. A crash mid-run leaves
   every role completion durably recorded.
 - 2026-05-26 [2.8] [T-000013]: Pre-existing flake in
   `packages/orchestra/tests/test_fan_out_executor.py::test_cancellation_race_preserves_concurrent_success`.
@@ -197,7 +197,7 @@
   `role_bindings` does NOT inherit the default `design` binding; the
   `load_config` merge function only falls back to `default_config`
   when both layers are absent. Worth revisiting if the inherited-vs-
-  declared-default ergonomics surface as a real complaint — a "merge
+  declared-default ergonomics surface as a real complaint, a "merge
   default_config as base" change has bigger blast radius than this
   task warrants.
 - 2026-05-26 [2.9] [T-000014]: `BUILTIN_MODEL_IDENTIFIERS` is exposed
@@ -215,7 +215,7 @@
   explicit reason because the workflow wiring they target is not yet
   in place. Specifically: (a) `design_loop.orc` still references
   `iterate_judge_verdict.json` and the `iterate_*.md` templates with
-  the old accept/iterate/stuck vocabulary — task T-000006 added the
+  the old accept/iterate/stuck vocabulary, task T-000006 added the
   workflow file but did not switch the schema and template paths,
   even though T-000008 through T-000011 created the new design_loop_*
   artifacts. (b) the orchestra v0 schema layer rejects the
@@ -252,7 +252,7 @@
   `packages/orchestra/orchestra/workflows/templates/iterate_proposer.md`.
   The schema `schemas/iterate_judge_verdict.json` and templates
   `iterate_judge.md` and `iterate_reviewer.md` are NOT exclusive to the
-  retired workflow — `design_loop.orc` still references them — and
+  retired workflow (`design_loop.orc` still references them) and
   must stay.
 - 2026-05-26 [2.11] [T-000016]: The F2.5a end-to-end coverage that
   rode on `iterate_until_acceptable` (the file
@@ -304,7 +304,7 @@
   LLM calls elsewhere), so wrapping those two is one record per call.
   Two design choices worth revisiting: (1) records store the full
   `prompt`/`system`/`response` text, which is ideal for debugging but
-  will grow large and may capture sensitive content — a size cap or
+  will grow large and may capture sensitive content, a size cap or
   redaction toggle may be wanted later; (2) the run directory is
   created lazily on first append, so an activated run that makes no LLM
   calls leaves no directory. Subcommands (`fix`, `reauthor`, `init`,
@@ -324,7 +324,7 @@
   Kimi K2.6, eventually DeepSeek) for the duration of the lockout, OR
   pause and wait for quota recovery. The third path that needs building:
   use the alternate while Opus is locked, then *automatically resume on
-  Opus* the moment its quota window resets — especially relevant when
+  Opus* the moment its quota window resets, especially relevant when
   the alternate also has finite quota (GPT will eventually exhaust;
   Kimi has its own ceilings). Resumption is non-trivial: mcloop needs
   to (a) detect when the Opus window has reset (probe with a cheap
@@ -334,7 +334,7 @@
   task boundaries are the clean handoff points) or interrupt and
   re-dispatch, (c) re-route subsequent task dispatch back to Opus
   cleanly. The design has to handle the case where multiple models in
-  sequence run out — Opus → GPT → Kimi → DeepSeek → wait — and the
+  sequence run out (Opus → GPT → Kimi → DeepSeek → wait) and the
   resumption preference order should respect both the cost hierarchy
   AND the quality hierarchy (Opus first when available, even if GPT
   is also available, because Opus is preferred for high-judgment tasks).

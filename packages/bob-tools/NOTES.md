@@ -44,7 +44,7 @@
   caller keeps the default `False`, so the construction-API guard is
   unchanged on all non-fmt paths. Note: the sibling save paths (`done`,
   `fail`, mcloop `update`) still reject `trailing_lines` on the default
-  path — this fix was scoped to fmt per the task, but if those operations
+  path; this fix was scoped to fmt per the task, but if those operations
   are ever run on a file that already carries trailing lines they will hit
   the same gate; revisit if that surfaces.
 
@@ -52,7 +52,7 @@
   `backfill_file` (`planfile/backfill.py`) now renders then writes through
   `fileio._acquire_exclusive_lock` + `fileio._atomic_write_text` (imported
   by `from ... import`, so tests monkeypatch the names on the **backfill**
-  module, not `fileio`), matching every other writer — no more bare
+  module, not `fileio`), matching every other writer, no more bare
   `path.write_text`. Encodings pinned to UTF-8 everywhere they were locale-
   dependent: `fileio.load` (`path.read_text`), both reads in `fileio.update`,
   and the tempfile `os.fdopen` inside `_atomic_write_text`; backfill already
@@ -73,7 +73,7 @@
   making the **renderer refuse** the ambiguous combination (design doc
   section 4.3 grammar `ActionTag ← "[AUTO:" Word "]" WS Text?` defines args
   as the remainder to end of line, so the parser option "delimit args" is
-  ruled out — the design doc wins). `_render_task_lines`
+  ruled out, the design doc wins). `_render_task_lines`
   (`planfile/renderer.py`) now raises `PlanValidationError` when
   `action_tag is not None and text` is non-empty; that is the hard backstop
   for *any* `render_plan` caller, closing the gap the task named ("make_task
@@ -85,7 +85,7 @@
   vocabulary (`test_make_task_rejects_d1_scalar_leaks[action_tag]` still
   sees both `action_tag` and `failed to round-trip` in the message).
   Note the invariant is "action_tag present ⇒ text empty" regardless of
-  whether `args` is empty — even `[AUTO:run]` + text collapses on re-parse.
+  whether `args` is empty, even `[AUTO:run]` + text collapses on re-parse.
   Property test added in `test_generative.py`
   (`test_action_tag_args_and_text_combination_round_trips_or_is_refused`):
   over seeded `(action, args, text)` triples it asserts empty-text
@@ -97,7 +97,7 @@
   while running the checks: `ruff check .` reports one `UP038` in
   `tests/conftest.py:22` (`isinstance(cmd, (list, tuple))`). That file is an
   mcloop auto-injected LLM guard (`# mcloop:llm-guard`, "Auto-injected by
-  mcloop"), so I did not modify it — treating it like the mcloop:wrap
+  mcloop"), so I did not modify it, treating it like the mcloop:wrap
   managed blocks. It is unrelated to this task and in none of the three
   files I changed; the sanctioned `mcloop verify` scoped run (which lints
   only the changed files) passes clean. Flagging for the user to decide
@@ -119,7 +119,7 @@
   below: `ruff check .` fails on that mcloop-auto-injected guard file
   on clean HEAD; I fixed it to leave the tree green, `mcloop verify`
   flagged the untested conftest edit, and I reverted it. The debt is
-  still unowned — see the T-000002 entry for the recommended dedicated
+  still unowned; see the T-000002 entry for the recommended dedicated
   cleanup pass.
 
 - 2026-07-04 [2] [T-000002] The bug filed in BUGS.md ("`bob-plan fmt`
@@ -136,8 +136,8 @@
   checkboxes, with a mix of id'd and bare checkboxes, and with a bare
   done (`- [x]`) checkbox all exit 0 with fresh ids assigned and no
   error. A truly-empty checkbox `- [ ]` (no text) is intentionally NOT a
-  task — the parser routes it to prose and `_INCOMPLETE_CHECKBOX_RE` does
-  not match it — so it is left untouched; that is out of scope for this
+  task, the parser routes it to prose and `_INCOMPLETE_CHECKBOX_RE` does
+  not match it, so it is left untouched; that is out of scope for this
   bug. The migrate-vs-validate trigger is entirely in the parse step,
   not in `migrate`. Because the source fix already existed, this task
   added only a regression test
@@ -149,11 +149,11 @@
 
 - 2026-07-04 [2] [T-000002] Pre-existing ruff debt, left untouched as
   out of scope for this bug: on clean HEAD, `ruff check .` fails with
-  `cli.py:35 I001` (import block un-sorted — `operations` imported after
+  `cli.py:35 I001` (import block un-sorted, `operations` imported after
   `parser`) and `tests/conftest.py:19 UP038`, and `ruff format --check .`
   reports 5 files needing reformatting (`bob_tools/bob_cli.py`,
   `bob_tools/planfile/fileio.py`, `bob_tools/planfile/tests/test_operations.py`,
-  `bob_tools/tests/test_bob_cli.py`, `tests/conftest.py`) — cosmetic
+  `bob_tools/tests/test_bob_cli.py`, `tests/conftest.py`), cosmetic
   line-rewrapping because those files were wrapped more tightly than the
   configured `line-length = 88` (ruff 0.11.13 wants to unwrap). All of
   this predates and is unrelated to T-000002 (verified via a clean-HEAD
@@ -170,7 +170,7 @@
 - 2026-07-04 [2] [T-000002] Root cause of the reported mypy failure
   (`tests/conftest.py:11,18,28,29,38,41` `no-untyped-def` /
   `no-untyped-call`): the prior attempt's "revert the pre-existing-debt
-  cleanup" (documented in the entry above) was incomplete — it reverted
+  cleanup" (documented in the entry above) was incomplete, it reverted
   the UP038 lint fix but left one stray edit in `tests/conftest.py`, a
   deleted trailing blank line (`git diff HEAD` showed `1 deletion`). That
   single change kept the mcloop-auto-injected `# mcloop:llm-guard`
@@ -181,7 +181,7 @@
   set). Fix: `git checkout HEAD -- tests/conftest.py` fully restores it so
   it is no longer a changed file. After that, `mcloop verify` reports
   "scoped checks passed" and its scoped mypy list no longer includes
-  `tests/conftest.py`. No production change was needed for this — the
+  `tests/conftest.py`. No production change was needed for this, the
   T-000002 source fix and regression test were already in place (see the
   entry above); this attempt only completed the conftest restoration the
   prior attempt left half-done. Lesson: any incidental edit to the
@@ -189,7 +189,7 @@
   defs fail; leave it byte-identical to HEAD.
 
 - 2026-07-04 [2] [T-000002] Correction to the entry above: the proposed
-  `git checkout HEAD -- tests/conftest.py` was never actually applied —
+  `git checkout HEAD -- tests/conftest.py` was never actually applied,
   the working tree still carried the trailing-blank-line deletion and
   scoped `mypy` still failed on the guard's untyped defs when this attempt
   started. Reverting to HEAD is also not cleanly viable: HEAD's conftest
@@ -215,10 +215,10 @@
   helper (it walks the filesystem under `root` and parses every
   PLAN.md it finds). Three design choices worth re-checking once a
   real caller lands: (a) parse errors from any walked PLAN.md
-  propagate unchanged — a malformed file blocks resolution of every
+  propagate unchanged, a malformed file blocks resolution of every
   id below its directory; tolerant callers must catch `PlanSyntaxError`
   themselves. (b) Ambiguous ids (the same `T-XX-NNNNNN` appearing in
-  two PLAN.md files — invariant violation but possible from author
+  two PLAN.md files, invariant violation but possible from author
   error) return the first sorted-path match silently; no diagnostic
   is raised. If the workspace ever observes such a collision, prefer
   raising over silent first-match. (c) Legacy unprefixed `T-NNNNNN`
@@ -231,7 +231,7 @@
   every failure and error is under `packages/duplo/tests/` (test_reauthor,
   test_spec_writer, test_pipeline, test_phase5_integration, test_init,
   test_platform_integration, test_claude_cli). None are in
-  `packages/bob-tools/` — the 13 new `TestResolveGlobal` cases all pass
+  `packages/bob-tools/`, the 13 new `TestResolveGlobal` cases all pass
   and the rest of the bob-tools planfile suite is green. The BUG
   INVESTIGATION list from the prior attempt referenced the same duplo
   failures (73 failed / 24 errors then vs 58 / 9 now, so the absolute
@@ -244,7 +244,7 @@
   to pre-existing collection errors in `packages/mcloop/tests` and
   `packages/orchestra/tests`, independent of this task. The mcloop
   failure is `ImportPathMismatchError: ('tests.conftest',
-  '/duplo/tests/conftest.py', '/mcloop/tests/conftest.py')` —
+  '/duplo/tests/conftest.py', '/mcloop/tests/conftest.py')`,
   duplo's `tests/conftest.py` and mcloop's `tests/conftest.py` both
   register as the same `tests.conftest` module because each
   `tests/` directory has an `__init__.py` and they share a top-level
@@ -253,7 +253,7 @@
   for several `test_workflows_*.py` files in `packages/orchestra/tests`.
   These are workspace-structure issues (the duplo merge at
   `50d3dc80` on 2026-05-24 imported a `tests/` package with the same
-  name as mcloop's), not caused by this task's planfile changes —
+  name as mcloop's), not caused by this task's planfile changes,
   every file I modified lives under `packages/bob-tools/`. The 3932
   tests pytest did collect all passed (including the six new
   `TestCreatedAt` tests added in `tests/test_operations.py`). The
@@ -279,25 +279,25 @@
 - 2026-05-21 [23.2] [T-000197] Stage 23 gate verification. The gate's
   six conditions split into ones I can verify from bob-tools and ones
   I cannot. Verifiable from here: (a) no production imports of
-  `duplo.plan_document` in `/Users/mhcoen/proj/duplo/duplo` — `rg
+  `duplo.plan_document` in `/Users/mhcoen/proj/duplo/duplo`, `rg
   '^(from|import).*plan_document'` returns only
   `duplo/tests/test_plan_document.py:16` (legacy test file for the
   retiring module); the lone source-tree hit is a docstring reference
   in `duplo/reauthor_assemble.py:31` narrating the T-000192 migration,
   not an import; (b) no raw PLAN.md write sites remain in duplo
-  source — `rg 'plan_path\.write_text|PLAN\.md.*write_text'` under
+  source, `rg 'plan_path\.write_text|PLAN\.md.*write_text'` under
   `/Users/mhcoen/proj/duplo/duplo` returns no matches (the [23.1]
   baseline's `_save_plan_with_tag_escape` and related helpers have
-  been stripped from `duplo/saver.py` in the WORKING-tree diff — see
+  been stripped from `duplo/saver.py` in the WORKING-tree diff; see
   caveat (4) below); (c) bob-tools is green and unchanged from the
-  [23.1] baseline — `ruff check .` "All checks passed!"; `ruff format
+  [23.1] baseline, `ruff check .` "All checks passed!"; `ruff format
   --check .` "43 files already formatted";
   `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` 680 passed / 2
   skipped; bare `mypy .` not on PATH (same precedent flagged in every
   prior gate entry), invoked as
   `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .`, reports "Success:
   no issues found in 43 source files". NOT verifiable / NOT met from
-  here: (1) `plan_document.py deleted` — the file
+  here: (1) `plan_document.py deleted`, the file
   `/Users/mhcoen/proj/duplo/duplo/plan_document.py` is still on disk
   (25436 bytes, mtime 2026-05-10), confirmed by `ls -la`. I cannot
   delete it: the task preamble forbids file deletion unconditionally
@@ -305,7 +305,7 @@
   a file should be removed, leave it and note it in NOTES.md for the
   user to decide"). The user must remove this file (and its legacy
   test `duplo/tests/test_plan_document.py`) themselves from the duplo
-  repo. (2) `all-path end-to-end no-migrate test green` — a real
+  repo. (2) `all-path end-to-end no-migrate test green`, a real
   duplo run exercising initial generation, gap append, verification,
   contracts, bug append, and reauthor would invoke `claude` and
   likely `codex` at every synthesis step; the same task preamble's
@@ -314,7 +314,7 @@
   this end-to-end test manually under their own LLM-cost budget;
   there is no automated harness in either repo that runs the
   no-migrate end-to-end loop without real LLM calls. (3) `duplo
-  green` — `cd /Users/mhcoen/proj/duplo && git status` shows nine
+  green`, `cd /Users/mhcoen/proj/duplo && git status` shows nine
   modified source files (gap_detector, investigator, pipeline,
   planner, reauthor, reauthor_assemble, saver, spec_reader,
   verification_extractor) and eight modified test files, totaling
@@ -324,7 +324,7 @@
   rule scopes me to bob-tools (the four listed commands run from
   `/Users/mhcoen/proj/bob-tools`), so I did not run ruff/pytest in
   duplo; the user must commit duplo's working tree, then run
-  duplo-side checks. (4) `duplo and bob-tools both pushed` — bob-tools
+  duplo-side checks. (4) `duplo and bob-tools both pushed`, bob-tools
   is "ahead of 'origin/main' by 1 commit" (the [23.1] mcloop
   checkpoint commit `3b0165a`, which the orchestrator will turn into
   a Complete commit after this session). duplo's HEAD `871ab56` is
@@ -359,7 +359,7 @@
   subprocess calls to claude, codex, or any LLM CLI." A real duplo
   end-to-end run exercising initial generation, gap append,
   verification, contracts, bug append, and reauthor would invoke
-  `claude` (and likely `codex`) at every synthesis step — multiple
+  `claude` (and likely `codex`) at every synthesis step, multiple
   real LLM round-trips, each 5-15 seconds, which the test policy
   forbids. The previous gate entries from [22.1]/[22.2]
   ([T-000194]/[T-000195]) already verified that `duplo.plan_document`
@@ -385,7 +385,7 @@
 
 - 2026-05-21 [22.2] [T-000195] Stage 22 gate verified. No production
   callers of `duplo.plan_document` remain: `rg '^(from|import).*plan_document'`
-  under `/Users/mhcoen/proj/duplo` returns a single match —
+  under `/Users/mhcoen/proj/duplo` returns a single match,
   `duplo/tests/test_plan_document.py:16`, which is the legacy module's
   own test file, retained per the explicit "do not delete the module
   yet" constraint. The two other text-level hits (`duplo/duplo/reauthor_assemble.py:31`
@@ -415,7 +415,7 @@
   metacharacter (`"NOT the\\s+trailing"`). Fix is one line: convert to
   a raw string (`r"NOT the\s+trailing"`); semantics are identical
   because Python collapsed `"\\s"` to `"\s"` before the regex engine
-  saw it anyway. No production-code change was needed — the migration
+  saw it anyway. No production-code change was needed, the migration
   payload from the earlier [22.1] entry below is intact and the same
   six-contract verification still holds. Bob-tools checks all green:
   `ruff check .` reports "All checks passed!"; `ruff format --check .`
@@ -453,36 +453,36 @@
   `ruff check .` reports "All checks passed!";
   `ruff format --check .` reports "43 files already formatted";
   `/Users/mhcoen/proj/bob-tools/.venv/bin/pytest` reports 680 passed
-  / 2 skipped (12 new tests over the 21.2 baseline of 670 — covers
+  / 2 skipped (12 new tests over the 21.2 baseline of 670, covers
   the new sanitizer plus 2 cases that exist in the duplo originals);
   `/Users/mhcoen/proj/bob-tools/.venv/bin/mypy .` reports "Success:
   no issues found in 43 source files" (was 41 before).
 
 - 2026-05-21 [21.2] [T-000193] Stage 21 gate verified. Confirmed the
   six contract claims hold against the post-T-000192 reauthor.py:
-  (1) preserves unchanged phases — `assemble_reauthored_plan`
+  (1) preserves unchanged phases, `assemble_reauthored_plan`
   (reauthor.py:471) is the preserve-by-default assembly built on
   `prior_plan` (the bob_tools.planfile parse of the prior PLAN.md at
   reauthor.py:286); any phase not named in `normalized_lineage` is
-  carried forward verbatim. (2) substitutes changed — assembly
+  carried forward verbatim. (2) substitutes changed, assembly
   composes around `bob_tools.planfile.replace_phase_validated` (the
   imports in `reauthor_assemble`, exercised by every supersede/
   split/merge/new entry in the normalized lineage). (3) lineage
-  validated — `validate_lineage` is called twice: pre-flight at
+  validated, `validate_lineage` is called twice: pre-flight at
   reauthor.py:465-469 (with the normalized lineage's own seen ids as
   `new_plan_ids`, surfacing internal contradictions before the
   fail-fast in `replace_phase_validated` can mask them) and
   post-assembly at reauthor.py:485-489 (catching header-vs-phases
   mismatches only the assembled plan can expose). (4) lifecycle
-  events emitted — `_emit_lifecycle_events` (reauthor.py:570-576)
+  events emitted, `_emit_lifecycle_events` (reauthor.py:570-576)
   appends `phase_superseded`/`split`/`merged`/`abandoned` events
   FIRST, then `_emit_plan_reauthored` (reauthor.py:578-587) appends
   the meta-event referencing them, matching the design-doc option-(a)
-  ordering. (5) save only via planfile — `planfile_save(out_path,
+  ordering. (5) save only via planfile, `planfile_save(out_path,
   assembled_plan)` at reauthor.py:567 is the only persistence call
   in the success path; `rg 'write_text|\.write\('` against both
   `duplo/reauthor.py` and `duplo/reauthor_assemble.py` returns zero
-  matches. (6) canonical helper passes — `assert_mcloop_canonical(
+  matches. (6) canonical helper passes, `assert_mcloop_canonical(
   assembled_plan, source_path=plan_path)` at reauthor.py:550 is the
   gate the assembled plan must clear before save; on
   `PlanValidationError` the run pauses with a wrapped `ReauthorError`
@@ -507,7 +507,7 @@
   (composing split/merge/new/abandoned around it by tuple
   manipulation), gates the assembled plan through
   `assert_mcloop_canonical`, and persists via
-  `bob_tools.planfile.save` — no raw `path.write_text` writes remain
+  `bob_tools.planfile.save`, no raw `path.write_text` writes remain
   on the success path. Lineage and ledger emission stay in duplo
   (`compute_lineage_diff`, `_emit_lifecycle_events`,
   `_emit_plan_reauthored`).
@@ -534,7 +534,7 @@
   pins `LineageValidationError` as the contract.
 
   (b) The bob_tools.planfile parser's `_STAGE_RE` matches `#+\s+.*?\bphase\s+\d+\b`,
-  so an H1 like `# proj — Phase 0: env` is interpreted as a phase
+  so an H1 like `# proj, Phase 0: env` is interpreted as a phase
   heading (with title `env`) rather than as a plain H1. This is the
   same behavior `_check_structural_sanity` documents at parser.py:516
   ("a single-hash `# Phase 1: Bootstrapping` is matched by both
@@ -548,7 +548,7 @@
   bob_tools.planfile-canonical form. The two duplo tests at
   test_reauthor.py:1047 and :1075 keep the legacy H1 because they
   raise before reaching `parse_plan` (missing-event and
-  wrong-event-type cases). The remaining `# proj — Phase 0: env`
+  wrong-event-type cases). The remaining `# proj, Phase 0: env`
   literals in `plan_artifact_value` fixtures (e.g.,
   test_reauthor_rejects_when_extracted_verdict_disagrees) also work
   because those tests trip earlier-pipeline rejections
@@ -607,7 +607,7 @@
   `_append_extra_tasks` skips the markdown-roundtrip the old
   `_append_extra_markdown_tasks` performed. Design decisions worth
   recording: (a) the old `## Gaps detected from updated reference materials`
-  H2 header is gone — typed tasks attach directly to the last phase
+  H2 header is gone, typed tasks attach directly to the last phase
   as root tasks, not under a separate heading or subsection; (b) gap
   appends require the plan's phase ordinals to be contiguous `1..N`
   (constructed-mode invariant on `add_phase_task`), so the new
@@ -706,7 +706,7 @@
   `/Users/mhcoen/proj/mcloop/PLAN.EXAMPLE.md` produces a non-additive
   diff in two ways the Stage 7 verifier flags: (a) the six nested
   example-flow bullets under the "Clearer terminal output" task
-  (lines 110-115 of the source — they use `  - "..."` with no
+  (lines 110-115 of the source, they use ` - "..."` with no
   checkbox) are dropped by the parser/renderer round-trip and
   therefore disappear from the formatted file; (b) the blank lines
   between top-level task bullets in Stage 2 are collapsed by the
@@ -741,16 +741,16 @@
   and `parser.py` was empty when this session (2.2.1-2.2.6) started. The
   orchestra log at `logs/orchestra-runs/f1af613fa1f2/log.jsonl` shows the
   edit state exited in 9 seconds with `output_chars: 38` and the editor
-  said "Ready. What would you like to work on?" — the orchestrator
+  said "Ready. What would you like to work on?", the orchestrator
   still marked the state `complete` and advanced. Heading parsers will
   need to be retroactively implemented before the parser can be wired
   together; flagging for the user so the gap is not papered over.
 - 2026-05-15 [2.4.2] `_attach_deps` reads "immediately preceding task line
   at strictly lesser indent" (from the task description) as: walk the
   open-ancestor stack from innermost to outermost and return the first
-  task at lesser-or-equal indent — strict on `<`, lenient on `==`. The
-  alternative reading — "look only at the literally-immediately-preceding
-  task and accept only if its indent is strictly less" — would reject
+  task at lesser-or-equal indent, strict on `<`, lenient on `==`. The
+  alternative reading, "look only at the literally-immediately-preceding
+  task and accept only if its indent is strictly less", would reject
   the case where @deps sits at indent 0 after a deeper child task in
   source order. Treating that as lenient attachment to the outer task
   matches what hand-written PLAN.md files seem to expect, but the design
@@ -810,12 +810,12 @@
   not match what compat-mode actually does, and the new
   ``TestParsePlanMinimalValidPlan`` class pins the actual behavior
   rather than the described one:
-  1. "a missing H1 raises" — compat mode does not raise. mcloop's
+  1. "a missing H1 raises", compat mode does not raise. mcloop's
      ``parse`` has no H1 concept at all, so there is no precedent to
      preserve, but our compat parser also chose silent tolerance
      (``project_title`` falls back to ``""``). Strict mode in Stage 3
      should require an H1 and raise ``PlanSyntaxError`` on absence.
-  2. "tasks before any phase land in an implicit phase zero" — the
+  2. "tasks before any phase land in an implicit phase zero", the
      typed ``Plan`` model has no phase-zero slot, and ``Phase``
      requires an ordinal pulled from a heading. The 2.5.2 decision
      (documented above) was to drop orphan tasks silently to mirror
@@ -831,7 +831,7 @@
   phase/stage ordinals) and five tag-level (annotations with unclosed
   bracket, missing colon, or empty value; action tags without a colon
   or with an empty action name). Only the three structural anomalies
-  raise in compat mode — every tag-level malformation is silently
+  raise in compat mode, every tag-level malformation is silently
   treated as prose by the parser today, and `[feat: ]` (the empty-value
   case) is in fact captured as a *valid* annotation because
   `_ANNOTATION_CONTENT_RE` only requires whitespace after the colon and
@@ -853,7 +853,7 @@
   `tests/manual/check_compat_read.py` (RUF100): BLE001 is not in our
   enabled set (`E,F,W,I,B,UP,RUF`), so the directive was dead. The
   bug-fix payload (the `bug_count` API, the helper script, and the
-  `TestBugCount` cases) from the previous attempt was left intact —
+  `TestBugCount` cases) from the previous attempt was left intact,
   only the lint cleanup the previous attempt left unfinished was
   applied here.
 
@@ -920,7 +920,7 @@
   `## Phase phase_001: ...` heading is set to positional index
   (`len(phases) + 1`) since there is no digit to extract. Consequence:
   a mixed plan like `## Phase 1: A` then `## Phase phase_002: B` then
-  `## Phase 5: C` produces ordinals 1, 2, 5 — non-contiguous because
+  `## Phase 5: C` produces ordinals 1, 2, 5, non-contiguous because
   the digit-form headings override positional numbering. This matches
   the design doc's "ordinal fallback = n-th heading in document order"
   rule applied only when no digit is present, and it preserves the
@@ -936,7 +936,7 @@
   it.
 
 - 2026-05-16 [4.2.1] The renderer parent BATCH [4.1.1-4.1.11] was never
-  executed in the prior session — same failure mode flagged for tasks
+  executed in the prior session, same failure mode flagged for tasks
   1.1.1 (2026-05-15 entry) and 2.1.1-2.1.5: the orchestra-run log shows
   the agent exited in ~9 seconds with "Ready. What would you like me to
   work on?" and the orchestrator still advanced to 4.2.1. Property tests
@@ -985,7 +985,7 @@
 
   Wording discrepancy flagged per the PLAN.md preamble: the task
   description says "raises a clear error for an unknown task", but the
-  design doc (section 7.1 shim sketch — `return PhaseIdResolution(None,
+  design doc (section 7.1 shim sketch, `return PhaseIdResolution(None,
   "none", ctx.plan_phase_count)`) and the contract pinned by the prior
   subtasks have `resolve_task_context` return a none-shaped
   `TaskContext` for an unknown reference, not raise. Callers branch on
@@ -1009,14 +1009,14 @@
 
 - 2026-05-16 [5.4.1-5.4.7] Same recurring failure mode flagged for tasks
   1.1.1, 2.1.1-2.1.5, and 4.1.1-4.1.11: task `[5.1.1-5.1.8]` (Settlement
-  dataclass + `migrate`) was never executed — the session-history entry
+  dataclass + `migrate`) was never executed, the session-history entry
   shows an 8-second session ending with "Ready. What would you like to
   work on?" and no `Complete:` commit follows `11367f2` (the "next:
   5.1.1-5.1.8" checkpoint). `Settlement` was unimplemented when this
   session started, but task 5.4 depends on it ("the settlement for the
   direct task uses the kind policy above"). This session implemented
   `Settlement` and `Outcome` in `model.py` as a prerequisite for the
-  5.4 mutation operations, but did NOT implement `migrate` — that
+  5.4 mutation operations, but did NOT implement `migrate`, that
   belongs to the 5.1 scope. A future session will need to revisit 5.1
   to add `migrate` and any 5.1-specific tests (idempotency,
   partial-migration ID assignment for non-contiguous existing IDs,
@@ -1024,7 +1024,7 @@
   required by 5.1.1-5.1.8 step 2-6 are covered indirectly through
   `TestCompleteTask` and `TestFailTask` in this session, but the
   Settlement dataclass-construction tests from 5.1.1-5.1.8 step 8 are
-  not — they were never written and are not strictly necessary because
+  not; they were never written and are not strictly necessary because
   Settlement is a frozen dataclass with no behavior of its own (per
   the project rule against testing trivial dataclass additions).
 
@@ -1036,7 +1036,7 @@
   that is both BATCH and USER (unlikely but representable) settles as
   `work_observed`. A task that is BATCH alone (the common case of a
   BATCH parent surfaced as a unit by `next_tasks`) settles as
-  `commit_landed` — the BATCH flag is a scheduling hint, not an
+  `commit_landed`; the BATCH flag is a scheduling hint, not an
   evidence-of-commit signal, so the default applies.
 
 - 2026-05-16 [5.4.1-5.4.7] `complete_task`'s cascade walks ancestors
@@ -1046,7 +1046,7 @@
   design doc section 5 wording "from innermost outward" and the
   three-Settlement test for the BATCH chain. An ancestor whose status
   was already DONE before the call is not re-added to the list, even
-  if its children are now all DONE — the cascade fires on a
+  if its children are now all DONE, the cascade fires on a
   transition, not on observation of a final state. This guards against
   duplicate `kind="none"` Settlements when the operation is called
   twice on an already-completed subtree.
@@ -1067,11 +1067,11 @@
   load-lock-reparse-save flow described in 6.1.3. A future session
   should revisit:
     1. `migrate` partial-migration and idempotency unit tests
-       (5.1.1-5.1.8 step 8) which were never added — they are
+       (5.1.1-5.1.8 step 8) which were never added; they are
        exercised indirectly through `TestFmt.test_idempotent_on_strict_plan`
        in `tests/test_cli.py` but not at the function level.
     2. The `update` helper with file locking + concurrent-edit
-       detection (6.1.3) — needed when humans and tooling race for
+       detection (6.1.3), needed when humans and tooling race for
        the same PLAN.md.
     3. The 6.1.4 atomic-write / locking tests, which assume the full
        Stage 6 surface is in place.
@@ -1112,7 +1112,7 @@
   mirroring `mcloop._planfile_precondition._INCOMPLETE_RE`) and R2
   (every parsed task carries a `T-NNNNNN`) without importing mcloop,
   and returns the rendered text. `PlanSyntaxError` from the re-parse
-  is intentionally not caught — it propagates per contract.
+  is intentionally not caught, it propagates per contract.
 
   Interpretation decision worth recording explicitly: Contract 5's
   task wording lists `line_number`, `indent`, `source_path`, and
@@ -1124,14 +1124,14 @@
   re-parse always reports `explicit_comment`; without the collapse,
   legitimate phases with the legacy header would fail the round-trip
   even though both representations identify the same phase. The
-  collapse is bounded — `"none"` stays `"none"` — so the validity
+  collapse is bounded (`"none"` stays `"none"`) so the validity
   signal `validate_plan(constructed=True)` enforces (source must not
   be `"none"`) is preserved. This is a pragmatic departure from the
   literal task wording.
 
   Coverage gap filled in this session: added three tests to
   `TestAssertMcloopCanonical` exercising paths the original five
-  cases did not touch — a multi-phase plan, a plan with a Bugs
+  cases did not touch, a multi-phase plan, a plan with a Bugs
   section, and `source_path` forwarding to the re-parse (verified
   via a monkeypatch spy on `operations.parse_plan` since the happy
   path otherwise has no observable use of `source_path`).
@@ -1143,7 +1143,7 @@
   plan) and an R1-shape fixture (rendered text contains an
   incomplete checkbox line that the parser does not recover as a
   TODO task). Neither is constructible organically through the
-  public Plan/Task model — `validate_plan(constructed=True)`'s
+  public Plan/Task model, `validate_plan(constructed=True)`'s
   field-stability harness would catch any divergence at scalar
   granularity before Contract 5 ever runs, and the renderer never
   emits checkbox lines the parser would not recover. Both new tests
@@ -1169,7 +1169,7 @@
   regex-based dedup parser in `saver` and are unnecessary with typed
   annotations. (b) The bug-write goes through `planfile.update` with
   `validation="unchecked"`, matching `planner.save_plan`
-  (planner.py:758) — user-facing PLAN.md files in `duplo fix` may
+  (planner.py:758), user-facing PLAN.md files in `duplo fix` may
   not be in mcloop's canonical form (TODO tasks without ids, ad-hoc
   headings), so canonical validation would reject otherwise-valid
   inputs. A consequence: `parse_plan` does not surface TODO/DONE
@@ -1209,7 +1209,7 @@
   `msvcrt.locking` (or `portalocker`) fallback. The advisory lock also
   only protects writers that go through `Storage.append` /
   `Storage.exclusive()`; a process that writes `PLAN.events.jsonl`
-  directly (bypassing Storage) is still unserialized — acceptable
+  directly (bypassing Storage) is still unserialized, acceptable
   because Storage is the sole sanctioned writer, but worth remembering.
 
 - 2026-05-21 [19.2] [T-000189] The duplo-level test suite does not
@@ -1221,7 +1221,7 @@
   on a reopen, or omits annotations needed for fix-key dedup), the
   current duplo tests would not catch it. Worth adding a pipeline-
   level test that runs `duplo fix` twice against the same diagnosed
-  symptom (second run should report `0` writes — the unchanged-TODO
+  symptom (second run should report `0` writes, the unchanged-TODO
   path) and a test that marks a bug DONE then re-runs `duplo fix`
   (second run should reopen it). Flagging for a follow-up rather
   than adding here, since the gate task is verification-only.
