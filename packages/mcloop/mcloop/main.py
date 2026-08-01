@@ -523,7 +523,7 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
             failures.append((idx, entry, exc))
             print(
                 f"Skipping chain tier {idx} ({entry.cli}/{entry.model}): "
-                f"preflight failed — {_short_preflight_reason(exc)}"
+                f"preflight failed, {_short_preflight_reason(exc)}"
             )
             continue
         usable.append(entry)
@@ -554,7 +554,7 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
         survivors = ", ".join(entry.model or entry.cli for entry in usable)
         for idx, entry, err in failures:
             notify(
-                f"mcloop: skipping model tier {idx} ({entry.cli}/{entry.model}) — "
+                f"mcloop: skipping model tier {idx} ({entry.cli}/{entry.model}), "
                 f"preflight failed: {_short_preflight_reason(err)}. "
                 f"Running on: {survivors}.",
                 level="warning",
@@ -2757,7 +2757,7 @@ def run_loop(
                         print(
                             formatting.system_msg(
                                 "Task produced no diff; project checks pass"
-                                " — accepting as already-satisfied"
+                                ", accepting as already-satisfied"
                             ),
                             flush=True,
                         )

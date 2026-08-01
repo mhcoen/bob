@@ -399,7 +399,7 @@ def main() -> None:
         fix_parser = argparse.ArgumentParser(
             prog=f"duplo {subcmd}",
             description=(
-                "Diagnose uncertain causes — observed wrongness without a captured crash."
+                "Diagnose uncertain causes, observed wrongness without a captured crash."
                 if subcmd == "investigate"
                 else "Append fix tasks to PLAN.md for known bugs or failures."
             ),

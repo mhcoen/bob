@@ -489,7 +489,7 @@ def _run_video_frame_pipeline(
     print(f"{indent}Describing UI states \u2026")
     frame_descs = describe_frames(vetted_frames)
     for fd in frame_descs:
-        print(f"{indent}  {fd.path.name}: {fd.state} \u2014 {fd.detail}")
+        print(f"{indent}  {fd.path.name}: {fd.state}, {fd.detail}")
     frame_entries = [
         {
             "path": fd.path,
@@ -848,7 +848,7 @@ def _fix_mode(args: argparse.Namespace) -> None:
             else:
                 print("Screenshot capture failed (continuing without it).")
         else:
-            print("No app_name in duplo.json \u2014 skipping screenshot.")
+            print("No app_name in duplo.json. Skipping screenshot.")
 
     # Collect user-supplied screenshot paths.
     user_screenshots: list[Path] | None = None
@@ -2359,7 +2359,7 @@ def _compare_with_references(current: Path) -> None:
         ref_dir = Path("screenshots")
         references = sorted(ref_dir.glob("*.png")) if ref_dir.is_dir() else []
     if not references:
-        print("No reference screenshots found \u2014 skipping visual comparison.")
+        print("No reference screenshots found. Skipping visual comparison.")
         return
 
     print(f"\nComparing screenshot against {len(references)} reference image(s) \u2026")

@@ -2030,7 +2030,7 @@ def test_print_install_summary(capsys):
         ("Telegram", "configured (env vars)"),
         ("API key", "configured (strip)"),
         ("Sandbox", "skipped (already enabled)"),
-        ("Permissions", "installed — merge manually"),
+        ("Permissions", "installed, merge manually"),
     ]
     _print_install_summary(summary)
     out = capsys.readouterr().out
@@ -2131,7 +2131,7 @@ def test_cmd_install_prints_summary(tmp_path, capsys):
         patch("mcloop.install_cmd._setup_sandbox", return_value=("Sandbox", "configured")),
         patch(
             "mcloop.install_cmd._install_recommended_permissions",
-            return_value=("Permissions", "installed — merge manually"),
+            return_value=("Permissions", "installed, merge manually"),
         ),
         patch("mcloop.install_cmd._check_rtk", return_value=None),
         patch("mcloop.install_cmd._check_reviewer", return_value=None),

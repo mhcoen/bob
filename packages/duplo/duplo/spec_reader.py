@@ -663,7 +663,7 @@ def _split_sections(text: str) -> dict[str, str]:
                     "spec_reader:_split_sections",
                     "io",
                     f"Duplicate heading '## {new_heading}' in SPEC.md"
-                    " — content merged with earlier section",
+                    ", content merged with earlier section",
                 )
             current_heading = new_heading
             current_lines = []

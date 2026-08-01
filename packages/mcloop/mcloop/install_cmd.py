@@ -120,7 +120,7 @@ def _check_rtk() -> tuple[str, str] | None:
             "  Note: RTK detected on PATH.\n"
             "  RTK hooks should be configured separately via: rtk init\n"
         )
-        return ("RTK", "detected — configure manually via rtk init")
+        return ("RTK", "detected, configure manually via rtk init")
     return None
 
 
@@ -161,7 +161,7 @@ def _check_orchestra_override(
     suffix = " (dry run)" if dry_run else ""
     return (
         "Orchestra override",
-        f"detected — run mcloop ack-orchestra-override to silence{suffix}",
+        f"detected, run mcloop ack-orchestra-override to silence{suffix}",
     )
 
 
@@ -419,7 +419,7 @@ def _install_recommended_permissions(
         "\n  Merge them into ~/.claude/settings.json manually"
         "\n  if desired.\n"
     )
-    return ("Permissions", "installed — merge manually")
+    return ("Permissions", "installed, merge manually")
 
 
 # Hook scripts to copy: (source filename in repo root, dest filename)

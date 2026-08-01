@@ -198,14 +198,14 @@ def validate_build_preferences(prefs: list[BuildPreferences]) -> list[str]:
     """
     if not prefs:
         return [
-            "Build preferences are all defaults — "
+            "Build preferences are all defaults. "
             "## Architecture may be too vague for the LLM to extract "
             "platform, language, or constraints. "
             "Plan generation will proceed but with less context."
         ]
     if len(prefs) == 1 and is_all_defaults(prefs[0]):
         return [
-            "Build preferences are all defaults — "
+            "Build preferences are all defaults. "
             "## Architecture may be too vague for the LLM to extract "
             "platform, language, or constraints. "
             "Plan generation will proceed but with less context."
@@ -214,7 +214,7 @@ def validate_build_preferences(prefs: list[BuildPreferences]) -> list[str]:
     for i, p in enumerate(prefs):
         if is_all_defaults(p):
             warnings.append(
-                f"Stack {i + 1}: build preferences are all defaults — "
+                f"Stack {i + 1}: build preferences are all defaults. "
                 "this structured platform entry has no usable fields."
             )
     return warnings

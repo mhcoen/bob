@@ -72,7 +72,7 @@ _NO_ARGS_NEXT_STEPS = """Next steps:
   1. Open SPEC.md in your editor. Replace each <FILL IN> marker
      with your content. See SPEC-guide.md for details on each
      section.
-  2. (Optional) Drop reference files into ref/ — screenshots,
+  2. (Optional) Drop reference files into ref/: screenshots,
      videos, PDFs, design mockups. Skip this if you'll provide
      a URL or rely on prose alone.
   3. (Optional) Add a URL to ## Sources in SPEC.md if you have

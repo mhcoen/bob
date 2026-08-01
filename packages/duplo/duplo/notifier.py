@@ -11,7 +11,7 @@ def notify_phase_complete(phase: str = "Phase") -> None:
     Args:
         phase: Human-readable phase label (e.g. ``"Phase 1"``).
     """
-    banner = f"{'=' * 60}\n  {phase} complete — ready for testing\n{'=' * 60}"
+    banner = f"{'=' * 60}\n  {phase} complete, ready for testing\n{'=' * 60}"
     print(banner)
     _send_macos_notification(f"{phase} complete", "Ready for testing")
 

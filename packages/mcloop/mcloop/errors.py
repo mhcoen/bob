@@ -123,7 +123,7 @@ def _check_errors_json(
         print(
             formatting.error_msg(
                 f"{len(unresolvable)} error(s) exceeded "
-                f"{_MAX_FIX_ATTEMPTS} fix attempts — unresolvable:"
+                f"{_MAX_FIX_ATTEMPTS} fix attempts, unresolvable:"
             ),
             flush=True,
         )
