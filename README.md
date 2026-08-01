@@ -86,6 +86,55 @@ design meets the same requirements with a database, a session manager,
 and an orchestration framework, and then cannot survive being killed
 mid-run. The restraint is the point.
 
+## Agents, skills, and the vendor vocabulary
+
+Most readers arrive fluent in a vocabulary Bob does not use: agents,
+skills, hosted schedulers, managed sandboxes. The honest map is that
+three of those are positions Bob took on purpose, and one is a question
+it has not answered.
+
+**Agents.** In the vendor sense, an agent is the model holding the
+control flow: it picks the next action, decides when to delegate, and
+decides when to stop. That is precisely what Bob's one rule forbids, so
+it is not a gap waiting to be closed. Bob does fan out — Orchestra runs
+parallel actors in `parallel_thinking` and `council_four` — but at the
+workflow level, where every invocation crosses the executor and lands
+in the log as a checkable, resumable event. A subagent spawned inside a
+single CLI session does model work that never crosses that chokepoint:
+unlogged, unresumable, and checked by nothing that is not a model. Same
+capability, wrong side of the rule.
+
+**Skills.** A skill is static text loaded on demand. It takes no control
+flow, so nothing in the thesis rules it out — and Bob still does not use
+them. Conventions live in CLAUDE.md instead, which is the
+always-loaded version of the same idea. The tradeoff is real and
+unresolved: a manifest is paid on every task whether it is relevant or
+not, where a skill is paid only when the model reaches for it. Turning
+them on means adding one entry to the allowed-tools lists that McLoop
+and Orchestra's agent adapter deliberately keep mirrored. Nobody has
+measured whether it helps. This one is an open question rather than a
+settled position, and it is written down here so it does not read as an
+oversight.
+
+**Hosted schedulers.** That role is Vroom's — the layer above McLoop
+that owns the backlog, dispatches work, and reads the result. Designed
+and partly built, not yet closed; the Status section says exactly where
+it stands. The boundary holds either way, because it is an
+architectural claim rather than a status one: deciding *when* to run is
+the caller's job, not the runtime's. A managed cron does not invoke
+McLoop at all. It fires sessions into a vendor's container, solving the
+problem from outside the stack and billing per token against the
+subscription the fallover chain exists to protect.
+
+**Hosted sandboxes.** Bob's acceptance gate is your test suite, run on
+your working tree, with the diff's own lines proven executed against a
+pre-edit baseline. Moving execution into a managed container moves the
+gate away from the thing being gated.
+
+The pattern is the one that runs through the rest of this file. Bob is
+not missing these primitives. It declined most of them deliberately,
+and says out loud which one it did not.
+
 ## Bob's four main interacting components
 
 Each is the rule above applied at a different scale. They interact: McLoop runs against plans Duplo authored, Orchestra wraps McLoop's per-task edits, and McLoop calls Duplo back to re-author the plan when the ledger says the current approach is not working.
