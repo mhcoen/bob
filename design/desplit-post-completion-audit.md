@@ -15,14 +15,14 @@ the two reports is the closure criterion.
 
 Authoritative references (re-derive every claim against these):
 
-- `bob/design/mcloop-desplit-integration-plan.md` — the integration
+- `bob/design/mcloop-desplit-integration-plan.md`, the integration
   plan (§0 state, §1 governing risk, §2 parity audit, §3 staged plan,
   §4 decisions register, §5 forced ordering).
 - `bob/design/desplit-independent-validation.md` and
-  `bob/design/desplit-independent-validation-kimi.md` — the May 17
+  `bob/design/desplit-independent-validation-kimi.md`, the May 17
   parallel validation outputs; format precedent (PASS/FAIL verdict
   tables, evidence column with `file:line` citations).
-- `bob/design/planfile.md` — the canonical architecture reference;
+- `bob/design/planfile.md`, the canonical architecture reference;
   §8 Phase B contract is the behavioral target.
 
 ---
@@ -62,11 +62,11 @@ commands in fenced blocks where they fit. Audience: CS PhD.
 
 ---
 
-## 1. Item 1 — end-to-end behavioral equivalence (pre-B1 → post-D1)
+## 1. Item 1: end-to-end behavioral equivalence (pre-B1 → post-D1)
 
 The B5 baseline equivalence captured at and after B5 (and verified
 through D3, D1a, and D1) covers only post-B5 → post-D1. It does not
-cover the pre-B1 → post-D1 span — the most important behavioral
+cover the pre-B1 → post-D1 span, the most important behavioral
 question, since B1+B3 was the irreversible cutover. Item 1 closes
 that gap.
 
@@ -87,10 +87,10 @@ once before the post-D1 capture).
 The five gates for each capture mode:
 
 (a) Ordered task execution sequence (task IDs or task labels in the
-order `run_loop` selects them — under the canonical form these are
+order `run_loop` selects them, under the canonical form these are
 `T-NNNNNN`; under the pre-B1 form, the label string is the
 canonical identifier since IDs did not exist).
-(b) Ledger event stream — byte-identical across the pair. Per
+(b) Ledger event stream, byte-identical across the pair. Per
 Decision D1, AUTO/USER `work_observed` events are still not emitted;
 per Decision D2, ordinal phase-id attribution is still collapsed to
 `("none", None)`. Both decisions preserve pre-B1 emission, so the
@@ -98,7 +98,7 @@ ledger stream is the load-bearing equivalence signal.
 (c) Exit code.
 (d) `run-summary.json` fields: `terminal_status`, `stuck`,
 `completed_stage`.
-(e) BUGS.md final byte contents — byte-identical. BUGS.md is not
+(e) BUGS.md final byte contents, byte-identical. BUGS.md is not
 subject to canonical-id validation (per D3) and round-trips cleanly
 through `parse_plan` / `render_plan` on the pre-B1 file as well, so
 byte equivalence is the right gate here.
@@ -170,13 +170,13 @@ format is stable across the cutover by construction.
 
 Any (mode, gate) FAIL halts item 1, files the partial report under
 the output path, and surfaces to Michael with the failing diff. Do
-**not** continue to items 3/4/5 if item 1 has any FAIL — they are
+**not** continue to items 3/4/5 if item 1 has any FAIL; they are
 sweep-style checks whose value is contingent on item 1 having
 established behavioral equivalence.
 
 ---
 
-## 2. Item 2 — Kimi independent re-derivation (NOT IN THIS PROMPT)
+## 2. Item 2: Kimi independent re-derivation (NOT IN THIS PROMPT)
 
 Item 2 is the parallel-lineage validation pattern from May 17. It
 runs independently via Kimi K2.6 under a separate prompt. Claude
@@ -186,7 +186,7 @@ verified by Michael after both complete.
 
 ---
 
-## 3. Item 3 — audit-pattern completeness gate
+## 3. Item 3: audit-pattern completeness gate
 
 D2's `__import__("mcloop.checklist", …)` escape and D1's
 `from mcloop import checklist` escape both bypassed narrower
@@ -215,14 +215,14 @@ narrower grep patterns missed historically.
 For every hit from the seven greps above, classify into exactly one
 of three buckets in the report:
 
-- **Bucket I — live code reference.** Any executable code path that
+- **Bucket I, live code reference.** Any executable code path that
   resolves the name `checklist` / `plan_split` / `CURRENT_PLAN` to
   the deleted module / file. This is a FAIL.
-- **Bucket II — string literal in a user-facing or prompt context.**
+- **Bucket II, string literal in a user-facing or prompt context.**
   Error messages ("Checklist not found:"), prompt templates, log
   format strings. PASS but recorded for the optional hygiene-pass
   backlog.
-- **Bucket III — variable / parameter / docstring / comment.**
+- **Bucket III, variable / parameter / docstring / comment.**
   `checklist_path` as a Path identifier (naming hangover from the
   pre-de-split era); inline comments; docstrings referencing the
   historical module. PASS.
@@ -240,12 +240,12 @@ harder to diagnose.
 
 ---
 
-## 4. Item 4 — decision-register reconciliation
+## 4. Item 4: decision-register reconciliation
 
 §4 of the integration plan defines five decisions (D1–D5). Item 4
 verifies each against current source.
 
-### 4.1 D1 — AUTO/USER `work_observed` emission preserved as DROPPED
+### 4.1 D1: AUTO/USER `work_observed` emission preserved as DROPPED
 
 Per the integration plan §4 D1, the settle hook drops Settlement
 objects of `kind == "work_observed"` (AUTO/USER successful tasks).
@@ -262,7 +262,7 @@ PASS iff the filter is present and correct. FAIL if a code path
 exists that would emit a `work_observed` event from an AUTO or USER
 task completion.
 
-### 4.2 D2 — ordinal phase-id attribution collapsed to ("none", None)
+### 4.2 D2: ordinal phase-id attribution collapsed to ("none", None)
 
 Per §4 D2 and §2(e) Decision D2, `main._ledger_settle` calls
 `ledger_emit.resolve_phase_id` **without** the optional
@@ -280,7 +280,7 @@ PASS iff both checks hold. FAIL if `ordinal_index` is now passed
 implicitly or if `resolve_phase_id` returns a non-`None` phase_id
 without an explicit-source basis.
 
-### 4.3 D3 — `--retry` routes through `planfile.clear_failed`
+### 4.3 D3: `--retry` routes through `planfile.clear_failed`
 
 Per §4 D3 (the bob-tools commit `85b4524` addition) and §2(f),
 `--retry` clears FAILED tasks across both PLAN.md and BUGS.md via
@@ -294,7 +294,7 @@ PLAN.md and BUGS.md (not just one). Cite both call sites.
 PASS iff `--retry` calls `clear_failed` on both files. FAIL if only
 one file is cleared, or if a checklist-era code path survives.
 
-### 4.4 D4 — B1 canonicalization diff was routed to Michael
+### 4.4 D4: B1 canonicalization diff was routed to Michael
 
 Historical / settled. The B1+B3 cutover commit `eb80d13` landed
 after Michael reviewed the diff. No active code check; the report
@@ -303,7 +303,7 @@ decision-gate was honored.
 
 PASS by construction (the commit exists). Recorded for completeness.
 
-### 4.5 D5 — purge re-home preserves DELETE semantics (not RETAIN)
+### 4.5 D5: purge re-home preserves DELETE semantics (not RETAIN)
 
 Per §4 D5 and the §2(h) D3 sub-stage description, the
 `purge_done_bug_tasks` operation added to bob-tools at commit
@@ -333,7 +333,7 @@ reported. Item 4.4 is historical and cannot fail.
 
 ---
 
-## 5. Item 5 — deletion-surface completeness
+## 5. Item 5: deletion-surface completeness
 
 §2(h) of the integration plan lists every mcloop module's expected
 disposition under the de-split. Item 5 walks the table and confirms
@@ -399,10 +399,10 @@ a defect that must be fixed before consolidation.
 
 Mirror `desplit-independent-validation.md`:
 
-1. Header — what was audited, against what reference docs, by which
+1. Header, what was audited, against what reference docs, by which
    reviewer (Claude Code), under which Anthropic-Claude model
    identifier and date.
-2. Frozen state — the two `desplit-complete` tags, the pre-B1
+2. Frozen state, the two `desplit-complete` tags, the pre-B1
    reference SHA, the bob-tools D3 SHA. Confirm each resolves.
 3. Item-by-item PASS/FAIL verdict table, evidence column with
    `file:line` citations. One subsection per item (1, 3, 4, 5).
@@ -443,7 +443,7 @@ A single scoped commit on `bob/main` containing:
   optionally).
 
 If `bob` has a `.gitignore` excluding `.scratch/`, the fixtures live
-in the bob-tools scratch tree, which is a separate repo — commit
+in the bob-tools scratch tree, which is a separate repo, commit
 those there if they belong, but the canonical report itself lives in
 `bob/design/`.
 
@@ -508,7 +508,7 @@ done" auditable rather than oral. Consolidation planning then
 starts from a verified base.
 
 If convergence does not hold: triage the divergence in a follow-up
-session — defect in code (fix and re-run the affected item) versus
+session, defect in code (fix and re-run the affected item) versus
 defect in the integration plan or charter (correct the document,
 re-run if the correction implies a code check). Iterate until
 convergence. Consolidation does not start while either stream has

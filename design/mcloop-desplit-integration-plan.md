@@ -12,11 +12,11 @@ Audit trail (2026-05-17): two independent adversarial reviewers
 from current source and converged on zero behavioral defects. Their
 findings reports are at `bob/design/desplit-independent-validation-kimi.md`
 and `bob/design/desplit-independent-validation.md`. Three mechanical
-doc corrections from those reports — extending the §2 freeze
+doc corrections from those reports, extending the §2 freeze
 invariant to scan BUGS.md as well as PLAN.md (B-1), adding
 `tests/test_args.py` to the §2(h) test deletion surface (B-2), and
 replacing the brittle B1 pre-flight SHA fingerprint with a shape
-invariant the human re-verifies just before cutover (B-3) — are
+invariant the human re-verifies just before cutover (B-3), are
 folded in below.
 
 Authoritative architecture reference: `bob/design/planfile.md` §8
@@ -174,7 +174,7 @@ then each `subsection.tasks`. DFS leaf-before-parent in
   `_search_tasks`; `_phase_complete` mirrors `_stage_complete`
   (FAILED blocks completion in both). Empirically confirmed for task
   positions/ordinals/per-phase counts by §0.3.
-- `@deps` gating: **MATCH (vacuous)** on existing mcloop plans —
+- `@deps` gating: **MATCH (vacuous)** on existing mcloop plans,
   `mcloop/PLAN.md` has no `@deps` lines, and `_deps_satisfied` returns
   `all(()) == True`. **DIVERGENCE [accepted-doc]** if a `@deps` line
   is ever added to mcloop's PLAN.md before the swap: it changes
@@ -187,7 +187,7 @@ then each `subsection.tasks`. DFS leaf-before-parent in
   `STAGE_RE`/`BUGS_RE` match (`checklist.parse`), so its tasks stay in
   document order in the single flat stack. planfile separates
   `phase.tasks` from `subsection.tasks` and `next_tasks` walks
-  `(phase.tasks, *sub.tasks)` — phase-level tasks first, *then*
+  `(phase.tasks, *sub.tasks)`, phase-level tasks first, *then*
   subsection tasks. If a subsection physically precedes phase-level
   tasks in the file, the chosen next task differs. This cannot arise
   on canonical output: `renderer._render_phase_into` emits phase tasks
@@ -197,7 +197,7 @@ then each `subsection.tasks`. DFS leaf-before-parent in
   canonicalization in Stage B1 makes the authoritative PLAN.md
   canonical, after which the divergence is structurally impossible.
   Pin a parity test on the pre-migration file.
-- BATCH return shape: **DIVERGENCE [mcloop-adapt]** — see (c).
+- BATCH return shape: **DIVERGENCE [mcloop-adapt]**; see (c).
 
 ### (b) Failed-sibling blocking
 
@@ -229,7 +229,7 @@ to assemble the batch. Selection logic in
 FAILED → break if `batch or seen_non_failed` else continue,
 `is_user_task`/`is_auto_task` child → break, else append
 (`checklist.py:695-719`; `is_batch_task` at `:686-692`).
-planfile: `next_tasks` surfaces the **parent** itself —
+planfile: `next_tasks` surfaces the **parent** itself,
 `_walk_actionable` does `dataclasses.replace(task,
 children=_get_batch_children(task))` when `"BATCH" in task.flag_tags`
 and drains the child iterator (`operations.py:636-649`).
@@ -243,7 +243,7 @@ and drains the child iterator (`operations.py:636-649`).
   (`replace(parent, children=batch)`). A drop-in `find_next →
   next_tasks` swap changes what `run_loop` receives. Remediation:
   the Stage B3 scheduler shim normalizes this to mcloop's current
-  shape — when `next_tasks` yields a node with `"BATCH" in
+  shape, when `next_tasks` yields a node with `"BATCH" in
   flag_tags`, the shim returns the surfaced parent and `run_loop`'s
   existing batch block consumes `node.children` directly instead of
   recomputing `get_batch_children(parent)`. Net control flow
@@ -317,7 +317,7 @@ mcloop: `checklist.check_off` writes one `[x]` line via
 `_find_task_line` (stale-line-tolerant: line number, then text+indent
 +stage fallback, prefer unchecked), then `_auto_check_parents`
 re-parses (`check_structure=False`) and silently `[x]`-marks any
-parent whose children are all checked — **no ledger event**
+parent whose children are all checked, **no ledger event**
 (`checklist.py:478-558`, `_auto_check_parents` at `:771-797`).
 `main.run_loop` standard success: `check_off(active_file, task)` then
 `_ledger_settle(label, TaskOutcome(success=True, …))` →
@@ -366,8 +366,8 @@ the three public ops (`:879-1030`).
   reauthor / `HardStop`. Per design §5 this is the *intended target*
   contract, but it is **not behavior-preserving**. Resolution
   (Decision D1, §4): the Stage B3 scheduler/mutation swap keeps the
-  current emission profile — the settle hook ignores
-  `kind=="work_observed"` Settlements — and a separate, later,
+  current emission profile, the settle hook ignores
+  `kind=="work_observed"` Settlements, and a separate, later,
   independently-tested stage (Stage B6) opts into emitting them. This
   keeps the swap behavior-preserving and isolates the audit-stream
   change.
@@ -385,7 +385,7 @@ the three public ops (`:879-1030`).
   `_find_task_by_id` return `None` → `ValueError`. mcloop's
   `check_off` identifies the task by `Task` object (line+text), no
   ID. Therefore the authoritative PLAN.md **must be migrated (IDs
-  assigned)** before planfile mutation can be used — but migration
+  assigned)** before planfile mutation can be used, but migration
   breaks `checklist.is_user_task` (§2(d)). The only consistent
   resolution is an **atomic** Stage B1+B3: migrate the file and switch
   classification+scheduling+mutation to planfile in one cutover, never
@@ -428,7 +428,7 @@ planfile: `fail_task` → FAILED regardless of prior status,
 
 mcloop: `checklist.check_off`/`mark_failed`/`clear_failed_markers`/
 `_auto_check_parents` do `read_text → mutate → write_text`
-(`checklist.py:547-558`, `:572-596`, `:608-623`, `:781-797`) —
+(`checklist.py:547-558`, `:572-596`, `:608-623`, `:781-797`),
 non-atomic, unlocked, single-line edits. `plan_split` uses the same
 plain file rewrite model for `CURRENT_PLAN.md`/PLAN.md extraction and
 transition: it imports checklist at `plan_split.py:21-28`, defines
@@ -456,7 +456,7 @@ external change → apply → save (`fileio.py:89-188`).
   behavior preserved; durability improved.
 - **DIVERGENCE [hard constraint], HIGHEST behavior-preservation
   risk: whole-file canonical rewrite.** `fileio.save` writes
-  `render_plan(plan)` — canonical form: 2-space indent, `T-NNNNNN:`
+  `render_plan(plan)`, canonical form: 2-space indent, `T-NNNNNN:`
   IDs, `<!-- phase_id: … -->` comments, magic line if set, prose
   blank-line normalization (`parser._finalize_prose`), phase-tasks-
   then-subsections ordering. mcloop's `check_off` today changes
@@ -490,8 +490,8 @@ split-file model.
 | `mcloop/main.py` | imports checklist names at `main.py:17-40` and `plan_split.{BUGS_FILE,CURRENT_PLAN,ensure_bugs_file,ensure_current_plan,get_current_phase_name,transition_phase}` at `:107-114`; `run_loop` binds `master_path/current_plan_path/bugs_path` at `:689-693`, clears failed markers in active files at `:695-703`, passes interrupt `active_paths=[bugs,current,master]` at `:713-724`, and prints the split warning at `:1042-1048` | **Primary migration site** (Stages B2–B5) |
 | `mcloop/lifecycle.py` | imports `checklist.{CHECKBOX_RE,Task,mark_failed,parse}` at `lifecycle.py:14-19`; `_check_interrupted` documents `active_paths` including `BUGS.md, CURRENT_PLAN.md, PLAN.md` at `:76-87` and uses them at `:103`; `_all_tasks` is `:240-245`; `_write_ruledout_to_plan` uses `CHECKBOX_RE` to insert `[RULEDOUT]` at `:248-261` | **Migration site** (Stage B4): re-point to planfile types/ops; collapse `active_paths` to `[BUGS.md, PLAN.md]` |
 | `mcloop/output.py` | imports `checklist.{Task,count_unchecked,current_stage,find_next,get_stages}` at `output.py:10-16`; `_dry_run` uses `get_stages/current_stage/find_next` at `:21-46`; `_print_summary` counts remaining via `count_unchecked` at `:114-150` | **Migration site** (Stage B3/B5): `find_next→next_tasks`, `count_unchecked`→model walk; `_dry_run` reimplemented against `Plan` (no direct `current_stage`/`get_stages` analog) |
-| `mcloop/investigate_cmd.py` | imports `checklist.{Task,parse}` at `investigate_cmd.py:19-20` for *generated worktree investigation plans*: appends verification tasks to `PLAN.md` at `:286-290`, parses generated `PLAN.md` for status at `:378-386`, and writes generated `PLAN.md` at `:634-637`; not a CURRENT_PLAN split coupling | **Separate, lower-risk site** (Stage B5): re-point `parse→parse_plan`; verify the generated-plan format parses (its `## Bug Description` etc. headings are non-Stage → orphan/preamble in planfile; may require `generate_plan` to emit a Stage heading or a planfile compat allowance — pin a test) |
-| `mcloop/maintain.py` | imports `checklist.CHECKBOX_RE` at `maintain.py:13`; `parse_invariants` uses it for `MAINTAIN.md` unchecked invariant lines at `:66-82` — **not** PLAN.md, **not** the split | Decoupled from de-split. Keep a local regex or move `CHECKBOX_RE` to a shared constant when `checklist` is deleted. Not a CURRENT_PLAN coupling. |
+| `mcloop/investigate_cmd.py` | imports `checklist.{Task,parse}` at `investigate_cmd.py:19-20` for *generated worktree investigation plans*: appends verification tasks to `PLAN.md` at `:286-290`, parses generated `PLAN.md` for status at `:378-386`, and writes generated `PLAN.md` at `:634-637`; not a CURRENT_PLAN split coupling | **Separate, lower-risk site** (Stage B5): re-point `parse→parse_plan`; verify the generated-plan format parses (its `## Bug Description` etc. headings are non-Stage → orphan/preamble in planfile; may require `generate_plan` to emit a Stage heading or a planfile compat allowance, pin a test) |
+| `mcloop/maintain.py` | imports `checklist.CHECKBOX_RE` at `maintain.py:13`; `parse_invariants` uses it for `MAINTAIN.md` unchecked invariant lines at `:66-82`, **not** PLAN.md, **not** the split | Decoupled from de-split. Keep a local regex or move `CHECKBOX_RE` to a shared constant when `checklist` is deleted. Not a CURRENT_PLAN coupling. |
 | `mcloop/ledger_emit.py` | does **not** import `checklist`; owns `parse_plan_phase_ids` (`ledger_emit.py:72-89`), `find_explicit_phase_id_for_task` (`:92-119`), and `resolve_phase_id` (`:122-145` and following) using `_PHASE_HEADER_RE`/`_PHASE_ID_COMMENT_RE` | **Shim site** (Stage B2): `resolve_phase_id` becomes a `resolve_task_context` shim (design §7.1) |
 | `mcloop/{run_summary,checks,runner}.py` | **No checklist/plan_split import** (verified). `runner` consumes a precomputed `eliminated` list (`main` computes `get_eliminated`); RULEDOUT reaches prompts through `_build_*_prompt`'s "RULED OUT APPROACHES" blocks at `runner.py:376-385`, `:422-431`, `:482-488`, and `run_task(... eliminated=...)` at `:523-536` | No change |
 | `mcloop/{errors,sync_cmd,audit,claude_md_sync,dep_validator,investigator,review_integration,code_edit}.py` | reference `"PLAN.md"`/`"BUGS.md"` *string literals* only where relevant (`errors.py:138-139` legacy PLAN insertion and `:218-230` BUGS insertion, `sync_cmd.py:1-73` PLAN sync text/diff, `audit.py:39-63/:103-134/:339` audit-report/BUGS handling, `review_integration.py:94/:137` BUGS insertion); no `checklist`/`plan_split` import | No change (string literals; not API-coupled) |
@@ -503,12 +503,12 @@ and exercises `CURRENT_PLAN.md` behavior at `:210-230` (delete with
 `plan_split.py`); `tests/test_checklist.py` imports checklist at
 `:3` (module-level) plus 10 in-function imports of `Task` /
 `_find_task_line` at `:788, :1144, :1162, :1170, :1171, :1194,
-:1195, :1219, :1220, :1433` (parser-behavior tests — retarget to
+:1195, :1219, :1220, :1433` (parser-behavior tests, retarget to
 planfile or delete once `checklist` is gone);
 `tests/integration/test_checklist_integration.py` imports checklist
 ops at `:5`; `tests/integration/test_subtask_ordering.py` drives
 `run_loop` against PLAN fixtures at `:10-30` (scheduler
-integration — retain as planfile scheduler-parity tests);
+integration, retain as planfile scheduler-parity tests);
 `tests/test_output.py` imports `checklist.parse` in `_dry_run`
 fixtures at `:99` and `:114`; `tests/test_lifecycle.py` imports
 `Task` at `:27` (in-function) and asserts split-file interrupt
@@ -516,7 +516,7 @@ behavior at `:804+`; `tests/test_args.py` imports
 `from mcloop.checklist import Task` at `:13` (module-level) plus 9
 in-function imports of `parse as parse_checklist` / `parse as
 cl_parse` / `Task` at `:4309, :4340, :5980, :6264, :6276, :6600,
-:9893, :9942, :9988` — **Stage D1 deletion-prerequisite**
+:9893, :9942, :9988`, **Stage D1 deletion-prerequisite**
 (retarget `Task`/`parse` to `_planfile_compat` or planfile types
 before `mcloop.checklist` is reduced/deleted); **explicitly NOT a
 B1+B3 cutover blocker** since `test_args.py` continues to pass
@@ -557,7 +557,7 @@ tests). Stages are strictly ordered. Phase A (planfile parser/ops/IO)
 is already complete (§0.1); this plan is Phase B + Phase D cleanup
 from `bob/design/planfile.md` §8.
 
-### Stage B0 — Pre-cutover, no mcloop behavior change
+### Stage B0: Pre-cutover, no mcloop behavior change
 
 B0.1 **DONE in bob-tools commit `85b4524`**: added
 `bob_tools.planfile.clear_failed(plan: Plan) -> Plan`
@@ -569,7 +569,7 @@ already formatted`; `mypy --strict bob_tools` → `Success: no issues
 found in 39 source files`; `pytest -q` → `567 passed, 2 skipped in
 1.12s`; `check_cli_end_to_end` exit 0; `check_duplo_generated_fmt`
 exit 0; `test_mcloop_parity.py` → `3 passed in 0.76s`. *(Decision:
-deterministic API addition — Codex/Claude, not routed.)*
+deterministic API addition, Codex/Claude, not routed.)*
 B0.2 **DONE in mcloop commit `fd9518a`**: built the mcloop
 scheduler/mutation shim module `mcloop/_planfile_compat.py` but did
 not wire it into `run_loop`. It exposes checklist-shaped functions
@@ -597,7 +597,7 @@ skipped in 12.39s`; shim-only tests → `11 passed in 0.83s`. mcloop
 runtime unchanged: `rg -n "_planfile_compat" mcloop --glob
 '!_planfile_compat.py'` returns no matches.
 
-### Stage B1 — One-time authoritative-PLAN.md canonicalization+migration (atomic with B3; reviewed)
+### Stage B1: One-time authoritative-PLAN.md canonicalization+migration (atomic with B3; reviewed)
 
 This stage and B3 form **one cutover commit** and must not be split
 in time (the §2(d)/§2(e) hard constraints: a migrated file is
@@ -607,7 +607,7 @@ planfile mutation).
 B1.1 Run the `bob-plan fmt` composition (`parse_plan; migrate; save`)
 on a copy of `/Users/mhcoen/proj/mcloop/PLAN.md`.
 B1.2 Produce the unified diff and **route it to the user for
-review** — this is the one genuinely consequential, irreversible
+review**; this is the one genuinely consequential, irreversible
 artifact (rewrites the human-edited build document: 3→2-space indent,
 adds `T-NNNNNN:` IDs and `<!-- phase_id: phase_NNN -->` comments,
 normalizes prose blank lines, orders phase-tasks-before-subsections).
@@ -619,10 +619,10 @@ migrated file exits 0; re-parse(strict)→render is a fixed point
 (reuse Stage 8 round-trip property); `test_mcloop_parity.py`-style
 structural compare between `checklist.parse(original)` and
 `parse_plan(migrated)` shows only the accepted additive deltas
-(IDs/comments/indent/magic) and the accepted §2(d) substring set —
+(IDs/comments/indent/magic) and the accepted §2(d) substring set,
 nothing else.
 
-### Stage B2 — ledger phase-id resolver shim (independent, pre-cutover-safe)
+### Stage B2: ledger phase-id resolver shim (independent, pre-cutover-safe)
 
 B2.1 **DONE in mcloop commit `0c4d6b7`**: replaced
 `ledger_emit.resolve_phase_id`'s body with a
@@ -655,7 +655,7 @@ planfile side: `operations._task_matches_label` uses exact `task_id`
 match or exact/structurally-delimited text match, never raw substring
 matching.
 
-### Stage B3 — Cutover: scheduler + mutation + classification (atomic with B1)
+### Stage B3. Cutover: scheduler + mutation + classification (atomic with B1)
 
 B3.1 Land the B1-migrated PLAN.md and, in the same commit, switch
 `main.py` and `output.py` from `mcloop.checklist` to the B0.2 shim
@@ -665,7 +665,7 @@ for: `parse`, `find_next`, `check_off`, `mark_failed`,
 `user_task_instructions`, `parse_auto_task`. PLAN.md is now the sole
 authoritative build document for *scheduling and mutation*;
 `CURRENT_PLAN.md`/`plan_split` are **still present and still own
-phase windowing** (removed only at B5) — so `run_loop`'s active-file
+phase windowing** (removed only at B5), so `run_loop`'s active-file
 still reads PLAN.md sections via `plan_split` for now, but the
 parse/select/mutate calls go through planfile. (This keeps the
 diff minimal and the phase-window change isolated to B5.)
@@ -686,7 +686,7 @@ states (modulo the canonical-form bytes already accepted at B1, and
 the accepted §2(d) classification of prose-mention tag-bearing tasks:
 assert every such task in the fixture is DONE and no incomplete task
 differs between checklist substring classification and planfile
-leading-tag classification); (iii) **single-line mutation diffs** —
+leading-tag classification); (iii) **single-line mutation diffs**,
 each `check_off`/`mark_failed` changes exactly the one task line, no
 reflow (proves the §2(g) whole-file-rewrite risk is neutralized
 post-B1); (iv) byte-identical emitted ledger event stream. Gate:
@@ -699,14 +699,14 @@ Freeze invariants rechecked on current `/Users/mhcoen/proj/mcloop/PLAN.md`
 and `BUGS.md`: `rg -n "@deps" PLAN.md BUGS.md` and
 `rg -n "^[[:space:]]*- \[[ !]\].*\[(BATCH|AUTO[^\]]*)\]" PLAN.md BUGS.md`
 both return no matches (USER is excluded from the alternation per
-the freeze-invariant subsection above — confirmed MATCH per §2(d)).
+the freeze-invariant subsection above, confirmed MATCH per §2(d)).
 
 **B1 migration artifact: regenerate immediately before cutover
 review.** The artifact lives under
 `/Users/mhcoen/proj/bob-tools/.scratch/mcloop-b1b3-preflight/`
 (`/tmp` is forbidden by the workspace scratch policy):
 `PLAN.original.md`, `PLAN.migrated.md`, `PLAN.migration.diff`. The
-diff SHA-256 is **not** the cutover gate — it churns whenever
+diff SHA-256 is **not** the cutover gate, it churns whenever
 `mcloop/PLAN.md` is touched. The gate is the
 transformation-shape invariant below, which must hold on the
 freshly-regenerated artifact at the moment of the cutover commit.
@@ -732,7 +732,7 @@ changed and the cutover must not proceed without re-audit:
   BATCH by substring; planfile does not; all are `[x]` and not
   scheduler-selectable).
 
-Latest known-good fingerprint (2026-05-17, informational only — do
+Latest known-good fingerprint (2026-05-17, informational only, do
 **not** treat as a gate; regenerate immediately before cutover):
 `PLAN.original.md` SHA-256
 `56daf92f5e3895048d8d4f970fbcc95cd921363941d48f58c0c632cfd8ca645e`
@@ -799,7 +799,7 @@ consistent, shim API-boundary parity checks pass, and the named B3
 recorded-replay harness is now hermetic and deterministic. The
 irreversible cutover itself is still a separate scoped execution step.
 
-### Stage B4 — Interrupt/lifecycle path onto planfile
+### Stage B4: Interrupt/lifecycle path onto planfile
 
 B4.1 `lifecycle._check_interrupted`/`_write_ruledout_to_plan`/
 `_all_tasks` re-pointed to shim/planfile types; `mark_failed` via
@@ -810,14 +810,14 @@ B4.2 Verification: `tests/test_lifecycle.py`,
 an interrupted task marks `[!]` / appends `[RULEDOUT]` on the same
 line/indent as before (assert against pre-B4 baseline).
 
-### Stage B5 — Eliminate CURRENT_PLAN.md and the split
+### Stage B5: Eliminate CURRENT_PLAN.md and the split
 
 B5.1 `run_loop` reads/writes a single authoritative `PLAN.md` for
 scheduling **and** phase windowing: replace `ensure_current_plan`/
 `transition_phase`/`get_current_phase_name`/`mark_phase_complete`
 with planfile-native first-incomplete-phase scheduling
-(`next_tasks` already scopes to the first incomplete phase — §2(a)
-MATCH — so the explicit `transition_phase` extract/rewrite of
+(`next_tasks` already scopes to the first incomplete phase, §2(a)
+MATCH, so the explicit `transition_phase` extract/rewrite of
 `CURRENT_PLAN.md` becomes unnecessary; phase-boundary full-suite/build
 checks and `--stop-after-stage`/`completed_stage` accounting are
 rewired to detect "first incomplete phase advanced" from successive
@@ -825,7 +825,7 @@ rewired to detect "first incomplete phase advanced" from successive
 rewrites). `BUGS.md` remains a separate file (bugs section priority
 is `next_tasks`-native via `plan.bugs`; current mcloop keeps bugs in
 a standalone `BUGS.md`, so retain `BUGS.md` as a second plan input
-parsed by `parse_plan` — bug priority semantics unchanged, §2(a)
+parsed by `parse_plan`, bug priority semantics unchanged, §2(a)
 MATCH). `--retry` uses `planfile.clear_failed` (B0.1) over PLAN.md
 and BUGS.md. Collapse `_interrupt_active_paths` to `[BUGS.md,
 PLAN.md]`. Remove the "Do not edit CURRENT_PLAN.md" startup string;
@@ -843,7 +843,7 @@ behavior; identical `--retry`, `--stop-after-stage`,
 string or `plan_split` import anywhere in `mcloop/`
 (grep gate). Full suite green.
 
-### Stage B6 — (Deferred, opt-in, separately tested) adopt the target ledger contract
+### Stage B6: (Deferred, opt-in, separately tested) adopt the target ledger contract
 
 Not part of the behavior-preserving cutover. Enables Decision D1
 (`work_observed` for AUTO/USER) and/or Decision D2 (ordinal phase-id
@@ -872,7 +872,7 @@ from the import at `main.py:35` and tests). It is
 `checklist`-coupled: it uses `CHECKBOX_RE` (`checklist.py:9`) to
 identify checkbox lines (`checklist.py:763`), so
 reducing/deleting `checklist` at D1 forces it to be re-homed
-regardless — it is part of the deletion surface. Its current
+regardless; it is part of the deletion surface. Its current
 observable behavior is: every checked-off (`[x]` or `[X]`) line in
 `BUGS.md` is **deleted** and the whole file is rewritten
 (`checklist.py:763-768`). Two tests directly encode deletion:
@@ -923,25 +923,25 @@ schema bump, explicitly **out of scope** and not part of this plan.
 
 ## 4. Decisions register
 
-- **D1 — AUTO/USER `work_observed` emission.** CONSEQUENTIAL (alters
+- **D1, AUTO/USER `work_observed` emission.** CONSEQUENTIAL (alters
   ledger stream → threshold eval). Recommended default: **preserve
   current behavior** (drop `work_observed` at the settle hook through
   B5); adopt at opt-in B6. Rationale: behavior-preserving cutover is
   the acceptance bar; the design-§5 target is a deliberate, separable
   change.
-- **D2 — Ordinal phase-id attribution via `resolve_task_context`.**
+- **D2, Ordinal phase-id attribution via `resolve_task_context`.**
   CONSEQUENTIAL (alters ledger stream + `finding_observed` degraded
   events). Recommended default: shim collapses `ordinal → ("none",
   None)` to reproduce today's `resolve_phase_id(no ordinal_index)`
   emission; adopt at opt-in B6.
-- **D3 — `--retry` bulk clear.** Procedural. Add
+- **D3, `--retry` bulk clear.** Procedural. Add
   `planfile.clear_failed` (B0.1). Not routed.
-- **D4 — One-time PLAN.md canonicalization diff (B1.2).**
+- **D4, One-time PLAN.md canonicalization diff (B1.2).**
   CONSEQUENTIAL/irreversible (rewrites the human authoritative build
   document). The diff is routed to the user for review before the B1+B3
   cutover commit. Everything else in B1 is deterministic and not
   routed.
-- **D5 — `purge_completed_bugs` re-home (Stage D3).** Option A
+- **D5, `purge_completed_bugs` re-home (Stage D3).** Option A
   decided: behavior-preserving re-home only; **delete-vs-retain is
   out of scope**, owned by the already-filed mcloop defect `de7e7fd`
   and the deferred deterministic-bugfile layer. This is a *major
@@ -954,7 +954,7 @@ schema bump, explicitly **out of scope** and not part of this plan.
   primitives but no purge operation, so add a small `planfile` purge
   op and call it through `fileio.update` rather than embedding the
   filter in `mcloop`.
-  Changing purge *semantics* would be routed — but it is explicitly
+  Changing purge *semantics* would be routed, but it is explicitly
   deferred, so it does not arise in this plan.
 
 All other choices in this plan are deterministic/procedural and are
@@ -964,9 +964,9 @@ made by Codex/Claude per the standing decision rule.
 
 ## 5. Why this ordering is forced (not arbitrary)
 
-The two hard constraints — (i) `migrate()` IDs break
+The two hard constraints, (i) `migrate()` IDs break
 `checklist.is_user_task` (§2(d)); (ii) planfile mutation requires IDs
-(§2(e)) — make B1 (migrate file) and B3 (switch consumers) a single
+(§2(e)); make B1 (migrate file) and B3 (switch consumers) a single
 indivisible cutover: no point in time may have `checklist` reading an
 ID-bearing file or planfile mutation seeing an ID-less file. B2
 (ledger shim) is genuinely independent of file identity and is
@@ -974,7 +974,7 @@ sequenced first to shrink the cutover. B5 (delete the split) is
 deferred until after B3 proves scheduling/mutation parity, so the
 phase-windowing rewrite is isolated from the parser swap. B6 quarantines
 the only two *intended* (non-preserving) behavioral changes so the
-cutover itself remains strictly behavior-preserving — directly
+cutover itself remains strictly behavior-preserving, directly
 satisfying the governing risk and the "looks complete, isn't"
 failure-mode mandate.
 
@@ -1005,7 +1005,7 @@ Audit artifacts:
   design-level decisions required.
 - Convergence note:
   `bob/design/desplit-post-completion-audit-convergence.md`. Verdict
-  CONVERGE WITH MECHANICAL CORRECTIONS — two doc-side corrections (one
+  CONVERGE WITH MECHANICAL CORRECTIONS, two doc-side corrections (one
   per stream), both flagged in the respective reports, neither
   contradicting the other.
 
@@ -1016,7 +1016,7 @@ base.
 
 Stream B's MC-2 finding surfaced that the actual landed stage order
 differed from this document's §5 forced ordering: B2 (`0c4d6b7`)
-landed before B1+B3, and B1 was further split from B3 — PLAN.md
+landed before B1+B3, and B1 was further split from B3, PLAN.md
 canonicalization landed at `31ec2433` ("B1 re-fold") roughly 3.1
 days before the B1+B3 import-swap cutover at `eb80d13`. §5 had
 specified B1 and B3 as indivisible.
@@ -1024,8 +1024,8 @@ specified B1 and B3 as indivisible.
 This created a 3-day window between `31ec2433` and `eb80d13` in
 which mcloop ran pre-cutover code (still using `mcloop.checklist`)
 against a post-canonicalization PLAN.md. Per §2(d), the linchpin
-defect — `checklist.is_user_task` returns False on T-NNNNNN-prefixed
-text — was structurally present throughout that window. No USER
+defect, `checklist.is_user_task` returns False on T-NNNNNN-prefixed
+text, was structurally present throughout that window. No USER
 tasks were scheduled during the window (confirmed by Michael:
 no user requests were issued in the interval), so the latent
 defect never manifested. Audit Stream A's pre-B1 → post-D1

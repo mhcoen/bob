@@ -8,7 +8,7 @@ Critique file: `bob/design/0a-iterative-design-critique.md`.
 ## Purpose
 
 A workflow pattern that runs an iterative cross-model design conversation
-between two roles — **author** and **critic** — until either the critic
+between two roles (**author** and **critic**) until either the critic
 declares no serious issues remaining or a hard round cap is reached. Emits
 the final design artifact plus the full transcript. Intended use: duplo's
 design phase, mcloop's reauthor decision point, and any caller that wants
@@ -22,7 +22,7 @@ not modify or depend on them.
 
 Cross-model iterative design produces materially better designs than
 single-model design, when "better" is measured by structural soundness,
-edge-case coverage, and absence of contradictions — judged by a human
+edge-case coverage, and absence of contradictions, judged by a human
 operator on real duplo design tasks against a hand-run baseline.
 
 The pattern's value is empirical, not deductive. The mechanical test
@@ -33,10 +33,10 @@ what it says is worth doing.
 
 Two roles, each bound at configuration time to a (model, prompt) pair:
 
-- **author** — produces the initial design artifact and revises it across
+- **author**, produces the initial design artifact and revises it across
   rounds in response to critic output. Stateful across rounds (sees full
   history).
-- **critic** — reads the current artifact and the prior critique-and-
+- **critic**, reads the current artifact and the prior critique-and-
   revision history; emits a structured critique. Stateful across rounds.
 
 Author and critic must be bound to **different models** (different
@@ -77,18 +77,18 @@ the same round number. The next critic review begins round N+1.
 
 The pattern terminates in exactly one of:
 
-1. **CONVERGED** — the critic's most recent output declares
+1. **CONVERGED**, the critic's most recent output declares
    `ready: true` AND the `issues` list contains no entries of severity
    `structural` or `unrecoverable`. A critic output that declares
    `ready: true` while listing any `structural` or `unrecoverable` issue
    is an internal contradiction; the pattern treats this as malformed
    output (see Convergence signal contract below) and does not terminate
    CONVERGED.
-2. **CAPPED** — `current_round == max_rounds` and the critic's most
+2. **CAPPED**, `current_round == max_rounds` and the critic's most
    recent output declares `ready: false`. The author does *not* get a
    final revision after the capping critique. The artifact is whatever
    the author produced in the previous round.
-3. **ERROR** — see below.
+3. **ERROR**; see below.
 
 The caller receives the termination state explicitly in the result. A
 `CAPPED` result is a real outcome, not a failure; the caller decides
@@ -150,7 +150,7 @@ The author prompt must include a symmetric contract:
 > implementation time. Do not preemptively address such concerns."
 
 Symmetry of the done-definition is essential. Without it, the loop fails
-to converge — the author keeps polishing what the critic doesn't care
+to converge; the author keeps polishing what the critic doesn't care
 about, the critic keeps finding what the author considers out of scope.
 
 ## Hard round cap
@@ -173,7 +173,7 @@ current revision is responding to), and every prior author revision
 input, every prior version of the artifact, and its own prior critiques
 (rounds 1..N-1).
 
-This is expensive in tokens. The cost is intentional — both roles need
+This is expensive in tokens. The cost is intentional; both roles need
 full history to reason about whether earlier issues were resolved or
 merely re-introduced. No summarization or truncation in v1; revisit if
 context overflow occurs in practice.
@@ -273,7 +273,7 @@ classification `iterative_design.<reason>`.
 1. *Round threading.* Mock author and critic that emit canned outputs
    over 3 critic rounds with `ready: false`, `ready: false`,
    `ready: true`. Assert: terminates `CONVERGED` at round 3; transcript
-   contains all 6 turns in order — (a) initial author draft (round 0),
+   contains all 6 turns in order, (a) initial author draft (round 0),
    (b) critic 1 (ready=false), (c) author revision 1, (d) critic 2
    (ready=false), (e) author revision 2, (f) critic 3 (ready=true). No
    author revision follows the converging critique.

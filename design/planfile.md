@@ -49,7 +49,7 @@ behavior that the runner depends on.
   are admitted: space (todo), `x`/`X` (done), `!` (failed).
 - `STAGE_RE = r"^#+\s+.*?\b(?:stage|phase)\s+(\d+)\b"` (line 12). Any
   heading level whose title contains `Stage N` or `Phase N` is a
-  section header. The `\d+` is mandatory — bare digits only.
+  section header. The `\d+` is mandatory, bare digits only.
 - `BUGS_RE = r"^#+\s+Bugs\s*$"` (line 14). Any heading level titled
   exactly `Bugs` is the bug-priority section.
 - Four operational tags: `[USER]` (`_USER_TAG`, line 22),
@@ -166,7 +166,7 @@ prints a stderr warning and emits a `finding_observed` event tagged
 
 ### 2.5 The format incompatibility
 
-McLoop's `STAGE_RE` requires `\bphase\s+\d+\b` — bare digits after
+McLoop's `STAGE_RE` requires `\bphase\s+\d+\b`, bare digits after
 "phase". The ledger's `_PHASE_HEADER_RE` accepts
 `[A-Za-z0-9_]+` after "Phase". The following table shows what each
 heading produces:
@@ -284,7 +284,7 @@ The split between `canonicalize` and `migrate`:
 
 Mutation operations return a tuple of Settlements rather than a
 single one. A direct completion that also auto-checks a parent
-returns `(direct_settlement, derived_no_event_settlement)` — explicit
+returns `(direct_settlement, derived_no_event_settlement)`, explicit
 and testable. Callers do not infer derived state by diffing Plans.
 For tasks with no derived effects the tuple has one element.
 
@@ -404,7 +404,7 @@ plans.
 Compatibility mode parses leading tags as tags and treats non-leading
 bracketed tokens that resemble flag or action tags as prose. The
 parser may emit a validation warning when a non-leading token like
-`[USER]` appears inside task text — the warning is opt-in; the
+`[USER]` appears inside task text; the warning is opt-in; the
 default is silent acceptance as prose.
 
 The `migrate` operation does **not** auto-promote non-leading
@@ -612,7 +612,7 @@ tasks. Two paths forward:
 
 **Caveat about substring matching**:
 `find_explicit_phase_id_for_task` currently uses
-`label_token in line` — pure substring match. This is brittle
+`label_token in line`, pure substring match. This is brittle
 today and breaks once `T-NNNNNN:` lands
 (`T-000001` is a substring of `T-0000010`). The library must
 tokenize and match against parsed task entries, not raw line

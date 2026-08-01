@@ -3,16 +3,16 @@
 ## Purpose
 
 Phase C exposed Phase D's blockers. mcloop drove 23 stages to completion
-with ~1.5 human interventions per task. Phase D — building the
+with ~1.5 human interventions per task. Phase D, building the
 self-improvement infrastructure (FailureRecord, fix-proposer, trust
-ladder) per `recursive-improvement.md` — requires that intervention rate
+ladder) per `recursive-improvement.md`, requires that intervention rate
 to be substantially lower at the start, not the end. Otherwise Phase D
 is the same pain Phase C was, only this time mcloop is editing mcloop
 itself, which makes the failure modes more dangerous.
 
 This document enumerates the issues observed in Phase C plus the gaps
 those issues exposed, organized by tier. Not all need to land before
-Phase D — Tier 1 is the blocker set; Tier 2 is high-leverage but not
+Phase D, Tier 1 is the blocker set; Tier 2 is high-leverage but not
 required; Tier 3 is M1-or-later territory captured here so it does not
 get lost.
 
@@ -29,12 +29,12 @@ Each issue has four lines:
   mcloop edits its own infrastructure.
 - **Sketch of fix**: enough to know it's tractable. Not the
   implementation.
-- **Effort estimate**: rough — small (≤1 day), medium (2-5 days), large
+- **Effort estimate**: rough, small (≤1 day), medium (2-5 days), large
   (1-2 weeks).
 
 ---
 
-## Tier 1 — Blockers
+## Tier 1: Blockers
 
 The loop is not safely runnable for Phase D until these land.
 
@@ -81,7 +81,7 @@ orchestra) and surface human-readable activity:
 
 Update on event arrival, not on a 30s timer. Tool-use events become
 one-liners. File edits become one-liners with counts. Test output
-becomes pass/fail summary. Existing detailed log remains untouched —
+becomes pass/fail summary. Existing detailed log remains untouched,
 this is a surface, not a replacement.
 
 **Effort.** Medium. Stream-json event parser already exists in
@@ -108,7 +108,7 @@ is when wall-clock or idle fires.
 
 **Why it matters for Phase D.** A loop running on its own code can
 enter a self-modification cycle that produces output (so it looks
-"alive" to the idle detector) but is making zero useful progress —
+"alive" to the idle detector) but is making zero useful progress,
 e.g., the agent keeps proposing the same edit, the gate keeps
 rejecting it, the agent re-proposes, etc. The idle timeout would not
 fire. A repetition detector would.
@@ -144,7 +144,7 @@ FailureRecord candidate event.
 - `.mcloop/active-pid` not cleaned up on abnormal exit. We rm'd it
   manually 4+ times.
 - Master `PLAN.md` not getting `[x]` written even when mcloop reported
-  "Completed Task N" — because the canonical-validation bug blocked the
+  "Completed Task N", because the canonical-validation bug blocked the
   write silently. Caught only because the next task tried to start from
   the same `[ ]`.
 - mcloop's run_summary.json says `success: false` while the actual work
@@ -213,16 +213,16 @@ race against each other; the rest is bookkeeping.
 
 **What we hit.** During Phase C we needed but did not have:
 
-- `bob-plan edit <T-id> <new-text>` — to fix the T-000183 broken-glob
+- `bob-plan edit <T-id> <new-text>`, to fix the T-000183 broken-glob
   typo without hand-editing PLAN.md.
-- `bob-plan unstick` — combined: regenerate CURRENT_PLAN.md from
+- `bob-plan unstick`, combined: regenerate CURRENT_PLAN.md from
   master, clean stale pid, fix common drifts. One command instead of
   three.
-- `mcloop --status` — single-command answer to "what's running, is it
+- `mcloop --status`, single-command answer to "what's running, is it
   alive, what task is in progress, what was the last commit, what was
   the last failure". Today this is 5-10 separate `cat`/`grep`/`stat`/
   `kill -0` invocations across 4 files.
-- `mcloop --kill` — clean termination (signal mcloop, wait for editor
+- `mcloop --kill`, clean termination (signal mcloop, wait for editor
   subprocess, remove pid, leave consistent state). Today this is
   Ctrl-C + rm active-pid + sometimes manual git operations.
 
@@ -248,7 +248,7 @@ to exist first.
   line 3). Pre-existing. Sitting unfixed.
 - mcloop's pre-flight check_commands run only in `project_dir`. For
   cross-repo tasks (Stages 18-22), bob-tools' suite was green but
-  duplo's wasn't checked by mcloop — the editor agent ran duplo's
+  duplo's wasn't checked by mcloop, the editor agent ran duplo's
   pytest manually inside its session.
 - "Full test suite (phase boundary)" runs once per phase boundary,
   reported as `passed [1s]`. Suspiciously fast. Worth checking what's
@@ -276,7 +276,7 @@ silently.
 
 ---
 
-## Tier 2 — High leverage, not blocking
+## Tier 2: High leverage, not blocking
 
 Things that will hurt during Phase D but won't stop it.
 
@@ -307,10 +307,10 @@ only available AFTER mcloop has bailed.
 **Sketch of fix.** A control channel (file under `.mcloop/control/`
 that mcloop polls):
 
-- `pause` — finish current tool use, then pause
-- `inject <text>` — append text to the agent's next-message context
-- `skip` — mark current task failed and advance
-- `kill` — same as Ctrl-C but cleaner
+- `pause`, finish current tool use, then pause
+- `inject <text>`, append text to the agent's next-message context
+- `skip`, mark current task failed and advance
+- `kill`, same as Ctrl-C but cleaner
 
 These could be triggered by `mcloop --pause`, etc. The polling adds
 overhead but it's cheap.
@@ -370,7 +370,7 @@ are signal of a workaround.
 is a persistent drift source. We have rm'd-and-regenerated it 5+ times.
 The user asked "why does this file exist" mid-Phase-C and the answer
 ("it's mcloop's working slice; regenerated each run") satisfies the
-mechanical question but not the design question — could mcloop just
+mechanical question but not the design question, could mcloop just
 operate on master with a slice cursor and avoid the divergent file
 entirely?
 
@@ -390,7 +390,7 @@ shape. Either is a substantial change to mcloop.
 
 ---
 
-## Tier 3 — Worth doing, M1+ territory
+## Tier 3: Worth doing, M1+ territory
 
 Capture so they're not forgotten; defer until after Tier 1 lands.
 
@@ -404,7 +404,7 @@ agent should carry richer context across tasks.
 
 **Sketch.** A `session_memory.md` file under `.mcloop/`, written by the
 agent at the end of each task, read by the next task as additional
-prompt context. Curated, not raw — the agent decides what's worth
+prompt context. Curated, not raw, the agent decides what's worth
 keeping.
 
 **Effort.** Medium.
@@ -458,9 +458,9 @@ unused, decide whether to remove or activate.
 
 **What we hit.** Three log locations:
 
-- `.mcloop/runs/*.json` — mcloop's run summaries
-- `logs/orchestra-runs/<id>/log.jsonl` — orchestra's run events
-- `logs/<timestamp>_<task>_edit_<...>.log` — editor session transcript
+- `.mcloop/runs/*.json`, mcloop's run summaries
+- `logs/orchestra-runs/<id>/log.jsonl`, orchestra's run events
+- `logs/<timestamp>_<task>_edit_<...>.log`, editor session transcript
 
 No common run_id linking them. Today this is fixed via timestamps and
 guessing. Phase D's FailureRecord schema needs a stable identifier
@@ -499,16 +499,16 @@ document is an opening sketch; expect a discussion pass to add at
 least as many issues as it currently names.
 
 After agreement, the Tier 1 items become PLAN.md tasks (Phase C.5
-slice in bob-tools/PLAN.md or a new home — same open question as the
+slice in bob-tools/PLAN.md or a new home, same open question as the
 Phase D plan home). Tier 2 items become Phase C.6 candidates or
 deferred to Phase D-readiness sub-phases. Tier 3 items become M1+
 ledger entries.
 
-The single biggest leverage item is **1.1 Visibility** — without it,
+The single biggest leverage item is **1.1 Visibility**, without it,
 every other issue is harder to diagnose, because the user has no
 real-time view of what the loop is doing. It should land first.
 
-The second-biggest is **1.4 Cross-repo workspace** — it removes a
+The second-biggest is **1.4 Cross-repo workspace**, it removes a
 category of false-negatives that bit Stage 18-22 every single time.
 
 ## Open questions

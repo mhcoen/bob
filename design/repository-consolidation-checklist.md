@@ -1,4 +1,4 @@
-# Bob repository consolidation — checklist
+# Bob repository consolidation: checklist
 
 Goal: merge mcloop, duplo, orchestra, bob-tools into the bob repo as
 `packages/<name>/`, preserving history, re-signed under your key.
@@ -7,7 +7,7 @@ Goal: merge mcloop, duplo, orchestra, bob-tools into the bob repo as
 
 1. `pip install git-filter-repo`.
 2. All five repos clean (`git status` empty) and pushed to origin.
-3. Make source repo histories read-only at the filesystem level —
+3. Make source repo histories read-only at the filesystem level,
    forecloses the entire class of "checklist bug accidentally touches
    the original":
    ```bash
@@ -49,7 +49,7 @@ store, not a local-optimized clone with hardlinks or alternates back
 to the source repository.
 
 filter-repo writes `.git/filter-repo/commit-map` in each rewritten
-clone. Save these — they map old SHA → new SHA, needed for citation
+clone. Save these, they map old SHA → new SHA, needed for citation
 updates.
 
 ## Merge into bob
@@ -87,9 +87,9 @@ done
 
 ## Verify
 
-10. `git log --oneline --graph --all | head` — five histories
+10. `git log --oneline --graph --all | head`, five histories
     converging into bob's seed.
-11. `uv sync && uv run pytest` — full workspace test suite green.
+11. `uv sync && uv run pytest`, full workspace test suite green.
 12. Spot-check: `git log -- packages/mcloop/mcloop/main.py` shows
     historical commits with `--follow`; commit timestamps and
     `user.name`/`user.email` on rewritten commits match the originals.
@@ -110,5 +110,5 @@ done
 Irreversible step is the filter-repo invocation. Everything before it
 is rehearsable on the scratch clones; everything after it is
 mechanical. If the re-signing callback doesn't work on the first
-attempt, delete the scratch clone and re-clone — the source repos
+attempt, delete the scratch clone and re-clone, the source repos
 are untouched.

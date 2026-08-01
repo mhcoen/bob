@@ -3,7 +3,7 @@
 ## Lens
 
 This document orders bob-ecosystem work by its contribution to the path from
-"primitives that work" to "an ecosystem that does the engineering" — better
+"primitives that work" to "an ecosystem that does the engineering", better
 designs going in, fewer interventions during execution, structured handling
 of the failures that do occur, and eventually self-improvement from the
 corpus of those failures. Autonomy (measured as interventions per task
@@ -18,7 +18,7 @@ packages.
 
 ---
 
-## Top priority — design-quality loop
+## Top priority: design-quality loop
 
 These four items unlock cross-model iterative design as a first-class
 operation. Empirical observation: cross-model design conversation
@@ -31,12 +31,12 @@ conversation between two different-model roles, with state threaded
 across rounds. Convergence on two signals: (a) critic declares no
 serious issues remaining; (b) hard round cap. Critic prompt locks
 register to structural flaws, incorrect behavior, and unrecoverable
-state — not stylistic, naming, or scope-expansion comments. Author and
+state, not stylistic, naming, or scope-expansion comments. Author and
 critic share a symmetric definition of done. Emits final artifact and
 full transcript for provenance.
 
 Tested twice:
-- *Mechanical:* orchestra integration test — does the role thread state,
+- *Mechanical:* orchestra integration test, does the role thread state,
   honor the round cap, parse the stop signal, emit a transcript?
 - *Empirical:* run it on a real duplo design task that would otherwise
   be hand-mediated. The hand-run is the baseline. This is the test
@@ -58,27 +58,27 @@ rather than building parallel machinery.
 **0d. Verify orchestra's `design/` folder is fully consolidated.** The
 mcloop README links to `raw.githubusercontent.com/.../packages/orchestra/design/figures/triad.png`,
 but `bob/packages/orchestra/design/` may not exist in the consolidated
-tree — only a `.scratch/consolidation/orchestra-import/` staging copy
+tree, only a `.scratch/consolidation/orchestra-import/` staging copy
 is confirmed present. Either the link is broken in the consolidated
 repo, or the folder was dropped during consolidation. Small, independent.
 
 ---
 
-## Wave 0 — Foundations
+## Wave 0: Foundations
 
 Everything downstream depends on these.
 
 - **Real-time visibility into editor agent activity.** Stream orchestra's
   `log.jsonl` events into mcloop's progress channel as one-liners
   (reading X, editing Y, running pytest, N passed). Replaces the
-  "still running, 1800s elapsed" ticker. [pre-phase-d 1.1 — named in
+  "still running, 1800s elapsed" ticker. [pre-phase-d 1.1, named in
   the source as the single highest-leverage item]
 - **Common `run_id` across mcloop / orchestra / editor logs.** Adopt
   orchestra's hex dir name as canonical; write into mcloop's
   `run_summary.json` and the editor log filename. Hard prerequisite
   for M1 FailureRecord lineage. [pre-phase-d 3.5; promoted from Tier 3]
 
-## Wave 1 — Intervention-reduction quick wins
+## Wave 1: Intervention-reduction quick wins
 
 Small to medium individually; together eliminate roughly half of
 observed intervention categories.
@@ -103,7 +103,7 @@ observed intervention categories.
   commands route to human. YAML/JSON-driven. Eliminates the
   missed-Telegram-prompt intervention class. [pre-phase-d 2.3]
 - **Self-monitoring: `SessionHealth` + repetition detector.** Stateful
-  reducer over the Wave 0 visibility stream — `last_tool_use_ts`,
+  reducer over the Wave 0 visibility stream, `last_tool_use_ts`,
   `tool_use_count_5min`, `repeated_tool_signatures`,
   `current_activity_class`. Alert (not kill) on repetition or
   thinking > 5 min. Detects the failure mode M1 most needs to catch:
@@ -115,11 +115,11 @@ observed intervention categories.
   required. [pre-phase-d 2.4]
 - **mcloop `changed_files` spans the whole workspace.** Originally
   framed as "merge cross-repo diffs across sibling repos"; after
-  consolidation the underlying issue is smaller — mcloop's detector
+  consolidation the underlying issue is smaller, mcloop's detector
   must see edits across all `packages/<name>/`, not just `project_dir`.
   [pre-phase-d 1.4, reframed post-consolidation]
 
-## Wave 2 — M1: Self-diagnosis
+## Wave 2. M1: Self-diagnosis
 
 Turns Wave 0+1 signals into structured records.
 
@@ -149,7 +149,7 @@ Turns Wave 0+1 signals into structured records.
   Do before the M1 corpus accumulates, so it isn't polluted by
   inconsistent gates. [pre-phase-d 1.6]
 
-## Wave 3 — M2: Self-repair
+## Wave 3. M2: Self-repair
 
 Closes the loop.
 
@@ -174,7 +174,7 @@ Closes the loop.
   parser/renderer/operations, CLI layer. Trust-ladder operations on
   BUGS.md need a non-corruptible target. [BACKLOG #1]
 
-## Wave 4 — M3: Self-extension
+## Wave 4. M3: Self-extension
 
 Gated on ~30+ FailureRecord corpus from Wave 2.
 
@@ -182,10 +182,10 @@ Gated on ~30+ FailureRecord corpus from Wave 2.
   Frozen (input plan, expected validation outcome) and
   (failure scenario, expected classification) pairs. Load-bearing
   safety property: self-modifications cannot weaken this. Merge
-  BACKLOG #2 and recursive-improvement M3 — same artifact, two framings.
+  BACKLOG #2 and recursive-improvement M3, same artifact, two framings.
 - **Pattern detector over the FailureRecord corpus.** Clusters by
   signature, surfaces patterns (e.g., "5 records hit the canonical-
-  validation wall — missing `validation_legacy` mode").
+  validation wall, missing `validation_legacy` mode").
   [recursive-improvement M3]
 - **Capability-proposal generator.** Pattern → multi-task PLAN slice
   via the `bob_tools.planfile` API. Shares machinery with the M2
@@ -203,7 +203,7 @@ Parallel to the waves; not wave-gated.
   `parallel-implementation.md`, different framing. [mcloop/IDEAS #1]
 - **`mcloop consult <doc> --reviewer codex`.** Single-pass cross-model
   review. *Note: top-priority item 0a is the iterative generalization
-  of this; this independent item may collapse into 0a — verify after
+  of this; this independent item may collapse into 0a; verify after
   0a lands.* [mcloop/IDEAS #2]
 - **Duplo redesign Phase 2: migration detection.**
   [duplo/REDESIGN-overview, named as the next thing to land]
@@ -230,20 +230,20 @@ Parallel to the waves; not wave-gated.
 
 ## Dropped (auditable log)
 
-- **BACKLOG #5 — NOTES.md commit-log summarization provider selection.**
+- **BACKLOG #5, NOTES.md commit-log summarization provider selection.**
   Post-bugfix tuning, not a tracked design item. 5-minute config
   decision once the payload-bounding bug is fixed.
 - **`parallel-implementation.md` as a standalone effort.** Worktree
   primitive subsumes into the mcloop/IDEAS #1 independent track.
-  Multi-agent parallelism is throughput, not intervention reduction —
+  Multi-agent parallelism is throughput, not intervention reduction,
   defer until single-agent autonomy works.
 - **Pre-phase-d Tier 3.2 (cost visibility), 3.3 (per-task model
   routing), 3.4 (reviewer integration audit), 3.6 (claude CLI
   pinning).** No autonomy or design-quality impact on current
   evidence. Revisit after Wave 3.
-- **mcloop/NOTES item 12.2 — friendlier `resolve_workspace_context`
+- **mcloop/NOTES item 12.2, friendlier `resolve_workspace_context`
   error.** Cosmetic; no impact.
-- **Pre-phase-d "Things this document does not cover (yet)" — all 10
+- **Pre-phase-d "Things this document does not cover (yet)", all 10
   items** (editor prompt design, plan task granularity, BUGS.md
   lifecycle, lineage tracking, acceptance-evidence grammar,
   multi-operator support, audit-trail completeness, plan-level

@@ -16,7 +16,7 @@ Both reviews converged on the load-bearing direction: explicit scope
 as structured metadata, hybrid root/package state where content
 exists at both levels, layered manifests and invariants, and a single
 workspace-root audit trail. Both reviews also pushed on specific
-implementation claims that revision 2 over-promised — scope
+implementation claims that revision 2 over-promised, scope
 classification reliability, CLAUDE.md resolver simplicity, ledger
 migration ease, and the inventory of McLoop call sites that need
 adapting. Revision 3 absorbs those corrections.
@@ -40,7 +40,7 @@ The post-consolidation layout collapses the four sibling repos into
 `packages/<name>/` subdirectories under one bob repository. The
 question this document settles: which of those state files live at
 the bob root, which live per-package, and which are hybrid or
-layered across both scopes — together with the McLoop changes,
+layered across both scopes, together with the McLoop changes,
 ledger schema versioning, and scope-validation contracts that scoping
 requires.
 
@@ -54,7 +54,7 @@ running it. The state-file architecture has to support that
 trajectory, not just today's manual workflow.
 
 A note on vroom: today's vroom (`vroom/__main__.py:106-194`;
-`vroom/orchestrator.py:12-26`) is an artifact auditor — it reads
+`vroom/orchestrator.py:12-26`) is an artifact auditor; it reads
 a text artifact, runs auditors in parallel, coalesces findings,
 optionally writes a corrected artifact. The dispatcher/backlog/
 scheduler/executor/reflector roles described in
@@ -101,7 +101,7 @@ Crucially, `_ensure_git` initializes a new git repo if
 `project_dir/.git` is absent (`mcloop/git_ops.py:49-63`). Under a
 consolidated layout where `packages/orchestra/` is a subdirectory
 of the bob git repo rather than its own repo, this behavior would
-create a nested git repo inside the workspace — exactly the failure
+create a nested git repo inside the workspace, exactly the failure
 mode consolidation is supposed to prevent.
 
 Convenience layer on top: when the user runs `mcloop` from a
@@ -111,12 +111,12 @@ workspace-level `pyproject.toml` declaring `[tool.uv.workspace]`),
 then computing `scope_root` and `scope` from the cwd's relationship
 to `packages/`. The cwd-inference is a shortcut over the explicit
 abstraction, not a substitute. For vroom-driven dispatch, scope is
-passed explicitly as part of the task envelope — there is no
+passed explicitly as part of the task envelope; there is no
 "current directory" for vroom.
 
 ## The files
 
-### `PLAN.md` and `BUGS.md` — hybrid, by declared scope with validation
+### `PLAN.md` and `BUGS.md`: hybrid, by declared scope with validation
 
 `PLAN.md` is the authoritative build document; `BUGS.md` is the
 paired bug backlog. Both files use the same scope-resolution rule
@@ -190,7 +190,7 @@ explicit parent references; acceptance evidence rolling up via the
 everything log.
 
 The lineage extension to bob-tools' planfile API has to land
-before vroom or M2 starts generating tasks automatically — vroom
+before vroom or M2 starts generating tasks automatically, vroom
 can't dispatch a multi-package fan-out without it, and M2 can't
 roll up acceptance evidence without it.
 
@@ -221,9 +221,9 @@ A bug filed at the wrong scope can either stall too much work
 hide a cross-package failure pattern (package bug that should have
 been root). The intake contract above is the mitigation.
 
-### `CLAUDE.md` — layered, with bounded task-context assembly
+### `CLAUDE.md`: layered, with bounded task-context assembly
 
-`CLAUDE.md` describes the codebase to the agent — source-file
+`CLAUDE.md` describes the codebase to the agent, source-file
 manifest, build instructions, conventions, platform rules. Sessions
 read it first to orient.
 
@@ -246,7 +246,7 @@ conventions, cross-package import rules. These don't change per
 package and shouldn't be duplicated in five files.
 
 **Precedence classes (load-bearing).** The conflict policy in
-revision 2 — "package conventions override root" — is too blunt
+revision 2 ("package conventions override root") is too blunt
 and was correctly rejected by GPT's review. Some root rules are
 safety rules and must not be overridden by a package manifest.
 Some root rules are workspace conventions where package overrides
@@ -302,7 +302,7 @@ Alternatives considered:
 - **Strict root-plus-one-package.** Rejected as the only mode, but
   it is the default mode in Phase 1.
 
-### `MAINTAIN.md` — layered, with distinct execution contexts
+### `MAINTAIN.md`: layered, with distinct execution contexts
 
 `MAINTAIN.md` is the invariants file McLoop's maintain mode
 enforces. Invariants have the same scope distinction as `CLAUDE.md`
@@ -326,7 +326,7 @@ Two maintain logs result:
 They are distinct artifacts because they describe distinct
 execution contexts.
 
-### `NOTES.md` — hybrid
+### `NOTES.md`: hybrid
 
 Codex's review correctly flagged that "per-package only" is wrong.
 McLoop instructs sessions to append observations to `NOTES.md`
@@ -339,7 +339,7 @@ observations, per-package `NOTES.md` for component-scoped
 observations. Scope of the task determines which file the session
 appends to.**
 
-### `IDEAS.md` — hybrid
+### `IDEAS.md`: hybrid
 
 Same correction. Banning a root `IDEAS.md` was wrong;
 ecosystem-level ideas need a scratch layer.
@@ -351,7 +351,7 @@ The `mcloop idea "text"` command resolves which file to append to
 based on its execution scope (cwd inference for the convenience
 case; explicit scope for vroom dispatch).
 
-### The everything log — single, with versioned schema migration
+### The everything log: single, with versioned schema migration
 
 The everything log is the unified audit trail of the system's
 actions across all components. A single audit trail is the right
@@ -509,7 +509,7 @@ explicitly avoids the same failure mode.
 
 duplo writes `PLAN.md` files at the project root today. Post-
 consolidation, duplo writes plans at the scope its current
-invocation targets — root plan if called from the workspace root,
+invocation targets, root plan if called from the workspace root,
 package plan if called from a package. duplo's reauthor mode
 follows the same rule, and reauthor events emit to the
 workspace-rooted everything log with the appropriate scope tag.
@@ -545,7 +545,7 @@ vroom's reflection loop will query the everything log to:
 
 The schema migration described in the everything-log section is
 what makes these queries possible. The minimum vroom-facing
-contract is the `task_context` payload — beyond that, the
+contract is the `task_context` payload, beyond that, the
 backlog schema, scheduler behavior, and reflection query
 language are vroom's own design space, not this proposal's.
 
@@ -601,7 +601,7 @@ to implementation. Each warrants its own scoped design document.
 
 The three gates can be developed in parallel. Consolidation
 execution itself does not require all three to be complete on day
-one — gate 2 (CLAUDE resolver) and gate 3 (ledger migration) can
+one, gate 2 (CLAUDE resolver) and gate 3 (ledger migration) can
 follow consolidation as long as gate 1 (scope validation) and the
 McLoop changes in the Implications section land first.
 
@@ -652,7 +652,7 @@ recursive-improvement sense: contributors spending effort figuring
 out where work belongs, McLoop sessions loading the wrong context,
 vroom reading a fragmented audit trail, or worse, McLoop creating
 nested git repos because it conflated workspace root with package
-scope. The cost of getting it right is bounded operational work —
+scope. The cost of getting it right is bounded operational work,
 the McLoop changes named in the Implications section, the
 versioned ledger schema migration, and the scope-validation
 contract. The trade favors getting it right, because the

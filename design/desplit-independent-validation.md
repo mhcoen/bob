@@ -1,4 +1,4 @@
-# mcloop-desplit integration plan — independent adversarial validation
+# mcloop-desplit integration plan: independent adversarial validation
 
 Reviewer: second, independent. Every claim below was re-derived from
 current source. Citations are mine; original doc citations were not
@@ -41,7 +41,7 @@ behavioral mismatches are FAIL.
 |---|---|---|---|
 | (a) DFS / first-incomplete-phase / leaf-before-parent | MATCH | MATCH | `operations.py:591-666` mirrors `checklist.py:362-411`; `_phase_complete` (`operations.py:538-547`) mirrors `_stage_complete` (`checklist.py:302-318`) |
 | (a) `@deps` vacuous on current plan | MATCH (vacuous) | MATCH (vacuous) | `rg "@deps" mcloop/PLAN.md` → 0; `_deps_satisfied` returns `all(())==True` (`operations.py:525`) |
-| (a) subsection ordering — neutralized by canonical render | ACCEPTED-DOC | ACCEPTED-DOC | `_render_phase_into` orders phase-tasks-then-subsections; `next_tasks` walks `(phase.tasks, *sub.tasks)` (`operations.py:716`) |
+| (a) subsection ordering, neutralized by canonical render | ACCEPTED-DOC | ACCEPTED-DOC | `_render_phase_into` orders phase-tasks-then-subsections; `next_tasks` walks `(phase.tasks, *sub.tasks)` (`operations.py:716`) |
 | (b) failed-sibling root-skip / subtask-block | MATCH | MATCH | `operations.py:622-626` and `:657-665` byte-equivalent to `checklist.py:375-382` and `:402-407` |
 | (c) BATCH child selection | MATCH | MATCH | `_get_batch_children` (`operations.py:550-575`) line-for-line equivalent to `get_batch_children` (`checklist.py:695-719`), modulo `TaskStatus` enum and `flag_tags`/`action_tag` for USER/AUTO break test |
 | (c) BATCH return shape divergence | DIVERGENCE→shim | DIVERGENCE→shim | `next_tasks` surfaces parent via `dataclasses.replace(task, children=_get_batch_children(task))` (`operations.py:642`); shim `_planfile_compat.find_next` (`mcloop/_planfile_compat.py:233-251`) returns leaf and the BATCH parent shape is consumed by `run_loop`'s existing batch block |
@@ -50,16 +50,16 @@ behavioral mismatches are FAIL.
 | (d) prose-mention `[BATCH]` tasks all DONE in current PLAN.md | PASS | PASS | re-grep: `[BATCH]` mentions inside non-leading text appear only at `mcloop/PLAN.md:341,359,439`, all `- [x]` |
 | (d) HIGH-SEVERITY: `migrate()` IDs break `checklist.is_user_task` | TRUE | TRUE | `checklist.is_user_task` checks `text == "[USER]"` / `startswith("[USER] ")` against raw post-checkbox text; after migrate prepends `T-NNNNNN:` the text starts with `T-…`, both predicates false. Parser path strips ID first (`parser.py:685`), so planfile is unaffected |
 | (d) `_collect_body` USER capture also breaks under IDs | TRUE | TRUE | `checklist.parse` body-capture predicate identical to is_user_task (`checklist.py:227`) |
-| (e) derived parent completion ≡ ledger_event_required=False | MATCH | MATCH | `complete_task` direct Settlement `ledger_event_required=True`; derived `kind="none"`, `ledger_event_required=False` (`operations.py:967-985`) — equivalent to mcloop's silent `_auto_check_parents` (`checklist.py:771-797`) |
+| (e) derived parent completion ≡ ledger_event_required=False | MATCH | MATCH | `complete_task` direct Settlement `ledger_event_required=True`; derived `kind="none"`, `ledger_event_required=False` (`operations.py:967-985`), equivalent to mcloop's silent `_auto_check_parents` (`checklist.py:771-797`) |
 | (e) `commit_landed` git-gating preserved by construction | MATCH | MATCH | `_git_head_sha` short-circuit at `ledger_emit.py:470-472` is in the caller (`emit_task_lifecycle_events`); planfile only produces a `Settlement` descriptor |
 | (e) AUTO/USER currently no `_ledger_settle` call | TRUE | TRUE | `main.py:1202-1224` (AUTO branch) and `:1227-1271` (USER branch) call only `check_off`/`completed.append`/`ctx.add`/`notify`; no `_ledger_settle` |
 | (e) commit-failure today: ledger settle but no `mark_failed` | TRUE | TRUE | `main.py:1660-1673`: `_ledger_settle(failure_kind="commit_failed")` then `break`; no `mark_failed` call |
 | (e) retry-exhaustion today: `mark_failed` then `_ledger_settle` abandoned | TRUE | TRUE | `main.py:1769-1786` |
-| (e) `complete_task`/`fail_task`/`reset_task` raise ValueError on missing ID | TRUE | TRUE | `operations.py:959-960`, `1009-1010`, `1042-1043` (doc cites :933-935/:983-985/:1016-1018 — line-drift only, ~26 lines off; raise-on-miss behavior verified) |
+| (e) `complete_task`/`fail_task`/`reset_task` raise ValueError on missing ID | TRUE | TRUE | `operations.py:959-960`, `1009-1010`, `1042-1043` (doc cites :933-935/:983-985/:1016-1018, line-drift only, ~26 lines off; raise-on-miss behavior verified) |
 | (e) mutation requires migrated IDs (hard constraint) | TRUE | TRUE | `_find_task_by_id` matches by `task.task_id == task_id` only (`operations.py:107-122`); no ID → `None` → ValueError |
 | (f) `mark_failed` semantics ([ ]/[x]→[!], no cascade) | MATCH | MATCH | mcloop: `checklist.py:583-588`; planfile: `fail_task` `cascade=False` (`operations.py:1012`) flips to FAILED unconditionally |
 | (f) bulk clear: `planfile.clear_failed` exists, no-event, idempotent, recursive | PASS | PASS | `operations.py:1058-1097` + `_clear_failed_in_tasks` `:879-901` recurses, returns new Plan, no Settlement |
-| (g) atomicity / locking — strictly safer + shim retry wrapper | PASS | PASS | `fileio.save`/`update` semantics as cited; `_planfile_compat._update_with_retry` is 3-attempt bounded (`_planfile_compat.py:32,366-381`) |
+| (g) atomicity / locking, strictly safer + shim retry wrapper | PASS | PASS | `fileio.save`/`update` semantics as cited; `_planfile_compat._update_with_retry` is 3-attempt bounded (`_planfile_compat.py:32,366-381`) |
 | (g) whole-file canonical-rewrite hazard real; rendered fixed point holds on migrated file | TRUE | TRUE | `render_plan(parse_plan(migrated)) == migrated` re-verified on scratch artifact; current `mcloop/PLAN.md` is 3-space-nested with no IDs/comments (`mcloop/PLAN.md:14-21` style); a first planfile save on it would reflow |
 | (h) deletion-surface table accuracy | partly FAIL | see Findings | independent `rg "from mcloop\.(checklist\|plan_split)" mcloop tests` reproduces doc's 6 mcloop importers + 6 test importers, but **doc's test list omits `tests/test_args.py`** (real `from mcloop.checklist import Task` at `:13` plus 9 in-function `parse`/`Task` imports) |
 | (h) `runner.py`/`run_summary.py`/`checks.py` not coupled | PASS | PASS | grep on those three files: zero `from mcloop.checklist` / `from mcloop.plan_split` |
@@ -76,13 +76,13 @@ behavioral mismatches are FAIL.
 | B0.2 shim is unimported by any mcloop runtime module | PASS | `rg "_planfile_compat" mcloop --glob '!_planfile_compat.py'` → 0; tests-only references in `tests/test_planfile_compat.py:11,261-265` |
 | B0.2 BATCH return-shape normalization (§2c) | PASS | `find_next` returns leaf (`_planfile_compat.py:233-251`); never invokes planfile `next_tasks`'s parent-surfacing path |
 | B0.2 ConcurrentUpdateError bounded retry (§2g) | PASS | `_update_with_retry` 3-attempt bound (`_planfile_compat.py:32,374-381`) |
-| B0.2 retry-exhaustion-only `fail_task` boundary (§2e) | PASS | `mark_failed` is the only `fail_task` caller in the shim (`_planfile_compat.py:400-408`); docstring records the policy. Caller restriction is enforced at the `run_loop` site that will route to it — verifiable only post-B3 |
+| B0.2 retry-exhaustion-only `fail_task` boundary (§2e) | PASS | `mark_failed` is the only `fail_task` caller in the shim (`_planfile_compat.py:400-408`); docstring records the policy. Caller restriction is enforced at the `run_loop` site that will route to it, verifiable only post-B3 |
 | B0.2 USER/AUTO/BATCH classified via flag_tags / action_tag (§2d) | PASS | `_planfile_compat.py:271-283` |
 | B0.3 `tests/test_planfile_compat.py` covers operation-level parity + import proof | PASS | re-run `pytest -q tests/test_planfile_compat.py` → `11 passed in 0.90s` |
 | B2 `resolve_phase_id` routes through `planfile.resolve_task_context` | PASS | `ledger_emit.py:122-171` rebuilt body imports `parse_plan`, `resolve_task_context` from `bob_tools.planfile` |
 | B2 no-`ordinal_index` callers preserve `source="none"`/`phase_id=None` | PASS | `ledger_emit.py:153-171`: ordinal-path requires `ordinal_index is not None`; falls through to `("none", None)` otherwise |
-| B2 `main._ledger_settle` still calls without `ordinal_index` | PASS | `main.py:903-906` — only `plan_path` + `task_label` passed |
-| B2 exact-id substring hazard fixed via `_task_matches_label` | PASS | `operations.py:264-292` — first clause is exact-equality `task.task_id == ref`; substring forms only with required trailing separator (`:`/`)`/whitespace) |
+| B2 `main._ledger_settle` still calls without `ordinal_index` | PASS | `main.py:903-906`, only `plan_path` + `task_label` passed |
+| B2 exact-id substring hazard fixed via `_task_matches_label` | PASS | `operations.py:264-292`, first clause is exact-equality `task.task_id == ref`; substring forms only with required trailing separator (`:`/`)`/whitespace) |
 | B2 test coverage as claimed | PASS | re-run `pytest -q tests/test_ledger_emit.py` → `27 passed in 1.07s`; explicit/comment/ordinal/no-id/T-000001-vs-T-0000010 cases all present |
 | B3 harness hermetic: integration tests force direct backend + patch `_build_command` | PASS | `tests/integration/test_stub_run.py:90-95` patches `code_edit._select_backend → "direct"` and `runner._build_command`; other 4 test files patch `mcloop.main.run_task` outright |
 | Autouse subprocess guard blocks unmocked `claude`/`codex` calls | PASS | `tests/conftest.py:30-53` |
@@ -91,7 +91,7 @@ behavioral mismatches are FAIL.
 | B1 pre-flight: structural parity to legacy checklist on migrated copy | PASS | only deltas are 376 IDs, 10 phase_id comments, 286 indent changes, the 3 known DONE prose-mention BATCH lines |
 | B1 pre-flight: transformation counts (376/10/0/286/-1) match | PASS | re-counted from current `PLAN.migration.diff`: `^+.*T-[0-9]{6}:` → 376; `^+.*phase_id:` → 10; `^+.*bob-plan-format` → 0; `+`/`-` totals 388/379 → net +9 = 10 + (-1) |
 | B1 pre-flight: artifact SHA-256 / line count / path as doc records | **FAIL** | see Findings: doc cites `/tmp/...`, 878 lines, `d49204…`; actual is `/Users/mhcoen/proj/bob-tools/.scratch/mcloop-b1b3-preflight/`, 840 lines, `a3ceec…` |
-| Decision D1: "drop work_observed" not yet code; preserved-by-current-behavior in fact | PASS (vacuous) | current `main.py` never invokes `complete_task`; AUTO/USER branches lack `_ledger_settle` — so today `work_observed` is not emitted regardless |
+| Decision D1: "drop work_observed" not yet code; preserved-by-current-behavior in fact | PASS (vacuous) | current `main.py` never invokes `complete_task`; AUTO/USER branches lack `_ledger_settle`, so today `work_observed` is not emitted regardless |
 | Decision D2: ordinal collapse-to-none preserved | PASS | `ledger_emit.resolve_phase_id` returns `("none", None)` when `ordinal_index is None`, even if the planfile resolver synthesized an ordinal phase_id internally (`ledger_emit.py:153-171`) |
 | §5 ordering: B2 genuinely independent of file identity (ID-bearing or not) | PASS | `planfile.parse_plan` handles compat-mode IDs-absent files (`parser.py:129-160` strict=False); `resolve_task_context` resolves by positional or text label too (`operations.py:457-489`) |
 
@@ -100,7 +100,7 @@ behavioral mismatches are FAIL.
 | Item | Verdict | Evidence |
 |---|---|---|
 | Invariant guards PLAN.md state | PASS | both rg commands cited in doc return 0 matches on `mcloop/PLAN.md` |
-| Invariant covers all files parsed/scheduled by both libraries | **FAIL** | see Findings — BUGS.md is parsed by both, included in `next_tasks` via `plan.bugs.tasks`, but not in the rg path |
+| Invariant covers all files parsed/scheduled by both libraries | **FAIL** | see Findings, BUGS.md is parsed by both, included in `next_tasks` via `plan.bugs.tasks`, but not in the rg path |
 
 ---
 
@@ -150,7 +150,7 @@ Doc §2(h) lists 6 test files in the deletion/migration surface
 `rg "from mcloop\.(checklist|plan_split)" tests` returns those six **plus**
 `tests/test_args.py`:
 
-- `tests/test_args.py:13` — `from mcloop.checklist import Task`
+- `tests/test_args.py:13`, `from mcloop.checklist import Task`
 - 9 additional in-function imports of `parse as parse_checklist` /
   `parse as cl_parse` / `Task` at `:4309, :4340, :5980, :6264, :6276,
   :6600, :9893, :9942, :9988`
@@ -206,14 +206,14 @@ the transformation-shape and parity claims, which are correct.
 
 ### B-4. None found in the linchpin §2(d)/(e)/(g) claims themselves
 
-Every behaviorally load-bearing claim in the audit — the
+Every behaviorally load-bearing claim in the audit, the
 `migrate()`-breaks-`is_user_task` linchpin, the `_collect_body` USER
 body-capture breakage under IDs, the `complete_task` ValueError on
 missing IDs, the `_get_batch_children` equivalence, the
 failed-sibling root-skip/subtask-block asymmetry, the
 `commit_landed` git-sha gate sitting in the caller, the
 canonical-rewrite hazard on first save, the rendered fixed-point on
-the migrated file — was re-derived from current source and holds. The
+the migrated file, was re-derived from current source and holds. The
 B0.1, B0.2/B0.3, B2, and B3-harness work passes my re-run gate
 (parity 3/3, planfile-compat 11/11, ledger_emit 27/27, hermetic
 integration 21/21). The substantive cutover analysis is sound.

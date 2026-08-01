@@ -1,4 +1,4 @@
-# mcloop de-split post-completion audit — convergence note
+# mcloop de-split post-completion audit: convergence note
 
 **Reviewer**: Claude Code (Opus 4.7, 1M context).
 **Date**: 2026-05-22.
@@ -13,7 +13,7 @@ Audit refs: `mcloop` `desplit-complete = 901a0aff09329743c3f9a11c8667f59563cb824
 
 **CONVERGE WITH MECHANICAL CORRECTIONS.**
 
-Both lineages independently report zero behavioral defects. Two mechanical corrections were surfaced — one per stream — and both are doc-side, not code-side. The corrections do not contradict each other; they are independent observations about the audit charter's wording and stage-ordering claim that did not match observed source. The behavioral state of the de-split is verified equivalent to the pre-cutover contract.
+Both lineages independently report zero behavioral defects. Two mechanical corrections were surfaced (one per stream) and both are doc-side, not code-side. The corrections do not contradict each other; they are independent observations about the audit charter's wording and stage-ordering claim that did not match observed source. The behavioral state of the de-split is verified equivalent to the pre-cutover contract.
 
 ---
 
@@ -40,17 +40,17 @@ Zero behavioral defects.
 
 ## Mechanical corrections
 
-### Correction MC-1 — gate (e) wording (surfaced by Stream A)
+### Correction MC-1: gate (e) wording (surfaced by Stream A)
 
 Stream A's pre-B1 → post-D1 capture pair flagged a single-byte divergence in BUGS.md byte equivalence on modes where the `## Bugs` section was empty (or became empty post-run). Root cause: planfile's renderer (`bob_tools/planfile/renderer.py:71-74` per Stream B's independent re-derivation) strips trailing blank lines on an empty section. `## Bugs\n\n` → `## Bugs\n`. This is a renderer normalization, the same class of canonicalization the charter §1.1 already excluded from PLAN.md byte equivalence; the charter omitted it from the BUGS.md case in error.
 
-Stream A's resolution: gate (e) restated as "byte-identical modulo planfile renderer normalization" — operationally `render_plan(parse_plan(pre)) == post`. Under the corrected gate, all 25/25 PASS.
+Stream A's resolution: gate (e) restated as "byte-identical modulo planfile renderer normalization", operationally `render_plan(parse_plan(pre)) == post`. Under the corrected gate, all 25/25 PASS.
 
 Stream B's independent observation: Stream B's item 19 cited exactly the same renderer normalization (`renderer.py:71-74`, the `while lines and not lines[-1]: lines.pop()` loop) and classified it `PASS (normalization property)` without prompting. Independent convergence on the underlying observation; corroborates Stream A's charter-side correction.
 
-### Correction MC-2 — stage-ordering re-derivation (surfaced by Stream B)
+### Correction MC-2: stage-ordering re-derivation (surfaced by Stream B)
 
-Stream B's item 29 reports the actual landed stage order from `git log` as `B0.2 → B2 → B3 → B1+B3 → D3 → D2 → D1a → D1`. The Kimi charter §1.13 had stated the forced ordering as `B0 → B1+B3 → B2 → B4 → B5 → D3 → D2 → D1a → D1`, which Stream B re-derived and corrected: B2 in fact preceded B1+B3 rather than following it. All load-bearing dependencies (B0.1 before B0.2, B1+B3 atomic, D3 before D2 before D1a before D1) are preserved by the actual landed order. Cross-checked here against `git log` independently: B2 commit `0c4d6b7` (route phase-id resolution through planfile context shim) lands before B1+B3 commit `eb80d13` (cutover) — Stream B's claim is correct.
+Stream B's item 29 reports the actual landed stage order from `git log` as `B0.2 → B2 → B3 → B1+B3 → D3 → D2 → D1a → D1`. The Kimi charter §1.13 had stated the forced ordering as `B0 → B1+B3 → B2 → B4 → B5 → D3 → D2 → D1a → D1`, which Stream B re-derived and corrected: B2 in fact preceded B1+B3 rather than following it. All load-bearing dependencies (B0.1 before B0.2, B1+B3 atomic, D3 before D2 before D1a before D1) are preserved by the actual landed order. Cross-checked here against `git log` independently: B2 commit `0c4d6b7` (route phase-id resolution through planfile context shim) lands before B1+B3 commit `eb80d13` (cutover), Stream B's claim is correct.
 
 This is a documentation correction to the charter's stated ordering, not a code defect. The charter listed an idealized planning order that the actual implementation didn't strictly follow; the implementation took a valid ordering that the charter's stated ordering didn't capture.
 
@@ -64,12 +64,12 @@ Where both streams independently audited the same decision register entries:
 
 | Decision | Stream A verdict (item 4.x) | Stream B verdict (item 30-33) | Convergence |
 |---|---|---|---|
-| D1 — drop `work_observed` | PASS | PASS | converges |
-| D2 — collapse ordinal to (`"none"`, `None`) | PASS | PASS | converges |
-| D3 — `--retry` through `clear_failed` on both files | PASS | PASS | converges |
-| D5 — `purge_done_bug_tasks` filters DONE | PASS | PASS | converges |
+| D1; drop `work_observed` | PASS | PASS | converges |
+| D2, collapse ordinal to (`"none"`, `None`) | PASS | PASS | converges |
+| D3, `--retry` through `clear_failed` on both files | PASS | PASS | converges |
+| D5, `purge_done_bug_tasks` filters DONE | PASS | PASS | converges |
 
-Citation-line drift between streams: both cite `main.py:854-855` for D3, both cite `ledger_emit.py:152-171` for D2's no-ordinal collapse (Stream A: `:152-168` + `:171`; Stream B: `:153-171`) — within mechanical drift tolerance, the same code paths.
+Citation-line drift between streams: both cite `main.py:854-855` for D3, both cite `ledger_emit.py:152-171` for D2's no-ordinal collapse (Stream A: `:152-168` + `:171`; Stream B: `:153-171`), within mechanical drift tolerance, the same code paths.
 
 Independent file:line corroboration on the renderer-normalization property: Stream A cited the runtime behavioral signal (`bug_only` mode BUGS.md output) and proposed the gate-(e) charter correction; Stream B cited the planfile source (`renderer.py:71-74`) and classified it as a normalization property in §2(g). Same finding, independent derivations.
 
@@ -79,7 +79,7 @@ Independent file:line corroboration on the renderer-normalization property: Stre
 
 - Stage-ordering re-derivation (Stream B item 29 → MC-2 above). Stream A's charter scoped items 1, 3, 4, 5 only; §3 forced ordering was Stream B's scope.
 - §2(d) ID-prefix strip via `_extract_task_id` (Stream B item 9). Stream A confirmed task-id mutation contract under item 4.5 / item 5; Stream B re-derived the parser's strip step independently.
-- Several §2 parity items at finer granularity (Stream B items 1, 4, 5, 6, 7, 8 — the parser/walker/batch/classifier parity). Stream A treated these implicitly under the end-to-end equivalence captures.
+- Several §2 parity items at finer granularity (Stream B items 1, 4, 5, 6, 7, 8, the parser/walker/batch/classifier parity). Stream A treated these implicitly under the end-to-end equivalence captures.
 
 No divergence: Stream B's broader §2 coverage corroborates Stream A's end-to-end capture without contradicting it. Both streams independently arrive at "zero behavioral defects".
 

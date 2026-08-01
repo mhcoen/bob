@@ -3,7 +3,7 @@
 ## Vision
 
 The stated long-term goal of this project is for the development pipeline
-itself — mcloop, orchestra, bob-tools, duplo — to become recursively
+itself (mcloop, orchestra, bob-tools, duplo) to become recursively
 self-improving. mcloop drives editor agents through PLAN.md tasks today.
 The horizon: mcloop driving editor agents through a PLAN.md that
 describes improvements to mcloop, orchestra, and bob-tools themselves,
@@ -46,14 +46,14 @@ The qualitative shift that matters more than the number: the type of
 intervention changes over time. Early interventions are "this is
 broken, fix it." Late interventions are "consider this objective."
 The number conflates both, but the latter is closer to the actual
-goal — a system that needs direction, not repair.
+goal; a system that needs direction, not repair.
 
 ## What "Closed Loop" Means Operationally
 
 A closed loop has four properties:
 
 1. **Self-diagnosing.** When something fails, the loop produces a
-   structured record of what failed, why, and what would unblock it —
+   structured record of what failed, why, and what would unblock it,
    without a human reading raw logs.
 
 2. **Self-repairing.** When the loop hits an infrastructure bug in its
@@ -109,7 +109,7 @@ machinery to diagnose itself.
 ## The Path: Three Workstreams (Co-Developable)
 
 These are named M1, M2, M3 for reference but are not sequential gates.
-Pieces of M2 and M3 can be co-developed with M1 — and should be, since
+Pieces of M2 and M3 can be co-developed with M1, and should be, since
 some of the M3 infrastructure (the FailureRecord corpus storage) is
 shared with M1's emitter design. Sequencing them strictly would
 artificially serialize work that can run in parallel.
@@ -119,7 +119,7 @@ how much capacity has been freed; it does not say a workstream is
 "done." Some interventions will resist reduction even after the
 infrastructure exists, and that's information about what to build next.
 
-### M1 — Self-Diagnosing
+### M1: Self-Diagnosing
 
 **Goal:** when the loop fails, it produces a structured failure record
 that says what happened and recommends a fix, without a human reading
@@ -148,10 +148,10 @@ raw logs.
 test harness and produces a correctly-classified FailureRecord. The
 human-readable summary names the actual root cause. The intervention
 rate observed in subsequent runs drops to a measurable degree (this
-is the thermometer reading, not a pass/fail gate — if it doesn't drop,
+is the thermometer reading, not a pass/fail gate, if it doesn't drop,
 that's data about what to build next).
 
-### M2 — Self-Repairing
+### M2: Self-Repairing
 
 **Goal:** when the loop hits an infrastructure bug in its own code,
 it proposes a PLAN.md task that fixes the bug. The next loop iteration
@@ -186,7 +186,7 @@ table.
 intervention. Then: real bugs (not planted) start being caught and
 auto-proposed at observable rate.
 
-### M3 — Self-Extending
+### M3: Self-Extending
 
 **Goal:** the loop reads its own failure history across many runs,
 detects patterns that aren't single-bug fixes but missing capabilities,
@@ -196,7 +196,7 @@ and writes tasks to add those capabilities.
 
 - **Pattern detector** over the FailureRecord corpus: clusters records
   by signature, surfaces patterns ("5 failures across 30 days all hit
-  the canonical-validation strictness wall — implies missing
+  the canonical-validation strictness wall, implies missing
   `validation_legacy` mode").
 - **Capability-proposal generator:** turns a pattern into a multi-task
   PLAN.md proposal (the same shape we wrote by hand for Stage 16's
@@ -211,7 +211,7 @@ and writes tasks to add those capabilities.
 reads is the corpus the M1 emitters produce. Storing FailureRecords
 in a structure designed for pattern queries from day one is a small
 cost; retrofitting it later is large. The capability-proposal
-generator and the fix-proposer share most of their machinery — both
+generator and the fix-proposer share most of their machinery, both
 turn evidence into PLAN.md tasks; only the input shape differs.
 
 **Evidence we'd look for:** capability gaps detected from failure
@@ -250,7 +250,7 @@ What is NOT in place:
 
 The bootstrap: this document gets translated into a new PLAN.md (a
 Phase D extension to bob-tools/PLAN.md, or a separate plan in a new
-home — see Open Questions). Stages cover:
+home; see Open Questions). Stages cover:
 
 1. FailureRecord schema and emitters (M1 part 1)
 2. `--diagnose-last-failure` and the human-readable summarizer (M1 part 2)
@@ -275,7 +275,7 @@ record actionable. M3 makes recurring patterns auto-generate work.
 
 The "singularity" framing names a real property: improvement-rate
 growth from internal work. We're not pre-committing to where that
-growth tops out, because we don't know — that's the point of building
+growth tops out, because we don't know, that's the point of building
 the system. Statements like "this is not AGI" or "the loop will be
 bounded" are not claims we get to make in advance; they're outcomes
 we'll observe as we build.
@@ -289,7 +289,7 @@ trajectory leads:
   evidence.** Provides traceability at any capability level.
 - **The system cannot relax its own validation without passing a
   frozen acceptance corpus.** This is the load-bearing safety
-  property — it prevents the loop from degrading the gates it's
+  property, it prevents the loop from degrading the gates it's
   trying to pass. The corpus is human-curated; updating it is a
   human-reviewed decision.
 - **Human-approved-by-default for any task that touches the trust
@@ -301,7 +301,7 @@ These properties are framed as invariants that hold as capability
 grows, not as a ceiling on capability. The intent is that as the
 loop becomes more capable, the human's role shifts from author to
 reviewer to objective-setter, and the safety properties define what
-"reviewer" and "objective-setter" mean in operational terms — not
+"reviewer" and "objective-setter" mean in operational terms, not
 to slow the trajectory but to keep it interpretable as it advances.
 
 ## Open Questions
@@ -321,7 +321,7 @@ to slow the trajectory but to keep it interpretable as it advances.
    on declared but missing deps.
 
 4. **Schema sharing.** Should FailureRecord share fields with the
-   existing TaskEntry / settlement events? Probably yes — common
+   existing TaskEntry / settlement events? Probably yes, common
    evidence pointers, common task_id/run_id lineage.
 
 5. **Cross-validation corpus.** What pins the current guarantees?
@@ -331,7 +331,7 @@ to slow the trajectory but to keep it interpretable as it advances.
 
 6. **Editor agent introspection.** Should the editor agent be able to
    read its own past FailureRecords as context for the current task?
-   Probably yes at M2 — gives it the memory to avoid repeating the
+   Probably yes at M2, which gives it the memory to avoid repeating the
    class of mistake.
 
 ## Immediate Next Steps
@@ -369,8 +369,8 @@ the infrastructure already being assembled (planfile, ledger,
 stream-json transcripts, structured task ids).
 
 How far the trajectory goes is something we'll observe, not predict.
-The "singularity" framing names the property we're aiming at —
-marginal cost of each self-improvement trending downward — without
+The "singularity" framing names the property we're aiming at,
+marginal cost of each self-improvement trending downward, without
 committing to where that trend tops out. The work is to make the
 trend visible, then to push it.
 
@@ -384,5 +384,5 @@ The metric (interventions/N) is the thermometer. The deliverable is
 mcloop running on its own PLAN.md to improve mcloop, with humans
 setting objectives and reviewing outputs. How much beyond that the
 system reaches depends on how the pieces actually behave under
-scale — and that's information we get by building, not by
+scale, and that's information we get by building, not by
 predicting.

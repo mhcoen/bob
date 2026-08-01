@@ -12,8 +12,8 @@ The motivating observation: Phase C's 30-minute editor sessions are a
 serialization point. Many Phase C tasks were independent of each other
 in content (different files, different concerns) but ran sequentially
 because the loop has no parallel-execution capability. Phase D will be
-similar — FailureRecord schema, emitters at different sites, the
-diagnose CLI, the trust ladder definition — all independent enough to
+similar, FailureRecord schema, emitters at different sites, the
+diagnose CLI, the trust ladder definition, all independent enough to
 run in parallel.
 
 The question this document examines is: **is this realistic, what
@@ -21,11 +21,11 @@ exists already, and what's the smallest tractable starting point**.
 
 ## Two distinct goals (separating them matters)
 
-**Mergeable design** — structuring tasks so their outputs don't
+**Mergeable design**, structuring tasks so their outputs don't
 conflict by construction. Different files, different functions,
 explicit non-overlap. The merge is a no-op or near-no-op.
 
-**Reactive conflict resolution** — letting tasks proceed in parallel
+**Reactive conflict resolution**, letting tasks proceed in parallel
 and dealing with conflicts as they arise.
 
 These are different problems. The first is hard at design time
@@ -42,75 +42,75 @@ to refine partitioning to make it rare.
 
 ### Mature, off-the-shelf
 
-**`git worktree`** — built into git since 2015. `git worktree add <path>
+**`git worktree`**, built into git since 2015. `git worktree add <path>
 <branch>` creates a separate working directory backed by the same `.git`
 dir. Each worktree has its own checkout, its own index, its own branch.
 Mature, stable, well-documented. No need to reinvent.
 
-**`git rerere`** ("reuse recorded resolution") — when you resolve a
+**`git rerere`** ("reuse recorded resolution"), when you resolve a
 merge conflict, git records the resolution. Next time the same
 conflict pattern appears, git auto-applies the recorded resolution.
 Useful for repetitive structured conflicts (e.g., import-list merges).
 Built-in, opt-in via `git config rerere.enabled true`.
 
-**`git merge-tree`** — performs a three-way merge in memory without
+**`git merge-tree`**, performs a three-way merge in memory without
 touching any worktree. Useful for "would these branches merge cleanly"
 checks before actually doing it. Built-in.
 
-**Sapling (Meta)** — git-compatible source control with first-class
+**Sapling (Meta)**, git-compatible source control with first-class
 stacked branches and conflict resolution. Open source. Not a
 multi-agent orchestrator but provides better primitives for
 concurrent work than vanilla git.
 
-**Jujutsu (`jj`)** — git-compatible VCS with conflict-tolerant
+**Jujutsu (`jj`)**, git-compatible VCS with conflict-tolerant
 semantics: conflicts can exist as first-class objects rather than
 being resolved immediately. Working on conflicted states is supported.
 Probably overkill for this project; mentioned for completeness.
 
 ### Stacked-PR tooling
 
-**GitButler** — virtual branches that let you work on multiple
+**GitButler**, virtual branches that let you work on multiple
 branches simultaneously on the same physical worktree. Designed for
 human developers, not agents, but the primitives (branch slicing,
 diff partitioning) are interesting. Open source.
 
-**Graphite, Aviator, Stacked PRs (Sapling)** — workflow tools for
+**Graphite, Aviator, Stacked PRs (Sapling)**, workflow tools for
 managing chains of dependent PRs. Useful pattern for the loop's
 output (stage = stack of related task PRs that land together).
 Mostly UI-level, but the underlying convention is portable.
 
-**Mergify, Kodiak** — automated PR merging based on rules. Could be
+**Mergify, Kodiak**, automated PR merging based on rules. Could be
 useful when the loop produces PRs (not direct commits to main).
 Probably not relevant if mcloop continues committing directly.
 
 ### Multi-agent / AI-driven
 
-**Anthropic Claude Code's Task tool** — spawns parallel subagents
+**Anthropic Claude Code's Task tool**, spawns parallel subagents
 within a single Claude Code session. We've used it. It parallelizes
 tool calls inside one task; it does not parallelize tasks themselves
 across worktrees. Useful primitive for in-task fan-out (e.g., "have N
 subagents each explore a file") but not for our parallel-implementation
 goal.
 
-**Aider** — AI pair-programming. Multi-file edits within one session.
+**Aider**, AI pair-programming. Multi-file edits within one session.
 Single-agent. Has a `--watch-files` mode but not multi-worktree.
 
-**Cursor / Continue** — IDE-level AI. Single-agent per session.
+**Cursor / Continue**, IDE-level AI. Single-agent per session.
 Multi-window setups exist but no orchestration.
 
-**Devin (Cognition)** — closed product claiming parallel agent
+**Devin (Cognition)**, closed product claiming parallel agent
 execution. Proprietary, no inspectable design. Probably similar to
 what we'd build, but no reusable code.
 
-**SWE-agent, AutoCodeRover, CodeAct, ReAct** — academic single-agent
+**SWE-agent, AutoCodeRover, CodeAct, ReAct**, academic single-agent
 systems on isolated tasks. Useful for understanding agent loop design,
 not for parallel orchestration.
 
-**OpenDevin / OpenHands** — open-source attempts at the Devin pattern.
+**OpenDevin / OpenHands**, open-source attempts at the Devin pattern.
 Worth looking at for orchestration patterns even if not directly
 reusable.
 
-**MetaGPT, AutoGen, CrewAI** — multi-agent frameworks where agents
+**MetaGPT, AutoGen, CrewAI**, multi-agent frameworks where agents
 have roles (planner, coder, reviewer). Mostly conversational
 orchestration rather than git-worktree-level parallelism. The "roles"
 pattern might be reusable for partitioning (e.g., one agent's role is
@@ -118,7 +118,7 @@ pattern might be reusable for partitioning (e.g., one agent's role is
 
 ### Distributed-build tooling (orthogonal but informative)
 
-**Bazel / Buck2 remote execution** — parallel build distribution.
+**Bazel / Buck2 remote execution**, parallel build distribution.
 Conceptually similar to "parallel agents on independent units" but
 solving a different problem (compile graph, not edit graph). The
 build-graph dependency model is worth borrowing for PLAN.md tasks.
@@ -142,7 +142,7 @@ system. Building this is novel investigation into open problems.
 
 ## The argument for scaling: induction, not prediction
 
-The current state is effectively N = 1.x — one mcloop session at a
+The current state is effectively N = 1.x, one mcloop session at a
 time, plus occasional informal parallelism via codex on the side that
 requires manual tracking of non-interference. Moving to N = 2 is both
 an immediate doubling of throughput AND removes the human-tracked
@@ -150,8 +150,8 @@ coordination tax.
 
 But the more important reason to target 2 first is structural: **N = 1
 → N = 2 is the same shape of step as N = k → N = k + 1**. Whatever it
-takes to make two parallel agents safely converge — partitioning,
-clean-merge gates, state isolation, conflict-halt semantics — is the
+takes to make two parallel agents safely converge, partitioning,
+clean-merge gates, state isolation, conflict-halt semantics, is the
 same machinery scaled out. Each additional agent stresses the same
 seams.
 
@@ -223,9 +223,9 @@ These are real and need solving; none of them are intrinsic limits:
    verified before B merges. Solvable by ordering merges by stated
    dependency, or by running acceptance only on merged trunk.
 3. **State independence.** mcloop's CURRENT_PLAN.md, active-pid,
-   ledger — all assume one running session. Requires either per-task
+   ledger, all assume one running session. Requires either per-task
    state directories or a redesigned single-source-of-truth (see
-   readiness doc 2.5 — possibly the cleaner fix).
+   readiness doc 2.5, possibly the cleaner fix).
 4. **Branch hygiene.** Each parallel task on its own branch named
    after the task_id (`task/T-000190`). Trunk updated by merging
    completed branches in plan-order.
@@ -279,21 +279,21 @@ These are real and need solving; none of them are intrinsic limits:
 
 ## Approach: prove N=2, characterize, scale
 
-Not a tiered roadmap with fixed milestones — an experimental protocol
+Not a tiered roadmap with fixed milestones, an experimental protocol
 where each step's outcome determines the next.
 
 ### Prerequisites (these are real; not optional)
 
-- **Visibility** (readiness 1.1) — without it, supervising parallel
+- **Visibility** (readiness 1.1), without it, supervising parallel
   agents is opaque to the user. Already needed at N=1; the cost goes
   up with N.
-- **Self-monitoring** (readiness 1.2) — the system has to detect a
+- **Self-monitoring** (readiness 1.2); the system has to detect a
   stuck agent. Today's idle timeout is binary; richer signals (tool
   call rate, repeated-signature loops) are needed before scaling
   multiplies the failure surface.
-- **State coherence** (readiness 1.3) — drift sources at N=1 become
+- **State coherence** (readiness 1.3), drift sources at N=1 become
   drift catastrophes at N=k. Fix before scaling.
-- **Cross-repo workspace** (readiness 1.4) — the cleanest first
+- **Cross-repo workspace** (readiness 1.4), the cleanest first
   partition boundary is one agent per repo. Without it, "parallel"
   has to be within-repo, which is harder.
 
@@ -301,7 +301,7 @@ where each step's outcome determines the next.
 
 The first experiment. Specifically:
 
-- PLAN.md tasks carry a `[PARALLEL:G1]` annotation (or equivalent —
+- PLAN.md tasks carry a `[PARALLEL:G1]` annotation (or equivalent,
   may end up being declared via the planfile's typed dependency
   graph rather than as a flat tag). Tasks with the same group run
   concurrently.
@@ -350,7 +350,7 @@ conflict rate growing slowly (signal that partitioning quality is
 holding), coordinator overhead growing sub-linearly. A bad step
 has one of those breaking.
 
-When a step breaks, that's a characterized problem with a name —
+When a step breaks, that's a characterized problem with a name,
 not a fence. Examples of what each would imply:
 
 - Rate-limit hits become binding → multi-account routing, request
@@ -412,7 +412,7 @@ After the prerequisites land, the first probe:
    consumed, conflict rate (in this case probably zero), interventions
    per task, total cost.
 5. **Then run N = 3.** Same shape, one more agent. Same
-   measurements. The deltas — what changed when we added the agent —
+   measurements. The deltas, what changed when we added the agent,
    are the actual finding.
 
 Total scope for the probe: probably 1-2 weeks of work after the
@@ -486,7 +486,7 @@ orchestrator before knowing what it needs to handle.
   at N=2 as a halt + human review event; characterize the conflict
   classes as they appear; add structured merge primitives case by
   case when a class proves recurring. This is incremental, not
-  deferring the problem — it's how the typed planfile work already
+  deferring the problem, it's how the typed planfile work already
   positions us to solve semantic merge for known structured edit
   classes.
 - **Constraints to measure and address, not ceilings to accept:**
@@ -497,7 +497,7 @@ orchestrator before knowing what it needs to handle.
 
 This is a Phase D-or-later capability. It belongs in the Phase D
 readiness conversation as a workstream that runs in parallel with
-M1 (FailureRecord) and M2 (fix proposer) — and importantly,
+M1 (FailureRecord) and M2 (fix proposer), and importantly,
 making M1/M2 itself amenable to parallel-agent work is a natural
 co-design with this effort, since FailureRecord emitters at
 multiple sites are exactly the shape of work that should run in
@@ -505,7 +505,7 @@ parallel once the orchestration exists.
 
 ## Related documents
 
-- `recursive-improvement.md` — the long-range goal this serves.
-- `pre-phase-d-readiness.md` — the tier-1 items that must land
+- `recursive-improvement.md`, the long-range goal this serves.
+- `pre-phase-d-readiness.md`, the tier-1 items that must land
   before parallelism is attempted, and the Phase C.5 hardening
   that creates the conditions for the probe.

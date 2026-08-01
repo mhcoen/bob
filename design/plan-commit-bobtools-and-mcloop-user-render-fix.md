@@ -1,8 +1,8 @@
-> **STATUS: SUPERSEDED — historical record, do not execute.**
+> **STATUS: SUPERSEDED, historical record, do not execute.**
 >
-> This is the initial planning document from the 2026-05-16 session. Its §0 verification ledger (V1–V6) was sound and was independently confirmed by a later Codex audit. Its §1 procedure is **counterfactual**: it plans to commit a "pending green bob-tools bug-fix" fileset that did not exist — that work was already committed in bob-tools commit `96967c3`, and the working tree was clean. §2–§4 and Decisions A/B were overtaken by events. The session's actual path: the D1/D2 mcloop `[USER]` defects were filed into `mcloop/BUGS.md` (commit `de7e7fd`), `BUGS.md` was made git-tracked in mcloop (`3abaca0`) and un-ignored in duplo/orchestra, the authoritative planfile design spec was committed (`bob/design/planfile.md`), and a deferred-design backlog was created (`bob/design/BACKLOG.md`). bob-tools Stages 3–8 were not resumed in this session.
+> This is the initial planning document from the 2026-05-16 session. Its §0 verification ledger (V1–V6) was sound and was independently confirmed by a later Codex audit. Its §1 procedure is **counterfactual**: it plans to commit a "pending green bob-tools bug-fix" fileset that did not exist; that work was already committed in bob-tools commit `96967c3`, and the working tree was clean. §2–§4 and Decisions A/B were overtaken by events. The session's actual path: the D1/D2 mcloop `[USER]` defects were filed into `mcloop/BUGS.md` (commit `de7e7fd`), `BUGS.md` was made git-tracked in mcloop (`3abaca0`) and un-ignored in duplo/orchestra, the authoritative planfile design spec was committed (`bob/design/planfile.md`), and a deferred-design backlog was created (`bob/design/BACKLOG.md`). bob-tools Stages 3–8 were not resumed in this session.
 >
-> Retained as audit provenance and as a specimen for structural-lessons analysis (see `bob/design/BACKLOG.md`, entry 2): it documents the session's root-cause failure mode — an authoritative-looking plan whose central premise derived from an unverified handoff prompt rather than confirmed source.
+> Retained as audit provenance and as a specimen for structural-lessons analysis (see `bob/design/BACKLOG.md`, entry 2): it documents the session's root-cause failure mode, an authoritative-looking plan whose central premise derived from an unverified handoff prompt rather than confirmed source.
 
 ---
 
@@ -25,16 +25,16 @@ V2. **bob-tools Stage 2 checkbox state is inconsistent across files.** `bob-tool
 
 V3. **`353 tests pass; ruff/format/mypy strict clean` is `UNVERIFIED`.** No test run and no git access from this environment (see V4). Corroborated only indirectly by `NOTES.md` `## Eliminated` commit digest, which is narrative, not a green-state proof.
 
-V4. **Pending uncommitted bob-tools changes are `UNVERIFIED` from here.** `bash_tool` executes on the Claude container; `ls /Users/mhcoen/proj` returns `No such file or directory`. There is no git tool over the user filesystem. The specific pending fileset (`BUGS.md`, `NOTES.md`, `bob_tools/planfile/__init__.py`, `bob_tools/planfile/operations.py`, `bob_tools/planfile/tests/test_operations.py`, untracked `bob_tools/planfile/tests/manual/`) cannot be confirmed. `NOTES.md` entries dated 2026-05-16 corroborate the *content* of the work (RUF022 on `__init__.py` `__all__` re-sorted; dead `# noqa: BLE001` removed for RUF100; `bug_count(plan) -> int` added; manual helper `check_compat_read.py`; `TestBugCount` cases) but not working-tree state. `bob-tools/BUGS.md` currently contains only `## Bugs` (empty) — consistent with the task-2.8 BUGS.md noise having been cleared.
+V4. **Pending uncommitted bob-tools changes are `UNVERIFIED` from here.** `bash_tool` executes on the Claude container; `ls /Users/mhcoen/proj` returns `No such file or directory`. There is no git tool over the user filesystem. The specific pending fileset (`BUGS.md`, `NOTES.md`, `bob_tools/planfile/__init__.py`, `bob_tools/planfile/operations.py`, `bob_tools/planfile/tests/test_operations.py`, untracked `bob_tools/planfile/tests/manual/`) cannot be confirmed. `NOTES.md` entries dated 2026-05-16 corroborate the *content* of the work (RUF022 on `__init__.py` `__all__` re-sorted; dead `# noqa: BLE001` removed for RUF100; `bug_count(plan) -> int` added; manual helper `check_compat_read.py`; `TestBugCount` cases) but not working-tree state. `bob-tools/BUGS.md` currently contains only `## Bugs` (empty), consistent with the task-2.8 BUGS.md noise having been cleared.
 
-V5. **`[USER]` task count is four, not three.** `bob-tools/PLAN.md` contains `[USER]` tasks in Stage 2, **Stage 3**, Stage 7, Stage 8. All four are in the readable "What to do / What to expect / What to report back" form with commands on isolated lines — so the substantive claim (PLAN.md needs no edit) holds. The Stage 3 `[USER]` task is omitted from the prompt's enumeration. Separately: `CURRENT_PLAN.md`'s Stage-2 `[USER]` task is still the *old inline one-liner* form (stale snapshot); it is only relevant if CURRENT_PLAN.md ever becomes the operator-facing surface.
+V5. **`[USER]` task count is four, not three.** `bob-tools/PLAN.md` contains `[USER]` tasks in Stage 2, **Stage 3**, Stage 7, Stage 8. All four are in the readable "What to do / What to expect / What to report back" form with commands on isolated lines, so the substantive claim (PLAN.md needs no edit) holds. The Stage 3 `[USER]` task is omitted from the prompt's enumeration. Separately: `CURRENT_PLAN.md`'s Stage-2 `[USER]` task is still the *old inline one-liner* form (stale snapshot); it is only relevant if CURRENT_PLAN.md ever becomes the operator-facing surface.
 
 V6. **The defect is two distinct defects; "Phase B" does not exist.** Source trace of `mcloop/mcloop/checklist.py`:
   - `parse()` converts only `CHECKBOX_RE` lines to `Task`s. `text = m.group(3).strip()` is the **single checkbox line only**. Every non-checkbox body line hits `if not m: continue` and is **discarded at parse time**.
-  - `user_task_instructions(task)` returns `task.text.replace("[USER]","").strip()` — only the first line survives.
-  - `formatting.user_banner()` prints that one line. The multi-line "What to do/expect/report" body and isolated command lines **never reach the console**. This is **not** "rendering collapses the body into a blob" — the body is **absent before rendering**. Root cause is the parser, not the printer.
+  - `user_task_instructions(task)` returns `task.text.replace("[USER]","").strip()`, only the first line survives.
+  - `formatting.user_banner()` prints that one line. The multi-line "What to do/expect/report" body and isolated command lines **never reach the console**. This is **not** "rendering collapses the body into a blob"; the body is **absent before rendering**. Root cause is the parser, not the printer.
   - Distinct second defect: `mcloop/mcloop/main.py`, the `[USER]`-fail branch, `flat_obs = response.replace("\n"," | "); short_obs = flat_obs[:200]` flattens+truncates the **user's typed observation when filing it to BUGS.md**. This is the defect `bob-tools/NOTES.md` (2026-05-16) actually logged for task 2.8. `NOTES.md` cites `mcloop/main.py:1218-1226`; line numbers drift (per `bob-tools/PLAN.md` preamble policy), so re-confirm with `grep -n`.
-  - `mcloop/BUGS.md` already holds one open `- [ ]` entry for this, described there as "dumps the entire task text as one prose blob" — also imprecise vs. source; its proposed fix ("render `[USER]` with structure") **cannot work without first changing the parser** to retain the body.
+  - `mcloop/BUGS.md` already holds one open `- [ ]` entry for this, described there as "dumps the entire task text as one prose blob", also imprecise vs. source; its proposed fix ("render `[USER]` with structure") **cannot work without first changing the parser** to retain the body.
   - `mcloop/PLAN.md` uses `## Stage N`, has Stages 1–10, **all `[x]`**, and **no `Phase` sections and no "Phase B"**. The prompt's "Phase B" referent is unverified. The real in-repo bug-fix surfaces are enumerated under Decision B.
 
 ---
@@ -54,9 +54,9 @@ Expected modified: `BUGS.md`, `NOTES.md`, `bob_tools/planfile/__init__.py`, `bob
 ```
 cd /Users/mhcoen/proj/bob-tools && ruff check . && ruff format --check . && pytest -q && mypy --strict bob_tools
 ```
-All must pass. If any fails, **stop** — the work is not green; do not commit, do not revert (hard rule: never revert working code).
+All must pass. If any fails, **stop**; the work is not green; do not commit, do not revert (hard rule: never revert working code).
 
-1.2 Commit (mechanism is **Decision A** — do not pick here). Message (factual, scoped to what NOTES.md records):
+1.2 Commit (mechanism is **Decision A**, do not pick here). Message (factual, scoped to what NOTES.md records):
 ```
 planfile: fix RUF022 (__all__ sort) + RUF100 (dead BLE001 noqa); add bug_count() disambiguation API and check_compat_read manual helper for task-2.8 bug
 ```
@@ -84,13 +84,13 @@ grep -n "flat_obs" /Users/mhcoen/proj/mcloop/mcloop/main.py
 ```
 Assert: `replace("\n"," | ")` + `[:200]` in the `[USER]`-fail branch only; this is the BUGS.md-filing path, not the body-display path. Record actual current line numbers (NOTES.md's `1218-1226` is a drift-prone reference).
 
-2.3 Deliverable: a 2-defect diagnosis — (D1) parser discards `[USER]` body (`checklist.parse` + `user_task_instructions`); (D2) observation flatten/truncate when filing to BUGS.md (`main.py` flat_obs). State explicitly that the `mcloop/BUGS.md` entry and the prompt both under-describe D1 (it is loss, not flattening) and that any structured-render fix is contingent on the parser first retaining the body.
+2.3 Deliverable: a 2-defect diagnosis, (D1) parser discards `[USER]` body (`checklist.parse` + `user_task_instructions`); (D2) observation flatten/truncate when filing to BUGS.md (`main.py` flat_obs). State explicitly that the `mcloop/BUGS.md` entry and the prompt both under-describe D1 (it is loss, not flattening) and that any structured-render fix is contingent on the parser first retaining the body.
 
 ---
 
 ## 3. Write the fix as a task in mcloop's own repo (in-plan, not out-of-band)
 
-The surface is **Decision B** — do not pick here. Whatever surface is chosen, the task text must encode the corrected D1/D2 understanding from §2.3, because the existing `mcloop/BUGS.md` wording would misdirect the fix. Task body (to be placed per Decision B), in mcloop's readable convention, commands on isolated lines:
+The surface is **Decision B**, do not pick here. Whatever surface is chosen, the task text must encode the corrected D1/D2 understanding from §2.3, because the existing `mcloop/BUGS.md` wording would misdirect the fix. Task body (to be placed per Decision B), in mcloop's readable convention, commands on isolated lines:
 
 - Retain `[USER]`-task body in `checklist.parse`: associate contiguous non-checkbox lines following a `[USER]` checkbox (until the next checkbox/heading) with that `Task` (new field, e.g. `body: str`); do not fold into `text`. Keep `CHECKBOX_RE` task identity unchanged.
 - `user_task_instructions` returns the retained body verbatim (newlines preserved) when present, else current behavior.
@@ -107,25 +107,25 @@ No edit to stopped mcloop source happens in this step; this only authors the tas
 
 Precondition: §1 committed and clean; Decision B path for §3 chosen and, if it routes through mcloop bug-only mode against `mcloop/BUGS.md`, that run completed and mcloop is green.
 
-4.1 No PLAN.md edit (V5: PLAN.md `[USER]` tasks already in readable form — verified). If V2 indicates CURRENT_PLAN.md/PLAN.md Stage-2 divergence blocks resumption, surface it; do not hand-reconcile.
+4.1 No PLAN.md edit (V5: PLAN.md `[USER]` tasks already in readable form, verified). If V2 indicates CURRENT_PLAN.md/PLAN.md Stage-2 divergence blocks resumption, surface it; do not hand-reconcile.
 
 4.2 Resume:
 ```
 cd /Users/mhcoen/proj/bob-tools && mcloop
 ```
-4.3 Stages 3–8 contain `[USER]` checkpoints (3, 7, 8). Until §3's fix lands in mcloop, those checkpoints will display first-line-only (D1 active) — operator must read the body from `bob-tools/PLAN.md` directly. Note this expectation explicitly to the user before the run.
+4.3 Stages 3–8 contain `[USER]` checkpoints (3, 7, 8). Until §3's fix lands in mcloop, those checkpoints will display first-line-only (D1 active), operator must read the body from `bob-tools/PLAN.md` directly. Note this expectation explicitly to the user before the run.
 
 ---
 
-## Open decisions (do not resolve — user decides)
+## Open decisions (do not resolve: user decides)
 
-**Decision A — how to land the §1 commit.**
+**Decision A, how to land the §1 commit.**
 - A1 Direct `git commit` in bob-tools (steps as in §1). Fastest; bypasses mcloop entirely; no mcloop run touches the tree.
-- A2 One-task mcloop run that commits. Keeps mcloop's commit path authoritative, but mcloop on startup runs checkpoint/`_stage_safe`, ensures CURRENT_PLAN.md/BUGS.md split files, and enters **bug-only mode if `bob-tools/BUGS.md` has any unchecked entry** (it is currently empty — verified — so bug-only would not trigger now). Risk: an mcloop run mutates more than the intended commit (checkpoint commits, split-plan files) and interacts with V2's Stage-2 divergence. Trade-off: tool-path purity (A2) vs. blast-radius minimization and the never-edit-around-a-run rule (A1).
+- A2 One-task mcloop run that commits. Keeps mcloop's commit path authoritative, but mcloop on startup runs checkpoint/`_stage_safe`, ensures CURRENT_PLAN.md/BUGS.md split files, and enters **bug-only mode if `bob-tools/BUGS.md` has any unchecked entry** (it is currently empty (verified) so bug-only would not trigger now). Risk: an mcloop run mutates more than the intended commit (checkpoint commits, split-plan files) and interacts with V2's Stage-2 divergence. Trade-off: tool-path purity (A2) vs. blast-radius minimization and the never-edit-around-a-run rule (A1).
 
-**Decision B — §3 surface, and the edit-now vs. in-plan tension.**
-- B1 In-plan via the **existing `mcloop/BUGS.md` entry**: this *is* mcloop's own bug-fix path. `cd /Users/mhcoen/proj/mcloop && mcloop` enters bug-only mode and fixes it. Fully in-repo, honors "let mcloop's bug-fix path own bug fixes," no out-of-band edit. Cost: the BUGS.md entry text is imprecise (V6) — must be corrected in-repo first (itself an in-plan edit to mcloop, made while mcloop is *not* running), and a full mcloop self-run is slower.
-- B2 In-plan via a **new appended stage in `mcloop/PLAN.md`** (there is no "Phase B"; Stages 1–10 all `[x]` — V6). Explicit, reviewable, ordered; but adds a stage to a fully-complete plan and still requires an in-repo PLAN.md edit while mcloop is stopped.
+**Decision B, §3 surface, and the edit-now vs. in-plan tension.**
+- B1 In-plan via the **existing `mcloop/BUGS.md` entry**: this *is* mcloop's own bug-fix path. `cd /Users/mhcoen/proj/mcloop && mcloop` enters bug-only mode and fixes it. Fully in-repo, honors "let mcloop's bug-fix path own bug fixes," no out-of-band edit. Cost: the BUGS.md entry text is imprecise (V6), must be corrected in-repo first (itself an in-plan edit to mcloop, made while mcloop is *not* running), and a full mcloop self-run is slower.
+- B2 In-plan via a **new appended stage in `mcloop/PLAN.md`** (there is no "Phase B"; Stages 1–10 all `[x]`, V6). Explicit, reviewable, ordered; but adds a stage to a fully-complete plan and still requires an in-repo PLAN.md edit while mcloop is stopped.
 - B3 Direct out-of-band edit of stopped mcloop source now (fastest path to a correct operator display for the §4 resume). **Violates the never-edit-out-of-band hard rule.** Listed only because the prompt names the tension explicitly; the rule disfavors it.
 - The tension: B3 gives a correct `[USER]` display *before* the bob-tools Stages 3–8 resume (so §4.3's degraded-display caveat disappears); B1/B2 are rule-compliant but leave D1 active during the §4 resume. The user must weigh "correct checkpoints during Stages 3–8" against the never-edit-out-of-band rule. Not resolved here.
 
