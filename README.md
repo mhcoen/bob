@@ -96,16 +96,17 @@ it has not answered.
 **Agents.** In the vendor sense, an agent is the model holding the
 control flow: it picks the next action, decides when to delegate, and
 decides when to stop. That is precisely what Bob's one rule forbids, so
-it is not a gap waiting to be closed. Bob does fan out — Orchestra runs
-parallel actors in `parallel_thinking` and `council_four` — but at the
-workflow level, where every invocation crosses the executor and lands
+it is not a gap waiting to be closed. Bob does fan out. Orchestra runs
+parallel actors in `parallel_thinking` and `council_four`, but it
+happens at the workflow level, where every invocation crosses the
+executor and lands
 in the log as a checkable, resumable event. A subagent spawned inside a
 single CLI session does model work that never crosses that chokepoint:
 unlogged, unresumable, and checked by nothing that is not a model. Same
 capability, wrong side of the rule.
 
 **Skills.** A skill is static text loaded on demand. It takes no control
-flow, so nothing in the thesis rules it out — and Bob still does not use
+flow, so nothing in the thesis rules it out. Bob still does not use
 them. Conventions live in CLAUDE.md instead, which is the
 always-loaded version of the same idea. The tradeoff is real and
 unresolved: a manifest is paid on every task whether it is relevant or
@@ -116,9 +117,9 @@ measured whether it helps. This one is an open question rather than a
 settled position, and it is written down here so it does not read as an
 oversight.
 
-**Hosted schedulers.** That role is Vroom's — the layer above McLoop
+**Hosted schedulers.** That role is Vroom's, the layer above McLoop
 that owns the backlog, dispatches work, and reads the result. Designed
-and partly built, not yet closed; the Status section says exactly where
+and partly built, not yet closed. The Status section says exactly where
 it stands. The boundary holds either way, because it is an
 architectural claim rather than a status one: deciding *when* to run is
 the caller's job, not the runtime's. A managed cron does not invoke
