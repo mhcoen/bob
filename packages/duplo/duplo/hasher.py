@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from duplo.saver import DUPLO_DIR
+from duplo.state import edit_manifest, read_manifest
 
 _SKIP_DIRS = {
     ".duplo",
@@ -77,19 +77,14 @@ def load_hashes(directory: Path | str = ".") -> dict[str, str]:
     Returns an empty dict if the file does not exist.
     """
     path = Path(directory).resolve() / DUPLO_DIR / _HASH_FILE
-    if not path.exists():
-        return {}
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError):
-        return {}
-    return dict(loaded) if isinstance(loaded, dict) else {}
+    return read_manifest(path)
 
 
 def save_hashes(
     hashes: dict[str, str],
     *,
     directory: Path | str = ".",
+    expected: dict[str, str] | None = None,
 ) -> Path:
     """Write *hashes* to ``.duplo/file_hashes.json``.
 
@@ -99,7 +94,9 @@ def save_hashes(
     duplo_dir = Path(directory).resolve() / DUPLO_DIR
     duplo_dir.mkdir(parents=True, exist_ok=True)
     path = duplo_dir / _HASH_FILE
-    path.write_text(json.dumps(hashes, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    with edit_manifest(path, expected=expected) as data:
+        data.clear()
+        data.update(hashes)
     return path
 
 

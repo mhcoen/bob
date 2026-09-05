@@ -2,8 +2,9 @@
 
 Status: in progress, 2026-09-05. Slice A passed all five hosted CI jobs on
 `d4df6eee`. Slice B's first boundary covers persistence ownership, shared JSON
-updates, product identity recovery, and atomic run summaries. Remaining Duplo
-state migration and cross-system reconciliation are still pending.
+updates, product identity recovery, and atomic run summaries. Main Duplo state
+and processing manifests are now migrated as the second boundary. Cross-system
+reconciliation remains pending.
 
 This records the repository review and turns its recommendations into bounded
 deliverables. It is a design document, not an executable McLoop queue. Promote
@@ -365,8 +366,40 @@ Local validation:
   The first sandboxed invocation could not read uv's cache; the successful
   offline run used approved cache access. Artifacts remain at the printed path.
 
-Next boundary: migrate `duplo.json` readers and writers, plus processing manifests,
-without holding state locks during provider calls. Define revision conflict
-handling for those long-running operations. Then inject and reconcile failures
-between verification, Git commit, ledger append, and task advancement. Slice B
-is not complete until these remaining boundaries are implemented and tested.
+Hosted evidence for the first boundary: commit `4545b588`,
+[run 33953132692](https://github.com/mhcoen/bob/actions/runs/33953132692), all five
+jobs passed; 6,936 workspace tests passed, 136 skipped.
+
+### Slice B second boundary: Duplo state and checkpoints (2026-09-05)
+
+Workspace tasks `T-000036`–`T-000038` cover this boundary. Main state readers
+now share `duplo.state.read_state()`, including the pipeline, investigator,
+verification loader, and saver. Missing state remains distinct from invalid
+JSON, unsupported versions, and malformed known field shapes. Legacy objects
+migrate on update while unknown fields and unrelated history remain intact.
+
+Short writes use locked atomic transactions. Feature merging and preference
+extraction compute outside the lock, then reject mismatched input snapshots
+without repeating provider calls. Scrape timestamps no longer rewrite an old
+copy of the full state. File and video manifests migrate to versioned envelopes;
+video merges serialize and file checkpoint publication checks the observed map.
+
+Validation:
+
+- `source .venv/bin/activate` followed by `python -m pytest -n 4 -q`: 6,996
+  passed, 125 skipped, nine existing schema-smoke warnings.
+- The final `test_state.py` module passed 50 cases, including a scrape-concurrency
+  regression added after the full run. It exercises 13 public writers against
+  corrupt input, legacy migration, stale model results, interrupted publication,
+  parallel feedback/video updates, and checkpoint conflicts.
+- Ruff and strict mypy on the shared JSON utility passed; the full suite also
+  ran Duplo's package type check.
+- `python scripts/smoke_wheels.py --offline --work-dir
+  /private/tmp/bob-duplo-state-wheels` passed from installed artifacts outside
+  the checkout. The retained directory contains wheels and probe logs.
+
+Next boundary: inject and reconcile failures between verification, Git commit,
+ledger append, and task advancement. Define pipeline ownership and recovery for
+multi-file operations such as example-directory replacement and reference moves.
+A conflict currently stops safely at the individual JSON publication boundary;
+it does not roll back earlier external effects. Slice B remains in progress.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+from copy import deepcopy
 import hashlib
 import json
 import re
@@ -13,6 +14,7 @@ from pathlib import Path
 from bob_tools.json_state import StateError, read_json_object, update_json_object
 
 from duplo.diagnostics import record_failure
+from duplo.state import edit_state, read_state, edit_manifest, read_manifest
 from duplo.parsing import strip_fences
 from duplo.doc_examples import CodeExample
 from duplo.doc_tables import DocStructures
@@ -50,17 +52,6 @@ def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
     duplo_dir = Path(target_dir) / DUPLO_DIR
     duplo_dir.mkdir(parents=True, exist_ok=True)
     return duplo_dir
-
-
-def _safe_read_json(path: Path) -> dict:
-    """Read *path* as JSON, returning ``{}`` if missing or corrupted."""
-    if not path.exists():
-        return {}
-    try:
-        loaded = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {}
-    return dict(loaded) if isinstance(loaded, dict) else {}
 
 
 def save_product(
@@ -141,7 +132,7 @@ def derive_app_name(
         # Keep the complete product read-modify-write under one lock.
         app_name = data.get("app_name", "")
         if not app_name:
-            duplo_data = read_json_object(td / DUPLO_JSON) or {}
+            duplo_data = read_state(td / DUPLO_JSON)
             app_name = duplo_data.get("app_name", "")
             if not isinstance(app_name, str):
                 raise StateError(f"{td / DUPLO_JSON}: app_name must be a string")
@@ -173,7 +164,7 @@ def save_selections(
 ) -> Path:
     """Write selected features and build preferences to *duplo.json*.
 
-    The file is created or overwritten in *target_dir*.  Returns the path
+    Selected fields are updated in *target_dir*, preserving unrelated history.  Returns the path
     to the written file.
 
     Args:
@@ -188,7 +179,7 @@ def save_selections(
         target_dir: Directory in which to write ``duplo.json``.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
     data: dict = {
         "source_url": source_url,
         "app_name": app_name,
@@ -201,7 +192,8 @@ def save_selections(
         data["code_examples"] = [dataclasses.asdict(ex) for ex in code_examples]
     if doc_structures is not None:
         data["doc_structures"] = _serialize_doc_structures(doc_structures)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    with edit_state(path) as current:
+        current.update(data)
     return path
 
 
@@ -275,6 +267,7 @@ def save_build_preferences(
     arch_hash: str,
     *,
     target_dir: Path | str = ".",
+    expected: dict | None = None,
 ) -> Path:
     """Update ``preferences`` and ``architecture_hash`` in *duplo.json*.
 
@@ -283,12 +276,11 @@ def save_build_preferences(
     file.  Returns the path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["preferences"] = [dataclasses.asdict(p) for p in preferences]
-    if arch_hash:
-        data["architecture_hash"] = arch_hash
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path, expected=expected) as data:
+        data["preferences"] = [dataclasses.asdict(p) for p in preferences]
+        if arch_hash:
+            data["architecture_hash"] = arch_hash
     return path
 
 
@@ -308,21 +300,19 @@ def append_phase_to_history(
         target_dir: Directory containing ``duplo.json``.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        match = re.search(
+            r"^#\s*.*?((?:Phase|Stage)\s+\d+[^\n]*)", plan_content, re.IGNORECASE | re.MULTILINE
+        )
+        phase_title = match.group(1).strip() if match else "Unknown phase"
 
-    match = re.search(
-        r"^#\s*.*?((?:Phase|Stage)\s+\d+[^\n]*)", plan_content, re.IGNORECASE | re.MULTILINE
-    )
-    phase_title = match.group(1).strip() if match else "Unknown phase"
-
-    entry = {
-        "phase": phase_title,
-        "plan": plan_content,
-        "completed_at": datetime.now(tz=timezone.utc).isoformat(),
-    }
-    data.setdefault("phases", []).append(entry)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        entry = {
+            "phase": phase_title,
+            "plan": plan_content,
+            "completed_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        data.setdefault("phases", []).append(entry)
     return path
 
 
@@ -344,16 +334,14 @@ def save_feedback(
         target_dir: Directory containing ``duplo.json``.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-
-    entry = {
-        "after_phase": after_phase,
-        "text": text,
-        "recorded_at": datetime.now(tz=timezone.utc).isoformat(),
-    }
-    data.setdefault("feedback", []).append(entry)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        entry = {
+            "after_phase": after_phase,
+            "text": text,
+            "recorded_at": datetime.now(tz=timezone.utc).isoformat(),
+        }
+        data.setdefault("feedback", []).append(entry)
     return path
 
 
@@ -364,12 +352,11 @@ def save_roadmap(
 ) -> Path:
     """Save the roadmap to duplo.json."""
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["roadmap"] = roadmap
-    first_phase = roadmap[0].get("phase", 0) if roadmap else 0
-    data["current_phase"] = first_phase
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        data["roadmap"] = roadmap
+        first_phase = roadmap[0].get("phase", 0) if roadmap else 0
+        data["current_phase"] = first_phase
     return path
 
 
@@ -379,17 +366,14 @@ def advance_phase(
 ) -> int:
     """Increment current_phase in duplo.json. Returns new phase number."""
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
     if not path.exists():
+        read_state(path)  # Refuse dangling symlinks rather than initializing them.
         return 1
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return 1
-    current_raw = data.get("current_phase", 0)
-    current = int(current_raw) if isinstance(current_raw, int | float) else 0
-    data["current_phase"] = current + 1
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    with edit_state(path) as data:
+        current_raw = data.get("current_phase", 0)
+        current = int(current_raw) if isinstance(current_raw, int | float) else 0
+        data["current_phase"] = current + 1
     return current + 1
 
 
@@ -401,13 +385,8 @@ def get_current_phase(
 
     Returns (0, None) if no roadmap exists.
     """
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    if not path.exists():
-        return (0, None)
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return (0, None)
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    data = read_state(path)
     roadmap = data.get("roadmap", [])
     current = data.get("current_phase", 0)
     for phase in roadmap:
@@ -636,8 +615,9 @@ def save_features(
     across runs. Returns the path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    baseline = read_state(path)
+    data = deepcopy(baseline)
     existing = data.get("features", [])
     existing_names = {f["name"] for f in existing}
 
@@ -666,17 +646,16 @@ def save_features(
         if kept is not None:
             merged_count += len(group) - 1
 
-    if merged_count:
-        print(f"Merged {merged_count} duplicate feature(s).")
-
     # Propagate implemented status: if a pending feature is semantically
     # identical to an implemented one, mark it implemented too.
     propagated = _propagate_implemented_status(existing)
+    data["features"] = existing
+    with edit_state(path, expected=baseline) as current:
+        current.update(data)
+    if merged_count:
+        print(f"Merged {merged_count} duplicate feature(s).")
     if propagated:
         print(f"Marked {len(propagated)} feature(s) as implemented (duplicate of implemented).")
-
-    data["features"] = existing
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 
 
@@ -709,18 +688,17 @@ def save_feature_status(
         raise ValueError(msg)
 
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    features = data.get("features", [])
-    for feat in features:
-        if feat["name"] == name:
-            feat["status"] = status
-            feat["implemented_in"] = implemented_in
-            break
-    else:
-        msg = f"No feature named {name!r}"
-        raise ValueError(msg)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        features = data.get("features", [])
+        for feat in features:
+            if feat["name"] == name:
+                feat["status"] = status
+                feat["implemented_in"] = implemented_in
+                break
+        else:
+            msg = f"No feature named {name!r}"
+            raise ValueError(msg)
     return path
 
 
@@ -784,23 +762,22 @@ def save_issue(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    issues = data.get("issues", [])
-    for existing in issues:
-        if existing.get("description") == description:
-            return path
-    issues.append(
-        {
-            "description": description,
-            "source": source,
-            "phase": phase,
-            "status": "open",
-            "added_at": datetime.now(tz=timezone.utc).isoformat(),
-        }
-    )
-    data["issues"] = issues
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        issues = data.get("issues", [])
+        for existing in issues:
+            if existing.get("description") == description:
+                return path
+        issues.append(
+            {
+                "description": description,
+                "source": source,
+                "phase": phase,
+                "status": "open",
+                "added_at": datetime.now(tz=timezone.utc).isoformat(),
+            }
+        )
+        data["issues"] = issues
     return path
 
 
@@ -826,18 +803,17 @@ def resolve_issue(
         ValueError: If no issue with the given description exists.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    issues = data.get("issues", [])
-    for issue in issues:
-        if issue.get("description") == description:
-            issue["status"] = "resolved"
-            issue["resolved_at"] = datetime.now(tz=timezone.utc).isoformat()
-            break
-    else:
-        msg = f"No issue with description {description!r}"
-        raise ValueError(msg)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        issues = data.get("issues", [])
+        for issue in issues:
+            if issue.get("description") == description:
+                issue["status"] = "resolved"
+                issue["resolved_at"] = datetime.now(tz=timezone.utc).isoformat()
+                break
+        else:
+            msg = f"No issue with description {description!r}"
+            raise ValueError(msg)
     return path
 
 
@@ -945,13 +921,8 @@ def load_examples(
                 continue
         return examples
     # Fallback: read from duplo.json for backward compatibility.
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    if not path.exists():
-        return []
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8")).get("code_examples", [])
-    except json.JSONDecodeError:
-        return []
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    raw = read_state(path).get("code_examples", [])
     return [
         CodeExample(
             input=ex.get("input", ""),
@@ -1009,10 +980,9 @@ def save_doc_structures(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["doc_structures"] = _serialize_doc_structures(structures)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        data["doc_structures"] = _serialize_doc_structures(structures)
     return path
 
 
@@ -1035,10 +1005,9 @@ def save_reference_urls(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["reference_urls"] = [dataclasses.asdict(r) for r in records]
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        data["reference_urls"] = [dataclasses.asdict(r) for r in records]
     return path
 
 
@@ -1066,17 +1035,15 @@ def save_sources(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        existing = data.get("sources", [])
+        existing_by_url: dict[str, dict] = {s["url"]: s for s in existing}
 
-    existing = data.get("sources", [])
-    existing_by_url: dict[str, dict] = {s["url"]: s for s in existing}
+        for entry in sources:
+            existing_by_url[entry["url"]] = entry
 
-    for entry in sources:
-        existing_by_url[entry["url"]] = entry
-
-    data["sources"] = list(existing_by_url.values())
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        data["sources"] = list(existing_by_url.values())
     return path
 
 
@@ -1088,8 +1055,8 @@ def load_sources(
 
     Returns an empty list if no sources have been recorded.
     """
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data = _safe_read_json(path)
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    data = read_state(path)
     sources = data.get("sources", [])
     return list(sources) if isinstance(sources, list) else []
 
@@ -1153,10 +1120,9 @@ def save_design_requirements(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["design_requirements"] = design
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        data["design_requirements"] = design
     return path
 
 
@@ -1178,10 +1144,9 @@ def save_frame_descriptions(
         Path to the updated file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / DUPLO_JSON).resolve()
-    data: dict = _safe_read_json(path)
-    data["frame_descriptions"] = descriptions
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / DUPLO_JSON).absolute()
+    with edit_state(path) as data:
+        data["frame_descriptions"] = descriptions
     return path
 
 
@@ -1239,12 +1204,11 @@ def load_processed_videos(
 
     Maps a project-relative video path to the SHA-256 content hash the
     video had when it last completed the frame pipeline (extraction,
-    Vision filtering, description).  Returns ``{}`` when missing or
-    corrupted.
+    Vision filtering, description). Returns ``{}`` only when missing.
+    Invalid or unsupported state raises without overwriting the file.
     """
-    path = (Path(target_dir) / PROCESSED_VIDEOS_JSON).resolve()
-    data = _safe_read_json(path)
-    return {str(k): str(v) for k, v in data.items() if isinstance(v, str)}
+    path = Path(target_dir) / PROCESSED_VIDEOS_JSON
+    return read_manifest(path)
 
 
 def record_processed_videos(
@@ -1260,13 +1224,9 @@ def record_processed_videos(
     Returns the path to the written file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / PROCESSED_VIDEOS_JSON).resolve()
-    data = load_processed_videos(target_dir=target_dir)
-    data.update(entries)
-    path.write_text(
-        json.dumps(data, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    path = (Path(target_dir) / PROCESSED_VIDEOS_JSON).absolute()
+    with edit_manifest(path) as data:
+        data.update(entries)
     return path
 
 

@@ -67,6 +67,14 @@ Callbacks return the new object; keep them short and do not recursively update
 the same path. `atomic_write_json(path, data)` provides replacement for complete
 diagnostic snapshots without merge or schema semantics.
 
+`edit_json_object(path, validate=..., expected=...)` exposes the same locked
+transaction as a context manager yielding a mutable object. It publishes only
+on normal exit. Both edit and update accept an optional `expected` snapshot:
+different logical contents raise `StateConflictError` before mutation. `None`
+disables comparison; `{}` matches missing or empty state. This lets callers
+compute a result outside the lock and refuse publication if state changed,
+without automatically repeating external calls.
+
 These functions reuse the planfile's existing file-sync, replacement,
 directory-sync, and advisory-lock primitives. Existing file permission bits are
 preserved; new JSON files are private (0600). Read-modify-write protection requires

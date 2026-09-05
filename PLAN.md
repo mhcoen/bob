@@ -75,4 +75,12 @@ Shared JSON persistence, product identity recovery, and atomic diagnostic summar
 - [x] T-000033: Document persistent-state ownership and recovery boundaries; provide validated atomic JSON publication and locked read-modify-write using existing durable file utilities, with failure and concurrency tests. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
 - [x] T-000034: Migrate Duplo product identity to versioned, validated, locked atomic updates. Preserve malformed and unsupported state without overwrite; retain legacy fields and document manual recovery. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
 - [x] T-000035: Publish McLoop run summaries atomically with collision-resistant identities; preserve dated evidence when latest publication fails and test interruption boundaries. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
+## Phase 8: Duplo state migration (Slice B)
+<!-- phase_id: phase_008 -->
+
+Migrate authoritative JSON readers and writers, reject stale feature updates, and version processing manifests. Cross-system task reconciliation remains a separate boundary.
+
+- [x] T-000036: Migrate duplo.json to validated versioned state reads and atomic locked mutations. Preserve corrupt bytes and legacy data; reject stale feature-merge results without holding a lock during provider calls. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
+- [x] T-000037: Migrate file and video processing manifests to validated versioned atomic persistence. Serialize merges and reject outdated file-manifest publication in the pipeline. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
+- [x] T-000038: Migrate pipeline, investigation, and verification readers; add corruption, interruption, and concurrent-update regressions and document the remaining recovery boundaries. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
 ## Bugs

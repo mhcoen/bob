@@ -9,6 +9,8 @@ PLAN.md as verification tasks.
 
 from __future__ import annotations
 
+from duplo.state import read_state
+
 import json
 from dataclasses import dataclass
 
@@ -155,11 +157,6 @@ def load_frame_descriptions(
 
     base = Path(target_dir) if target_dir else Path(".")
     duplo_path = base / ".duplo" / "duplo.json"
-    if not duplo_path.exists():
-        return []
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
+    data = read_state(duplo_path)
     frames = data.get("frame_descriptions", [])
     return list(frames) if isinstance(frames, list) else []

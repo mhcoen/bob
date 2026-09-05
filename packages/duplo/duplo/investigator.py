@@ -11,6 +11,8 @@ at the product-knowledge level rather than the code level.
 
 from __future__ import annotations
 
+from duplo.state import read_state
+
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -241,12 +243,8 @@ def _gather_context() -> dict:
     }
 
     duplo_path = Path(".duplo/duplo.json")
+    data = read_state(duplo_path)
     if not duplo_path.exists():
-        return context
-
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
         return context
 
     context["app_name"] = data.get("app_name", "")

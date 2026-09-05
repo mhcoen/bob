@@ -122,14 +122,14 @@ class TestSaveSelections:
         data = json.loads((tmp_path / DUPLO_JSON).read_text())
         assert data["features"] == []
 
-    def test_overwrites_existing_file(self, tmp_path, sample_features, sample_prefs):
+    def test_preserves_unrelated_existing_fields(self, tmp_path, sample_features, sample_prefs):
         path = tmp_path / DUPLO_JSON
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text('{"old": "data"}')
         save_selections("https://example.com", sample_features, sample_prefs, target_dir=tmp_path)
         data = json.loads(path.read_text())
         assert "source_url" in data
-        assert "old" not in data
+        assert data["old"] == "data"
 
     def test_default_target_dir_is_cwd(self, monkeypatch, tmp_path, sample_features, sample_prefs):
         monkeypatch.chdir(tmp_path)
@@ -2780,13 +2780,16 @@ class TestProcessedVideosManifest:
 
         assert load_processed_videos(target_dir=tmp_path) == {}
 
-    def test_load_corrupted_file_returns_empty(self, tmp_path):
+    def test_load_corrupted_file_is_preserved(self, tmp_path):
+        from bob_tools.json_state import StateError
         from duplo.saver import PROCESSED_VIDEOS_JSON, load_processed_videos
 
         path = tmp_path / PROCESSED_VIDEOS_JSON
         path.parent.mkdir(parents=True)
         path.write_text("{not json", encoding="utf-8")
-        assert load_processed_videos(target_dir=tmp_path) == {}
+        with pytest.raises(StateError, match="preserved"):
+            load_processed_videos(target_dir=tmp_path)
+        assert path.read_text() == "{not json"
 
     def test_record_then_load_round_trip(self, tmp_path):
         from duplo.saver import load_processed_videos, record_processed_videos
@@ -2807,10 +2810,13 @@ class TestProcessedVideosManifest:
             "ref/b.mp4": "hash-b2",
         }
 
-    def test_non_string_values_dropped_on_load(self, tmp_path):
+    def test_non_string_values_reported_without_dropping_entries(self, tmp_path):
+        from bob_tools.json_state import StateError
         from duplo.saver import PROCESSED_VIDEOS_JSON, load_processed_videos
 
         path = tmp_path / PROCESSED_VIDEOS_JSON
         path.parent.mkdir(parents=True)
         path.write_text('{"ref/a.mp4": "h", "ref/bad.mp4": 42}', encoding="utf-8")
-        assert load_processed_videos(target_dir=tmp_path) == {"ref/a.mp4": "h"}
+        with pytest.raises(StateError, match="preserved"):
+            load_processed_videos(target_dir=tmp_path)
+        assert json.loads(path.read_text()) == {"ref/a.mp4": "h", "ref/bad.mp4": 42}

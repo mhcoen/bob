@@ -236,7 +236,10 @@ detects new files and appends tasks for anything missing.
   files in the project directory. `compute_hashes()` walks the
   directory tree (skipping `.duplo/`, `.git/`, etc.) and returns a
   `{relative_path: sha256}` dict. `save_hashes()` writes to
-  `.duplo/file_hashes.json`. `load_hashes()` reads it back.
+  `.duplo/file_hashes.json` through the versioned manifest API.
+  `load_hashes()` accepts legacy flat maps and refuses malformed state.
+  `save_hashes(expected=...)` rejects an outdated checkpoint; omitting
+  the snapshot uses serialized whole-manifest replacement.
   `diff_hashes()` compares old and new manifests, returning a
   `HashDiff` dataclass (added, changed, removed). Called during
   first run (initial manifest) and subsequent runs (detect changes).
@@ -283,8 +286,12 @@ detects new files and appends tasks for anything missing.
   Product identity uses `bob_tools.json_state` for validated, locked atomic
   updates, including `derive_app_name()`. Legacy product objects migrate to
   `schema_version: 1` on update; malformed fields and unsupported versions
-  raise `StateError` without replacing the file. Other saver state paths
-  retain their existing persistence behavior pending migration.
+  raise `StateError` without replacing the file. `duplo.json` mutations use
+  `state.edit_state()` and retain unrelated history. Feature merging computes
+  outside the lock then publishes against its original snapshot; conflicts
+  raise `StateConflictError` without repeating model calls. Video manifests
+  use locked, versioned merges. The generated examples directory retains
+  its existing replacement behavior.
   `save_features()` merges new features into duplo.json, using
   `_deduplicate_features_llm()` to detect semantic duplicates via
   a single batch ``Codex -p`` call (e.g. "CLI tool" and
@@ -416,7 +423,7 @@ detects new files and appends tasks for anything missing.
   renders them as PLAN.md checklist items (e.g.
   ``- [ ] Verify: type \`Price: $10\`, expect result \`$10\```).
   ``load_frame_descriptions()`` reads the ``frame_descriptions``
-  list from duplo.json. ``_parse_cases()`` handles JSON parsing
+  list through `state.read_state()`, refusing malformed or unsupported state. ``_parse_cases()`` handles JSON parsing
   with fence stripping. Called during plan generation in both
   ``_first_run`` and ``_subsequent_run`` (State 3).
 
@@ -454,7 +461,8 @@ detects new files and appends tasks for anything missing.
   `_parse_response()` parses structured output.
 
 - `investigator.py`: Intelligent product-level bug diagnosis using
-  LLM analysis. `Diagnosis` dataclass (symptom, expected, severity,
+  LLM analysis. Reads project context through `state.read_state()` and
+  refuses malformed or unsupported state before requesting a diagnosis. `Diagnosis` dataclass (symptom, expected, severity,
   area, evidence_sources). `InvestigationResult` dataclass
   (diagnoses, summary, raw_response). `investigate()` gathers all
   available product context via `_gather_context()` (reference
@@ -494,6 +502,20 @@ detects new files and appends tasks for anything missing.
   longer calls McLoop directly. The user runs McLoop separately
   after duplo generates the plan.
 
+- `state.py`: Owns versioned `duplo.json` and processing-manifest persistence.
+  `read_state()` validates without rewriting legacy files; `edit_state()` uses
+  shared locked atomic JSON transactions and writes schema version 1.
+  Optional expected snapshots reject stale results. Manifest helpers migrate
+  flat filename/hash maps to `{schema_version: 1, entries: {...}}` on update.
+  Malformed or unsupported state raises `StateError` with original bytes intact.
+
+- `pipeline.py`: Coordinates the project workflow. All `duplo.json` reads use
+  `read_state()`. Preference extraction takes a snapshot before the model call
+  and rejects intervening edits before saving. Scrape timestamps update only
+  their field under a lock; the unchanged-content branch checks its snapshot.
+  File-hash publication compares the observed checkpoint before replacing it.
+  These per-file operations do not make an entire pipeline run a transaction.
+
 ### Top-level files
 
 - `PLAN.md`: Task checklist for building duplo itself.
@@ -520,6 +542,8 @@ test_investigator.py, test_spec_reader.py, test_roadmap.py.
 
 `test_product_state.py` covers identity corruption, legacy migration, and
 interrupted saves with preserved original bytes.
+`test_state.py` covers the main state and processing manifests, stale model
+results, interrupted updates, and cooperating process writers.
 
 Video extraction unit tests mock ffmpeg availability; real ffmpeg tests cover
 scene detection and interval fallback with generated videos. They skip when

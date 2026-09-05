@@ -5,6 +5,9 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+import pytest
+from bob_tools.json_state import StateError
+
 from duplo.verification_extractor import (
     VerificationCase,
     _parse_cases,
@@ -299,8 +302,10 @@ class TestLoadFrameDescriptions:
         (duplo_dir / "duplo.json").write_text("{}")
         assert load_frame_descriptions(target_dir=str(tmp_path)) == []
 
-    def test_returns_empty_on_invalid_json(self, tmp_path):
+    def test_invalid_state_is_reported_and_preserved(self, tmp_path):
         duplo_dir = tmp_path / ".duplo"
         duplo_dir.mkdir()
         (duplo_dir / "duplo.json").write_text("NOT JSON")
-        assert load_frame_descriptions(target_dir=str(tmp_path)) == []
+        with pytest.raises(StateError, match="preserved"):
+            load_frame_descriptions(target_dir=str(tmp_path))
+        assert (duplo_dir / "duplo.json").read_text() == "NOT JSON"

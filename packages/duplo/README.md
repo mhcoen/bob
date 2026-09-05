@@ -510,9 +510,23 @@ version stops identity loading and saving with its path and a recovery message;
 it is not treated as a new project. Stop all writers, copy the damaged file for
 inspection, then repair it or restore a known-good backup. Do not delete it just
 to bypass the error: product confirmation and user-edited names would be lost.
-These guarantees currently cover product identity; other `.duplo` state paths
-still await migration. See [persistence and recovery](../../design/persistence.md)
-for durability limits and which state needs a backup beyond Git.
+The same validation and atomic update guarantees now cover `duplo.json`,
+`file_hashes.json`, and `processed_videos.json`. Legacy files migrate on their
+next update. Main state gains `schema_version: 1`; processing manifests become
+`{"schema_version": 1, "entries": {"path": "hash"}}`. The Python loading helpers
+continue returning the plain filename/hash map. Keep a backup when upgrading;
+older Duplo versions do not understand the new manifest envelope.
+
+Feature merging and preference extraction run without holding a state lock,
+then check that their input snapshot still matches before saving. A conflict
+preserves the newer state and stops the operation without repeating model calls.
+Reload and review before retrying. Processing-checkpoint conflicts also stop
+publication instead of overwriting another writer's checkpoint.
+
+These are per-file guarantees. Generated example directories, reference moves,
+and transitions across plans, Git commits, and ledgers are not one transaction.
+See [persistence and recovery](../../design/persistence.md) for remaining recovery
+boundaries and which state needs a backup beyond Git.
 
 ## Migrating existing projects
 

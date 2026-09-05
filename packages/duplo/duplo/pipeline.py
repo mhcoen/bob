@@ -15,10 +15,12 @@ The display helpers (``_print_status``, ``_print_summary``,
 
 from __future__ import annotations
 
+from duplo.state import read_state, edit_state
+from bob_tools.json_state import StateConflictError
+
 import argparse
 import dataclasses
 import hashlib
-import json
 import re
 import sys
 import time
@@ -261,8 +263,9 @@ def _load_preferences(data: dict, spec) -> list[BuildPreferences]:
         return cached
 
     # Hash changed - re-parse from the updated architecture prose.
+    baseline = read_state(Path(_DUPLO_JSON))
     prefs = parse_build_preferences(spec.architecture, structured_entries=structured)
-    save_build_preferences(prefs, current_hash)
+    save_build_preferences(prefs, current_hash, expected=baseline)
     # Update in-memory data so later accesses in the same run see it.
     data["preferences"] = [dataclasses.asdict(p) for p in prefs]
     data["architecture_hash"] = current_hash
@@ -827,11 +830,7 @@ def _fix_mode(args: argparse.Namespace) -> None:
 
     # Load project data.
     duplo_path = Path(_DUPLO_JSON)
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        print(f"Error: {duplo_path} contains invalid JSON.")
-        sys.exit(1)
+    data = read_state(duplo_path)
 
     # Optionally capture a screenshot.
     if args.screenshot:
@@ -1143,10 +1142,7 @@ def _rescrape_product_url(
     duplo_path = Path(_DUPLO_JSON)
     if not duplo_path.exists():
         return 0, 0, ""
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return 0, 0, ""
+    data = read_state(duplo_path)
     source_url = data.get("source_url", "")
     if not source_url:
         return 0, 0, ""
@@ -1179,8 +1175,8 @@ def _rescrape_product_url(
 
     if new_hashes and old_hashes == new_hashes:
         print("  Site content unchanged, skipping feature re-extraction.")
-        data["last_scrape_timestamp"] = time.time()
-        duplo_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+        with edit_state(duplo_path, expected=data) as current:
+            current["last_scrape_timestamp"] = time.time()
         return 0, 0, ""
 
     pages_updated = 0
@@ -1284,15 +1280,13 @@ def _rescrape_product_url(
             )
             print("  Design autogen block already exists; skipping Vision.")
 
-    # Re-read duplo.json to pick up writes from save_reference_urls,
-    # save_doc_structures, etc. that happened since our initial read.
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, FileNotFoundError):
-        print("  Warning: could not re-read duplo.json; skipping timestamp update.")
-        return pages_updated, examples_updated, scraped_text
-    data["last_scrape_timestamp"] = time.time()
-    duplo_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    # Only change this field, retaining writes from the extraction steps.
+    with edit_state(duplo_path) as current:
+        if current.get("source_url", "") != source_url:
+            raise StateConflictError(
+                f"{duplo_path}: source URL changed during scraping; timestamp not saved"
+            )
+        current["last_scrape_timestamp"] = time.time()
 
     return pages_updated, examples_updated, scraped_text
 
@@ -1323,10 +1317,7 @@ def _detect_and_append_gaps(
         return 0, 0, 0, 0
 
     plan_content = plan_path.read_text(encoding="utf-8")
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return 0, 0, 0, 0
+    data = read_state(duplo_path)
 
     features = [_feature_from_dict(f) for f in data.get("features", [])]
     if scope_exclude:
@@ -1692,10 +1683,7 @@ def _subsequent_run() -> None:
     spec_prompt = format_spec_for_prompt(spec) if spec else ""
 
     duplo_path = Path(_DUPLO_JSON)
-    try:
-        status_data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        status_data = {}
+    status_data = read_state(duplo_path)
     _print_status(status_data, plan_exists=Path("PLAN.md").exists())
 
     summary = UpdateSummary()
@@ -1787,10 +1775,7 @@ def _subsequent_run() -> None:
     # new ones into duplo.json so the gap detector can find them.
     if combined_text:
         print("\nRe-extracting features \u2026")
-        try:
-            old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            old_data = {}
+        old_data = read_state(Path(_DUPLO_JSON))
         existing_names = [f["name"] for f in old_data.get("features", [])]
         new_features = extract_features(
             combined_text,
@@ -1805,18 +1790,10 @@ def _subsequent_run() -> None:
                 f for f in new_features if not _matches_excluded(f, spec.scope_exclude)
             ]
         if new_features:
-            try:
-                old_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
-            except FileNotFoundError:
-                # First run: no duplo.json yet. Treat as empty state and
-                # proceed to save_features below (old_count == 0).
-                old_data = {}
-            except json.JSONDecodeError:
-                print(f"Error: {_DUPLO_JSON} contains invalid JSON. Delete or fix it.")
-                return
+            old_data = read_state(Path(_DUPLO_JSON))
             old_count = len(old_data.get("features", []))
             save_features(new_features)
-            updated_data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+            updated_data = read_state(Path(_DUPLO_JSON))
             new_count = len(updated_data.get("features", [])) - old_count
             if new_count > 0:
                 print(f"  {new_count} new feature(s) merged into duplo.json.")
@@ -1962,21 +1939,12 @@ def _subsequent_run() -> None:
     # (media download, behavioral-video design extraction, gap detection)
     # has run. Saving earlier would consume the change trigger on a crash,
     # so the next run would diff clean and never re-analyze those files.
-    save_hashes(compute_hashes("."))
+    save_hashes(compute_hashes("."), expected=old_hashes)
 
     _print_summary(summary)
 
     duplo_path = Path(_DUPLO_JSON)
-    try:
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        # First run: no duplo.json yet (e.g. a spec with no sources/refs
-        # never triggered a save_* above). Treat as empty so the State-3
-        # roadmap/plan-generation path below proceeds instead of crashing.
-        data = {}
-    except json.JSONDecodeError:
-        print(f"Error: {duplo_path} contains invalid JSON. Delete or fix it.")
-        return
+    data = read_state(duplo_path)
     app_name = derive_app_name(spec)
 
     plan_path = Path("PLAN.md")
@@ -1991,7 +1959,7 @@ def _subsequent_run() -> None:
         print(f"Completing {phase_label} (all tasks done).")
         _complete_phase(content, app_name, phase_label)
         # Reload data after phase completion modified duplo.json.
-        data = json.loads(duplo_path.read_text(encoding="utf-8"))
+        data = read_state(duplo_path)
         _print_feature_status(data)
 
     # State 2: PLAN.md exists. Two sub-cases:
@@ -2115,7 +2083,7 @@ def _subsequent_run() -> None:
         # save/reload round-trip drops entries.  Reload `data` so later
         # steps see the persisted current_phase and any other state.
         roadmap = new_roadmap
-        data = json.loads(Path(_DUPLO_JSON).read_text(encoding="utf-8"))
+        data = read_state(Path(_DUPLO_JSON))
 
     # Bail out only if the regen block failed to leave us with a
     # usable roadmap. We intentionally key off ``roadmap`` rather than
@@ -2272,10 +2240,7 @@ def _complete_phase(
 
         # Match unannotated tasks to features via Claude.
         duplo_path = Path(_DUPLO_JSON)
-        try:
-            data = json.loads(duplo_path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            data = {}
+        data = read_state(duplo_path)
         features = [_feature_from_dict(f) for f in data.get("features", [])]
         if features:
             unannotated = [t for t in tasks if not t.features and not t.fixes]

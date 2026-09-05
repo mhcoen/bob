@@ -3500,6 +3500,8 @@ class TestSubsequentRunFeatureCountingIntegration:
 
     def test_handles_invalid_duplo_json_during_reextraction(self, capsys, tmp_path, monkeypatch):
         """When duplo.json is corrupted between rescrape and re-extract, exits."""
+        from bob_tools.json_state import StateError
+
         _write_duplo_json(tmp_path, self._BASE_DATA)
         duplo_dir = tmp_path / ".duplo"
         (duplo_dir / "file_hashes.json").write_text("{}", encoding="utf-8")
@@ -3518,10 +3520,10 @@ class TestSubsequentRunFeatureCountingIntegration:
             ),
             patch("duplo.pipeline.extract_features", side_effect=corrupt_json),
         ):
-            main()
+            with pytest.raises(StateError, match="preserved"):
+                main()
 
-        out = capsys.readouterr().out
-        assert "invalid JSON" in out
+        assert (duplo_dir / "duplo.json").read_text() == "NOT JSON"
 
     def test_reports_no_features_when_extraction_returns_empty(
         self, capsys, tmp_path, monkeypatch
@@ -8304,7 +8306,7 @@ class TestIntegrationUrlOnlySpec:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,
@@ -8388,7 +8390,7 @@ class TestIntegrationRefOnlySpec:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,
@@ -8466,7 +8468,7 @@ class TestIntegrationBothSourcesAndRefs:
         monkeypatch.setattr(m, "extract_features", fake_extract)
         monkeypatch.setattr(m, "save_features", lambda *a: None)
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,
@@ -8692,7 +8694,7 @@ class TestIntegrationProposedExcluded:
         mock_di = MagicMock(return_value=[])
         monkeypatch.setattr(m, "collect_design_input", mock_di)
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,
@@ -8891,7 +8893,7 @@ class TestProductJsonBackwardCompat:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
@@ -8937,7 +8939,7 @@ class TestProductJsonBackwardCompat:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
@@ -8984,7 +8986,7 @@ class TestProductJsonBackwardCompat:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
@@ -9259,7 +9261,7 @@ class TestSourcesFieldPopulated:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,
@@ -9471,7 +9473,7 @@ class TestSubsequentRunProductNameSync:
         monkeypatch.setattr(m, "_rescrape_product_url", lambda **kw: (0, 0, ""))
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
@@ -9542,7 +9544,7 @@ class TestSubsequentRunProductNameSync:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m, "diff_hashes", lambda *a: MagicMock(added=[], changed=[], removed=[])
@@ -9629,7 +9631,7 @@ class TestNoAskPreferencesInPipeline:
         monkeypatch.setattr(m, "format_doc_references", lambda s: [])
         monkeypatch.setattr(m, "extract_features", lambda *a, **kw: [])
         monkeypatch.setattr(m, "compute_hashes", lambda *a: {})
-        monkeypatch.setattr(m, "save_hashes", lambda *a: None)
+        monkeypatch.setattr(m, "save_hashes", lambda *a, **kw: None)
         monkeypatch.setattr(m, "load_hashes", lambda *a: {})
         monkeypatch.setattr(
             m,

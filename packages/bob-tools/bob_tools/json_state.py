@@ -11,7 +11,8 @@ from __future__ import annotations
 
 import json
 import stat
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,10 @@ Validator = Callable[[JSONObject], None]
 
 class StateError(RuntimeError):
     """State cannot be safely used. Keep the original file for recovery."""
+
+
+class StateConflictError(StateError):
+    """A snapshot no longer matches the latest committed state."""
 
 
 def _object_pairs(pairs: list[tuple[str, Any]]) -> JSONObject:
@@ -89,18 +94,19 @@ def atomic_write_json(path: Path, data: JSONObject) -> None:
     _atomic_write_text(path, content, mode=mode)
 
 
-def update_json_object(
+@contextmanager
+def edit_json_object(
     path: Path,
-    operation: Callable[[JSONObject], JSONObject],
     *,
     validate: Validator | None = None,
-) -> JSONObject:
-    """Lock, read, validate, transform, validate, and atomically publish.
+    expected: JSONObject | None = None,
+) -> Iterator[JSONObject]:
+    """Yield a mutable object under its lock, publishing only on normal exit.
 
-    The operation receives an empty dict for missing state, otherwise the latest
-    committed object. It runs once, inside the lock. Schema owners may accept
-    legacy input in validate and migrate it in operation. Existing invalid state
-    is never replaced, and unknown fields survive if the operation preserves them.
+    An optional expected snapshot is compared with the current logical object
+    before yielding. A mismatch raises StateConflictError without retrying. None
+    disables the check; an empty dict matches absent or empty state. Keep the
+    critical section short: no provider calls or nested same-path edits.
     """
     # Detect broken symlinks before resolve() erases that distinction.
     if path.is_symlink() and not path.exists():
@@ -111,8 +117,36 @@ def update_json_object(
         current = read_json_object(path)
         if current is not None and validate is not None:
             validate(current)
-        updated = operation(current if current is not None else {})
+        if current is None:
+            current = {}
+        if expected is not None and current != expected:
+            raise StateConflictError(
+                f"{path}: state changed since it was read; newer state preserved. "
+                "Reload and review before retrying; no operation was repeated."
+            )
+        yield current
         if validate is not None:
-            validate(updated)
-        atomic_write_json(path, updated)
-        return updated
+            validate(current)
+        atomic_write_json(path, current)
+
+
+def update_json_object(
+    path: Path,
+    operation: Callable[[JSONObject], JSONObject],
+    *,
+    validate: Validator | None = None,
+    expected: JSONObject | None = None,
+) -> JSONObject:
+    """Lock, validate, transform once, validate, and publish atomically.
+
+    Missing state supplies an empty dict. Optional expected has the same
+    semantics as edit_json_object; callbacks never run against stale input.
+    """
+    with edit_json_object(path, validate=validate, expected=expected) as current:
+        updated = operation(current)
+        if not isinstance(updated, dict):
+            raise TypeError("expected a JSON object")
+        if updated is not current:
+            current.clear()
+            current.update(updated)
+    return current

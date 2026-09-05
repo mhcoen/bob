@@ -1,8 +1,8 @@
 # Persistence ownership and recovery
 
-Initial inventory, 2026-09-05. This is the first boundary of improvement-plan
-Slice B. Product identity and run-summary changes below are implemented; the
-remaining migrations and cross-system failure injection are still queued.
+Updated 2026-09-05 for improvement-plan Slice B. Product identity, main Duplo
+state, processing manifests, and run-summary persistence are migrated. Recovery
+across multiple artifacts and task transitions remains queued.
 
 ## Inventory
 
@@ -11,8 +11,8 @@ remaining migrations and cross-system failure injection are still queued.
 | `PLAN.md`, `BUGS.md` through `bob_tools.planfile` | Authoritative scheduling intent and task status | Canonical validation, sidecar lock, file fsync, replacement, directory fsync. `update` also detects an external change before lock acquisition. Use the API; reconcile Git and ledger evidence before changing task completion. |
 | `PLAN.events.jsonl` and `.writers/*.seq` through `bob_tools.ledger.storage` (configured ledger directory, including `.duplo/ledger`) | Authoritative event evidence and sequence allocation | Validated append under advisory lock, file/directory synchronization; corrupt sequence state is refused. Preserve event and writer state together. Ledger projections are reconstructible; do not discard events or invent a replacement sequence. |
 | `.duplo/product.json` through `saver.save_product` / `derive_app_name` | Authoritative confirmed identity and user-edited names | **Migrated:** versioned validation, locked read-modify-write, atomic replacement. Reads do not mutate. Corruption or unknown versions stop the operation. |
-| `.duplo/duplo.json` through `saver` and other Duplo consumers | Authoritative selections, status, phase history, preferences, feedback, issues | **Pending:** many direct writes and tolerant reads remain. Back up this file before recovery; missing/corrupt state may currently trigger regeneration. Migrating writers alone is insufficient: inventory readers and lifecycle transitions too. |
-| `.duplo/file_hashes.json`, `processed_videos.json` | Processing checkpoints | Values can be recalculated, but completion and prior paid work cannot be inferred from content hashes alone. Direct writes remain. Losing these may repeat processing and provider calls; preserve with Duplo state. |
+| `.duplo/duplo.json` through `saver` and other Duplo consumers | Authoritative selections, status, phase history, preferences, feedback, issues | **Migrated:** all runtime JSON readers use schema validation; short mutations hold a sidecar lock through atomic publication. Provider-backed feature merges and preference extraction compare a pre-call snapshot before saving. Unknown fields and unrelated history are preserved. |
+| `.duplo/file_hashes.json`, `processed_videos.json` | Processing checkpoints | **Migrated:** flat legacy maps remain readable; updates write versioned envelopes with entries. Video records merge under a lock; the pipeline checks its original file checkpoint before replacement. Losing checkpoints may repeat processing and provider calls; preserve them with Duplo state. |
 | `.duplo/references`, `examples`, `raw_pages`, `site_media`, frame descriptions | Retained inputs and derived evidence | Originals moved into references may be the only surviving copy. Derived artifacts depend on source availability and possibly paid calls. Preserve originals; rebuilding outputs is an explicit operation, not automatic crash reconciliation. |
 | Orchestra run directory (`store.sqlite`, `log.jsonl`, `visibility.json`, prompt snapshots) | Artifact versions and execution evidence | SQLite WAL with FULL synchronization; log append fsync and tail-recovery rules; visibility gates successful invocations. Default CLI root is `~/.orchestra/runs`, configurable. Preserve the entire run directory using a consistent SQLite backup or after stopping writers; copying only the database while live may omit WAL data. Existing resume owns replay; no new replay guarantee here. |
 | `.mcloop/task-baseline` through `git_ops` | Verification checkpoint | Best-effort SHA write. Missing/unreadable baseline is unavailable evidence, not an empty diff. A current Git HEAD cannot automatically reconstruct the pre-edit baseline. |
@@ -65,8 +65,45 @@ Repair with the recorded schema or restore a known-good backup. For a newer
 schema, use a compatible application version. Do not delete state to get past
 the error. Check confirmed identity before resuming; a product file is not proof
 that subsequent extraction or task creation completed. The fallback read of
-`duplo.json` in name derivation also refuses corrupt input, without claiming a
-schema migration of that file.
+`duplo.json` in name derivation uses the same validated main-state reader as
+the pipeline, investigator, and verification loader.
+
+## Main state and processing manifests
+
+`duplo.json` accepts unversioned legacy objects and schema version 1. Reads are
+read-only; each successful mutation writes version 1. Known scalar, list, and
+object fields are checked for the shapes consumers require. Partial legacy
+objects and unknown fields remain supported. Validation does not independently
+establish that a feature is implemented or a requirement is correct.
+
+Short saver operations use `edit_state()` and retain unrelated fields. Feature
+merging works on a copy without a lock during model calls; publication compares
+its original logical snapshot under the lock. Preference extraction similarly
+checks a pre-call snapshot. A mismatch raises `StateConflictError`, preserves
+newer state, and does not automatically repeat model calls. Whitespace-only edits
+are equivalent snapshots; this comparison is not a history revision counter.
+Reload and review the affected operation before explicitly retrying it.
+
+Legacy processing manifests map arbitrary filenames to string hashes. Updates
+migrate them to `{"schema_version": 1, "entries": {...}}`, preserving names such
+as `schema_version` and `entries` inside the entries object. Loading helpers
+still return the plain map. Invalid values, malformed envelopes, and unsupported
+versions are refused without dropping individual records. Existing envelope
+metadata is retained. Older Duplo versions cannot consume the new envelopes.
+
+`record_processed_videos()` merges against the current checkpoint under lock.
+`save_hashes()` replaces the whole file manifest and accepts optional expected
+entries; the pipeline passes its observed checkpoint to reject intervening
+changes. Direct callers omitting expected opt into serialized last-write
+replacement. Scrape timestamp updates retain unrelated fields, with a snapshot
+check on the unchanged-content branch and a source-URL check at final publication.
+
+These guarantees cover individual state operations. They do not support two
+complete project pipelines as one coordinated transaction: reference moves,
+example-directory replacement, generated plans, and provider effects may already
+have occurred when a later conflict is reported. Retain their logs and inspect
+the project before retrying. Directory snapshots, pipeline ownership, and task
+transition reconciliation are still separate recovery work.
 
 ## Tested failure boundaries
 
@@ -75,7 +112,9 @@ schema migration of that file.
 | Invalid JSON, invalid schema, serialization, file fsync, or pre-replace failure | Original bytes remain. Diagnose the exception; repair input or environment. No mutating callback runs on invalid stored identity. |
 | Writer killed immediately before replace | Previous state remains, OS releases the lock, and a subsequent update can proceed. A temporary file may remain. |
 | Replace succeeds but directory fsync fails | Complete new state can be visible even though the call raises. Inspect the file before retrying a non-idempotent update; an exception is not proof of rollback. |
-| Several cooperating JSON updates | All updates are retained; a four-process regression checks 120 appended entries. |
+| Several cooperating JSON updates | All updates are retained; shared tests check 120 appends, and public Duplo APIs retain 40 feedback records plus 40 video records from four processes. |
+| State changes during feature merging, preference extraction, or an unchanged scrape | Stale publication raises a conflict and preserves the intervening update; no automatic provider retry. |
+| File checkpoint changes during processing | Expected entries no longer match; the newer checkpoint is preserved. |
 | Summary archive publication fails | Previous latest and prior archives remain intact. Inspect task and Git evidence; do not rerun a task based on missing summary. |
 | Summary archive succeeds but latest replacement fails | New archive remains; latest may describe an earlier run. Locate archive by identity and verify its commits. |
 | Two summaries share a start timestamp | UUID filenames preserve both archives. Latest identifies whichever publication finished last. |
