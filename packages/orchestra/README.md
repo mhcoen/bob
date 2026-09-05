@@ -265,7 +265,8 @@ alongside McLoop, Duplo, and bob-tools in a single `.venv/`):
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
 Create `~/.orchestra/config.json`:

@@ -64,7 +64,7 @@ McLoop is part of the [bob ecosystem](https://github.com/mhcoen/bob), a determin
 - **[duplo](https://github.com/mhcoen/bob/tree/main/packages/duplo)** generates plans from product specifications and re-authors plans against accumulated execution evidence. McLoop calls into duplo when re-author thresholds fire.
 - **[orchestra](https://github.com/mhcoen/bob/tree/main/packages/orchestra)** is the workflow runtime McLoop uses for multi-model coding patterns (draft-then-adjudicate, council, anonymous reviewers).
 
-McLoop runs against your project. The rest of the bob stack runs under it. Install the full ecosystem by cloning the bob workspace and running `uv sync`.
+McLoop runs against your project. The rest of the bob stack runs under it. Install the full ecosystem by cloning the bob workspace and running `uv sync --locked --all-packages`.
 
 ## State files
 
@@ -210,15 +210,16 @@ clearly enough for a person to follow, McLoop can execute it.
 
 ## Install
 
-McLoop is part of the bob workspace and is not installable standalone. Clone the bob repo and run `uv sync`:
+McLoop is part of the bob workspace and is not installable standalone. Clone the bob repo and run `uv sync --locked --all-packages`:
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
-This installs every workspace package (McLoop, Duplo, Orchestra, bob-tools) in editable mode with internal cross-package dependencies resolved locally. The `mcloop`, `duplo`, `orchestra`, and `bob-plan` CLIs land on `PATH`.
+This installs every workspace package (McLoop, Duplo, Orchestra, bob-tools) in editable mode with internal cross-package dependencies resolved locally. The `mcloop`, `duplo`, `orchestra`, and `bob-plan` CLIs are on `PATH` after activation in the current shell.
 
 ## Quickstart
 
@@ -1283,7 +1284,7 @@ returns on the next run until you re-acknowledge.
 Prerequisites:
 
 - Install orchestra in the same Python environment as mcloop. If you
-  cloned the bob workspace, `uv sync` already handles this; otherwise
+  cloned the bob workspace, `uv sync --locked --all-packages` already handles this; otherwise
   `pip install -e /path/to/orchestra`. McLoop imports orchestra
   directly via `from orchestra import run_workflow`. There is no
   subprocess boundary; orchestra has to be importable.
@@ -1981,7 +1982,8 @@ McLoop lives in the bob workspace alongside its sibling packages (Duplo, Orchest
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
 McLoop, its sibling packages, and all dev dependencies are installed editable in a single `.venv/` at the workspace root. Run lint, format, and tests from the McLoop package directory:

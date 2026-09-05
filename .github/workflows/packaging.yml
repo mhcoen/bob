@@ -1,0 +1,64 @@
+name: Packaging and workspace checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packaging-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  wheels:
+    name: Wheels (${{ matrix.os }}, Python ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.12', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: '0.7.15'
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - name: Build and test installed wheels outside checkout
+        shell: bash
+        run: uv run --no-project --python '${{ matrix.python }}' python scripts/smoke_wheels.py --work-dir "$RUNNER_TEMP/bob-wheels"
+      - name: Preserve packaging evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: wheels-${{ matrix.os }}-py${{ matrix.python }}
+          path: |
+            ${{ runner.temp }}/bob-wheels/*.log
+            ${{ runner.temp }}/bob-wheels/*.json
+            ${{ runner.temp }}/bob-wheels/installed-requirements.txt
+            ${{ runner.temp }}/bob-wheels/wheels/*.whl
+          retention-days: 7
+
+  workspace:
+    name: Workspace (macOS, Python 3.13)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: '0.7.15'
+          python-version: '3.13'
+          enable-cache: true
+      - run: uv sync --locked --all-packages --all-extras
+      - run: .venv/bin/ruff check .
+      - run: .venv/bin/python -m pytest -n 4 -q

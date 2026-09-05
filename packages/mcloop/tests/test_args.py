@@ -392,15 +392,17 @@ def test_install_calls_claude_version_with_found_path(tmp_path):
 
 
 def _setup_hooks(tmp_path, create_sources=True):
-    """Create a fake repo root with hook source files."""
+    """Create fake packaged hook resources."""
     repo_root = tmp_path / "repo"
     fake_mcloop_dir = repo_root / "mcloop"
     fake_mcloop_dir.mkdir(parents=True)
     (fake_mcloop_dir / "main.py").write_text("")
+    resources = fake_mcloop_dir / "resources"
+    resources.mkdir()
     if create_sources:
         for name in _HOOK_SCRIPTS:
-            (repo_root / name).write_text(f"# {name}\n")
-    return repo_root, fake_mcloop_dir
+            (resources / name).write_text(f"# {name}\n")
+    return resources, fake_mcloop_dir
 
 
 def test_install_hooks_copies_scripts(tmp_path, capsys):
@@ -1738,14 +1740,16 @@ def test_cmd_install_passes_dry_run_to_setup_sandbox(tmp_path):
 
 
 def _setup_perms(tmp_path, example_content=None):
-    """Create a fake repo root for recommended permissions tests."""
+    """Create fake packaged recommended permissions."""
     repo_root = tmp_path / "repo"
     fake_mcloop_dir = repo_root / "mcloop"
     fake_mcloop_dir.mkdir(parents=True)
     (fake_mcloop_dir / "main.py").write_text("")
+    resources = fake_mcloop_dir / "resources"
+    resources.mkdir()
     if example_content is not None:
-        (repo_root / "settings.example.json").write_text(example_content)
-    return repo_root, fake_mcloop_dir
+        (resources / "settings.example.json").write_text(example_content)
+    return resources, fake_mcloop_dir
 
 
 def test_install_recommended_permissions_writes_file(tmp_path, capsys):

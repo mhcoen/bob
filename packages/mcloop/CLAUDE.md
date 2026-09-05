@@ -51,7 +51,9 @@ mcloop works PLAN.md and BUGS.md directly; the old split-plan design (a CURRENT_
 
 **mcloop/idea_cmd.py** - Append timestamped ideas to IDEAS.md.
 
-**mcloop/install_cmd.py** - Install and uninstall subcommands.
+**mcloop/install_cmd.py** - Install and uninstall subcommands. Hook installation,
+drift checks, and recommended permissions read `mcloop/resources/` in both editable
+and wheel installs. Top-level hook and settings paths are compatibility symlinks.
 
 **mcloop/investigate_cmd.py** - Investigation subcommand and helpers.
 
@@ -97,7 +99,10 @@ mcloop works PLAN.md and BUGS.md directly; the old split-plan design (a CURRENT_
 
 **mcloop/wrap.py** - Instrument project source files with error-catching hooks (Swift, Python) using mcloop:wrap markers.
 
-**telegram-permission-hook.py** - Telegram permission hook for interactive sessions. Includes session memory with command prefix extraction for Bash tools.
+**mcloop/resources/telegram-permission-hook.py** - Canonical Telegram permission
+hook for interactive sessions; the top-level path links here. Includes session
+memory with command prefix extraction for Bash tools. `session-start-hook.py`
+and `settings.example.json` in the same resource directory also ship in wheels.
 
 ## Test Files
 

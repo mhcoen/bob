@@ -154,7 +154,20 @@ def test_install_missing_hook_errors(
     assert "not found" in capsys.readouterr().err
 
 
-def test_default_hook_points_at_repo_mcloop_copy() -> None:
-    # The default hook path resolves to the real repo artifact.
-    assert bob_cli._default_hook().name == "telegram-permission-hook.py"
-    assert bob_cli._default_hook().parent.name == "mcloop"
+def test_default_hook_points_at_packaged_mcloop_copy() -> None:
+    hook = bob_cli._default_hook()
+    assert hook is not None
+    assert hook.name == "telegram-permission-hook.py"
+    assert hook.parent.name == "resources"
+    assert hook.is_file()
+
+
+def test_install_without_mcloop_explains_override(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(bob_cli.importlib.util, "find_spec", lambda name: None)
+    home = tmp_path / "home"
+    assert bob_cli.main(["install", "--home", str(home)]) == 1
+    assert "--hook" in capsys.readouterr().err
+    assert not home.exists()
+    hook = tmp_path / "explicit.py"
+    hook.write_text("# supplied hook\n")
+    assert bob_cli.main(["install", "--home", str(home), "--hook", str(hook)]) == 0

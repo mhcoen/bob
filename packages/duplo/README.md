@@ -104,17 +104,18 @@ IDs are assigned and the canonical structure is preserved.
 Duplo is part of the bob workspace and is not installable standalone:
 it depends on `mcloop`, `orchestra`, and `bob-tools`, which resolve
 through the workspace rather than PyPI. Clone the bob repo and run
-`uv sync`:
+`uv sync --locked --all-packages`:
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
 This installs every workspace package in editable mode with internal
 cross-package dependencies resolved locally. `duplo`, `mcloop`, and
-the other CLIs land on `PATH`.
+the other CLIs are on `PATH` after activation in the current shell.
 
 ## Getting started
 
@@ -866,7 +867,8 @@ PyPI.
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
 Duplo, its sibling packages, and all dev dependencies are then

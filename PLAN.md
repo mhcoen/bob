@@ -46,4 +46,25 @@ The bob ecosystem workspace: deterministic control plane for stochastic AI codin
 - [x] T-000024: For the council path, ensure the same per-call fidelity is captured. The orchestra adapters already log to the orchestra run directory; add a `call_log` record (or a pointer/symlink) under `.duplo/logs/<run_id>/` that references the orchestra transcript path for each council-authored phase, so a single duplo run directory is the complete index of every LLM call regardless of path (legacy vs council). Record per phase: `call_site`, `path` (`"legacy"` | `"council"`), and the orchestra `run_id`/`transcript_path` when council. <!-- completed_at: 2026-05-29T03:11:38Z -->
 - [x] T-000025: Write a `duplo logs` summary helper (or extend an existing status command) that reads a run directory and prints a per-run report: each `call_site` in order, model, path (legacy/council), duration, and token counts (input/cache/output), with a run total. Mirrors the kind of aggregation done manually on mcloop logs for the quota analysis. Read-only over the JSONL. <!-- completed_at: 2026-05-29T03:19:39Z -->
 - [x] T-000026: Tests in `packages/duplo/tests/`: assert a run directory is created with the expected `run_id` shape; assert `query` / `query_with_images` each emit a well-formed JSONL record with all required fields on success AND on timeout/error (mock the subprocess so no real `claude` call happens); assert token counts are parsed from a canned stream-json fixture; assert the `call_site` labels thread through from a mocked `generate_phase_plan` run; assert the `duplo logs` summary aggregates a fixture run directory correctly. No real LLM calls in any test. <!-- completed_at: 2026-05-29T03:45:28Z -->
+## Phase 5: Installable artifacts (improvement plan Slice A)
+<!-- phase_id: phase_005 -->
+
+Scope: design/improvement-plan.md, Slice A steps 1-4. Installation documentation and CI are follow-up slices.
+
+- [x] T-000027: Add a clean wheel smoke harness that builds all four packages from fresh source copies, installs them without editable imports outside the checkout, and reproduces the missing Duplo platform modules and Orchestra workflow schemas. Record original-wheel failures with actionable resource diagnostics; runtime probes must make no model calls. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:15:42Z --> <!-- completed_at: 2026-09-05T06:30:29Z -->
+- [x] T-000028: Fix Duplo package discovery and Orchestra workflow schema inclusion so fresh wheels contain all Duplo platform modules and bundled workflow resources. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:15:42Z --> <!-- completed_at: 2026-09-05T06:30:29Z -->
+  @deps T-000027
+- [x] T-000029: Verify all five installed Python CLI entry points, resolve platform profiles and workflow schemas, execute a bundled Orchestra workflow with a mock actor, inventory other runtime assets, and document smoke commands and remaining installation limitations. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:15:42Z --> <!-- completed_at: 2026-09-05T06:30:29Z -->
+  @deps T-000028
+## Phase 6: Installer resources and packaging CI
+<!-- phase_id: phase_006 -->
+
+Follow-up to improvement-plan Slice A. Preserve current user configuration and test installation only in temporary homes.
+
+- [x] T-000030: Package the shared McLoop hook sources and recommended permissions in one runtime resource location, retain checkout paths, and resolve Bob and McLoop installation from wheels. Verify temporary-home installation, idempotence, stale-hook refresh, and preserved unrelated settings. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:36:32Z --> <!-- completed_at: 2026-09-05T06:44:00Z -->
+  @deps T-000029
+- [x] T-000031: Ship the portable appshot helper source and token-audit script; extend installed-wheel checks for installer assets and command scripts without executing live providers or native screenshots. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:36:32Z --> <!-- completed_at: 2026-09-05T06:44:00Z -->
+  @deps T-000030
+- [x] T-000032: Wire clean-wheel checks into GitHub Actions and verify installation instructions from a separate project. Document supported checks and local versus hosted validation evidence. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:36:32Z --> <!-- completed_at: 2026-09-05T06:44:00Z -->
+  @deps T-000031
 ## Bugs

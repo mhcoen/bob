@@ -1,0 +1,37 @@
+{
+  "chain": [
+    {
+      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "opus"
+    },
+    {
+      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "enabled": true,
+      "cli": "codex",
+      "model": "gpt-5.6-sol"
+    },
+    {
+      "comment": "Kimi direct-provider tier for long unattended fallover. Set enabled=false when MOONSHOT_API_KEY is unavailable or you want to avoid direct-provider routing.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "kimi-k3",
+      "executor": {
+        "base_url": "https://api.moonshot.ai/anthropic",
+        "auth_token_env": "MOONSHOT_API_KEY",
+        "use_slug_model": false,
+        "env_overrides": {
+          "ENABLE_TOOL_SEARCH": "false",
+          "CLAUDE_CONFIG_DIR": "~/.mcloop/claude-kimi"
+        }
+      }
+    },
+    {
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "enabled": true,
+      "cli": "claude",
+      "model": "deepseek-v4-pro"
+    }
+  ]
+}

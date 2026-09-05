@@ -15,7 +15,10 @@ dependencies = [
 
 [tool.setuptools]
 packages = ["mcloop"]
-script-files = ["bin/appshot"]
+script-files = ["bin/appshot", "bin/cgwindowid.swift", "bin/mcloop-audit"]
+
+[tool.setuptools.package-data]
+mcloop = ["resources/*.py", "resources/*.json"]
 
 [project.scripts]
 mcloop = "mcloop.main:main"

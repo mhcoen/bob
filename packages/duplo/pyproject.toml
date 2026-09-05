@@ -24,8 +24,8 @@ dependencies = [
     "pytest-randomly>=3.15",
 ]
 
-[tool.setuptools]
-packages = ["duplo"]
+[tool.setuptools.packages.find]
+include = ["duplo", "duplo.*"]
 
 [tool.setuptools.package-data]
 # DUPLO-owned, project-local Orchestra workflow assets (T-000786). These

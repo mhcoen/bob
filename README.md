@@ -280,23 +280,32 @@ earlier design material still lives under
 
 ## Installation
 
-Bob is a uv workspace. Clone the repo and run `uv sync`:
+Bob is a uv workspace. With Python 3.12+ and uv installed, clone and sync
+all workspace packages, then activate the environment:
 
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages
+source .venv/bin/activate
 ```
 
 This installs every package (Duplo, McLoop, Orchestra, bob-tools) in
 editable mode, with internal cross-package dependencies resolved locally.
-The CLIs (`duplo`, `mcloop`, `orchestra`, `bob`, `bob-plan`) land on
-`PATH`.
+Activation puts the CLIs (`duplo`, `mcloop`, `orchestra`, `bob`, `bob-plan`)
+on `PATH` for the current shell. You can then change into a separate target
+project and run them there. Alternatively, invoke `/path/to/bob/.venv/bin/duplo`
+(or another CLI) directly. For development checks, sync with
+`uv sync --locked --all-packages --all-extras` to include every package's dev tools.
 
 To add Bob's optional Claude Code hook for token-saving command
 compression and remote approval of tool calls, run `bob install` after
 syncing. See [Combined Telegram and RTK hook](#combined-telegram-and-rtk-hook)
 below.
+
+For contributor verification of built distributions, see the
+[installed-wheel smoke test](scripts/README.md). It tests fresh wheel installs
+outside the checkout and records remaining installer resource limitations.
 
 ## Subscribe
 

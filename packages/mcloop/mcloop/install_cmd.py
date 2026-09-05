@@ -375,8 +375,7 @@ def _install_recommended_permissions(
     dry_run: bool = False,
 ) -> tuple[str, str]:
     """Install recommended permissions baseline for manual merging."""
-    repo_root = Path(__file__).resolve().parent.parent
-    src = repo_root / "settings.example.json"
+    src = Path(__file__).resolve().parent / "resources" / "settings.example.json"
 
     if not src.exists():
         print(
@@ -422,7 +421,7 @@ def _install_recommended_permissions(
     return ("Permissions", "installed, merge manually")
 
 
-# Hook scripts to copy: (source filename in repo root, dest filename)
+# Hook scripts under mcloop/resources; copied under their original filenames.
 _HOOK_SCRIPTS = [
     "telegram-permission-hook.py",
     "session-start-hook.py",
@@ -434,18 +433,18 @@ def _file_sha256(path: Path) -> str:
 
 
 def check_hook_drift() -> list[str]:
-    """Return hook scripts whose installed copy differs from the repo copy.
+    """Return hook scripts whose installed copy differs from the package copy.
 
     Compares each script in ``_HOOK_SCRIPTS`` under ``~/.mcloop/hooks/``
-    against the packaged copy at the repo root by SHA-256. A hook missing
+    against the packaged resource by SHA-256. A hook missing
     on either side is not reported as drift: a missing installed copy is
     an install-time concern and a missing source cannot be compared.
     """
-    repo_root = Path(__file__).resolve().parent.parent
+    resource_dir = Path(__file__).resolve().parent / "resources"
     hooks_dir = Path.home() / ".mcloop" / "hooks"
     stale: list[str] = []
     for script_name in _HOOK_SCRIPTS:
-        src = repo_root / script_name
+        src = resource_dir / script_name
         dest = hooks_dir / script_name
         if not src.is_file() or not dest.is_file():
             continue
@@ -475,7 +474,7 @@ def _install_hooks(
     dry_run: bool = False,
 ) -> list[tuple[str, str]]:
     """Copy hook scripts to ~/.mcloop/hooks/. Refresh stale copies."""
-    repo_root = Path(__file__).resolve().parent.parent
+    resource_dir = Path(__file__).resolve().parent / "resources"
     hooks_dir = Path.home() / ".mcloop" / "hooks"
 
     if not dry_run:
@@ -483,7 +482,7 @@ def _install_hooks(
 
     results: list[tuple[str, str]] = []
     for script_name in _HOOK_SCRIPTS:
-        src = repo_root / script_name
+        src = resource_dir / script_name
         dest = hooks_dir / script_name
         label = f"Hook ({script_name})"
 

@@ -36,6 +36,7 @@ orchestra = [
     "py.typed",
     "workflows/*.orc",
     "workflows/templates/*.md",
+    "workflows/schemas/*.json",
 ]
 
 [tool.pytest.ini_options]

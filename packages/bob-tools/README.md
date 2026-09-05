@@ -431,12 +431,13 @@ is via the workspace:
 ```bash
 git clone https://github.com/mhcoen/bob.git
 cd bob
-uv sync
+uv sync --locked --all-packages --all-extras
+source .venv/bin/activate
 ```
 
 This installs every workspace package — including bob-tools — in
 editable mode, with internal cross-package dependencies resolved
-locally. `bob-plan` lands on `PATH`.
+locally. `bob-plan` is on `PATH` after activation in the current shell.
 
 For standalone development on bob-tools alone:
 

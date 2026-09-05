@@ -1,7 +1,7 @@
 """Bob umbrella CLI.
 
 Currently provides `bob install`, which installs the combined Telegram + RTK
-Claude Code hook (``packages/mcloop/telegram-permission-hook.py``) into
+Claude Code hook (the ``mcloop/resources`` package asset) into
 ``~/.claude/hooks/`` and registers it as a ``PreToolUse`` hook in
 ``~/.claude/settings.json``.
 
@@ -14,6 +14,7 @@ multi-hook ``updatedInput`` race. RTK rewriting is skipped automatically when
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import shutil
 import sys
@@ -22,16 +23,15 @@ from pathlib import Path
 from typing import Any, cast
 
 HOOK_NAME = "telegram-permission-hook.py"
-HOOK_REL = Path("packages") / "mcloop" / HOOK_NAME
 
 
-def _repo_root() -> Path:
-    # bob_tools/bob_cli.py -> bob_tools -> bob-tools -> packages -> <repo root>
-    return Path(__file__).resolve().parents[3]
-
-
-def _default_hook() -> Path:
-    return _repo_root() / HOOK_REL
+def _default_hook() -> Path | None:
+    # Find the top-level package without importing McLoop's eager module graph.
+    # bob-tools remains usable alone; --hook works without McLoop installed.
+    spec = importlib.util.find_spec("mcloop")
+    if spec is None or spec.origin is None:
+        return None
+    return Path(spec.origin).resolve().parent / "resources" / HOOK_NAME
 
 
 def _entry_refs_hook(entry: dict[str, Any]) -> bool:
@@ -76,11 +76,10 @@ def _register_hook(settings_path: Path, command: str) -> tuple[bool, int]:
 def cmd_install(args: argparse.Namespace) -> int:
     home = Path(args.home).expanduser() if args.home else Path.home()
     src = Path(args.hook) if args.hook else _default_hook()
-    if not src.exists():
+    if src is None or not src.exists():
         print(
             f"error: combined hook not found at {src}\n"
-            "       (expected the Bob repo's packages/mcloop/"
-            f"{HOOK_NAME}; pass --hook to override)",
+            "       install McLoop with its packaged resources, or pass --hook",
             file=sys.stderr,
         )
         return 1
@@ -123,7 +122,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     install.add_argument("--home", help="override home directory (for testing)")
-    install.add_argument("--hook", help="path to the hook file (default: repo copy)")
+    install.add_argument(
+        "--hook", help="path to the hook file (default: McLoop package resource)"
+    )
     install.set_defaults(func=cmd_install)
 
     args = parser.parse_args(argv)
