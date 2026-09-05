@@ -59,6 +59,14 @@ jobs:
           version: '0.7.15'
           python-version: '3.13'
           enable-cache: true
+      - name: Install video test dependency
+        run: brew install ffmpeg
       - run: uv sync --locked --all-packages --all-extras
       - run: .venv/bin/ruff check .
-      - run: .venv/bin/python -m pytest -n 4 -q
+      - name: Run workspace tests
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          command -v ruff
+          command -v ffmpeg
+          python -m pytest -n 4 -q

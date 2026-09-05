@@ -56,8 +56,12 @@ CLI and prompts for configuration, which this smoke does not invoke.
 
 [packaging.yml](../.github/workflows/packaging.yml) runs on pushes, pull requests,
 and manual dispatch. Wheels are tested on Linux and macOS with Python 3.12 and
-3.13. A separate macOS/Python 3.13 job syncs all locked workspace dev dependencies,
-runs lint, and runs the workspace tests. Default integration-test skips remain
+3.13. A separate macOS/Python 3.13 job installs ffmpeg, syncs all locked workspace
+dev dependencies, runs lint, and activates the virtual environment before running
+the workspace tests so subprocesses can find tools such as ruff. The video tests
+mock ffmpeg availability for unit tests; the real extraction test skips locally
+when ffmpeg is absent. CI checks that ffmpeg is on PATH before running tests.
+Default integration-test skips remain
 in effect; no provider credentials are configured. Wheel evidence is retained
 for seven days, including failed-step logs.
 

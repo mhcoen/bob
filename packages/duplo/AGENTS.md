@@ -511,6 +511,9 @@ test_frame_filter.py, test_frame_describer.py, test_video_extractor.py,
 test_task_matcher.py, test_verification_extractor.py,
 test_investigator.py, test_spec_reader.py, test_roadmap.py.
 
+Video extraction unit tests mock ffmpeg availability; the real ffmpeg test
+skips when the executable is absent and fails if video generation fails.
+
 ## Keeping this file current
 
 **If you add, rename, or significantly change any source file, update

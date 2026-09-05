@@ -40,6 +40,13 @@ def test_extract_scene_frames_no_ffmpeg(tmp_path):
     assert result.frames == []
 
 
+@pytest.fixture
+def _mock_ffmpeg_available(monkeypatch):
+    """Let mocked extraction tests reach subprocess handling on any host."""
+    monkeypatch.setattr("duplo.video_extractor.ffmpeg_available", lambda: True)
+
+
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_missing_file(tmp_path):
     video = tmp_path / "nonexistent.mp4"
     result = extract_scene_frames(video, tmp_path / "out")
@@ -47,6 +54,7 @@ def test_extract_scene_frames_missing_file(tmp_path):
     assert result.frames == []
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_ffmpeg_failure(tmp_path):
     video = tmp_path / "test.mp4"
     video.touch()
@@ -58,6 +66,7 @@ def test_extract_scene_frames_ffmpeg_failure(tmp_path):
     assert "ffmpeg failed" in result.error
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_timeout(tmp_path):
     video = tmp_path / "test.mp4"
     video.touch()
@@ -69,6 +78,7 @@ def test_extract_scene_frames_timeout(tmp_path):
     assert result.error == "ffmpeg timed out"
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_creates_output_dir(tmp_path):
     video = tmp_path / "test.mp4"
     video.touch()
@@ -79,6 +89,7 @@ def test_extract_scene_frames_creates_output_dir(tmp_path):
     assert out_dir.is_dir()
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_collects_frames(tmp_path):
     video = tmp_path / "test.mp4"
     video.touch()
@@ -98,6 +109,7 @@ def test_extract_scene_frames_collects_frames(tmp_path):
     assert all(f.name.startswith("test_scene_") for f in result.frames)
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_retry_lower_threshold(tmp_path):
     video = tmp_path / "test.mp4"
     video.touch()
@@ -123,6 +135,7 @@ def test_extract_scene_frames_retry_lower_threshold(tmp_path):
     assert len(result.frames) == 2
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_all_videos(tmp_path):
     v1 = tmp_path / "a.mp4"
     v2 = tmp_path / "b.mp4"
@@ -137,6 +150,7 @@ def test_extract_all_videos(tmp_path):
     assert all(isinstance(r, ExtractionResult) for r in results)
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_all_videos_source_path_preserved(tmp_path, monkeypatch):
     """ExtractionResult.source MUST equal the input path byte-for-byte.
 
@@ -162,6 +176,7 @@ def test_extract_all_videos_source_path_preserved(tmp_path, monkeypatch):
     assert str(results[0].source) == "demo.mp4"
 
 
+@pytest.mark.usefixtures("_mock_ffmpeg_available")
 def test_extract_scene_frames_ffmpeg_not_found_as_file_not_found(tmp_path):
     """FileNotFoundError from subprocess.run (ffmpeg binary missing)."""
     video = tmp_path / "test.mp4"
@@ -177,6 +192,8 @@ def test_extract_scene_frames_ffmpeg_not_found_as_file_not_found(tmp_path):
 @pytest.fixture
 def _real_test_video(tmp_path):
     """Create a short test video with two distinct scenes using ffmpeg."""
+    if not ffmpeg_available():
+        pytest.skip("ffmpeg not installed")
     video = tmp_path / "scenes.mp4"
     # Scene 1: red for 1 second, Scene 2: blue for 1 second.
     cmd_scene1 = [
@@ -203,8 +220,7 @@ def _real_test_video(tmp_path):
         "error",
     ]
     proc = subprocess.run(cmd_scene1, capture_output=True, text=True, timeout=30)
-    if proc.returncode != 0:
-        pytest.skip(f"Could not create test video: {proc.stderr}")
+    assert proc.returncode == 0, f"Could not create test video: {proc.stderr}"
     return video
 
 
