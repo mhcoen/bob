@@ -83,4 +83,12 @@ Migrate authoritative JSON readers and writers, reject stale feature updates, an
 - [x] T-000036: Migrate duplo.json to validated versioned state reads and atomic locked mutations. Preserve corrupt bytes and legacy data; reject stale feature-merge results without holding a lock during provider calls. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
 - [x] T-000037: Migrate file and video processing manifests to validated versioned atomic persistence. Serialize merges and reject outdated file-manifest publication in the pipeline. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
 - [x] T-000038: Migrate pipeline, investigation, and verification readers; add corruption, interruption, and concurrent-update regressions and document the remaining recovery boundaries. <!-- created_at: 2026-09-05T07:43:30Z --> <!-- completed_at: 2026-09-05T07:56:57Z -->
+## Phase 9: Completion interruption recovery (Slice B)
+<!-- phase_id: phase_009 -->
+
+Journal verified commit transitions and require explicit reconciliation of ambiguous outcomes.
+
+- [x] T-000039: Add durable completion receipts and a read-only recovery report with explicit operator acknowledgement. Preserve unresolved evidence and stop bare-loop startup before retries or provider calls. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
+- [x] T-000040: Journal verified single-task and batch commit paths through Git, plan advancement, and ledger settlement. Stop ambiguous batch commit failures instead of automatically replaying them. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
+- [x] T-000041: Inject interruptions at completion boundaries, verify restart refusal and evidence preservation, and document supported recovery and remaining lifecycle gaps. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
 ## Bugs

@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 
+from bob_tools.json_state import StateError
 from bob_tools.planfile import (
     PlanPreflightError,
     preflight_runtime_plan,
@@ -61,6 +62,13 @@ from mcloop.checks import (
     try_salvage_style_failures,
 )
 from mcloop.claude_md_sync import handle_sync, reconcile_pending
+from mcloop.completion import (
+    Completion,
+    RecoveryRequired,
+    guarded_loop,
+    recovery_command,
+    require_reconciled,
+)
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.conftest_guard import ensure_conftest_guard
 from mcloop.dep_validator import (
@@ -683,6 +691,9 @@ def main() -> None:
     try:
         try:
             _main()
+        except StateError as exc:
+            print(f"\nmcloop: {exc}", file=sys.stderr)
+            sys.exit(6)
         except HardStop as exc:
             # Plan Ledger Slice D: a threshold crossing that warrants
             # auto-reauthor either could not run (reauthor_unavailable),
@@ -750,6 +761,14 @@ def main() -> None:
 def _main() -> None:
     args = _parse_args()
     checklist_path = Path(args.file).resolve()
+
+    if args.command == "recover":
+        recovery_command(
+            checklist_path.parent,
+            identity=args.acknowledge,
+            reason=args.reason,
+        )
+        return
 
     # The wrap subcommand works on any project directory — it does not
     # need a checklist file because it detects the language from file
@@ -879,6 +898,7 @@ def _run_batch(
     Returns ("success", ""), ("failed", error_tail), or
     ("limited", output_tail).
     """
+    require_reconciled(project_dir)
     n = len(batch_children)
     labels = []
     for child in batch_children:
@@ -1069,6 +1089,13 @@ def _run_batch(
                 flush=True,
             )
             return "failed", "Checker introduced uncommitted changes"
+        completion = Completion.begin(
+            project_dir,
+            checklist_path,
+            batch_children,
+            command=str(check_result.command),
+            output=str(check_result.output),
+        )
         try:
             batch_hash = _commit(
                 project_dir,
@@ -1079,7 +1106,11 @@ def _run_batch(
                 formatting.error_msg(str(exc)),
                 flush=True,
             )
-            return "failed", f"Commit failed: {exc}"
+            completion.record_error(str(exc))
+            raise RecoveryRequired(
+                f"Batch commit outcome requires reconciliation: {exc}. Run `mcloop recover`."
+            ) from exc
+        completion.advance("commit_returned", commit_hash=batch_hash)
         if batch_hash and commit_hashes is not None:
             commit_hashes.append(batch_hash)
         handle_sync(project_dir, batch_hash or "", task_label=first_label)
@@ -1091,6 +1122,8 @@ def _run_batch(
             check_off(checklist_path, child)
             lbl = _task_label(tasks, child)
             completed.append(f"{lbl}) {format_task_id(child)}{child.text}")
+        completion.advance("plan_updated", plan_after=checklist_path.read_text())
+        completion.advance("settled", ledger="not emitted by batch path")
         elapsed = _format_elapsed(time.monotonic() - task_start)
         print(
             formatting.task_complete(label_range, elapsed),
@@ -1210,6 +1243,7 @@ def _reset_failed_tasks(
     return reset_ids, missing_ids
 
 
+@guarded_loop
 def run_loop(
     checklist_path: Path,
     max_retries: int = 3,
@@ -1496,7 +1530,7 @@ def run_loop(
         )
         return RunStatus("failure", detail=f"Missing project dependencies: {exc}")
 
-    def _ledger_settle(task_label: str, outcome: TaskOutcome) -> None:
+    def _ledger_settle(task_label: str, outcome: TaskOutcome) -> list[str]:
         """Plan Ledger Slice D per-task settle hook.
 
         Emits lifecycle events, evaluates thresholds, and either
@@ -1508,7 +1542,7 @@ def run_loop(
         No-op on projects without Plan Ledger enabled.
         """
         if not _pl_settings.enabled or _pl_storage is None or _pl_run_id is None:
-            return
+            return []
         resolution = resolve_phase_id(
             plan_path=_pl_settings.plan_path,
             task_label=task_label,
@@ -1520,7 +1554,7 @@ def run_loop(
                 resolution=resolution,
                 run_id=_pl_run_id,
             )
-        emit_task_lifecycle_events(
+        event_ids = emit_task_lifecycle_events(
             storage=_pl_storage,
             task_label=task_label,
             phase_id=resolution.phase_id,
@@ -1533,7 +1567,7 @@ def run_loop(
             run_id=_pl_run_id,
         )
         if decision is None:
-            return
+            return event_ids
         if _pl_settings.auto_reauthor:
             auto_reauthor(
                 decision=decision,
@@ -1546,7 +1580,7 @@ def run_loop(
             # at the top of every iteration, so the refreshed task
             # mapping is picked up automatically (Q3 mandatory
             # refresh contract).
-            return
+            return event_ids
         raise HardStop(
             reason="manual_pause",
             detail=(
@@ -2442,7 +2476,19 @@ def run_loop(
                             )
                             continue
 
+                    completion = None
                     if changed_files:
+                        completion = Completion.begin(
+                            project_dir,
+                            active_file,
+                            [task],
+                            command=str(acceptance_check.command),
+                            output=str(acceptance_check.output),
+                            baseline=task_start_sha,
+                            ledger_dir=str(_pl_settings.ledger_dir)
+                            if _pl_settings.enabled
+                            else "",
+                        )
                         try:
                             task_hash = _commit(
                                 project_dir,
@@ -2468,17 +2514,13 @@ def run_loop(
                             failed_task = f"{label}) {format_task_id(task)}{task.text}"
                             failed_reason = str(exc)
                             terminal_failure = f"Commit failed: {exc}"
-                            _ledger_settle(
-                                label,
-                                TaskOutcome(
-                                    success=False,
-                                    abandoned=False,
-                                    summary=f"commit failed: {exc}",
-                                    changed_files=tuple(changed_files),
-                                    failure_kind="commit_failed",
-                                ),
+                            completion.record_error(str(exc))
+                            print(
+                                formatting.error_msg("Run `mcloop recover` before retrying."),
+                                flush=True,
                             )
                             break
+                        completion.advance("commit_returned", commit_hash=task_hash)
                         if task_hash:
                             commit_hashes.append(task_hash)
                         handle_sync(project_dir, task_hash or "", task_label=label)
@@ -2487,6 +2529,8 @@ def run_loop(
                         _maybe_auto_wrap(project_dir)
                         _reinject_wrappers(project_dir)
                     check_off(active_file, task)
+                    if completion is not None:
+                        completion.advance("plan_updated", plan_after=active_file.read_text())
                     if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)
                     elapsed = _format_elapsed(time.monotonic() - task_start)
@@ -2521,7 +2565,7 @@ def run_loop(
                         result.output,
                         changed_files=changed_files,
                     )
-                    _ledger_settle(
+                    settled_event_ids = _ledger_settle(
                         label,
                         TaskOutcome(
                             success=True,
@@ -2530,6 +2574,13 @@ def run_loop(
                             changed_files=tuple(changed_files or ()),
                         ),
                     )
+                    if completion is not None:
+                        completion.advance(
+                            "settled",
+                            ledger_event_ids=settled_event_ids,
+                            ledger_run_id=_pl_run_id,
+                            ledger_enabled=_pl_settings.enabled,
+                        )
                     success = True
                     break
 
@@ -2922,6 +2973,15 @@ def run_loop(
                             flush=True,
                         )
                         continue
+                    completion = Completion.begin(
+                        project_dir,
+                        active_file,
+                        [task],
+                        command=str(check_result.command),
+                        output=str(check_result.output),
+                        baseline=task_start_sha,
+                        ledger_dir=str(_pl_settings.ledger_dir) if _pl_settings.enabled else "",
+                    )
                     try:
                         task_hash = _commit(
                             project_dir,
@@ -2950,17 +3010,13 @@ def run_loop(
                         failed_task = f"{label}) {format_task_id(task)}{task.text}"
                         failed_reason = str(exc)
                         terminal_failure = f"Commit failed: {exc}"
-                        _ledger_settle(
-                            label,
-                            TaskOutcome(
-                                success=False,
-                                abandoned=False,
-                                summary=f"commit failed: {exc}",
-                                changed_files=tuple(changed_files or ()),
-                                failure_kind="commit_failed",
-                            ),
+                        completion.record_error(str(exc))
+                        print(
+                            formatting.error_msg("Run `mcloop recover` before retrying."),
+                            flush=True,
                         )
                         break
+                    completion.advance("commit_returned", commit_hash=task_hash)
                     if task_hash:
                         commit_hashes.append(task_hash)
                     handle_sync(project_dir, task_hash or "", task_label=label)
@@ -2969,6 +3025,8 @@ def run_loop(
                     _maybe_auto_wrap(project_dir)
                     _reinject_wrappers(project_dir)
                     check_off(active_file, task)
+                    if completion is not None:
+                        completion.advance("plan_updated", plan_after=active_file.read_text())
                     if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)
                     elapsed = _format_elapsed(
@@ -3002,7 +3060,7 @@ def run_loop(
                         result.output,
                         changed_files=changed_files,
                     )
-                    _ledger_settle(
+                    settled_event_ids = _ledger_settle(
                         label,
                         TaskOutcome(
                             success=True,
@@ -3011,6 +3069,13 @@ def run_loop(
                             changed_files=tuple(changed_files or ()),
                         ),
                     )
+                    if completion is not None:
+                        completion.advance(
+                            "settled",
+                            ledger_event_ids=settled_event_ids,
+                            ledger_run_id=_pl_run_id,
+                            ledger_enabled=_pl_settings.enabled,
+                        )
                     success = True
                     break
                 else:
@@ -3584,6 +3649,12 @@ def _parse_args() -> argparse.Namespace:
             "task's edits (in-session adapter; exits non-zero on no-signal)"
         ),
     )
+    recover_parser = subparsers.add_parser(
+        "recover",
+        help="Inspect unresolved completion evidence without replaying work",
+    )
+    recover_parser.add_argument("--acknowledge", metavar="ID", help="Record manual reconciliation")
+    recover_parser.add_argument("--reason", help="Describe Git, plan, and ledger reconciliation")
     subparsers.add_parser(
         "ack-orchestra-override",
         help=(

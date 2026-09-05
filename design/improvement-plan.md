@@ -4,7 +4,8 @@ Status: in progress, 2026-09-05. Slice A passed all five hosted CI jobs on
 `d4df6eee`. Slice B's first boundary covers persistence ownership, shared JSON
 updates, product identity recovery, and atomic run summaries. Main Duplo state
 and processing manifests are now migrated as the second boundary. Cross-system
-reconciliation remains pending.
+reconciliation now has a conservative gate for verified commit paths; other
+lifecycle paths remain pending.
 
 This records the repository review and turns its recommendations into bounded
 deliverables. It is a design document, not an executable McLoop queue. Promote
@@ -398,8 +399,54 @@ Validation:
   /private/tmp/bob-duplo-state-wheels` passed from installed artifacts outside
   the checkout. The retained directory contains wheels and probe logs.
 
+Hosted evidence for the second boundary: commit `8255ffb2`,
+[run 33953985130](https://github.com/mhcoen/bob/actions/runs/33953985130), all five
+jobs passed; 6,986 workspace tests passed, 136 skipped.
+
 Next boundary: inject and reconcile failures between verification, Git commit,
 ledger append, and task advancement. Define pipeline ownership and recovery for
 multi-file operations such as example-directory replacement and reference moves.
 A conflict currently stops safely at the individual JSON publication boundary;
 it does not roll back earlier external effects. Slice B remains in progress.
+
+
+### Slice B third boundary: verified commit interruption recovery (2026-09-05)
+
+Workspace tasks `T-000039`–`T-000041` cover this boundary. McLoop now writes
+versioned UUID completion receipts before verified single-task or batch commits.
+Returned Git, plan, and ledger boundaries update the receipt atomically. A bare
+loop owns a nonblocking project lock and refuses unresolved or corrupt receipts
+before provider preflight, retry handling, or scheduling. Batch commit failures
+stop instead of entering the editor retry loop. Single-task commit/push errors
+retain evidence without emitting a potentially false failure event or triggering
+reauthoring from that ambiguous outcome.
+
+`mcloop recover` reports pending evidence read-only; explicit acknowledgement
+records the operator's resolution and current evidence without replaying work,
+mutating plans, appending ledger events, or invoking a provider. The
+[persistence contract](persistence.md) defines the action for each tested window.
+The README now distinguishes this gate from the legacy interrupt prompt and
+removes the incorrect claim that task advancement shares the implementation commit.
+
+Validation:
+
+- Activated workspace `python -m pytest -n 4 -q`: 7,025 passed, 125 skipped,
+  nine existing schema-smoke warnings.
+- 28 new regressions include actual Git commits and ledger appends through both
+  single-task success branches, unclean child-process exit, publication failures,
+  startup refusal, ownership, corrupt evidence, CLI reporting, explicit
+  acknowledgement, successful event links, and push/commit ambiguity.
+- `.venv/bin/ruff check .` and targeted mypy on `mcloop/completion.py` passed.
+- `python scripts/smoke_wheels.py --offline --work-dir
+  /private/tmp/bob-completion-wheels` passed; the installed `mcloop recover`
+  command also ran outside the checkout without model calls. Artifacts remain
+  in that directory.
+
+This boundary stops for explicit reconciliation; it does not automatically finish
+partially completed transactions. The existing batch path still emits no ledger
+events, and its receipt records that fact. No-diff completions, auto/user tasks,
+editor/rate-limit checkpoints, audit/maintain/investigation commands, and death
+before verified receipt publication retain earlier behavior. Extending attempt
+ownership to those paths and coordinating Duplo directory operations are the next
+Slice B work. Check output is not yet cryptographically bound to the candidate;
+Slice C's independent acceptance record must address that separately.

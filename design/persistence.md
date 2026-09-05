@@ -2,7 +2,8 @@
 
 Updated 2026-09-05 for improvement-plan Slice B. Product identity, main Duplo
 state, processing manifests, and run-summary persistence are migrated. Recovery
-across multiple artifacts and task transitions remains queued.
+across verified commit transitions now stops at an explicit reconciliation gate.
+Other task paths and multi-file Duplo operations remain queued.
 
 ## Inventory
 
@@ -15,6 +16,8 @@ across multiple artifacts and task transitions remains queued.
 | `.duplo/file_hashes.json`, `processed_videos.json` | Processing checkpoints | **Migrated:** flat legacy maps remain readable; updates write versioned envelopes with entries. Video records merge under a lock; the pipeline checks its original file checkpoint before replacement. Losing checkpoints may repeat processing and provider calls; preserve them with Duplo state. |
 | `.duplo/references`, `examples`, `raw_pages`, `site_media`, frame descriptions | Retained inputs and derived evidence | Originals moved into references may be the only surviving copy. Derived artifacts depend on source availability and possibly paid calls. Preserve originals; rebuilding outputs is an explicit operation, not automatic crash reconciliation. |
 | Orchestra run directory (`store.sqlite`, `log.jsonl`, `visibility.json`, prompt snapshots) | Artifact versions and execution evidence | SQLite WAL with FULL synchronization; log append fsync and tail-recovery rules; visibility gates successful invocations. Default CLI root is `~/.orchestra/runs`, configurable. Preserve the entire run directory using a consistent SQLite backup or after stopping writers; copying only the database while live may omit WAL data. Existing resume owns replay; no new replay guarantee here. |
+| `.mcloop/completions/<uuid>.json` through `completion` | Verified commit-transition evidence | **Migrated:** validated atomic receipts before Git, then commit return, plan advancement, and ledger settlement. Unresolved receipts block bare-loop startup. Explicit acknowledgement retains evidence and resolution; no automatic replay. |
+| `.mcloop/completions/owner.lock` | Bare-loop ownership | Nonblocking POSIX advisory lock held for the bare loop or acknowledgement. Released by process death; never unlink a live lock. Other commands and external writers are not coordinated. |
 | `.mcloop/task-baseline` through `git_ops` | Verification checkpoint | Best-effort SHA write. Missing/unreadable baseline is unavailable evidence, not an empty diff. A current Git HEAD cannot automatically reconstruct the pre-edit baseline. |
 | `.mcloop/active-pid`, `interrupted.json` through `lifecycle` | Process hints and interruption evidence | PID cleanup checks command identity before killing a process. PID reuse or absence does not establish task outcome. Interrupted JSON still uses direct writes; inspect Git, logs, and plans. |
 | `.mcloop/runs/*_run-summary.json`, `latest.json` through `run_summary` | Diagnostic summaries | **Migrated:** UUID identity and atomic publication per file. Dated record first, latest second. Latest is last-published, not a transaction or proof of commit. |
@@ -119,9 +122,66 @@ transition reconciliation are still separate recovery work.
 | Summary archive succeeds but latest replacement fails | New archive remains; latest may describe an earlier run. Locate archive by identity and verify its commits. |
 | Two summaries share a start timestamp | UUID filenames preserve both archives. Latest identifies whichever publication finished last. |
 
-No atomic transaction currently spans verification, Git commit, ledger append,
-and plan advancement. If interrupted between those steps, retain all evidence
-and reconcile the actual Git revision, checks, task ID, and recorded events
-before replaying a mutating action. The next Slice B boundary must inject each
-of those failures and implement explicit reconciliation; this document does not
-claim that broader recovery is already automatic.
+## Verified commit reconciliation
+
+No transaction spans verification, Git, plan advancement, and ledger append.
+McLoop's `completion` module now owns the conservative gate around verified
+single-task commits (including declared acceptance with changes) and batch
+commits. After verification, it publishes a UUID receipt before invoking Git.
+Each successful boundary atomically updates that same record. Bare-loop startup
+holds the project ownership lock and checks all receipts before provider
+preflight, `--retry`, interrupt hints, checkpointing, or task execution.
+
+The receipt retains task IDs/text, the prior plan, the task baseline when
+available, check command/output, observed HEAD/status, returned commit hash,
+post-completion plan, and ledger IDs when settlement returns. Missing Git evidence
+is recorded as a failed command, never as proof of no change. Reports use Git's
+no-optional-locks mode. The existing batch path emits no ledger events; its
+settled receipt records that limitation explicitly.
+
+| Interruption boundary | Durable evidence and reconciliation |
+| --- | --- |
+| Receipt publication fails before replacement | No commit invocation. Existing evidence remains. Diagnose storage; inspect worktree before retrying the editor. |
+| Receipt replacement becomes visible but its directory sync fails | A pending receipt may exist although begin raised. Startup checks it; inspect the record and Git before retrying. |
+| Verified receipt exists, before/during Git or after commit before return | Pending `verified` receipt. Compare actual Git history with the baseline; local commit and push outcomes can differ. Never infer rollback from an exception. |
+| Commit returned, before plan mutation | `commit_returned` includes returned hash. Verify that revision and plan task before completing the task through planfile. |
+| Plan mutation lands before its receipt update | Receipt may still say `commit_returned`; compare current plan with its saved prior version. Do not replay solely from the stage label. |
+| Plan is updated, before/during/after ledger append or reauthoring | Pending `plan_updated` receipt. Inspect actual ledger events and any reauthored plan. A missing event ID in the receipt does not establish that append failed. |
+| Final receipt update fails | Earlier complete record remains, or a complete settled record may already be visible. Check the actual record; never delete evidence to force retry. |
+| Receipt reaches `settled` | Commit/plan/settle hook returned. Later plan pushes, post-run checks, and audits are outside this receipt. |
+
+Single-task commit errors retain a pending receipt and return terminal failure;
+they no longer emit a potentially false task-failure ledger event or trigger
+reauthoring from an ambiguous commit. Batch commit errors raise a recovery stop
+instead of returning a retryable editor failure. A process can die with no
+`interrupted.json`; the receipt gate still applies.
+
+`mcloop recover` returns read-only JSON with pending receipts, current Git evidence,
+and current plan text. The operator stops writers, preserves state, checks the
+actual revision and verification applicability, reconciles task status through
+planfile, and inspects ledger events before any typed append. A completed task
+can be recorded with `bob-plan done <plan> <task-id>` only after confirming its
+outcome. When evidence is insufficient, preserve a pending/failed task and record
+that decision. `mcloop recover --acknowledge <id> --reason <explanation>` acquires
+the same ownership lock, stores the resolution and current evidence, and marks
+only the receipt acknowledged. It never edits Git, plans, or the ledger and never
+calls a model. Unsupported/corrupt receipts cannot be acknowledged; restore or
+repair them after stopping writers. This gate trusts the operator's explicit
+resolution and is not an independent acceptance oracle.
+
+Tests exercise actual Git commits and ledger appends through both single-task
+success branches; interrupt before Git, after commit, after plan completion, and
+after append; verify refusal before provider preflight/retry; terminate child
+processes without cleanup; and inject receipt replacement failures. Ownership,
+corruption, report-only CLI behavior, acknowledgement preservation, ledger event
+links, and batch push ambiguity are also checked.
+
+Remaining boundaries: no-diff completion paths, explicit auto/user tasks,
+editor/rate-limit checkpoint commits, audit/maintain/investigation commands,
+and death before the verified receipt is published. The current worktree is not
+cryptographically bound to the check output, and Git hooks or background work
+can change it. Other commands, older versions, external editors, and independent
+Duplo pipelines do not honor the bare-loop ownership lock. Runtime directories
+remain separately backed-up local state; a clone cannot reconstruct these
+receipts. Slice B remains partial, with full attempt ownership and Duplo directory
+operations still pending.

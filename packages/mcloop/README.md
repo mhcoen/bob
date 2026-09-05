@@ -18,7 +18,7 @@ You still author `PLAN.md` as a markdown checklist with prose descriptions. The 
 - **Deterministic mutation** of plan state — task completion, phase advancement, bug filing, and retry resets all go through validated API calls that refuse invalid moves
 - **Automatic bug audit** after all tasks complete: find, verify, and fix confirmed defects in two rounds
 - **Telegram notifications** for progress, failures, and remote command approval from your phone
-- **Interrupt and resume** from structured state: Ctrl-C captures what was happening and the next run picks up exactly where you left off, identified by task ID
+- **Interrupt and recover** using task state and durable completion receipts; ambiguous commit outcomes stop for explicit reconciliation
 - **Investigation mode** for runtime bugs that survive the build/test cycle
 - **Builds self-healing apps** with automatic crash instrumentation (Swift and Python)
 - **Task batching** with `[BATCH]` to combine well-specified subtasks into a single session
@@ -55,7 +55,7 @@ The diagram is McLoop's runtime shape. Each labeled element corresponds to a rea
 - **Reviewers** are McLoop's pre- and post-commit review surfaces. The pre-commit reviewers are the orchestra-backed multi-model coding patterns described below (`draft_then_adjudicate`, `propose_critique_synthesize`, the council patterns) — a configurable number of reviewer roles read the Architect's framing and produce text-only critiques before any file is touched. The post-commit reviewer is the continuous code reviewer (`mcloop.reviewer`, enabled per project) that sends each commit's diff to a second model and writes findings to `.mcloop/reviews/` for the next loop iteration to absorb.
 - **Coders** are the per-task code-edit sessions (`mcloop.code_edit.invoke_code_edit`). Each task launches a fresh CLI session with a clean context. When orchestra is configured, the coder role is the edit-agent at the end of a multi-role workflow; otherwise it is a direct Claude Code or Codex invocation. Either way exactly one invocation per attempt mutates the workspace.
 - **Worktree** is the project tree the coder writes into. McLoop's investigation mode (`mcloop investigate`) creates a sibling git worktree per investigation (`mcloop.worktree.create`), isolating exploratory work from the main branch.
-- **Git** is the convergence point. Every Coder commits to Git; the canonical mutation through `bob_tools.planfile` updates `PLAN.md` in the same commit. Nothing crosses into committed state without passing the test/lint/build gate.
+- **Git** records implementation commits after the configured verification gate. The subsequent canonical mutation through `bob_tools.planfile` updates `PLAN.md` separately. Completion receipts expose interruptions between the commit, plan update, and ledger settlement.
 - The **loop arc** wrapping McLoop is the iteration: tasks settle, evidence accumulates in the Plan Ledger, the threshold evaluator fires when warranted, Duplo re-authors, McLoop continues against the new plan. This is the recursive invocation that distinguishes McLoop from agent runners that treat the task file as a static input.
 
 McLoop is part of the [bob ecosystem](https://github.com/mhcoen/bob), a deterministic control plane for stochastic agents. The other components:
@@ -143,12 +143,12 @@ reading it, whether or not they use Claude Code.
 McLoop is designed for the long haul. Start with a few tasks, let it run
 while you do something else, add more tasks when you think of them, re-run.
 It's a persistent task queue backed by a formally structured document,
-not a one-shot build script. All state lives in the repository: PLAN.md,
-source code, documentation, configuration, and git history. If McLoop is
-interrupted, killed, or hits a rate limit, just run `mcloop` again. It
-reads its own structured state, finds the next unchecked task by ID, and
-picks up exactly where it left off. No session files, no databases,
-nothing to reset.
+not a one-shot build script. Plans, source, and committed history survive a
+clone; ignored `.mcloop/` and `.duplo/` state require separate preservation.
+On restart, an unresolved completion receipt stops the bare loop before
+provider preflight or retry handling. Use `mcloop recover` to inspect it.
+Other interruptions retain the existing retry/describe/skip prompt; resuming
+can rerun an editor and is not a guarantee of exactly-once execution.
 
 **Do not edit PLAN.md or BUGS.md while mcloop is running.** McLoop
 reads, modifies, and commits these files during execution (checking off
@@ -442,8 +442,8 @@ exits. The state includes the task ID of what was running, how long it
 had been active, the last 20 lines of output, and what phase McLoop
 was in (task session, checks, audit, or user prompt).
 
-The next time you run `mcloop`, it detects the saved state and
-prompts you:
+After checking for unresolved completion receipts, the next `mcloop` run
+detects the saved interrupt state and prompts you:
 
 ```
   Previous run was interrupted during task phase (2026-03-13T11:02:44)
@@ -455,18 +455,70 @@ prompts you:
   (r)etry / (d)escribe what went wrong / (s)kip / (q)uit
 ```
 
-**Retry** proceeds normally, picking up the unchecked task by ID.
+**Retry** resumes normal scheduling from the current unchecked tasks.
 **Describe** lets you type what went wrong. McLoop records your
 description as a `[RULEDOUT]` entry in PLAN.md under the task and
 appends it to `.mcloop/eliminated.json`, so the next attempt knows
 not to repeat the same approach. **Skip** marks the task as failed
 (`[!]`) and moves on. **Quit** exits.
 
-Resumption uses structured task state, not text matching. The interrupted task's ID identifies it precisely; McLoop looks up that task in the canonical PLAN.md and resumes against it regardless of any edits you made to the surrounding tasks while McLoop was stopped.
+The interrupt hint records a task ID, but the legacy describe/skip actions still
+match task text. Review the current plan before choosing an action, especially
+if tasks were edited while stopped. The hint alone does not prove whether Git
+or ledger operations completed.
 
 The prompt adapts to the interrupted phase. Audit interruptions
 offer resume/skip/quit. User prompt interruptions resume
 automatically with no prompt.
+
+### Reconciling a completion interruption
+
+Verified single-task commits (including declared acceptance) and batch commits
+write versioned `.mcloop/completions/<id>.json` receipts before invoking Git.
+They record task identities, the prior plan, baseline when available, check
+command/output, observed HEAD/status, the returned commit hash, plan update,
+and successful ledger event IDs. Batch receipts explicitly record that the
+existing batch path does not emit ledger events. Receipts remain after success.
+The directory ignores its own files so they are not swept into an ordinary
+implementation commit; preserve them separately with project runtime state.
+
+A pending receipt blocks the bare loop, including `--retry`, before any model
+preflight or task scheduling. A nonblocking project lock prevents two cooperating
+bare loops or a loop and a recovery acknowledgement from running together.
+Other commands, external editors, and older McLoop versions do not share this
+ownership contract. State/recovery refusals exit with code 6; ordinary single-task
+commit errors still return failure and retain the receipt for the next startup.
+
+1. Stop project writers. Run `mcloop recover` (or
+   `mcloop --file /path/to/PLAN.md recover`) for a read-only JSON report.
+2. Compare the recorded baseline and commit against `git status`, `git log`,
+   and `git show <sha>`. A push error may have occurred after a local commit.
+   Inspect the recorded plan snapshots and configured ledger directory. Check
+   for an existing commit event before considering any append. If verification
+   applicability is uncertain, run the relevant checks explicitly; the receipt
+   does not certify later edits or that Git hooks left the candidate unchanged.
+3. Reconcile the actual task status through the plan API. For an independently
+   confirmed completed task, `bob-plan done PLAN.md T-000001` is available.
+   Resolve missing ledger evidence using its typed API only after checking the
+   original events. If evidence is insufficient, keep the task pending or fail
+   it explicitly; record that decision instead of declaring success.
+4. Record the decision with `mcloop recover --acknowledge <id> --reason
+   "Compared Git, plan and ledger; describe the resolution here"`. This retains
+   the original receipt plus current evidence and the explanation. It performs
+   no commit, push, plan mutation, ledger append, or model call. Then explicitly
+   resume `mcloop` when the project is ready.
+
+Malformed, unsupported, or unreadable receipts are preserved and refused. Stop
+writers and repair or restore them from a known-good backup; acknowledgement is
+not a way around corrupt evidence. Never delete a live ownership lock.
+
+This is a conservative reconciliation gate, not an automatic resume transaction.
+It covers the window from successful receipt publication through verified commit
+settlement. Death before publication, editor-created/rate-limit checkpoints,
+no-diff completions, auto/user tasks, audit/maintain/investigation commands, and
+Duplo directory operations retain their earlier behavior. Successful receipts
+do not prove that a later push of the plan or post-run audit completed. See the
+[workspace persistence contract](../../design/persistence.md) for failure windows.
 
 ### Model fallback
 
