@@ -266,7 +266,7 @@ def _render_for_validation(
     )
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def _atomic_write_text(path: Path, text: str, *, mode: int | None = None) -> None:
     """Atomically write ``text`` to ``path`` without acquiring the lock.
 
     Write-only helper: takes already-rendered (and, for canonical
@@ -276,6 +276,8 @@ def _atomic_write_text(path: Path, text: str) -> None:
     the validate-and-render step out, the atomic-write path no longer
     knows about Plans at all, so there is no in-process path that
     writes a Plan without going through :func:`_render_for_validation`.
+    Optional ``mode`` sets permissions before flushing the new inode; omitted,
+    the tempfile retains its private default permissions.
 
     Writes to a sibling tempfile (UTF-8, pinned so the on-disk encoding
     never depends on the platform locale), ``fsync``s the descriptor,
@@ -296,11 +298,13 @@ def _atomic_write_text(path: Path, text: str) -> None:
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fp:
+            if mode is not None:
+                os.fchmod(fp.fileno(), mode)
             fp.write(text)
             fp.flush()
             os.fsync(fp.fileno())
         os.replace(tmp_name, str(path))
-    except Exception:
+    except BaseException:
         try:
             os.unlink(tmp_name)
         except FileNotFoundError:

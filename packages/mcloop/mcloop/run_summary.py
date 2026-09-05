@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import shutil
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from uuid import uuid4
+
+from bob_tools.json_state import atomic_write_json
 
 
 @dataclass
@@ -65,6 +66,7 @@ class RunSummary:
     stop_reason: str = ""  # set when terminal_status == "stopped"
     stuck: list[str] = field(default_factory=list)
     commit_hashes: list[str] = field(default_factory=list)
+    run_id: str = field(default_factory=lambda: uuid4().hex)
 
 
 def _iso_now() -> str:
@@ -75,6 +77,9 @@ def _iso_now() -> str:
 def write_run_summary(project_dir: Path, summary: RunSummary) -> Path:
     """Write the run summary to .mcloop/runs/ and update latest.json.
 
+    Each file is published atomically; the pair is not a transaction. If latest
+    publication fails, the dated record remains available. Summaries are
+    diagnostic and must never be used alone to decide whether to repeat a task.
     Returns the path to the dated summary file.
     """
     runs_dir = project_dir / ".mcloop" / "runs"
@@ -87,13 +92,15 @@ def write_run_summary(project_dir: Path, summary: RunSummary) -> Path:
     except (ValueError, TypeError):
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-    dated_path = runs_dir / f"{stamp}_run-summary.json"
+    # UUID identity is stable when the same summary is republished and avoids
+    # collisions between runs that start in the same second. Reject path input.
+    if not summary.run_id or any(c not in "0123456789abcdef" for c in summary.run_id):
+        raise ValueError("run_id must be a non-empty lowercase hexadecimal identity")
+    dated_path = runs_dir / f"{stamp}_{summary.run_id}_run-summary.json"
     latest_path = runs_dir / "latest.json"
 
     data = asdict(summary)
-    content = json.dumps(data, indent=2) + "\n"
-
-    dated_path.write_text(content)
-    shutil.copy2(dated_path, latest_path)
+    atomic_write_json(dated_path, data)
+    atomic_write_json(latest_path, data)
 
     return dated_path

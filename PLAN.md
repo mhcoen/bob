@@ -67,4 +67,12 @@ Follow-up to improvement-plan Slice A. Preserve current user configuration and t
   @deps T-000030
 - [x] T-000032: Wire clean-wheel checks into GitHub Actions and verify installation instructions from a separate project. Document supported checks and local versus hosted validation evidence. [accept: command-exit: python3 scripts/smoke_wheels.py] <!-- created_at: 2026-09-05T06:36:32Z --> <!-- completed_at: 2026-09-05T06:44:00Z -->
   @deps T-000031
+## Phase 7: Persistence contracts (Slice B first boundary)
+<!-- phase_id: phase_007 -->
+
+Shared JSON persistence, product identity recovery, and atomic diagnostic summaries. Remaining Duplo state and cross-system reconciliation stay in design/improvement-plan.md.
+
+- [x] T-000033: Document persistent-state ownership and recovery boundaries; provide validated atomic JSON publication and locked read-modify-write using existing durable file utilities, with failure and concurrency tests. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
+- [x] T-000034: Migrate Duplo product identity to versioned, validated, locked atomic updates. Preserve malformed and unsupported state without overwrite; retain legacy fields and document manual recovery. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
+- [x] T-000035: Publish McLoop run summaries atomically with collision-resistant identities; preserve dated evidence when latest publication fails and test interruption boundaries. <!-- created_at: 2026-09-05T07:30:24Z --> <!-- completed_at: 2026-09-05T07:38:24Z -->
 ## Bugs

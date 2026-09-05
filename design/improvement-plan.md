@@ -1,8 +1,9 @@
 # Bob reliability and utility improvement plan
 
-Status: in progress, 2026-09-05. Slice A is implemented and locally verified,
-including installer resources, setup documentation, and CI configuration. The
-first hosted CI run and the later improvement slices remain pending.
+Status: in progress, 2026-09-05. Slice A passed all five hosted CI jobs on
+`d4df6eee`. Slice B's first boundary covers persistence ownership, shared JSON
+updates, product identity recovery, and atomic run summaries. Remaining Duplo
+state migration and cross-system reconciliation are still pending.
 
 This records the repository review and turns its recommendations into bounded
 deliverables. It is a design document, not an executable McLoop queue. Promote
@@ -270,7 +271,7 @@ import origins and five CLI launchers, resolves platform profiles and 16 bundled
 workflows, and executes a mock workflow with durable output. Runtime probes forbid
 external processes and network connections.
 
-Validation in the working tree (not yet committed):
+Local validation before commit `7b3592da`:
 
 - Original metadata: smoke failed for eight omitted Duplo platform modules and
   seven omitted Orchestra schemas; the installed Duplo launcher also failed with
@@ -303,7 +304,7 @@ preservation of unrelated configuration, recommended-permissions output, and the
 installed audit script. The current settings example has no permissions block;
 the installer preserves its existing empty allow-list behavior.
 
-Validation in the working tree (not yet committed):
+Local validation before commit `7b3592da`:
 
 - Before the fix, the installed `bob install` failed looking under a nonexistent
   `venv/lib/packages/mcloop/` checkout path.
@@ -320,8 +321,52 @@ Validation in the working tree (not yet committed):
 [The CI workflow](../.github/workflows/packaging.yml) tests wheels on Linux/macOS
 and Python 3.12/3.13, and runs the workspace lint/test suite on macOS/Python 3.13.
 It uses pinned action revisions and saves packaging evidence on failure or success.
-It has been validated locally, not yet pushed or executed on GitHub. Native window
-capture and live provider setup remain outside the smoke's scope.
+Hosted validation subsequently passed on `d4df6eee`:
+[GitHub Actions run 33952437743](https://github.com/mhcoen/bob/actions/runs/33952437743).
+All four wheel jobs and the workspace job passed (6,894 tests passed, 136 skipped,
+nine existing schema-smoke warnings). Follow-up commits tracked the uv lockfile,
+installed ffmpeg, activated the test environment, isolated mocked video tests,
+and replaced the removed ffmpeg `-vsync` option in both extraction paths.
+Native window capture and live provider setup remain outside the smoke's scope.
 
-Next implementation slice: Duplo JSON recovery, starting with the persistence
-inventory and a corruption/interruption regression fixture.
+### Slice B first boundary (2026-09-05)
+
+Workspace tasks `T-000033`–`T-000035` cover this boundary. The
+[persistence inventory and recovery contract](persistence.md) classifies state
+ownership and distinguishes process interruption, host failure, and clone recovery.
+Shared `bob_tools.json_state` reuses planfile's existing synchronized replacement
+and locking utilities, adding JSON validation and permission preservation.
+
+Duplo product identity is the first authoritative consumer: missing state remains
+distinct from malformed state; legacy objects migrate on update to version 1;
+unknown fields are retained; schema and corruption errors preserve original bytes.
+The read-modify-write operation is serialized across cooperating writers.
+McLoop summaries now use UUID identities and atomic per-file publication; failure
+to replace latest does not discard the archived summary. Summary IDs remain
+separate from the ledger's existing run IDs.
+
+Regression reproduction against `d4df6eee`: `save_product` silently overwrote a
+truncated JSON file. The new implementation refused the same operation and kept
+the original bytes. Tests exercise serialization, validation, synchronization,
+replacement, process death, four concurrent writers, same-second summary
+collisions, and failure between archive and latest publication.
+
+Local validation:
+
+- Activated workspace: `python -m pytest -n 4 -q` passed with 6,947 passed,
+  125 skipped, and nine existing schema-smoke warnings.
+- 42 persistence regressions passed; the first broader focused run also passed
+  295 existing and new state, planfile, saver, and summary tests.
+- `.venv/bin/ruff check .` passed. Targeted strict mypy passed for shared JSON
+  state and run summaries; the full suite also ran Duplo's package type check.
+- `python scripts/smoke_wheels.py --offline --work-dir
+  /private/tmp/bob-persistence-wheels-2` passed, including runtime resource
+  inventory, fresh installation, all five CLI launchers, and runtime probes.
+  The first sandboxed invocation could not read uv's cache; the successful
+  offline run used approved cache access. Artifacts remain at the printed path.
+
+Next boundary: migrate `duplo.json` readers and writers, plus processing manifests,
+without holding state locks during provider calls. Define revision conflict
+handling for those long-running operations. Then inject and reconcile failures
+between verification, Git commit, ledger append, and task advancement. Slice B
+is not complete until these remaining boundaries are implemented and tested.

@@ -10,6 +10,8 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from bob_tools.json_state import StateError, read_json_object, update_json_object
+
 from duplo.diagnostics import record_failure
 from duplo.parsing import strip_fences
 from duplo.doc_examples import CodeExample
@@ -25,6 +27,22 @@ DUPLO_JSON = ".duplo/duplo.json"
 PRODUCT_JSON = ".duplo/product.json"
 PROCESSED_VIDEOS_JSON = ".duplo/processed_videos.json"
 CLAUDE_MD_FILENAME = "CLAUDE.md"
+
+
+def _validate_product(data: dict, path: Path) -> None:
+    """Accept unversioned legacy identity or version 1, preserving extra fields."""
+    version = data.get("schema_version", 0)
+    if type(version) is not int or version not in (0, 1):
+        raise StateError(
+            f"{path}: unsupported product schema_version {version!r}; file preserved. "
+            "Use a compatible Duplo version or restore a known-good backup."
+        )
+    for key in ("product_name", "source_url", "app_name"):
+        if key in data and not isinstance(data[key], str):
+            raise StateError(
+                f"{path}: invalid product field {key!r}; expected a string. "
+                "File preserved; stop writers and repair or restore a known-good backup."
+            )
 
 
 def _ensure_duplo_dir(target_dir: Path | str = ".") -> Path:
@@ -65,11 +83,13 @@ def save_product(
         Path to the written file.
     """
     _ensure_duplo_dir(target_dir)
-    path = (Path(target_dir) / PRODUCT_JSON).resolve()
-    data = _safe_read_json(path)
-    data["product_name"] = product_name
-    data["source_url"] = source_url
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    path = (Path(target_dir) / PRODUCT_JSON).absolute()
+
+    def update(data: dict) -> dict:
+        data.update(schema_version=1, product_name=product_name, source_url=source_url)
+        return data
+
+    update_json_object(path, update, validate=lambda data: _validate_product(data, path))
     return path
 
 
@@ -82,13 +102,11 @@ def load_product(
     Returns ``(product_name, source_url)`` if the file exists,
     or ``None`` if not found.
     """
-    path = (Path(target_dir) / PRODUCT_JSON).resolve()
-    if not path.exists():
+    path = (Path(target_dir) / PRODUCT_JSON).absolute()
+    data = read_json_object(path)
+    if data is None:
         return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
+    _validate_product(data, path)
     return data.get("product_name", ""), data.get("source_url", "")
 
 
@@ -117,53 +135,29 @@ def derive_app_name(
     from duplo.spec_reader import ProductSpec
 
     td = Path(target_dir)
-    path = (td / PRODUCT_JSON).resolve()
-    data: dict = {}
-    if path.exists():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            data = {}
+    path = (td / PRODUCT_JSON).absolute()
 
-    # 1. Existing app_name in product.json — user may have edited it.
-    existing = data.get("app_name", "")
-    if existing:
-        # Still sync product_name if empty.
+    def update(data: dict) -> dict:
+        # Keep the complete product read-modify-write under one lock.
+        app_name = data.get("app_name", "")
+        if not app_name:
+            duplo_data = read_json_object(td / DUPLO_JSON) or {}
+            app_name = duplo_data.get("app_name", "")
+            if not isinstance(app_name, str):
+                raise StateError(f"{td / DUPLO_JSON}: app_name must be a string")
+        if not app_name and isinstance(spec, ProductSpec) and spec.sources:
+            if any(s.role == "product-reference" for s in spec.sources):
+                app_name = data.get("product_name", "")
+        if not app_name:
+            app_name = td.resolve().name
+        data["app_name"] = app_name
         if not data.get("product_name"):
-            data["product_name"] = existing
-            _ensure_duplo_dir(target_dir)
-            path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-        return str(existing)
+            data["product_name"] = app_name
+        data["schema_version"] = 1
+        return data
 
-    app_name = ""
-
-    # 2. duplo.json app_name (set during first run via save_selections).
-    duplo_path = (td / DUPLO_JSON).resolve()
-    if duplo_path.exists():
-        try:
-            duplo_data = json.loads(duplo_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            duplo_data = {}
-        app_name = duplo_data.get("app_name", "")
-
-    # 3. Product-reference URL → use validated product_name.
-    if not app_name and isinstance(spec, ProductSpec) and spec.sources:
-        has_product_ref = any(s.role == "product-reference" for s in spec.sources)
-        if has_product_ref:
-            app_name = data.get("product_name", "")
-
-    # 4. Fallback: directory name.
-    if not app_name:
-        app_name = td.resolve().name
-
-    # Persist so subsequent runs find it.
-    data["app_name"] = app_name
-    if not data.get("product_name"):
-        data["product_name"] = app_name
-    _ensure_duplo_dir(target_dir)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    return app_name
+    data = update_json_object(path, update, validate=lambda data: _validate_product(data, path))
+    return str(data["app_name"])
 
 
 def save_selections(

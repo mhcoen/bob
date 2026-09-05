@@ -503,6 +503,17 @@ for the per-video completion manifest; `site_media/` for downloaded
 page media; `ledger/` for the Plan Ledger event log; and `logs/` for
 per-run LLM-call logs (browse them with `duplo logs`).
 
+Product identity updates are atomic and serialized between cooperating writers.
+Unversioned `product.json` files remain readable and gain `schema_version: 1` on
+their next update, preserving custom fields. A malformed file or unsupported
+version stops identity loading and saving with its path and a recovery message;
+it is not treated as a new project. Stop all writers, copy the damaged file for
+inspection, then repair it or restore a known-good backup. Do not delete it just
+to bypass the error: product confirmation and user-edited names would be lost.
+These guarantees currently cover product identity; other `.duplo` state paths
+still await migration. See [persistence and recovery](../../design/persistence.md)
+for durability limits and which state needs a backup beyond Git.
+
 ## Migrating existing projects
 
 Duplo's project layout has changed. Existing projects (created before

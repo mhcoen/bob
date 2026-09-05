@@ -57,6 +57,22 @@ schemas, cross-cutting utilities — lives here too.
 
 ## Contents
 
+### `bob_tools.json_state` — validated JSON persistence
+
+`read_json_object(path)` returns `None` for absent state and raises `StateError`
+for malformed JSON, invalid UTF-8, duplicate keys, or a non-object root.
+`update_json_object(path, operation, validate=...)` holds a stable sidecar lock
+over reading, schema validation, transformation, and atomic publication.
+Callbacks return the new object; keep them short and do not recursively update
+the same path. `atomic_write_json(path, data)` provides replacement for complete
+diagnostic snapshots without merge or schema semantics.
+
+These functions reuse the planfile's existing file-sync, replacement,
+directory-sync, and advisory-lock primitives. Existing file permission bits are
+preserved; new JSON files are private (0600). Read-modify-write protection requires
+all writers to use the locked API. See [persistence contracts](../../design/persistence.md)
+for recovery after errors, filesystem limits, and the initial migrated consumers.
+
 ### `bob_tools.planfile` — the formal PLAN.md API
 
 `PLAN.md` is a structured document with a defined grammar: stages with

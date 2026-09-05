@@ -1531,14 +1531,23 @@ Every `run_loop()` invocation writes a JSON summary to
 `.mcloop/runs/`. The file is written on all exit paths: success,
 failure, and interruption. Two files are produced:
 
-- **`YYYYMMDD_HHMMSS_run-summary.json`** — timestamped archive.
-- **`latest.json`** — a copy of the most recent summary so
+- **`YYYYMMDD_HHMMSS_<run_id>_run-summary.json`** — archive with a random UUID
+  identity, so runs starting in the same second do not overwrite one another.
+- **`latest.json`** — the last published summary so
   automation has a stable filename to read.
+
+Both files publish atomically. They are separate writes: if updating `latest.json`
+fails, the dated record can still exist while `latest.json` describes an older run.
+Concurrent publishers use last-writer-wins for `latest.json`; its identity is not
+a promise of chronological order. A missing or stale summary does not prove
+whether a task committed. Inspect the Git history and task/ledger evidence before
+retrying mutations. See [persistence and recovery](../../design/persistence.md).
 
 The summary schema:
 
 | Field | Type | Description |
 |---|---|---|
+| `run_id` | string | Random UUID hex identity of this summary; stable when republished |
 | `run_start` | string | ISO 8601 UTC start time |
 | `run_end` | string | ISO 8601 UTC end time |
 | `elapsed_seconds` | float | Total wall-clock seconds |
@@ -1562,6 +1571,10 @@ a commit), plus the backend-parity fields `success`, `exit_code`,
 
 Each check entry contains: `command`, `passed`, and `elapsed`
 (seconds).
+
+Summary `run_id` values identify these diagnostic records. They are currently
+separate from Plan Ledger run IDs; correlate task IDs and commit hashes when
+following evidence across the two stores.
 
 ## Token auditing
 

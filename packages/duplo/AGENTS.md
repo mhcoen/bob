@@ -280,6 +280,11 @@ detects new files and appends tasks for anything missing.
   (name and source URL) to `.duplo/product.json`.
   `load_product()` reads it back, returning
   ``(product_name, source_url)`` or ``None`` if absent.
+  Product identity uses `bob_tools.json_state` for validated, locked atomic
+  updates, including `derive_app_name()`. Legacy product objects migrate to
+  `schema_version: 1` on update; malformed fields and unsupported versions
+  raise `StateError` without replacing the file. Other saver state paths
+  retain their existing persistence behavior pending migration.
   `save_features()` merges new features into duplo.json, using
   `_deduplicate_features_llm()` to detect semantic duplicates via
   a single batch ``Codex -p`` call (e.g. "CLI tool" and
@@ -512,6 +517,9 @@ test_pdf_extractor.py, test_hasher.py, test_gap_detector.py,
 test_frame_filter.py, test_frame_describer.py, test_video_extractor.py,
 test_task_matcher.py, test_verification_extractor.py,
 test_investigator.py, test_spec_reader.py, test_roadmap.py.
+
+`test_product_state.py` covers identity corruption, legacy migration, and
+interrupted saves with preserved original bytes.
 
 Video extraction unit tests mock ffmpeg availability; real ffmpeg tests cover
 scene detection and interval fallback with generated videos. They skip when
