@@ -196,7 +196,9 @@ detects new files and appends tasks for anything missing.
   `extract_scene_frames()` runs ffmpeg with the `select` filter
   using `gt(scene,threshold)` to detect visual transitions, saves
   frames as PNG files. Retries with a lower threshold if too few
-  frames are found. After extraction, deduplicates similar frames
+  frames are found. Scene detection and interval sampling use
+  `-fps_mode vfr` for compatibility with ffmpeg versions that removed
+  `-vsync`. After extraction, deduplicates similar frames
   using perceptual image hashing via `deduplicate_frames()`.
   `_dhash()` computes a 64-bit difference hash (dHash) for an image.
   `_hamming()` computes Hamming distance between two hashes.
@@ -511,8 +513,9 @@ test_frame_filter.py, test_frame_describer.py, test_video_extractor.py,
 test_task_matcher.py, test_verification_extractor.py,
 test_investigator.py, test_spec_reader.py, test_roadmap.py.
 
-Video extraction unit tests mock ffmpeg availability; the real ffmpeg test
-skips when the executable is absent and fails if video generation fails.
+Video extraction unit tests mock ffmpeg availability; real ffmpeg tests cover
+scene detection and interval fallback with generated videos. They skip when
+the executable is absent and fail if video generation fails.
 
 ## Keeping this file current
 

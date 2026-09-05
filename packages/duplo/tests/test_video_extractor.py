@@ -189,13 +189,14 @@ def test_extract_scene_frames_ffmpeg_not_found_as_file_not_found(tmp_path):
     assert "ffmpeg not found" in result.error
 
 
-@pytest.fixture
-def _real_test_video(tmp_path):
-    """Create a short test video with two distinct scenes using ffmpeg."""
+@pytest.fixture(params=["scene", "interval"])
+def _real_test_video(tmp_path, request):
+    """Create a video with a hard cut or no transitions using ffmpeg."""
     if not ffmpeg_available():
         pytest.skip("ffmpeg not installed")
     video = tmp_path / "scenes.mp4"
-    # Scene 1: red for 1 second, Scene 2: blue for 1 second.
+    # A constant red video forces extraction through interval sampling.
+    second_color = "blue" if request.param == "scene" else "red"
     cmd_scene1 = [
         "ffmpeg",
         "-f",
@@ -205,7 +206,7 @@ def _real_test_video(tmp_path):
         "-f",
         "lavfi",
         "-i",
-        "color=c=blue:size=320x240:duration=1:rate=10",
+        f"color=c={second_color}:size=320x240:duration=1:rate=10",
         "-filter_complex",
         "[0:v][1:v]concat=n=2:v=1:a=0[out]",
         "-map",
@@ -221,19 +222,23 @@ def _real_test_video(tmp_path):
     ]
     proc = subprocess.run(cmd_scene1, capture_output=True, text=True, timeout=30)
     assert proc.returncode == 0, f"Could not create test video: {proc.stderr}"
-    return video
+    return video, request.param
 
 
 def test_extract_scene_frames_real_ffmpeg(tmp_path, _real_test_video):
-    """Integration test with real ffmpeg and a generated video."""
+    """Exercise scene detection and its interval fallback with real ffmpeg."""
+    video, expected_mode = _real_test_video
     out_dir = tmp_path / "frames"
-    result = extract_scene_frames(_real_test_video, out_dir, threshold=0.3)
+    result = extract_scene_frames(video, out_dir, threshold=0.3)
     assert result.error == ""
-    # Should detect at least 1 scene change (red→blue transition).
     assert len(result.frames) >= 1
     for frame in result.frames:
+        assert frame.name.startswith(f"scenes_{expected_mode}_")
         assert frame.exists()
         assert frame.stat().st_size > 0
+        with Image.open(frame) as image:
+            assert image.format == "PNG"
+            assert image.size == (320, 240)
 
 
 # --- Deduplication tests ---
