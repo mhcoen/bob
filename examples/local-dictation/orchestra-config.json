@@ -4,26 +4,30 @@
       "pattern": "software_design",
       "max_rounds": 6,
       "author": {
-        "model": "codex"
+        "adapter": "codex_text",
+        "model": "gpt-6-astra"
       },
       "reviewer": {
-        "model": "opus"
+        "model": "fable"
       },
       "judge_role": {
-        "model": "codex"
+        "adapter": "codex_text",
+        "model": "gpt-6-astra"
       }
     },
     "plan_author": {
       "pattern": "plan_author",
       "max_rounds": 6,
       "proposer": {
-        "model": "codex"
+        "adapter": "codex_text",
+        "model": "gpt-6-astra"
       },
       "reviewer": {
-        "model": "opus"
+        "model": "fable"
       },
       "judge_role": {
-        "model": "codex"
+        "adapter": "codex_text",
+        "model": "gpt-6-astra"
       },
       "criteria": [
         {

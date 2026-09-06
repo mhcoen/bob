@@ -24,7 +24,9 @@ duplo design --plan
 
 The command invokes configured model services. It sends the specification and
 reference material for design review, then generates the implementation plan.
-The example configuration uses Codex to author and judge, with Claude reviewing.
+The example configuration uses Astra (`gpt-6-astra`) through Codex to author
+and judge, with Fable reviewing through Claude. The Astra model ID is explicit;
+Bob's general `codex` alias still selects GPT-5.6 Sol.
 It does not build the application. Re-running it reuses a current accepted design
 and resumes planning from the first unsaved phase.
 
@@ -49,8 +51,8 @@ Review continues with the completed judgments and additional model-lease finding
 The fourth attempt exposed JSON restarts after output limits. Orchestra now
 recovers the complete replacement document. Its review also identified a staging
 lease that could not be acquired during installation and overlapping delivery
-attempts without a shared executor. The next invocation changes the author to
-Codex and retains the findings as revision inputs.
+attempts without a shared executor. The next invocation uses Astra as author
+with Fable reviewing, and retains the findings as revision inputs.
 No implementation plan has been generated. Model outputs in the evidence directory
 retain their wording.
 
