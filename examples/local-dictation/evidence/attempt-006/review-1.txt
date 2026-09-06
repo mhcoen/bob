@@ -1,0 +1,63 @@
+The proposal is not ready for acceptance. It closes nine of the ten prior blocking items and all three deferred items, and it is now a single parseable document. Five defects remain. Three are new consequences of the compression, one is a gap the compression exposed, and one is a bookkeeping error in the open questions. The coverage table lists each of the fourteen requirements exactly once.
+
+## Status of prior objections
+
+The following are resolved, verified against the current text rather than the claim:
+
+- **Staging lease.** D-033 adds a staging-model lease keyed to a frozen staging row, and D-022 acquires it before the smoke test.
+- **Blob publication.** D-022 takes an exclusive hash claim, verifies and references an existing blob, and otherwise renames without replacement.
+- **Service scratch.** D-003 gives each job a container-local directory registered before dispatch, with read handles returned to the app.
+- **Scheduling.** D-004 orders interactive work by capture sequence, and D-027 charges decode, ingest, materialization and the shell.
+- **Delivery serialization.** D-010 has one executor with a durable queue and an explicit barrier.
+- **Resume representation.** D-006 and D-031 add queued and interrupted_resumable states with execution epochs under invariant I8.
+- **Speaker identity.** D-023 makes cross-window links proposals, D-037 defines the three attribution states, and D-043 removes the centroid cap from the speaker count.
+- **Memory criteria.** The protocol uses a one-sided upper bound plus a duration-independent ceiling.
+- **Import bookmark.** D-019 stores no persistent capability.
+- **Deferred items.** Reconciliation covers notice directories, the practical recognition sample is preselected and pooled, and the Text delivery coverage no longer claims automatic clipboard placement.
+
+The media-restoration disagreement resolves in favor of the current D-025. The third-review entry in REVIEW_NOTES requires ownership evidence valid across every intervening control action and names a monotonic state revision as the example. D-025 follows that, and assumption 10 states the consequence that no player currently qualifies. The prior verdict's ruling that this demand was overstated conflicts with the notes, so that objection no longer applies.
+
+## Blocking defects
+
+**Delivery confirmation and the review barrier, D-009 and D-010.** D-009 defines confirmed as supported acknowledgment from a target adapter and demotes readback to diagnostic. No adapter exists at design time, F4 states that trials cannot create an acknowledgment contract, and the research records that a paste event carries none. So nearly every attempt ends unconfirmed, and that will not change with measurement. D-010 then raises a process-wide barrier after an unconfirmed paste, and the failure section says any uncertain write requires review before another automatic delivery proceeds. Together these mean one manual resolution per dictation in most targets. The submit modifier also cannot dispatch Return in any target until such an adapter exists. That is the core loop of the product, and the consequence appears nowhere. The two statements also disagree on scope, paste only versus any uncertain write. REVIEW_NOTES asks only that uncertain outcomes never trigger fallback or submission. Blocking the next dictation is the design's own addition. Resolve by stating which outcomes retire the barrier without user action, reconciling the two scope statements, disclosing that submission is unavailable until F4 finds documented semantics, and adding per-target unconfirmed rates to the F4 outputs. If a per-dictation review step is intended, state it as a product decision.
+
+**Transformation checks are no longer specified, D-012.** The specification requires that a mode not answer a dictated question unless answering is part of the mode. D-012 now refers to available checks reporting structural violations and suspected drift, and to a concrete detected violation withholding delivery, without naming a single check. It does not say which checks are definite and which advisory, or which depend on language. The prior draft listed them. For a language with no checks, the rewrite is delivered automatically with an evidence label, so enforcement rests on the prompt and development-time review alone. That may be acceptable, but it is a decision and its consequence must be stated. The context-overlap check that guarded prose context against instruction following is also gone, leaving the delimiter in D-016 as the only mitigation. Resolve by enumerating the checks per operation and language, classifying each, and stating the disposition for a non-answering mode when the answering check is unavailable.
+
+**The arming critical path is unbounded against a five-second ring, D-006 and D-008.** D-006 persists the manifest before flushing chunks and records truncation if arming exceeds the ring. Nothing states which steps gate that persistence. Two candidates have no bound. The session row goes through the single serialized writer and can wait behind a publication transaction. The accessibility latch in D-008 had a one-second watchdog in the prior draft and has none now, and a busy target application can stall accessibility calls for the messaging timeout. Screen OCR has a one-second deadline of its own. Losing leading audio during ordinary operation is a Recording controls failure, not a crash case. Resolve by enumerating the steps that must complete before chunks flush, bounding each, and showing the sum against the ring, or by making chunk flushing independent of the database write as the prior file-based ownership did.
+
+**The diarization window protocol has two gaps, D-003, D-023 and D-043.** First, D-043 says diarization writes each window into run-owned staging under the recording directory, but D-003 confines the service to its container and keys scratch by execution epoch. Which process appends the checkpoint, which process runs the paged candidate scan over stored centroids, and how a resumed epoch obtains the prior epoch's centroids are unstated. If centroids live in the container, the dead-holder reconciliation in D-003 can remove evidence a resumable run needs. Second, windows overlap by thirty seconds and each window's cluster IDs stay distinct, yet no rule says which window's segments cover the overlap or how a segment spanning the boundary is represented. Without one, published results contain duplicate segments, and notes citations and speaker assignments become ambiguous. D-020 has an overlap rule for speech only. Resolve by assigning checkpoint writing and candidate scanning to a process, stating how resume passes prior centroids, and defining overlap ownership for published segments.
+
+**A blocking open question that blocks nothing.** The Intel question is marked blocking while its resolution says it does not block the arm64 build. REVIEW_NOTES rejected the same pattern for App Store distribution. Mark it non-blocking and let D-001 carry the decision.
+
+## Improvements that can wait
+
+**Resource arithmetic, D-004 and D-027.** Under the listed envelopes, the interactive reservation and the default generator do not both fit.
+
+| Charge | Envelope |
+|---|---|
+| Shell and Store | 512 MiB |
+| Capture rings and writer | 128 MiB |
+| Primary speech, shared with preview | 2 GiB |
+| Standing reservation | about 2.6 GiB |
+| Remainder of the 8 GiB budget | about 5.4 GiB |
+| Default 8B generator | 5.5 GiB |
+
+Either the reservation is taken at trigger time, so every new dictation during a rewrite evicts and restarts the generator and preview waits for its unload, or the reservation stands, so the proposed default generator is never admissible. State which. Also state that a preempted stage without a checkpoint returns to queued rather than failed, since D-031 only covers restart. Add the eviction path to the responsiveness measurement, which currently assumes a warm model.
+
+**Capture storage, D-030.** The design states only the meeting rate.
+
+| Configuration | Rate |
+|---|---|
+| Mono microphone, 48 kHz Float32 | about 690 MB per hour |
+| Microphone plus stereo system audio | about 2.07 GB per hour |
+| Prior draft, 16 kHz mono ALAC | about 50 to 60 MB per hour |
+
+Post-seal transcoding of complete, verified PCM has none of the live-encoding recovery risks for which the alternative was rejected, and it is not considered. Record the dictation rate and either evaluate that alternative or record why not.
+
+**Speaker linking cost, D-023, D-037 and D-043.** Within-window clustering uses the SDK's uncalibrated threshold and is accepted as an unverified label, while cross-window links from the same kind of evidence require confirmation. The asymmetry has no stated basis. The confirmation count grows with windows times speakers, which for a multi-hour meeting is dozens of confirmations before notes can name anyone. The overlap region labels the same audio twice and is the strongest link evidence available, yet it is unused. Record a basis for the distance and tie values, define what sets the alignment state in production, and define or drop echo annotation, which is referenced but never specified.
+
+**Memory equivalence margin, verification.** One mebibyte per processed hour is far below plausible run-to-run variance for a process holding a multi-gigabyte model. The upper bound will not clear it at any practical repetition count, and the repetition rule is unbounded. State the basis, set the margin relative to observed variance, cap repetitions and define the inconclusive outcome.
+
+**Verification coverage regressions.** The compression removed named tests for rule precedence in D-014, replacement determinism in D-015, stuck-key recovery in D-026, mid-stage revocation in D-032, and panel placement across display changes. F4 should test editable-element identity stability over a capture in web content, since D-008 now defaults to the exact element and a regenerated element yields spurious holds. Text chunking for search breaks phrase matches across chunk boundaries unless chunks end at segment boundaries.
+
+**Ambiguities to close in the same pass.** D-031 does not say what a crashed session whose disposition is still active applies, presumably the manifest's interruption preference. D-017 leaves the choice between prompting and fallback for undetermined language to the implementation. D-009 does not say whether the paste path runs automatically or by setting. The explicit permission in D-010 for unsnapshottable clipboard content may become a modal on the delivery path. D-026 does not state whether Escape is consumed globally while recording. D-015 has no rule for selecting terms into the bounded prompt budget.

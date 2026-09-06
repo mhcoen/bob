@@ -1,0 +1,937 @@
+{
+  "purpose": "Build a single-user macOS dictation application whose speech recognition, language processing and speaker analysis execute on the user's Mac. The application preserves recordings and their successive results, supports delivery into other applications, and explains unavailable capabilities without imposing account requirements, subscriptions or artificial usage quotas. Cloud inference, account-based synchronization, enterprise administration, Windows and iOS clients are excluded. The supplied product specification governs this design. Historical feature inventories and research observations inform implementation choices without determining them. D-006 and D-029 establish the recording lifetime and provenance that the remaining components use. This document defines the complete application design and its acceptance basis. Detailed implementation phases follow design acceptance. No application benchmarks, feasibility experiments or project-file changes were performed for this revision.",
+  "architecture": "A recording begins with a durable owner, captures audio into recoverable storage, and produces immutable results through runs with frozen settings. Delivery is a separate external operation over a committed result. Reprocessing creates another run over identified inputs. Deletion invalidates publication before reclaiming files. The corresponding authoritative contracts are D-006, D-029 through D-031, and D-033.\n\nD-002 divides one Swift package into Ports, Core, Store, AudioIngest, InferenceIPC, platform integration, runtime adapters and UI targets. Ports owns application value types and capability contracts. Core depends on Ports and contains processing policy, scheduling and state transitions. Store and the platform/runtime adapters implement Ports. SwiftUI views observe application view models; AppKit implements desktop integration. The app shell constructs these components. Neither Core nor Ports imports SQLite, AppKit, AVFoundation or an inference runtime.\n\nA RunActor requests state transitions through Store. It cannot commit directly or independently mutate shared system resources. ResourceScheduler controls admission across all workers under D-004 and D-027. DeliveryExecutor exclusively owns external insertion and clipboard transactions under D-010. ArtifactBroker owns acquisition, publication exclusion and garbage collection under D-033. The database has one serialized writer. Real-time audio callbacks write bounded rings and signal a dedicated writer without performing database operations, allocation-heavy work or inference.\n\nBundled XPC services host speech recognition, generation, diarization and file decoding. D-003 defines their container storage and access mechanism; D-028 defines network isolation. An independently invoked downloader receives model acquisition requests. Workers return staged output and completion metadata to the app, which validates publication eligibility. They never update the library database. Runtime choices are WhisperKit, llama.cpp and SpeakerKit under D-020, D-021 and D-023. The baseline and distribution decisions are D-001 and D-036.\n\nThe public port contracts are authoritative here. AudioSource opens a live or seekable source and emits AudioFrame records under byte credit. DecoderProvider probes container and codec capabilities, selects an audio track, and implements the seekable AudioSource contract. SpeechRecognizer accepts bounded audio windows and returns timestamped recognition segments. Diarizer accepts bounded windows and returns local cluster labels with optional centroid evidence. TextGenerator consumes a bounded prompt and emits credited token batches. RuntimeCapabilityDescriptor describes accepted model assets, parameter ranges, architecture support and resource charges. ContextProvider returns a sampled source or a typed omission. TextInserter exposes a preflight capability and one selected insertion mechanism. Store exposes transactional state changes and immutable publication. LeaseBroker grants opaque, scoped handles. Remaining platform ports expose shortcut events, permission states and player-specific operations. Every IPC request includes protocol version, job identity, execution epoch and input hashes. Every response echoes them. AudioFrame and persistence schemas are defined in data_lifecycle; admission is defined in D-004.",
+  "data_lifecycle": "The library resides in Application Support/LocalDictation. SQLite stores metadata, revisions and searchable text chunks. Recording directories contain capture journals, immutable audio chunks, copied import sources, retained context and run staging. Model blobs are content addressed. Each XPC service keeps its scratch and materialized assets inside its own container as specified by D-003 and D-040. File permissions restrict library access to the user. Application-level encryption is outside the initial design; protection otherwise depends on macOS filesystem and disk-encryption settings. App-managed files are excluded from application telemetry, which is absent.\n\nThe following is the authoritative logical schema. IDs are random UUIDs unless identified as content hashes. All persistent structures carry a schema version. Times use UTC for chronology and monotonic host time for capture alignment. Paths stored in the database are relative to an enumerated storage root.\n\nsessions(id, disposition, capture_manifest_hash, generation, recording_id nullable, source_kind, created_at, owner_instance) owns work before publication. Disposition is active, keep_interrupted, discard or published. recordings(id, session_id, generation, created_at, duration_frames, audio_state, interrupted, alignment_state, display_result_id, deleted_at) owns published history. audio_artifacts(id, recording_id, stream_role, format, timeline_hash, content_hash, byte_length, availability) describes a stream assembled from audio_chunks(artifact_id, sequence, relative_path, start_host_time, frame_count, byte_length, content_hash, discontinuity). source_artifacts records a copied import's hash, container, selected track and non-authorizing original filename, size and modification time. No bookmark or persistent capability to the external source is stored.\n\nprocessing_runs(id, session_id nullable, recording_id nullable, expected_generation, kind, manifest_hash, state, resume_stage nullable, execution_epoch, retry_reason, started_at, ended_at nullable) owns processing. RunManifest contains mode and vocabulary revision IDs, model installation IDs and asset hashes, runtime and adapter revisions, application pipeline revision, operation parameters, language policy, context descriptors, delivery policy and exact parent input IDs. It is canonical JSON with a content hash. Later stage outputs are separate dependency records and never edits to that manifest. Notes therefore begin in a separate run after their inputs exist.\n\nresults(id, run_id, kind, primary_input_id nullable, payload_hash, status, created_at) owns immutable output. result_dependencies(result_id, input_kind, input_id, role) identifies additional results, audio artifacts or speaker revisions. text_chunks(result_id, sequence, text, start_offset, end_offset) supplies bounded database rows and the FTS index. Long text is inserted and read incrementally. segments(result_id, segment_id, start_frame, end_frame, text_chunk_range, stream_role, local_cluster_id nullable) supplies timing. A result payload contains the corresponding versioned metadata and text or segment stream. Publication streams staged rows through one database transaction, with bounded statement batches and a bounded SQLite page cache. Large WAL and output files consume disk, not a duration-sized application array.\n\nspeaker_revisions(id, recording_id, diarization_result_id, parent_revision_id nullable, names_hash, content_hash) owns editable interpretations. speaker_segments(revision_id, segment_id, source_segment_id, start_frame, end_frame) represents splits without editing model output. speaker_assignments(revision_id, segment_id, identity_id nullable, attribution_state, proposal_origin nullable) records attribution. speaker_names(revision_id, identity_id, display_name) freezes names. cluster_evidence stores local cluster IDs, optional centroid artifacts and measured distances. speaker_proposals records candidate links, ranking and ambiguity. Its evidence and transitions are defined in D-023 and D-037.\n\nmodes and mode_revisions store names and immutable contracts. vocabulary_revisions stores ordered terminology, replacement and filler configuration. rule_revisions stores the ordered matching rules. context_samples(run_id, source, sampled_at, representation, status, digest, retained_artifact_id nullable) records sampling outcomes. retained_artifacts identifies the recording or session owner, kind, root, path, hash and length. UI settings store panel placement, shortcut bindings and application preferences separately from run snapshots.\n\nmodel_staging(id, state, owner_instance, proposed_set_hash nullable, manifest_hash nullable, staging_path, error nullable, discard_after nullable) owns acquisition before an installation exists. model_installations(id, set_hash, runtime_kind, capabilities, provenance, notices_path nullable, state, parameter_schema, parameter_display) stores execution and attribution metadata. model_assets(asset_key, root, path, hash, bytes, state) describes physical blobs or caches. asset_references(owner_kind, owner_id, asset_key, purpose) describes durable retention claims. materialized_assets uses the key defined in D-040. publication_claims(set_hash, staging_id, owner_instance) serializes blob publication. leases(id, scope, owner_id, asset_keys, holder_instance, pid, process_start, connection_id, state) records live access. service_artifacts(job_id, service_kind, owner_kind, owner_id, execution_epoch, relative_path, state, bytes) registers worker scratch before its creation. Installation-specific notices and abandoned notice directories are included in reconciliation.\n\ndelivery_attempts(id, result_id, queue_sequence, target_snapshot, requested_submit, selected_mechanism, state, effect_started, clipboard_session_id nullable, outcome) is the durable delivery journal. clipboard_sessions records the app instance, original and written pasteboard change counts, snapshot availability, ownership state and unresolved-consumption barrier. Clipboard payload snapshots remain memory-only. jobs records scheduler admission, resource charges and execution identity. AudioFrame contains stream ID, sequence, format, frame count, host timestamp, clock domain and discontinuity flag; payload length is validated against its format before credit is accepted.\n\nThe invariants below are defined only here. I1: published results, their dependency identities and producing manifests are immutable. A derived result names its exact inputs: recognition and diarization depend on audio; normalization depends on recognition; rewrite and translation depend on a transcript result; notes additionally depend on one diarization result and one speaker revision. I2: publication requires a matching, eligible owner generation and the current run execution epoch in the same transaction as insertion. A discarded session or tombstoned recording cannot publish. I3: a physical artifact is reclaimable only when it has no qualifying durable reference, live lease, registered live creator or publication claim, and the broker has exclusively marked it deleting. I4: a published artifact reference resolves to verified durable bytes; interruption can leave unreferenced bytes for reconciliation. I5: an external delivery effect requires its committed attempt intent and exclusive DeliveryExecutor ownership. I6: assigned_by_user records a direct action on the current speaker revision; inferred carry-forward never acquires that status. I7: a worker receives only admitted bounded working data, while accumulated output is stored in paged or streamed artifacts. I8: a terminal run has ended_at and cannot resume. Non-terminal suspended states have no ended_at. Recovery and verification cite these invariants.",
+  "failure_behavior": "D-007 is the authoritative cancellation table, D-031 the recovery table, and D-032 the permission matrix. Failures carry a stage, cause and available action. The recording panel shows the failure while History retains eligible committed inputs. A failed rewrite therefore leaves its source transcript usable. An interrupted capture identifies its recovered extent and discontinuities. An unsupported or failed import leaves its external source untouched under D-019.\n\nWorker interruption invalidates the current connection and fences its execution epoch before another execution is admitted. Resource reservations remain charged until the process has exited or its resident model has demonstrably unloaded. The broker applies D-033 before reclaiming any file. A worker that stops responding can be terminated; elapsed heartbeat time alone does not establish that it has stopped using storage. Repeated installation-specific crashes mark the installation suspect and offer diagnostics or another model, without converting an absent quality score into incompatibility.\n\nD-009 and D-010 govern uncertain external effects. Permission failure before insertion holds the result and offers Copy. Copy itself is an explicit user action. A result is never placed on the clipboard merely because Accessibility became unavailable. After an uncertain write, the application reports the mechanism and possible partial effect, and requires review before another automatic delivery proceeds.\n\nResource pressure follows D-004. Capture stops only when continuing would lose data or exhaust a real resource; it does not stop at an arbitrary elapsed duration. A job exceeding its admitted ceiling is suspended or terminated with its inputs preserved and its observed use reported. A higher budget requires a new admission decision. Model acquisition failure preserves the active installation under D-022. Generation violations follow D-012, and uncertain speaker attribution follows D-023. Automatic desktop restoration follows the ownership protocol in D-025, including loss of ownership after competing actions.",
+  "evolution": "The persistence and concurrency contracts support the full application before individual surfaces are added. Capture, model installation and delivery can be developed against fake adapters because their ownership and interruption semantics already have definitions. Recognition then consumes the same stored audio that imports and meetings produce. Language processing consumes identified transcript results. Speaker editing and notes extend the result dependency graph without mutating recognition output.\n\nDesign acceptance precedes a detailed phased implementation plan. The dependency ordering is fixed here without prescribing a task checklist. Store publication and lease behavior are prerequisites for persistent workers. Service isolation and model materialization evidence precede integrating models into routine processing. Capture recovery and resource admission precede long imports and meetings. Delivery behavior can be evaluated independently using committed fixture text. Mode fidelity review depends on retained recognition output and versioned contracts. Notes require diarization publication and speaker revision semantics. Release packaging must exercise the same service boundaries as local development.\n\nD-034 defines evidence packages F1 through F5. Their results can change a runtime adapter, default model or resource descriptor. They cannot erase a required feature. If no candidate can satisfy a required capability within the local execution boundary, that capability remains an implementation blocker and the design returns for a concrete alternative. A benchmark miss alone does not disable a compatible user import.\n\nAdding a source requires an AudioSource implementation and the format/timing contract in D-018. It reuses capture ownership, processing and deletion. Adding a decoder requires a bundled adapter inside DecodeService. Replacing a runtime changes its adapter, service binary and parameter mapping. Historical UI rendering uses stored descriptors under D-038, and physical storage follows D-040. Neither operation requires a new recording schema unless it introduces a genuinely new kind of input or output.\n\nMaintenance includes database migrations, pinned Swift and C++ dependencies, signed service packaging, capture recovery fixtures and application-specific delivery profiles. Player support has a separate compatibility matrix because control ownership differs by integration. Language evaluation datasets and transformation checks require ongoing review as defaults change. The selected capture format spends more disk space to reduce container-repair code. Runtime caches remain visible in model storage accounting. Intel support adds a speech adapter and a diarization compatibility investigation under D-001; successful compilation alone would not establish acceptable behavior on that hardware.",
+  "verification": "Expected behavior is established by the specification, the invariants in data_lifecycle and the authoritative decision contracts. Before writing assertions, each subsystem gets a state/event table identifying persisted effects and visible outcomes. Derived behavior is labeled and reviewed against realistic user cases. D-035 assigns acceptance authority. A passing test establishes that an implementation met its assertions under the tested conditions; review must still examine whether those assertions express the intended behavior.\n\nF1 evaluates speech recognition, preview, cancellation and generation on identified Macs with exact model hashes, runtime revisions, operating-system builds and parameters. The evaluation target is Apple Silicon with 16 GB memory. No results currently exist. Before execution, freeze a language-stratified corpus, comparator configuration and scoring procedure. Compare WhisperKit with whisper.cpp using equivalent checkpoints where possible and record conversion or quantization differences. Proposed default-model criteria are corpus word error rate at most 12 percent and no degradation exceeding 15 percent relative to the comparator, or one percentage point when comparator error is below five percent. These are engineering acceptance proposals, not promised language coverage.\n\nThe practical recognition sample contains twenty preselected recordings per evaluated language, stratified across short commands, conversational dictation, names and noisy speech. The selection manifest is frozen before scoring. Reviewers count editing operations under a written rule covering substitutions, deletions and insertions. The proposed limit is two corrections per hundred reference words pooled over the sample, with every transcript separately inspected for meaning-changing errors. Short utterances retain individual counts and cannot disappear into the aggregate. A failed default requires another model or an explicit revision to the supported-default claim. Models remain selectable with their measured limitations.\n\nProposed responsiveness targets are a first provisional update within two seconds after speech reaches a warm model, continuing updates at least every three seconds during speech, and final recognition p95 within six seconds after a thirty-second recording stops. Cold loading is reported separately. These values express desired usability. Missing them requires optimization or a different default and disclosure of measured behavior. A final-only display does not satisfy the live transcript requirement. Compare final recognition with preview enabled and disabled using paired recordings, with a one-sided 95 percent upper confidence bound below one percentage point of additional word error rate. Capture discontinuities are reported independently of recognition scores.\n\nF2 exercises the signed service arrangement in D-003. Load each selected model kind from a service materialization, process fixture input, return staged output, and restart after connection interruption. Attempt outbound and inbound networking from every inference and decode service. Attempt opening unrelated library files and writing outside the service container. Verify the downloader has no recording or context handles. Dependency and initializer inspection supplements these runtime checks. Failure to load inside the selected arrangement blocks integration of that adapter until a compliant implementation exists. An unsandboxed inference fallback is unacceptable. Local ad hoc and Developer ID builds both need evidence because identity and entitlement mistakes can differ.\n\nF3 interrupts capture after every write, synchronization and rename boundary in D-030, including repeated interruption during recovery. Reference PCM defines the expected durable frame prefix. Every published chunk must reproduce its stored samples and timeline exactly. Proposed maximum uncommitted loss is four seconds under the configured two-second chunk period and tested storage conditions; exceeding it requires correcting writer scheduling or reducing the chunk period. It is not an unconditional guarantee against hardware failure. Exercise disk exhaustion, device removal, sleep, import cancellation and deletion during sealing. Record actual recovery duration, file counts and capture-writer backlog under concurrent decode and inference load.\n\nF4 evaluates D-008 through D-010 in TextEdit, Mail, Notes, Safari, Chrome, Xcode, Terminal, VS Code, Slack, Messages and Figma. Record app and OS versions, control roles, supported acknowledgment semantics and insertion results. Include selected text of equal length, unrelated edits, right-to-left text, non-Latin input methods, secure fields, focus changes between preflight and write, permission revocation and delayed clipboard consumers. Two simultaneous completed runs must exercise the global queue and unresolved clipboard barrier. Observing a successful readback is evidence about that trial. It does not create an acknowledgment contract or prove an error is always pre-effect. Only documented or explicitly supported target semantics can authorize automatic submission or a subsequent insertion after an attempted effect.\n\nF5 evaluates SpeakerKit windows, local cluster output, centroid availability and stitching proposals. Use consented, labeled meetings with overlapping speakers, echo, silence, remote-only participants and speakers returning after long gaps. Report diarization error with missed speech, false speech and speaker confusion separated, plus boundary error, proposal acceptance rate and manual correction time. Compare window lengths and overlaps while retaining distinct cluster identities. Timestamp alignment is scored against fixture tones recorded through both paths; production recordings use only their observed timing. The proposed alignment target is at most 50 ms disagreement over sixty minutes. A fit residual alone cannot establish absolute alignment accuracy. No calibrated identity threshold or speaker-confidence claim follows from centroid availability.\n\nThe resource protocol applies to every participating process, including the shell, DecodeService, materialization and any simultaneous workers. Fix model configuration and window sizes. Measure physical footprint and attributable accelerator allocations after warm-up in at least eight independent repetitions of ten-minute, one-hour and three-hour inputs, plus a twelve-hour repeated-content stress run. Increase repetitions if variance makes the interval inconclusive. Use a regression with a one-sided 95 percent upper confidence bound on post-warm-up growth. The proposed equivalence margin is 1 MiB per processed hour per process. Passing also requires every sample to remain below that job's duration-independent admitted ceiling, and code inspection must identify the finite buffers, caches and disk spill paths implementing I7. A small positive margin is measurement tolerance, not permission for indefinite allocation. Any demonstrated accumulating duration-dependent allocation fails even if a statistical comparison passes. A ceiling applies unchanged beyond measured durations, with runtime monitoring providing containment rather than a proof of future behavior.\n\nAutomated state-machine and fault-injection suites exercise I1 through I8 and their protocol boundaries. Required races include staged-model smoke tests without recordings, two identical concurrent imports, publication against archival, a live materialization during sweeping, orphan notices, deletion during every worker stage, stale execution responses and repeated diarization interruption. Checkpoint tests compare published segment structure and evidence under uninterrupted and resumed execution with identical seeds and parameters where the runtime is deterministic. Otherwise they verify preservation of completed windows and correct provenance without asserting identical stochastic output. Search and playback tests page long artifacts and exclude uncommitted staging. Migration fixtures include interrupted sessions and archived installations.\n\nTransformation review uses forty frozen examples per built-in mode and evaluated language, with two reviewers and adjudication of disagreements. Score meaning, factual additions, question preservation, terminology and formatting on a defined 0 to 2 rubric. Proposed acceptance permits no severe violation scored 0, at most ten percent of examples with a minor meaning or question issue, and at most twenty percent with a minor formatting or terminology issue. Review includes negation, quantities, uncertain claims, indirect questions and malicious context that can pass lexical checks. Translation is evaluated separately against the retained source transcript by bilingual reviewers, with audio recognition errors reported alongside it. Notes are checked against their cited passages for support and omission of invented decisions. Passing citation syntax does not establish factual support. These evaluation rules govern shipped defaults and development claims; D-012 and D-041 govern application behavior for unmeasured models.",
+  "assumptions": [
+    "macOS 14 remains the deployment baseline because the selected Argmax package documents that prerequisite and the capture design uses separately available microphone and system-audio paths. Reconsider when a pinned dependency or supported Apple API requires a newer baseline, and verify the oldest supported OS in release testing.",
+    "The first evaluated binary targets Apple Silicon. Intel remains an engineering compatibility question under D-001, with speech and generation alternatives identified and diarization still requiring hardware evidence. The product specification does not exclude Intel.",
+    "Service-local model materialization through explicitly passed read handles will support the selected runtimes. Apple documents independently sandboxed XPC services, but the complete loading arrangement has not been exercised. F2 resolves compatibility without changing the local execution requirement.",
+    "An initial 8 GiB scheduler budget on a 16 GB Mac leaves useful room for macOS and other applications. It is a configurable admission policy based on incomplete measurements, not a claim of sufficient headroom on every Mac. D-027 defines its arithmetic and reconsideration conditions.",
+    "Two-second PCM chunks, a five-second pre-roll ring and a dedicated writer are acceptable initial capture choices. The basis is bounded recovery work and simple frame accounting. F3 determines their measured loss, overhead and behavior under storage contention.",
+    "Bounded whole-window calls can integrate the selected speech and diarization runtimes without whole-recording allocation. Source inspection supports the available local APIs but does not establish resource behavior. F1 and F5 must verify each adapter's fixed working-data contract.",
+    "Centroid distance is useful enough to show ranked speaker-link proposals. Its suggested threshold is an uncalibrated display heuristic under D-023. Reconsider it using proposal acceptance and correction effort; identity remains user-confirmed.",
+    "The initial import matrix in D-018 is based on expected AVFoundation decoder coverage. Container and codec combinations require fixture confirmation on macOS 14. A failed built-in combination remains an implementation defect to resolve, not permission to remove imported video support.",
+    "Context deadlines and byte limits in D-016 are responsiveness and memory assumptions. Reconsider them when measured omission rates or user review show that useful context is routinely missed.",
+    "No initial player adapter has supplied evidence of an ownership-preserving atomic resume operation. Automatic resume is therefore unavailable until an integration satisfies D-025. Explicit player-specific resumption remains available after supported pausing.",
+    "Quality thresholds in verification are proposed development criteria. No language coverage, recognition accuracy, diarization accuracy or latency has been measured for this application."
+  ],
+  "decisions": [
+    {
+      "id": "D-001",
+      "title": "Deployment baseline and hardware compatibility",
+      "choice": "Use macOS 14.0 as the deployment target and evaluate the first binary on Apple Silicon with 16 GB memory. Initial release packaging is arm64. Intel compatibility remains open at the runtime level.",
+      "rationale": "The selected package documents macOS 14 and Xcode 16 prerequisites in its [repository](https://github.com/argmaxinc/argmax-oss-swift). Its Apple Silicon focus supplies an engineering reason for the initial binary choice. Intel would require whisper.cpp speech integration and separate SpeakerKit or alternative diarization evidence.",
+      "alternatives": [
+        {
+          "option": "Require macOS 15",
+          "tradeoff": "The newer microphone stream API could simplify capture integration, but would exclude macOS 14 without evidence that the separate paths are inadequate."
+        },
+        {
+          "option": "Ship a universal binary immediately",
+          "tradeoff": "Expands hardware coverage while adding unresolved diarization compatibility and another complete resource and quality evaluation."
+        }
+      ],
+      "consequences": "Later APIs receive availability checks. Smaller-memory Macs use smaller models or sequential residency, with capabilities reported per installation. Intel cannot be advertised on the strength of compilation or whisper.cpp support alone.",
+      "reconsider_when": "The capture alignment evidence requires a newer API, dependencies change their baseline, or Intel runtime evaluation becomes available."
+    },
+    {
+      "id": "D-002",
+      "title": "Swift package boundaries",
+      "choice": "Use one SPM package with the targets and dependency direction defined in architecture. Keep business behavior in Core and framework integration in adapters. Build service executables from library-backed targets.",
+      "rationale": "Deletion, reprocessing and cancellation require consistent policy across input sources. Explicit ports let those behaviors be exercised without TCC permissions or real models. Runtime-specific types remain within their adapter.",
+      "alternatives": [
+        {
+          "option": "One SwiftUI application target",
+          "tradeoff": "Reduces initial wiring but couples state transitions to platform callbacks and makes runtime replacement affect unrelated UI code."
+        },
+        {
+          "option": "Separate repositories for each adapter",
+          "tradeoff": "Allows independent release schedules while increasing version coordination before there is evidence that independent distribution is needed."
+        }
+      ],
+      "consequences": "SPM owns source dependencies and tests. A thin packaging configuration supplies bundle metadata, XPC embedding and signing. Protocol changes require coordinated adapter updates and compatibility tests.",
+      "reconsider_when": "A port repeatedly leaks framework types or an adapter acquires a separate distribution requirement."
+    },
+    {
+      "id": "D-003",
+      "title": "Sandboxed services and explicit storage access",
+      "choice": "Use independently sandboxed bundled XPC services. Choose container-local materialization for model loading. The app passes read-only file handles for verified model assets and job inputs. Before dispatch, Store registers a service_artifacts row and grants the job's lease. The service creates Jobs/<jobId>/<epoch> inside its container, writes outputs there, and returns read handles plus relative paths and hashes. The app copies publishable output into owner staging before committing it.",
+      "rationale": "Apple documents independent service sandboxes and interruption handling in the [XPC guide](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingXPCServices.html). A container-local path gives runtimes ordinary file access without granting the service the library directory.",
+      "alternatives": [
+        {
+          "option": "Grant each service library-path exceptions",
+          "tradeoff": "Avoids model copies but broadens persistent access and complicates path-specific entitlements."
+        },
+        {
+          "option": "Run inference inside the application",
+          "tradeoff": "Avoids IPC and copies while sharing native crashes and unrestricted shell access."
+        }
+      ],
+      "consequences": "The service sandbox permits its container; the design does not claim per-job filesystem isolation within one service. A restarted service reconciles registered scratch with the broker. The unsandboxed app can remove abandoned container paths after holder death. Live creators are protected under I3.",
+      "reconsider_when": "F2 demonstrates a runtime cannot operate with materialized local files or an equally confined descriptor-only integration removes the copy cost."
+    },
+    {
+      "id": "D-004",
+      "title": "Global scheduling and overlapping recordings",
+      "choice": "ResourceScheduler serializes admission. Priority order is capture writing, current live-session preview, final recognition for the most recently stopped live session, earlier interactive recognition or generation ordered by capture sequence, foreground reprocessing, then background work. A newly triggered session outranks an earlier rewrite. Before capture starts, reserve the preview charge and enough replaceable capacity for its subsequent recognition under D-027. Lower-priority jobs checkpoint or stop, retaining their charge until exit or unload. One live session is permitted; additional live triggers act on that session.",
+      "rationale": "Live audio cannot wait for an earlier rewrite to release memory. Priority must span resource classes because a generation model can consume the memory needed by speech.",
+      "alternatives": [
+        {
+          "option": "Equal priority for all interactive work",
+          "tradeoff": "Preserves completion order but can prevent live preview when an older rewrite holds residency."
+        },
+        {
+          "option": "Run everything serially",
+          "tradeoff": "Simplifies memory accounting while making dictation wait behind long jobs."
+        }
+      ],
+      "consequences": "Each decode, ingest, materialization and model job is charged. Capture writing has a dedicated queue. At 30 seconds of writer backlog, suspend seekable ingest and batch work; at 60 seconds, stop capture and retain the durable prefix. These are pressure responses. Paused batch jobs show their reason and may be explicitly prioritized while capture is idle.",
+      "reconsider_when": "Measured workloads justify concurrent residency or demonstrate starvation that requires a revised visible scheduling policy."
+    },
+    {
+      "id": "D-005",
+      "title": "Transactional metadata and searchable text",
+      "choice": "Use GRDB over SQLite in WAL mode, with FTS5 over bounded text_chunks and files for large artifacts. Store has one writer, explicit transactions and numbered migrations.",
+      "rationale": "Publication, deletion and lease eligibility need atomic checks with writes. FTS supports local search without a second indexing service. Streaming text rows prevents a long transcript from requiring a single in-memory value.",
+      "alternatives": [
+        {
+          "option": "SwiftData",
+          "tradeoff": "Provides native observation but requires additional work for full-text indexing and precise transactional lifecycle control."
+        },
+        {
+          "option": "Core Data with a separate search index",
+          "tradeoff": "Uses mature persistence APIs while introducing another consistency boundary for deletion and recovery."
+        }
+      ],
+      "consequences": "Validate FTS5 availability during development and bundle SQLite if the baseline lacks it. Limit page caches and page History results. Filesystem reconciliation remains necessary under I4. Database migration recovery must retain an intact prior database until migration commits.",
+      "reconsider_when": "Measured library scale or dependency maintenance outweighs the current query and transaction benefits."
+    },
+    {
+      "id": "D-006",
+      "title": "Run state machine and settings snapshots",
+      "choice": "At a recording trigger, create the session owner and snapshot configuration while capture begins into a bounded pre-roll ring. Persist the manifest before flushing captured chunks. States are arming, capturing, sealing, queued, recognizing, diarizing, refining, rewriting, translating, noting, delivering, interrupted_resumable, completed, cancelled and failed. The last three are terminal. queued and interrupted_resumable carry resume_stage. Every execution admission increments execution_epoch. Notes and reprocessing create runs with already identified inputs.",
+      "rationale": "Snapshotting gives ongoing work stable meaning while allowing users to edit modes. Explicit suspended states make repeated interruption representable under I8.",
+      "alternatives": [
+        {
+          "option": "Read settings when each stage starts",
+          "tradeoff": "Avoids snapshot storage but silently changes the interpretation of already captured speech."
+        },
+        {
+          "option": "Resume terminal failed runs",
+          "tradeoff": "Uses fewer state names but makes completion timestamps and terminal-state behavior inconsistent."
+        }
+      ],
+      "consequences": "UI state is derived from the run. If arming exceeds pre-roll capacity, record truncation and expose it. Terminal retries create a new run. Durable diarization resumption uses the same manifest under D-031.",
+      "reconsider_when": "A requested feature requires deliberate mid-recording configuration boundaries."
+    },
+    {
+      "id": "D-007",
+      "title": "Cancellation at every processing stage",
+      "choice": "Cancellation during arming discards the session. During capturing, stop input and apply the snapshotted keep_interrupted or discard preference. During sealing, durably set that disposition and return control immediately; finalization or cleanup continues. During queued, remove admission and retain committed inputs. During recognizing or diarizing, stop execution and discard unpublished output, including checkpoints. During refining, retain recognition. During rewriting, translating or noting, retain their inputs and discard partial generation. During interrupted_resumable, cancel the run and remove its checkpoint. During delivering, cancel before effect dispatch; after dispatch record the uncertain or completed effect and perform no undo.",
+      "rationale": "The meaning of cancellation depends on what has already become durable or external. The table covers sealing and suspended work without treating a partial result as complete.",
+      "alternatives": [
+        {
+          "option": "Discard the entire recording for every cancellation",
+          "tradeoff": "Provides one rule but destroys useful recognition when only a rewrite was unwanted."
+        }
+      ],
+      "consequences": "Cancellation acknowledgment waits for its durable intent, not worker termination. Disk failure can prevent that acknowledgment and must be reported. Cleanup follows the applicable leases.",
+      "reconsider_when": "Users need explicitly retained partial results as a separate artifact kind."
+    },
+    {
+      "id": "D-008",
+      "title": "Delivery target identity",
+      "choice": "Latch the foreground process launch identity, window and editable element at arming. The default target is that exact element. Changing focus during capture or processing holds delivery. An explicit per-mode follow-field option may select the currently focused field only within the same latched application, with the change shown before dispatch. DeliveryExecutor resolves and revalidates the target when the attempt reaches the queue front and immediately before each external operation. It never automatically activates another application.",
+      "rationale": "A transcript belongs to the context in which recording began. Queue delay makes a trigger-time target check insufficient.",
+      "alternatives": [
+        {
+          "option": "Always use the current foreground application",
+          "tradeoff": "Reduces held results but sends delayed transcripts into unrelated work."
+        },
+        {
+          "option": "Automatically refocus the original application",
+          "tradeoff": "Improves completion rate while interrupting the user's current activity."
+        }
+      ],
+      "consequences": "A pre-effect mismatch produces held. A mismatch after dispatch produces unconfirmed. Ordinary accessibility and keyboard APIs cannot atomically lock focus against another application; supported target adapters must expose their practical limits.",
+      "reconsider_when": "A target offers a documented insertion API with stable destination identity."
+    },
+    {
+      "id": "D-009",
+      "title": "Selection-aware insertion and acknowledgment",
+      "choice": "Preflight selects one mechanism before any write. Use AXSelectedText for a supported editable selection, never AXValue. Otherwise offer the clipboard paste path when permitted. Once a write is attempted, no automatic fallback mechanism is allowed. AX messaging errors, timeouts and unchanged readback produce unconfirmed. Confirmed means an applicable target adapter supplies supported acknowledgment of the operation; a content readback alone is diagnostic. The stop modifier requests submission, but Return is dispatched only after such acknowledgment and target/selection revalidation.",
+      "rationale": "The supplied Apple evidence distinguishes field replacement from selection insertion and supplies no general paste-consumption acknowledgment. Finite successful trials cannot establish that a later messaging failure had no effect.",
+      "alternatives": [
+        {
+          "option": "Paste, wait, then type if text appears unchanged",
+          "tradeoff": "Improves apparent coverage but can duplicate a delayed paste."
+        },
+        {
+          "option": "Synthetic typing as the default",
+          "tradeoff": "Avoids clipboard mutation while depending on focus and input-method behavior, with possible partial insertion."
+        }
+      ],
+      "consequences": "Unsupported confirmation commonly yields unconfirmed even when text appears inserted. Submission remains available in supported targets and through explicit user action elsewhere. Adapter coverage is versioned and tested under F4.",
+      "reconsider_when": "A documented target acknowledgment broadens reliable insertion or submission."
+    },
+    {
+      "id": "D-010",
+      "title": "Process-wide delivery and clipboard ownership",
+      "choice": "One DeliveryExecutor owns accessibility writes, event posting and pasteboard mutation. Ready attempts enter FIFO order by durable queue_sequence. Cancellation removes a queued attempt. At dispatch, persist intent under I5. For paste, snapshot supported eager pasteboard data up to 10 MiB, record changeCount, then write the transcript and record the resulting count. Unsupported, promised or oversized content requires explicit permission to replace without a restorable snapshot. Restore only after acknowledged consumption or explicit user action, and only while the written changeCount remains current.",
+      "rationale": "Per-run coordinators can interleave writes and create nested clipboard snapshots. A single owner prevents that race.",
+      "alternatives": [
+        {
+          "option": "One executor per recording",
+          "tradeoff": "Allows parallel completion but provides no ordering for shared clipboard and focus state."
+        }
+      ],
+      "consequences": "An unconfirmed paste leaves a process-wide unresolved-consumption barrier. Later automatic delivery waits for acknowledgment or user resolution. An external clipboard edit revokes restoration ownership but does not by itself prove paste consumption. User resolution explicitly retires the old attempt. Attempts use queued, dispatching, confirmed, unconfirmed, held, cancelled and needs_review states. Restart converts dispatching and unconfirmed to needs_review and restores no clipboard payload.",
+      "reconsider_when": "An application-specific API supports independently acknowledged delivery without shared clipboard or focus state."
+    },
+    {
+      "id": "D-011",
+      "title": "Recording panel and provisional output",
+      "choice": "Use a movable nonactivating AppKit panel with a waveform, effective mode and provisional transcript. Persist placement relative to the display's visible frame and clamp it when displays change. Preview uses rolling bounded recognition windows from the selected speech model, with a separately selectable compatible preview model when needed. D-004 reserves its capacity. Final recognition replaces preview after complete publication.",
+      "rationale": "A nonactivating panel preserves the target. Preview needs an explicit scheduling claim to remain available while an earlier run is generating text.",
+      "alternatives": [
+        {
+          "option": "A normal application window",
+          "tradeoff": "Simplifies standard interactions but takes focus from the delivery target."
+        },
+        {
+          "option": "Only a waveform until recording stops",
+          "tradeoff": "Reduces inference load but does not satisfy the provisional transcript requirement."
+        }
+      ],
+      "consequences": "Provisional text is labeled, may change and is not indexed or retained as a final result. A selected model unable to sustain preview needs a compatible preview model or an explicit resource/setup error. The app reports unavailable preview and does not claim full recording-display readiness.",
+      "reconsider_when": "Measurements support a more efficient streaming adapter or reveal unacceptable preview delay."
+    },
+    {
+      "id": "D-012",
+      "title": "Mode contracts and transformation fidelity",
+      "choice": "Mode revisions contain user instructions, formatting rules, permitted operations, answersQuestions, language behavior, context configuration and model selections. answersQuestions defaults to false. Available checks report structural violations and suspected semantic drift. Missing language checks or benchmarks changes the evidence label only; it does not replace, withhold or disable a compatible model's output. A concrete detected contract violation prevents automatic delivery, retains the flagged candidate and offers editing, retry or the source transcript. An explicitly answering custom mode visibly declares that behavior.",
+      "rationale": "Questions should remain questions unless the user selected answering behavior. Lexical checks cannot prove semantic fidelity, and requiring validator coverage would improperly restrict imported models.",
+      "alternatives": [
+        {
+          "option": "Require a validator pack for automatic rewriting",
+          "tradeoff": "Offers a stronger appearance of control while excluding valid multilingual output without proving meaning preservation."
+        },
+        {
+          "option": "Use a second model as a mandatory judge",
+          "tradeoff": "May detect additional errors but adds residency and correlated judgment failures."
+        }
+      ],
+      "consequences": "Checks distinguish definite structural errors from advisory signals such as expansion or vocabulary change. Users can review flagged output. Review does not silently change a mode's answering contract. Development evaluates semantic fidelity under D-035.",
+      "reconsider_when": "A check produces frequent false positives or new evaluation evidence supports a better disposition."
+    },
+    {
+      "id": "D-013",
+      "title": "Built-in transformation behavior",
+      "choice": "Provide Standard, Email, Note and Meeting notes. Standard performs recognition plus configured deterministic cleanup, preserving wording. Email may adjust punctuation, capitalization, paragraphs and explicitly dictated salutation or closing formatting. It cannot invent recipients, commitments or answers. Note may organize dictated material into headings and lists without dropping substantive claims. Meeting notes may summarize supported discussion into timestamped topics, decisions and action items, with uncertainty retained and citations required. All built-ins set answersQuestions=false.",
+      "rationale": "Each mode needs a concrete transformation boundary. Summarization has different acceptance criteria from ordinary dictation.",
+      "alternatives": [
+        {
+          "option": "One prompt with style presets",
+          "tradeoff": "Reduces editor structure but makes the permitted transformation depend on loosely interpreted prompt text."
+        },
+        {
+          "option": "Include a built-in answering assistant",
+          "tradeoff": "Adds a useful separate operation but expands the initial product beyond the required built-ins."
+        }
+      ],
+      "consequences": "Built-ins are versioned and read-only. Customization duplicates a built-in into a custom revision. Meeting notes can leave sections empty when the recording contains no supported decisions or actions.",
+      "reconsider_when": "Repeated user customization establishes a need for another distinctly specified built-in."
+    },
+    {
+      "id": "D-014",
+      "title": "Ordered automatic selection rules",
+      "choice": "Resolve mode once at arming. A per-mode shortcut explicitly selects its mode. Otherwise evaluate the user's ordered rules, first match winning, followed by the default mode. Predicates include application bundle identifier and supported browser URL host or path matching. Missing input makes that predicate non-matching. Rules display shadowing and their matching reason.",
+      "rationale": "Visible list order supplies complete conflict resolution. A missing website permission should not invent a match or change mode mid-sentence.",
+      "alternatives": [
+        {
+          "option": "Rank by inferred specificity",
+          "tradeoff": "Reduces manual ordering but makes precedence harder to predict when predicates overlap."
+        },
+        {
+          "option": "Continuously reevaluate while recording",
+          "tradeoff": "Tracks browsing but changes processing instructions during one utterance."
+        }
+      ],
+      "consequences": "The panel and menu bar show the effective mode and selection source. URL adapters are versioned per browser. Query strings and fragments are excluded by default from both matching and retention.",
+      "reconsider_when": "Rule sets become large enough to need explicit groups or additional supported predicates."
+    },
+    {
+      "id": "D-015",
+      "title": "Vocabulary and cleanup ordering",
+      "choice": "Select terminology for the recognizer's bounded prompt budget before recognition. Persist the raw recognition result. Apply configured replacements in one non-cascading pass, choosing the longest match and then list order, followed by the optional filler pass. Apply language processing next. Reapply explicitly designated output replacements once and retain that derived result. Exact, whole-word and case-sensitive matching are separate user options.",
+      "rationale": "Recognition bias is probabilistic, while replacements alter known text. Ordering determines what the language model receives and makes repeated processing explainable.",
+      "alternatives": [
+        {
+          "option": "Apply replacements only after rewriting",
+          "tradeoff": "Uses one pass but lets the model interpret an incorrect name or technical term."
+        },
+        {
+          "option": "Cascade replacements until stable",
+          "tradeoff": "Supports chains but introduces loops and harder-to-explain precedence."
+        }
+      ],
+      "consequences": "Whole-word matching uses locale-aware segmentation. Scripts without reliable word boundaries use explicit literal matching, identified in the editor. Filler removal defaults off and never treats every occurrence of a listed word as disposable. Adding a name provides no recognition guarantee.",
+      "reconsider_when": "A runtime exposes tested biasing controls or observed cleanup errors require a more contextual rule."
+    },
+    {
+      "id": "D-016",
+      "title": "Context sampling and instruction separation",
+      "choice": "Sample enabled focused-application text, screen context and clipboard text at arming. Use a 200 ms deadline for text sources and one second for screen capture plus local Vision OCR. Cap each text source at 32 KiB and the sampled screen image at four megapixels. Record omissions and truncation. Context is a typed, delimited data section after the mode instructions, with no tool execution or instruction authority.",
+      "rationale": "A single sampling point preserves the user's original context and bounds collection cost. Prompt separation reduces accidental instruction mixing without claiming to eliminate prompt injection.",
+      "alternatives": [
+        {
+          "option": "Sample immediately before generation",
+          "tradeoff": "Uses fresher data but may capture an unrelated application visited while processing."
+        },
+        {
+          "option": "Continuously capture the screen",
+          "tradeoff": "Provides more context while increasing retained exposure and processing cost."
+        }
+      ],
+      "consequences": "Context defaults to extracted terms; users can choose prose per source. Raw screen pixels are released after OCR. Transient text is released after the final stage that consumes it or on termination. Retention and replay follow D-039. No validator pack is required to use prose context.",
+      "reconsider_when": "Measured omission rates or fidelity review justify different bounds or representations."
+    },
+    {
+      "id": "D-017",
+      "title": "Recognition language and English translation",
+      "choice": "Support explicit language selection and model-supported detection. Preserve the returned language evidence without inventing calibrated confidence. A supported adapter may use its documented score scale with a configured threshold. Unknown or ambiguous detection prompts a visible language choice or uses the user's snapshotted fallback, recording that decision. English translation is a separate derived operation after source recognition.",
+      "rationale": "Recognition and translation introduce different errors. Retaining a source transcript allows users to inspect and regenerate the translation.",
+      "alternatives": [
+        {
+          "option": "Use direct speech-to-English output alone",
+          "tradeoff": "Can reduce processing stages but loses the requested source-language transcript."
+        },
+        {
+          "option": "Always detect language",
+          "tradeoff": "Simplifies settings but handles short or mixed utterances poorly when detection evidence is weak."
+        }
+      ],
+      "consequences": "Model descriptors distinguish recognition, generation and translation language claims. Publisher-declared or unknown coverage remains labeled. Code-switching is evaluated separately and uses the runtime's supported behavior. Translation quality is reviewed against its exact parent transcript.",
+      "reconsider_when": "A runtime supplies better language evidence or measured multilingual behavior supports a different default."
+    },
+    {
+      "id": "D-018",
+      "title": "Input formats and bounded decoding",
+      "choice": "Use AVAudioEngine for microphone input, ScreenCaptureKit for system audio and AVFoundation readers inside DecodeService for imports. The initial matrix is WAV with PCM or IEEE float, AIFF with PCM, CAF with PCM or ALAC, MP3, M4A with AAC or ALAC, and MOV, MP4 or M4V carrying supported AAC, ALAC or PCM audio tracks. Probe actual container and codec data, enumerate audio tracks and require a selection when ambiguous. Unsupported DRM or codecs produce a specific error.",
+      "rationale": "File extensions cannot establish decodability. A common AudioSource contract preserves timing and flow control across capture and import. Apple documents system-audio capture and newer microphone additions in its [ScreenCaptureKit session](https://developer.apple.com/videos/play/wwdc2024/10088/).",
+      "alternatives": [
+        {
+          "option": "Bundle FFmpeg immediately",
+          "tradeoff": "Broadens formats while adding native-code, licensing and update work."
+        },
+        {
+          "option": "Decode entire files first",
+          "tradeoff": "Simplifies adapters but violates the long-input memory requirement."
+        }
+      ],
+      "consequences": "Add formats through compiled DecoderProvider adapters inside the same service. No user executable decoder is launched. Audio credit is byte-based and buffers are bounded under D-042.",
+      "reconsider_when": "Unsupported formats justify a bundled decoder and its maintenance cost."
+    },
+    {
+      "id": "D-019",
+      "title": "Import ownership and source preservation",
+      "choice": "Open the selected source read-only, copy it incrementally into the session, verify the copied length and hash, and decode the copy. Persist only descriptive source metadata from data_lifecycle. Publish the recording after successful ingest under D-030. A failed or cancelled import discards its owned staging unless the user explicitly retains diagnostics.",
+      "rationale": "A library-owned copy survives later movement of the source. A bookmark adds an enduring access capability that is unnecessary after copying.",
+      "alternatives": [
+        {
+          "option": "Reference the external file in place",
+          "tradeoff": "Saves disk space but introduces missing-source behavior and persistent access management."
+        },
+        {
+          "option": "Retain only decoded audio",
+          "tradeoff": "Uses less storage for video imports but prevents later use of a better decoder on the original bytes."
+        }
+      ],
+      "consequences": "The original is never moved, modified or deleted by import. Copying video can consume substantial storage, which the preflight estimate shows. Source and decoded-audio retention are separately visible options under D-024.",
+      "reconsider_when": "Measured video usage justifies an explicit audio-only import option with disclosed loss of decoder reprocessing."
+    },
+    {
+      "id": "D-020",
+      "title": "Local speech runtime",
+      "choice": "Use WhisperKit behind SpeechRecognizer with explicit local model paths and acquisition disabled. Pin a reviewed package revision during integration. The adapter supplies bounded audio windows and writes completed window output to staging. Maintain a whisper.cpp comparison harness, promoting it to a product adapter if hardware coverage or measured behavior warrants the cost.",
+      "rationale": "The supplied research establishes Swift package integration and local model configuration. F1 must establish application accuracy and resource behavior. The upstream default whole-file path is not the application's long-input contract.",
+      "alternatives": [
+        {
+          "option": "Use whisper.cpp initially",
+          "tradeoff": "Provides an Intel-capable route and C-style integration while adding bridging work alongside the separate diarization dependency."
+        },
+        {
+          "option": "Use Apple's speech service",
+          "tradeoff": "Reduces model management code but does not supply the required user-controlled model installation interface."
+        }
+      ],
+      "consequences": "Recognition and provisional preview have separate adapter entry points. Overlap reconciliation is deterministic and retains timestamps. No advertised latency or language coverage is inferred from upstream benchmarks.",
+      "reconsider_when": "F1 shows unacceptable behavior, Intel becomes a release target, or upstream maintenance changes materially."
+    },
+    {
+      "id": "D-021",
+      "title": "Local language runtime",
+      "choice": "Embed llama.cpp as a library in GenerationService and accept compatible GGUF model sets. Use bounded context, explicit tokenizer and chat-template configuration, and credited token output. No server executable or endpoint is configured.",
+      "rationale": "The [llama.cpp repository](https://github.com/ggml-org/llama.cpp) documents local library-oriented inference and macOS acceleration. Its model ecosystem supports user-supplied quantizations, while embedding gives the application control over loading and lifecycle.",
+      "alternatives": [
+        {
+          "option": "MLX generation",
+          "tradeoff": "Offers an Apple-focused implementation but adds another model format and requires comparable import coverage evidence."
+        },
+        {
+          "option": "Connect to a local HTTP server",
+          "tradeoff": "Reuses installed tooling but cannot establish whether that server forwards prompts externally."
+        }
+      ],
+      "consequences": "The project maintains a pinned C++ bridge and records runtime revisions. Context length, KV-cache configuration and GPU placement feed D-027. An imported model's immediate end-of-sequence is valid contract output and may carry a quality warning.",
+      "reconsider_when": "Measured performance or maintenance favors another embedded runtime with equivalent local import support."
+    },
+    {
+      "id": "D-022",
+      "title": "Model staging and no-replace publication",
+      "choice": "Create model_staging before copying or downloading bytes. Copy regular files only, rejecting escaping paths, symlinks and executable plugins. Hash a canonical manifest of all behavior-affecting assets, persist proposed_set_hash, freeze staging, and obtain the staging lease in D-033. Verify required assets and smoke-test loading and result contracts through materialization. Before publication, obtain the exclusive setHash claim. If the blob exists, verify its full manifest and reference it. Otherwise publish with an atomic no-replace rename on the same volume and synchronize the parent directory. Write installation-specific notices durably, then transactionally add installation and asset references, transfer staging claims and change the active pointer.",
+      "rationale": "Identical imports must share verified bytes without overwriting a working blob. Staging eligibility supports smoke tests before any installation exists.",
+      "alternatives": [
+        {
+          "option": "Replace the destination directory",
+          "tradeoff": "Simplifies installation but can destroy a working installation or race another importer."
+        }
+      ],
+      "consequences": "Concurrent installers queue at the hash claim. The winner publishes; followers verify and reference its bytes. Failure releases the claim and preserves the active pointer. A mismatching existing blob is quarantined only through an explicit repair transaction, never overwritten during import. Recovery reconciles committed activation before cleaning staging or notices.",
+      "reconsider_when": "Measured hashing or staging cost warrants verified deduplication optimizations."
+    },
+    {
+      "id": "D-023",
+      "title": "Meeting capture and speaker evidence",
+      "choice": "Retain separate microphone and system streams. Use host timestamps and observed frame delivery to fit per-stream timeline mappings, preserving gaps and fit residuals. Use SpeakerKit with explicit local modelFolder, download=false and explicit concurrency. Analyze ten-minute windows with thirty-second overlap. Each window's cluster IDs remain distinct. For available normalized centroids, record up to three nearest candidate links with cosine distance at most 0.35. Distances within 0.02 are shown as tied. These uncalibrated values govern suggestions only. Missing centroids or no qualifying candidate produces no proposal.",
+      "rationale": "The supplied v1.1.0 API evidence supports centroid access, with no universal identity threshold or per-segment confidence. Cross-window identity therefore requires confirmation.",
+      "alternatives": [
+        {
+          "option": "Automatically merge nearest clusters",
+          "tradeoff": "Reduces editing but can join different speakers without calibrated evidence."
+        },
+        {
+          "option": "Diarize the entire meeting at once",
+          "tradeoff": "May improve global clustering while leaving duration-dependent memory unresolved."
+        }
+      ],
+      "consequences": "Confidence is unknown unless a future adapter supplies meaningful evidence. Channel origin remains a capture fact. Alignment-degraded recordings show uncertain timing and disable automatic cross-stream echo annotation. Echo annotations never erase the source segments.",
+      "reconsider_when": "F5 supports calibrated matching or a bounded incremental diarizer improves continuity."
+    },
+    {
+      "id": "D-024",
+      "title": "History and deletion",
+      "choice": "History groups recordings with searchable result chains, paged transcript views and playback over the audio timeline. Reprocessing creates a run using an explicitly selected mode/model snapshot. Deletion transactionally tombstones a recording, increments its generation, removes it from visible search and signals all holders. Session deletion durably sets discard before publication. Reclamation follows I2 and I3.",
+      "rationale": "Logical deletion must precede physical cleanup so an active worker cannot restore a deleted recording. Immutable results make model comparisons and translations attributable.",
+      "alternatives": [
+        {
+          "option": "Wait for every worker before hiding the recording",
+          "tradeoff": "Avoids a deleting state but lets a hung process block the user's deletion request."
+        },
+        {
+          "option": "Overwrite the previous transcript",
+          "tradeoff": "Simplifies History but loses the relationship between models and successive results."
+        }
+      ],
+      "consequences": "Default retention is manual deletion. Users may configure age-based whole-recording deletion or discard original sources, audio and retained context separately. Artifact-specific removal blocks new dependent jobs while live leases drain. Text-only reprocessing remains possible after audio removal. SSD secure erasure is not promised.",
+      "reconsider_when": "Storage usage or user expectations require another explicit retention policy."
+    },
+    {
+      "id": "D-025",
+      "title": "Desktop controls and restoration ownership",
+      "choice": "Provide menu bar access and application-local microphone gain with clipping indication. Automatic capture does not alter hardware input volume. Player adapters may issue an explicit pause to an identified running player. Automatic resume requires confirmed pause completion plus an adapter operation that atomically resumes only if an ownership token remains valid. That token must change on every intervening play, pause, seek, item change or player restart, including manual and competing-client actions. A read-then-resume sequence without atomic conditional semantics is insufficient.",
+      "rationale": "Playback position and incomplete notifications cannot establish continuing ownership. A comparison followed by an unconditional command also leaves a race.",
+      "alternatives": [
+        {
+          "option": "Resume when position and paused state appear unchanged",
+          "tradeoff": "Works with more players but can reverse a user's intervening pause."
+        },
+        {
+          "option": "Use a global media-key toggle",
+          "tradeoff": "Needs little integration while identifying neither recipient nor effect."
+        }
+      ],
+      "consequences": "No real player is currently claimed to satisfy automatic-resume requirements. Initial supported adapters can pause and offer explicit player-specific Resume. Music and Spotify require control validation before being listed. Unsupported players receive no automatic toggle. App-local gain needs no system restoration.",
+      "reconsider_when": "A documented player integration supplies atomic ownership-preserving control and passes competing-action tests."
+    },
+    {
+      "id": "D-026",
+      "title": "Global recording shortcuts",
+      "choice": "Provide separately configurable toggle and push-to-talk bindings, with per-mode variants and conflict detection. Use a fast session event tap for key-down, key-up and modifier events where permission allows. Ignore auto-repeat. Push-to-talk stops on release; the optional submission modifier is sampled at that stop event and stored in the run. Toggle bindings act on the current capture. Escape cancels through D-007.",
+      "rationale": "Distinct bindings avoid an ambiguous hold-discrimination period and make per-mode selection explicit.",
+      "alternatives": [
+        {
+          "option": "Only menu bar recording",
+          "tradeoff": "Avoids global input permission but does not satisfy control from another application."
+        },
+        {
+          "option": "One overloaded shortcut",
+          "tradeoff": "Uses fewer bindings but adds timing-sensitive interpretation."
+        }
+      ],
+      "consequences": "Tap-disable, sleep and session-lock events trigger stuck-key handling. A physical key-state poll during push-to-talk can recover a missed release. Permission-limited operation retains a supported global toggle path where available and shows unavailable push-to-talk. No maximum hold duration is imposed.",
+      "reconsider_when": "A supported global shortcut API supplies equivalent key-up semantics with less permission and maintenance work."
+    },
+    {
+      "id": "D-027",
+      "title": "Complete resource accounting",
+      "choice": "Start with a configurable 8 GiB admitted peak budget on the evaluation Mac. Charge the shell and Store at 512 MiB, capture rings/writer at 128 MiB, each active decode job at a provisional 512 MiB, and each materialization at 256 MiB. Model charges include mapped residency, accelerator allocation, runtime baseline and parameter-dependent workspace. Initial planning envelopes are 2 GiB for primary speech, 1 GiB for preview, 5.5 GiB for an 8B quantized generator and 1.5 GiB for diarization. These are unmeasured ceilings, not measured footprints.",
+      "rationale": "Weights alone omit caches and active decoding. A summed budget must cover every admitted process and shared allocation exactly once.",
+      "alternatives": [
+        {
+          "option": "Wait for system memory-pressure notifications",
+          "tradeoff": "Needs fewer estimates but reacts after the Mac is already under pressure."
+        }
+      ],
+      "consequences": "Reserve base plus capture plus preview and primary-speech capacity before admitting competing jobs; mutually exclusive preview/final phases can share the larger reservation. Available remainder bounds decode concurrency. Defaults may run sequentially. Users can revise the budget with the arithmetic shown. Compatibility activation is separate from execution admission.",
+      "reconsider_when": "F1, F2 or F5 replaces provisional charges with measured descriptors or another hardware class needs different defaults."
+    },
+    {
+      "id": "D-028",
+      "title": "Local execution and network policy",
+      "choice": "Inference and decode services have App Sandbox enabled with network client and server entitlements absent. They receive no downloader port. Runtime acquisition initializers are prohibited by adapter construction. ModelDownloader starts only for a user-requested acquisition, receives a URL and staging output capability, validates redirects against the acquisition policy and receives no recording, transcript or context data. Routine operation has no network dependency.",
+      "rationale": "A localhost address does not establish local inference because a service can forward requests. Enforced service isolation and controlled acquisition address that concern directly.",
+      "alternatives": [
+        {
+          "option": "Trust an installed local model server",
+          "tradeoff": "Reduces embedded runtime work but transfers the privacy contract to unverified forwarding behavior."
+        },
+        {
+          "option": "Permit implicit missing-model downloads",
+          "tradeoff": "Simplifies setup but makes loading depend on network availability."
+        }
+      ],
+      "consequences": "No HTTP endpoint is accepted as a model. The unsandboxed shell has no inference networking code or telemetry. XPC endpoints authenticate the app/service relationship. Release entitlement testing is mandatory. User model packages supply data assets only, never executable extensions.",
+      "reconsider_when": "A runtime replacement requires a new compliant integration; the all-local requirement itself remains fixed."
+    },
+    {
+      "id": "D-029",
+      "title": "Immutable provenance",
+      "choice": "Use the schema and I1 in data_lifecycle as the authoritative provenance definition. Record behavior-affecting model assets, application pipeline revision, mode and vocabulary snapshots, input results and context availability. Manual transcript edits create derived results. A displayed-result pointer changes presentation without changing prior output.",
+      "rationale": "A recording can have several recognitions and each can have translations or notes. Timestamp-based parent inference fails when work overlaps.",
+      "alternatives": [
+        {
+          "option": "Keep only the latest result and settings",
+          "tradeoff": "Reduces rows but makes earlier output impossible to explain or reproduce."
+        },
+        {
+          "option": "Put all dependencies in opaque JSON",
+          "tradeoff": "Avoids relationship tables but complicates deletion checks and History queries."
+        }
+      ],
+      "consequences": "Exact reruns require the pinned assets and retained inputs. If context or a runtime revision is unavailable, History explains the difference and starts a new run only with explicitly chosen replacements. Provenance does not promise bit-identical output from nondeterministic runtimes.",
+      "reconsider_when": "A new operation needs an additional dependency kind or reproducibility parameter."
+    },
+    {
+      "id": "D-030",
+      "title": "Durable PCM capture chunks",
+      "choice": "Keep independently verifiable PCM chunks as canonical capture audio. Initial capture uses 48 kHz Float32, mono microphone and stereo system audio, recording conversions and channel configuration. Each approximately two-second file has a versioned header with stream, sequence, format, frame count and host timestamp. Write .part, synchronize it, rename without replacement, synchronize its directory, then append a length-prefixed journal record containing those fields, filename, byte length, content hash and CRC, and synchronize the journal. Seal by publishing the accepted timeline and artifact rows. No chunk is deleted as an encoding optimization.",
+      "rationale": "Exact frame recovery is available without reconstructing a compressed container's packet and priming tables.",
+      "alternatives": [
+        {
+          "option": "Continuously encode one ALAC CAF",
+          "tradeoff": "Saves disk space but needs reliable packet-size, valid-frame, priming and remainder accounting before source PCM can be removed."
+        }
+      ],
+      "consequences": "Recovery accepts the verified journal prefix and can adopt a complete next chunk after validating sequence and hash. Torn .part files are discarded. Shard directories by sequence. A microphone-plus-system meeting uses about 2.07 GB per hour before metadata. Playback reads the virtual timeline incrementally. Disk estimates expose this cost.",
+      "reconsider_when": "Storage measurements justify independently verified chunk compression while preserving the same publication and recovery guarantees."
+    },
+    {
+      "id": "D-031",
+      "title": "Recovery transitions",
+      "choice": "On restart, arming sessions without durable chunks are discarded. Capturing or sealing sessions apply their durable disposition and publish a verified interrupted prefix when retained. queued jobs remain queued without external effects. Recognizing, rewriting, translating and noting executions become failed with committed inputs retained. Refining can reenter queued from its committed input. Diarizing becomes interrupted_resumable when D-043 provides a valid checkpoint, otherwise failed. Delivering follows D-010. Completed, cancelled and failed runs remain terminal.",
+      "rationale": "Each state needs a defined persisted and visible outcome. Durable checkpoints have a different lifecycle from failed executions.",
+      "alternatives": [
+        {
+          "option": "Automatically repeat every interrupted stage",
+          "tradeoff": "Reduces user interaction but repeats unwanted generation and risks external effects."
+        },
+        {
+          "option": "Discard all interrupted work",
+          "tradeoff": "Simplifies recovery but loses recoverable audio and completed diarization windows."
+        }
+      ],
+      "consequences": "User Resume changes interrupted_resumable to queued with ended_at unset, preserving its manifest and recording another execution epoch. Repeated crashes repeat that transition. Scheduler preemption may resume automatically when its reason is preempted. User cancellation removes the checkpoint. A completed meeting lacking notes offers Generate.",
+      "reconsider_when": "Another stage gains a verified durable checkpoint contract."
+    },
+    {
+      "id": "D-032",
+      "title": "Permission changes",
+      "choice": "Probe capabilities at setup and before the affected operation. Microphone denial disables microphone capture while imports remain usable. Revocation stops that stream and retains its durable prefix. Screen capture permission loss stops system audio and screen context; a meeting may continue microphone capture with an explicit missing-stream marker. Accessibility loss holds delivery and application-text context while processing continues. Global-input permission loss disables affected shortcuts and applies D-026 recovery. Browser automation loss makes URL predicates unavailable. Player automation loss revokes the adapter's control ownership.",
+      "rationale": "Permissions affect distinct stages. A missing insertion permission should not destroy successfully captured speech.",
+      "alternatives": [
+        {
+          "option": "Require every permission during first launch",
+          "tradeoff": "Simplifies readiness checks but blocks useful import and transcription paths unnecessarily."
+        }
+      ],
+      "consequences": "Secure fields and secure input suppress context collection and automatic delivery. Each omission is visible with a settings action. Restored permission is used at the next safe operation boundary and never causes automatic retry of an uncertain insertion.",
+      "reconsider_when": "An OS revision changes the permission requirements or revocation behavior of a supported API."
+    },
+    {
+      "id": "D-033",
+      "title": "Owner eligibility and physical artifact leases",
+      "choice": "ArtifactBroker serializes lease acquisition, archival, publication claims and deletion marking. A session lease requires an active or keep_interrupted session at its generation. A recording lease requires an untombstoned recording and expected generation. An installed-model lease requires an installed installation with an available runtime. A staging-model lease requires a durable frozen model_staging row in verifying, smoke_testing or ready state, matching proposed_set_hash and owner instance. It pins staged files and any reused blob/cache assets. Materialization obtains a child creator lease before directory creation. Acquisition and deletion marking occur transactionally under the same broker.",
+      "rationale": "Smoke tests and preview need model access independently of recording publication. A staged model cannot satisfy an installed-only rule.",
+      "alternatives": [
+        {
+          "option": "Treat session-directory ownership as sufficient for shared models",
+          "tradeoff": "Avoids separate scopes but does not protect a shared blob or service cache."
+        }
+      ],
+      "consequences": "Staging leases exclude sweeps and discard cleanup; installed-model leases survive archival until released. The separate exclusive publication claim orders competing installers. I3 governs shared retention. Reclaim a holder only after process identity proves death or confirmed handle closure; heartbeat age and connection loss alone are insufficient.",
+      "reconsider_when": "Measured broker contention requires finer locks while preserving the same atomic eligibility checks."
+    },
+    {
+      "id": "D-034",
+      "title": "Evidence before dependent integration",
+      "choice": "Use F1 through F5 in verification as development evidence packages. F1 informs speech and generation defaults and resource descriptors. F2 accepts the signed service integration. F3 accepts capture persistence. F4 establishes target support. F5 accepts diarization behavior and its resource contract.",
+      "rationale": "Measurements should occur before code depends on an unverified runtime property. Fixed behavior and measurable performance need different acceptance treatment.",
+      "alternatives": [
+        {
+          "option": "Measure only after all features are integrated",
+          "tradeoff": "Produces a visible application earlier but risks rebuilding storage or concurrency around a failed runtime assumption."
+        }
+      ],
+      "consequences": "Evidence records contain machine details, revisions and limitations. Failing evidence requires an identified corrective choice. Required features remain outstanding when no compliant implementation exists. Evaluation is never an installation-time quality gate for user models.",
+      "reconsider_when": "New dependencies introduce another property capable of invalidating a component boundary."
+    },
+    {
+      "id": "D-035",
+      "title": "Acceptance of behavior and measurements",
+      "choice": "The user or a named product delegate accepts the design's expected behavior and any consequential changes to it. Engineering reviewers check state tables, invariants and experiment methods. The proposed numerical criteria in verification become the initial evaluation basis with design acceptance; individual routine experiments require no additional permission round.",
+      "rationale": "Tests can faithfully encode a mistaken expectation. Behavioral review and practical application trials establish what assertions should mean.",
+      "alternatives": [
+        {
+          "option": "Treat passing automated tests as acceptance",
+          "tradeoff": "Reduces review work but cannot detect an incorrect test oracle or poor practical behavior."
+        },
+        {
+          "option": "Require product approval before every test",
+          "tradeoff": "Keeps close oversight but places routine engineering work on the user's critical path."
+        }
+      ],
+      "consequences": "Semantic fidelity, usability and unsupported-target behavior receive human review. Changed acceptance criteria record their reason and are not adjusted silently after results. Missing measurements are labeled as such.",
+      "reconsider_when": "A delegate or established acceptance process changes who can resolve product behavior."
+    },
+    {
+      "id": "D-036",
+      "title": "Direct distribution and packaging",
+      "choice": "Distribute directly as a macOS application. Use ad hoc signing for local builds and Developer ID signing with hardened runtime and notarization for releases. Keep the shell unsandboxed and bundle the independently sandboxed services. SPM builds application and service logic; packaging supplies bundle metadata and signing order.",
+      "rationale": "The specification chooses direct distribution. It accommodates the required desktop integrations without introducing an App Store decision.",
+      "alternatives": [
+        {
+          "option": "Mac App Store distribution",
+          "tradeoff": "Adds store delivery but requires a separate entitlement and behavior assessment outside this worked example."
+        },
+        {
+          "option": "Unsigned release archives",
+          "tradeoff": "Avoids certificate handling but weakens installation usability and stable permission identity."
+        }
+      ],
+      "consequences": "Release maintenance includes notarization, dependency notices and signed update packages. Updates are user-initiated initially. Ad hoc identities may require permissions to be granted again. The design makes no blanket claim that an App Store build is technically impossible.",
+      "reconsider_when": "Distribution requirements change or a supported update mechanism is selected."
+    },
+    {
+      "id": "D-037",
+      "title": "Speaker revisions and timestamped notes",
+      "choice": "Use attribution states unknown, unverified and assigned_by_user. unknown has no usable cluster label. Model clusters produce unverified assignments. Proposals do not change assignment state. A direct user action assigning, merging or confirming a segment creates assigned_by_user in a new revision under I6; clearing an assignment returns it to unknown. Boundary-changing re-diarization carries prior assignments only as unverified proposals. Names and splits are versioned. Notes pin transcript, diarization and speaker revision inputs.",
+      "rationale": "Editable identity and names must not change the meaning of saved notes. Every state consumed by notes needs an evidentiary source.",
+      "alternatives": [
+        {
+          "option": "Edit model segments in place",
+          "tradeoff": "Uses fewer records but invalidates old citations and conceals what the model produced."
+        }
+      ],
+      "consequences": "Notes may use confirmed names only for assigned_by_user. Other attribution uses explicitly unverified local labels or remains unattributed. Each note item cites valid segment ranges and timestamps. Renaming or splitting reports drift and offers regeneration. Long notes use the bounded processing contract in D-042.",
+      "reconsider_when": "Evaluation supports another clearly defined attribution state without weakening user-confirmation provenance."
+    },
+    {
+      "id": "D-038",
+      "title": "Runtime replacement and model retention",
+      "choice": "Installations use installed, archived, orphaned_runtime and missing states. Archiving removes execution references while retaining identity, notices and parameter descriptions. Removing an adapter changes affected installations to orphaned_runtime and deletes no assets automatically. Users can archive them or clear their caches. Restoring execution requires matching assets and an available compatible adapter.",
+      "rationale": "Historical attribution should not require retaining every executable model forever. Runtime replacement otherwise produces uncontrolled disk growth or unreadable History.",
+      "alternatives": [
+        {
+          "option": "Retain weights whenever any result references them",
+          "tradeoff": "Keeps reprocessing convenient but lets storage grow with every model tried."
+        },
+        {
+          "option": "Delete models when their adapter disappears",
+          "tradeoff": "Reclaims space automatically but removes user assets during an application update."
+        }
+      ],
+      "consequences": "Generic parameter_schema and parameter_display keep old settings readable. The manager reports unique physical bytes, shared bytes, staging and caches, and estimates the effect of archival. Execution leases delay physical cleanup under I3.",
+      "reconsider_when": "Users need an explicit automatic archival policy or parameter presentation exceeds the generic descriptor."
+    },
+    {
+      "id": "D-039",
+      "title": "Retained context and replay",
+      "choice": "Default context persistence records source status, timestamp and digest. An opt-in mode setting retains the exact bounded representation supplied to processing as an owned artifact. Commit its durable file before the context_samples reference. Exclude context from full-text search. Delete it with its session or recording, or through an explicit context-retention operation.",
+      "rationale": "Replay needs the actual supplied bytes; a digest can identify a sample but cannot reconstruct it. Retention must have an owner and deletion path.",
+      "alternatives": [
+        {
+          "option": "Retain every screen and clipboard sample",
+          "tradeoff": "Improves replay availability while accumulating unrelated application content."
+        },
+        {
+          "option": "Retain no context under any setting",
+          "tradeoff": "Simplifies storage but prevents deliberate replay with the original context."
+        }
+      ],
+      "consequences": "Reprocessing with absent context requires a visible choice to omit or resample it and creates a new manifest. Resampling never silently claims to reproduce the old result. Logs contain source status and hashes, not context payloads.",
+      "reconsider_when": "A broader at-rest protection requirement applies to the recording library."
+    },
+    {
+      "id": "D-040",
+      "title": "Service materialization ownership",
+      "choice": "Key a materialization by setHash, service kind, runtime revision and cache-format revision. Under a creator lease, register its path before copying into a unique temporary directory inside the service container. Copy assets from passed handles, verify hashes, synchronize files and a completion manifest, then publish without replacement under a per-key broker claim. An existing destination is verified and referenced. Register the completed asset transactionally before releasing the creator lease.",
+      "rationale": "Shared content needs shared ownership, while compiled runtime caches may be incompatible across revisions. A completion marker alone cannot protect an active copy from sweeping.",
+      "alternatives": [
+        {
+          "option": "Materialize separately for every job",
+          "tradeoff": "Simplifies retention but repeatedly copies large model sets."
+        },
+        {
+          "option": "Let services manage unregistered caches",
+          "tradeoff": "Reduces Store work while losing deletion coordination and complete disk accounting."
+        }
+      ],
+      "consequences": "Qualifying installation references and active users retain physical assets under I3. One installation's archival cannot remove another's shared cache. Launch reconciliation cleans dead creators, incomplete copies and unreferenced notices. Size estimates count every runtime-specific copy without assuming compression or cloning.",
+      "reconsider_when": "A verified descriptor-loading path or filesystem clone optimization removes copies without changing ownership."
+    },
+    {
+      "id": "D-041",
+      "title": "Compatible local models without quality gates",
+      "choice": "Compute model identity from a canonical manifest of weights, tokenizer, templates, feature configuration and required companions. Publisher, revision labels, notices and benchmarks may be unknown. Compatibility checks validate asset structure, runtime loading and the result contract. Empty recognition, empty diarization and immediate generation end-of-sequence are valid when contract-shaped. Quality limitations are reported separately.",
+      "rationale": "A user-built compatible model should not need invented provenance or a benchmark pack to work.",
+      "alternatives": [
+        {
+          "option": "Require a known model catalog entry",
+          "tradeoff": "Simplifies setup claims but excludes compatible local models."
+        },
+        {
+          "option": "Reject empty smoke-test output",
+          "tradeoff": "Catches some poor models while incorrectly treating legitimate output as runtime incompatibility."
+        }
+      ],
+      "consequences": "Users can browse installations, inspect capabilities, import local model sets and select them in modes. Resource admission still reflects actual hardware. Download offerings require an exact asset and notice inventory. Supplied SpeakerKit component notices do not establish permission to redistribute every weight.",
+      "reconsider_when": "A new model family needs additional structural compatibility checks."
+    },
+    {
+      "id": "D-042",
+      "title": "Duration-independent working memory",
+      "choice": "Every adapter declares finite buffers and a working ceiling expressed through controlled window size, context length and concurrency. Speech uses bounded overlapping windows. Decode reads incrementally under byte credit. Generation uses bounded context and output batches. Long faithful rewrites process transcript spans with overlap used only as context, emitting each source span once. Notes write cited per-window items to disk, then perform bounded fan-in reduction over those items. UI and Store page text and segments. D-043 bounds speaker working state.",
+      "rationale": "Queue credit cannot prevent an upstream runtime from retaining the entire input. Each participating process needs an internal bound and resource evidence.",
+      "alternatives": [
+        {
+          "option": "Impose a recording-duration maximum",
+          "tradeoff": "Bounds allocation by refusing long work but conflicts with the specification."
+        },
+        {
+          "option": "Trust streaming API names",
+          "tradeoff": "Reduces investigation while leaving hidden accumulation unexamined."
+        }
+      ],
+      "consequences": "Output storage and processing time may grow with duration. Window boundaries can affect fidelity and are evaluated. Resource tests use equivalence bounds plus fixed absolute ceilings as defined in verification. A limit breach preserves committed inputs and reports the failed adapter.",
+      "reconsider_when": "A runtime exposes a stronger bounded incremental contract or evaluation identifies boundary-related errors."
+    },
+    {
+      "id": "D-043",
+      "title": "Diarization checkpoint publication",
+      "choice": "Diarization writes each completed window's segments, centroids and proposal evidence into run-owned staging. Synchronize window payloads before appending a checksum-protected checkpoint record containing input hash, window index, epoch, runtime revision, parameters and artifact lengths. Recovery accepts the valid prefix and discards unfinished window tails. Persist all centroids on disk, with a 256-entry in-memory cache and paged candidate scanning. Cache overflow evicts an entry without deleting evidence or forcing a speaker match. New clusters always receive new IDs.",
+      "rationale": "Durable staging permits useful resumption while keeping partial output outside published History and notes. A memory cache limit must not become a limit on distinct speakers.",
+      "alternatives": [
+        {
+          "option": "Publish segment rows after each window",
+          "tradeoff": "Simplifies progress display but makes an incomplete analysis reachable as a result."
+        },
+        {
+          "option": "Keep all cluster evidence in memory",
+          "tradeoff": "Accelerates matching but grows with meeting complexity and loses progress on interruption."
+        }
+      ],
+      "consequences": "One final transaction streams the completed result and initial speaker revision into Store under I2. D-031 controls resumption; D-007 controls cancellation. Publication cleanup removes staging after commit. Repeated crashes preserve only validated completed windows. Candidate scanning can become slower as speakers accumulate and remains preemptible.",
+      "reconsider_when": "A tested incremental diarizer supplies equivalent persistent checkpoints with lower matching cost."
+    }
+  ],
+  "coverage": [
+    {
+      "requirement": "Automatic mode selection",
+      "decision_ids": [
+        "D-014",
+        "D-006",
+        "D-032"
+      ],
+      "explanation": "Ordered application and website rules resolve conflicts, unavailable predicates fall through, and the selected mode remains visible and frozen for the run."
+    },
+    {
+      "requirement": "Built-in modes",
+      "decision_ids": [
+        "D-013",
+        "D-012"
+      ],
+      "explanation": "The built-in contracts specify permitted transformations and preserve dictated questions. Fidelity checks and review have defined limits and dispositions."
+    },
+    {
+      "requirement": "Context",
+      "decision_ids": [
+        "D-016",
+        "D-039",
+        "D-028",
+        "D-032"
+      ],
+      "explanation": "Application text, screen context and clipboard content have sampling bounds, instruction separation, retention ownership and permission-loss behavior."
+    },
+    {
+      "requirement": "Custom modes",
+      "decision_ids": [
+        "D-012",
+        "D-006",
+        "D-029",
+        "D-041"
+      ],
+      "explanation": "Users control prompts, formatting and local model selections. Immutable revisions preserve the settings that produced each saved result."
+    },
+    {
+      "requirement": "Desktop behavior",
+      "decision_ids": [
+        "D-025",
+        "D-011",
+        "D-036"
+      ],
+      "explanation": "Menu bar access, local microphone gain and player controls are defined. Automatic restoration requires continuing ownership; unsupported integrations retain explicit resumption."
+    },
+    {
+      "requirement": "History",
+      "decision_ids": [
+        "D-024",
+        "D-029",
+        "D-005",
+        "D-031",
+        "D-033"
+      ],
+      "explanation": "Search, playback and reprocessing use immutable result chains. Retention and deletion invalidate active publication before physical cleanup."
+    },
+    {
+      "requirement": "Input sources",
+      "decision_ids": [
+        "D-018",
+        "D-019",
+        "D-030",
+        "D-042"
+      ],
+      "explanation": "Microphone, system audio and the declared audio/video import matrix share bounded ingest. Decoder extensions remain local, and imports preserve external sources."
+    },
+    {
+      "requirement": "Languages",
+      "decision_ids": [
+        "D-017",
+        "D-012",
+        "D-041"
+      ],
+      "explanation": "Explicit selection, detection and English translation have separate compatibility and evaluation behavior. Derived output retains its source transcript."
+    },
+    {
+      "requirement": "Meetings",
+      "decision_ids": [
+        "D-023",
+        "D-037",
+        "D-043",
+        "D-042"
+      ],
+      "explanation": "Local speaker analysis produces uncertain labels and non-destructive proposals. Editable revisions support timestamped notes with identified inputs and bounded working memory."
+    },
+    {
+      "requirement": "Models",
+      "decision_ids": [
+        "D-020",
+        "D-021",
+        "D-022",
+        "D-028",
+        "D-033",
+        "D-038",
+        "D-040",
+        "D-041"
+      ],
+      "explanation": "Local acquisition, identity, compatibility and publication are defined across staged and installed assets. Shared storage survives concurrent use, and absent quality scores do not disable compatible imports."
+    },
+    {
+      "requirement": "Recording controls",
+      "decision_ids": [
+        "D-026",
+        "D-006",
+        "D-007",
+        "D-032"
+      ],
+      "explanation": "Global toggle and push-to-talk include configurable per-mode bindings, stop-modifier submission intent and cancellation at every stage."
+    },
+    {
+      "requirement": "Recording display",
+      "decision_ids": [
+        "D-011",
+        "D-004",
+        "D-027"
+      ],
+      "explanation": "The movable panel remembers placement, distinguishes live provisional text from final output, reports failures and receives explicit preview capacity."
+    },
+    {
+      "requirement": "Text delivery",
+      "decision_ids": [
+        "D-008",
+        "D-009",
+        "D-010",
+        "D-032"
+      ],
+      "explanation": "One executor applies target policy, selection-aware insertion and submission rules. Clipboard ownership and uncertain outcomes prevent automatic duplicate retries. Permission loss holds output and offers Copy."
+    },
+    {
+      "requirement": "Vocabulary",
+      "decision_ids": [
+        "D-015",
+        "D-012"
+      ],
+      "explanation": "Terminology bias, deterministic replacements and optional filler removal have explicit ordering and matching rules without a recognition guarantee."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Do the selected pinned runtimes load and process correctly through container-local materialization in the signed XPC arrangement?",
+      "blocking": false,
+      "resolution": "F2 validates the concrete D-003 choice before runtime integration is accepted. This is an unperformed feasibility check, not an undecided access mechanism. Failure requires a compliant adapter change; if none can supply a required operation, that operation becomes blocking."
+    },
+    {
+      "question": "Which model sizes and parameters provide acceptable recognition, rewriting and preview on the evaluation Mac?",
+      "blocking": false,
+      "resolution": "F1 replaces provisional D-027 charges and selects shipped defaults using the frozen practical and statistical criteria. The runtime choices and user-import behavior are already decided."
+    },
+    {
+      "question": "Can the complete meeting stack operate acceptably on Intel Macs?",
+      "blocking": true,
+      "resolution": "This blocks claiming Intel support, not implementation of the specified arm64 evaluation build. Exercise whisper.cpp and llama.cpp on identified Intel hardware and establish a compatible local diarizer with bounded memory. Preserve meeting functionality when choosing that runtime."
+    },
+    {
+      "question": "Which application controls provide supported insertion acknowledgment and submission semantics?",
+      "blocking": false,
+      "resolution": "F4 establishes a versioned support matrix. Generic insertion already has the unconfirmed outcome and user-review path in D-009. Tests alone do not create acknowledgment semantics or authorize automatic fallback."
+    },
+    {
+      "question": "Which real players expose atomic conditional resumption with ownership evidence covering every intervening control action?",
+      "blocking": false,
+      "resolution": "Inspect documented integrations and test competing actions before enabling automatic resume for any adapter. D-025 already supplies explicit player-specific resumption, which satisfies unsupported-player behavior without assuming a readable position is ownership."
+    },
+    {
+      "question": "Which exact diarization assets can be offered as optional downloads?",
+      "blocking": false,
+      "resolution": "Compile component-specific asset hashes and notices before adding catalog entries. Local import and the selected diarization runtime remain available independently of distribution permission."
+    },
+    {
+      "question": "Do the proposed capture and long-input resource bounds hold under storage and inference contention?",
+      "blocking": false,
+      "resolution": "F3 and the resource protocol measure the selected PCM and windowing design. Correct scheduling, buffer bounds or adapters when evidence fails. Recording-duration caps and removal of live preview are not acceptable resolutions."
+    }
+  ]
+}

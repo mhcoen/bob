@@ -1,0 +1,69 @@
+{
+  "workflow_run": "1b155d9dc144",
+  "status": "unaccepted",
+  "actors": {
+    "author": {
+      "adapter": "codex_text",
+      "model": "gpt-6-astra"
+    },
+    "reviewer": {
+      "adapter": "claude_code_text",
+      "model": "fable"
+    },
+    "judge_role": {
+      "adapter": "codex_text",
+      "model": "gpt-6-astra"
+    }
+  },
+  "input_digest": "2fc4be62abeaa8cd42006be0cf16f574c1561cb22e3981ac4023fafe7586ab8d",
+  "design_digest": null,
+  "completed_stages": {
+    "1": [
+      "propose",
+      "review",
+      "judge"
+    ],
+    "2": [
+      "propose",
+      "review",
+      "judge"
+    ]
+  },
+  "source_sha256": {
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__propose__1.json": "4a92abfb97c8fbd70d2a6e9a9a6ec75243c4e84b16a8770bed454793bd175c80",
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__propose__2.json": "ccc19b20c9a63472b4c9118e9065ac4a5ecc1d30bb4077b8a66a725767e74197",
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__review__1.json": "d51ad3701ac9a9e2af489c1fc107999c58ee2acb446c408178dd6fcd040d7583",
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__review__2.json": "9458071c1c685b83298efa9317df4297ae6c8b61e5c3f1d18209d3fe30b67e97",
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__judge__1.json": "267d67ee6299efb5bef1b44b8c19caea635fa85b9fe0a0fd40e86e9a3bd9180b",
+    ".duplo/design-runs/1b155d9dc144/payloads/1b155d9dc144__judge__2.json": "0cf329b74ac8dc2b8cc993b9eecfe99c98d6c695b09801e565b9b7f4e5f2b529"
+  },
+  "sha256": {
+    "inputs.json": "ad83b320703420c8fbdca6efec772d3a4bd56ccdfd78e0c06c25a9ec1c75d9aa",
+    "judgment-1.json": "ccb7d4194edd95bd1f4711b7dde5faadc0ec65d017f28ee1b963a0a75aef3b72",
+    "judgment-2.json": "d49f5f1d158b8cba8db027b5f3760a0c741a5f1968cd890881d07b7ad4306535",
+    "proposal-1.json": "c869a0d612d00ae5e175f90d8eef81e8fdefe68ddfc7dfd27399fcc054ee8186",
+    "proposal-2.json": "0bba2a97adcd091fd592de85e57076f86ecbf01a992fec394a131b1be69cadd2",
+    "review-1.txt": "c032ed536b3916b131aa6b5f5518ce47032c36211238e27a6e73da831a4ec324",
+    "review-2.txt": "18b2845b17625f750004c6a07bd208714ac21b9a0b70a1c32a16bfa8425835c5"
+  },
+  "error": "Second judgment failed schema validation: feedback expected string, got list. Raw response retained as revision history; it is not a valid judgment.",
+  "schema_errors": [
+    {
+      "artifact": "verdict",
+      "attempt": 2,
+      "decision": null,
+      "event": "schema_validation",
+      "invocation_id": "1b155d9dc144::judge::2",
+      "outcome": "schema_error",
+      "payload_ref": "payloads/1b155d9dc144__judge__2.json",
+      "run_id": "1b155d9dc144",
+      "seq": 47,
+      "state_id": "judge",
+      "ts": "2026-09-06T20:19:50.477Z",
+      "validation_errors": [
+        "feedback: expected string, got list"
+      ]
+    }
+  ],
+  "stage_status_note": "Completed stages record returned model responses. Judgment 2 failed schema validation and is retained in its original form. No design was accepted."
+}

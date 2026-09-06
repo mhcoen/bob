@@ -145,3 +145,36 @@ Revise the complete design in place. Remove duplicate protocol definitions and
 superseded rules. Aim for 8,000 to 12,000 words across the entire JSON document,
 including decision records. Preserve consequential alternatives and failure
 semantics. Do not return an abbreviated patch or reproduce abandoned drafts.
+
+## Review of 1b155d9dc144, proposal 2
+
+D-009 and D-010 impose one manual resolution per dictation on targets reached by
+an unacknowledged paste. The cost is explicit now. The alternative comparison
+still dismisses synthetic typing for input-method and partial-event behavior
+without comparing those limitations with the selected recurring interaction cost.
+Repeated dictation is a primary application workflow. F4 should compare complete
+sequences of dictations through the candidate mechanisms and record user actions
+as well as text errors. Choose the mechanism before an attempt begins; retain
+the prohibition on fallback after an uncertain effect.
+
+Apple documents a Unicode payload on a keyboard event and warns that frameworks
+may ignore it. A preselected Unicode-event route avoids clipboard replacement,
+with compatibility that must be checked per target. It could leave an unconfirmed
+attempt terminal while permitting later independent dictations, as the design
+already allows for accessibility writes. The design needs to evaluate that option
+against the known paste barrier cost. No typing compatibility trial has been run.
+Source: https://developer.apple.com/documentation/coregraphics/cgevent/keyboardsetunicodestring(stringlength:unicodestring:)
+
+The acknowledgment discussion should also distinguish setter success from a
+messaging failure. Apple's AXUIElement header documents kAXErrorSuccess for a
+successful operation. AppKit documents setAccessibilitySelectedText. Writability
+still needs a capability check for the actual target; the older AX attribute
+header describes selected text as read-only. Consider whether a supported setter's
+successful return supplies the operation acknowledgment required by D-009.
+A readback or a timeout cannot supply the same evidence. Subsequent submission
+still requires its own target and selection checks. The proposed acknowledgment interprets the documented contracts; target
+compatibility still needs to be established.
+Sources:
+- https://developer.apple.com/documentation/applicationservices/axuielement_h
+- https://developer.apple.com/documentation/applicationservices/1460434-axuielementsetattributevalue?changes=_5&language=objc
+- https://developer.apple.com/documentation/appkit/nsaccessibilityprotocol/setaccessibilityselectedtext(_:)

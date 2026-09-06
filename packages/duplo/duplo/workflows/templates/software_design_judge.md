@@ -5,7 +5,9 @@ An empty list of blocking questions does not establish that the design is ready.
 
 Return only JSON with these fields:
 decision: accept, iterate, or stuck
-feedback: reasons for the judgment, including how review objections were resolved
+feedback: one nonempty JSON string containing the reasons for the judgment,
+  including how review objections were resolved. Use escaped newlines within
+  that string to separate paragraphs. An array or object is invalid for feedback.
 checks: an object with exactly these boolean fields:
   requirements, architecture, alternatives, data_lifecycle, failures,
   maintainability, verification, unresolved_decisions

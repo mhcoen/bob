@@ -61,6 +61,12 @@ The Codex text adapter now uses the total call limit for that timer too. Its
 diagnostic output is excluded from proposals. Review continues from the last
 complete design with Astra authoring and Fable reviewing.
 
+The next invocation completed two Astra/Fable review rounds. Its second judgment
+requested revision but failed schema validation because feedback was an array.
+The prompt now specifies a string. [Attempt 6](evidence/README.md#attempt-6)
+preserves the response and the remaining findings. Design review is continuing;
+the implementation plan remains unfinished.
+
 The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
 service can deny network access independently of its containing app's sandbox
 status. Its recorded results state the tested OS and the limits of the check.

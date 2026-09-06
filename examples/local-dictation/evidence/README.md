@@ -148,3 +148,36 @@ The field was cleared after the defect was identified. The [receipt](attempt-005
 records the original payload's digest and the correction. Its
 [input snapshot](attempt-005/inputs.json) is retained. The next invocation uses
 the complete proposal from attempt 4.
+
+## Attempt 6
+
+Run `1b155d9dc144`, September 6, 2026. Astra completed two revisions, each reviewed
+by Fable. The first judgment requested revision. The second also requested
+revision, but returned its feedback as an array. The workflow requires a string
+and rejected the response. No design was accepted.
+
+| File | Contents |
+| --- | --- |
+| [Inputs](attempt-006/inputs.json) | Specification and references supplied to this invocation. |
+| [First proposal](attempt-006/proposal-1.json) | Astra's first complete design. |
+| [First review](attempt-006/review-1.txt) | Fable's findings. |
+| [First judgment](attempt-006/judgment-1.json) | Required corrections. |
+| [Second proposal](attempt-006/proposal-2.json) | Revised design with 43 decisions. |
+| [Second review](attempt-006/review-2.txt) | Remaining defects and disputed choices. |
+| [Second judgment](attempt-006/judgment-2.json) | Original response, with invalid feedback type. |
+| [Receipt](attempt-006/receipt.json) | File digests and the schema error. |
+
+The revisions define capture ownership before database registration and supply
+staging leases for installation checks. Unfinished diarization output has a
+publication protocol. Remaining findings concern an undefined capture backlog,
+the scope of durability claims, and missing ownership for run manifests. The
+translation stage also needs a chosen runtime.
+
+The paste-delivery protocol requires manual resolution after each unacknowledged
+paste. The next inputs ask the author to compare that interaction cost with a
+preselected Unicode-event mechanism, and to distinguish a successful Accessibility
+setter from messaging failure. Target compatibility remains untested.
+
+The judge prompt now states the feedback type explicitly. A separate recovery
+record preserves the second judgment's original array for revision history.
+The original failed record remains intact; neither record grants acceptance.

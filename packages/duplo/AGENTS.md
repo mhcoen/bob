@@ -25,6 +25,8 @@ detects new files and appends tasks for anything missing.
   retain their own output contracts. See `SOFTWARE-DESIGN.md`.
   The author prompt requires one definition per protocol or schema and asks
   revisions to reconcile dependent recovery rules and verification assertions.
+  The judge prompt specifies a string for feedback; structured feedback is rejected
+  by the judgment schema.
 
 - `design_command.py`: Implements `duplo design` and `duplo design --plan` for
   specifications with an explicit scope list. Reviews design before generating
