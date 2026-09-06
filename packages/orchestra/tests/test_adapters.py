@@ -315,6 +315,57 @@ def test_extract_final_text_reassembles_max_tokens_continuations(wrapped, result
     assert json.loads(extracted) == {"decisions": [{"id": "D-001"}]}
 
 
+@pytest.mark.parametrize("empty_result", [False, True])
+@pytest.mark.parametrize("split_replacement", [False, True])
+def test_extract_final_text_recovers_json_restart(empty_result, split_replacement):
+    """A replacement JSON document excludes abandoned output-limit drafts."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    expected = '{"decisions": [{"id": "D-002"}]}'
+    messages = [('{"decisions": [{"id": "unfinished', "max_tokens")]
+    if split_replacement:
+        messages += [('{"decisions": [', "max_tokens"), ("", "max_tokens")]
+        final = '{"id": "D-002"}]}'
+    else:
+        final = expected
+    messages.append((final, "end_turn"))
+    events = []
+    for text, stop in messages:
+        events.extend(
+            [
+                {"type": "message_start"},
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+                {"type": "message_delta", "delta": {"stop_reason": stop}},
+            ]
+        )
+    events.append({"type": "result", "result": "" if empty_result else final})
+    actual = extract_final_text("\n".join(json.dumps(e) for e in events))
+    assert actual == expected
+    assert json.loads(actual) == {"decisions": [{"id": "D-002"}]}
+
+
+def test_extract_final_text_keeps_prose_before_json_continuation():
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    events = []
+    for text, stop in [("The measurements follow.\n", "max_tokens"), ('{"value": 2}', "end_turn")]:
+        events.extend(
+            [
+                {"type": "message_start"},
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+                {"type": "message_delta", "delta": {"stop_reason": stop}},
+            ]
+        )
+    events.append({"type": "result", "result": '{"value": 2}'})
+    assert extract_final_text("\n".join(json.dumps(e) for e in events)) == (
+        'The measurements follow.\n{"value": 2}'
+    )
+
+
 def test_extract_final_text_does_not_join_continuations_across_tool_turns():
     import json
 

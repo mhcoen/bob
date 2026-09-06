@@ -115,6 +115,8 @@ Claude can continue a long response after reaching an output limit. Its final
 result record may contain only the last fragment. The adapters assemble text
 across explicit `max_tokens` continuations before passing it to the workflow.
 Text from earlier tool turns is excluded from that assembly.
+If the model restarts an unfinished JSON document, the adapter selects the last
+complete document beginning at a message boundary. A prose prefix is preserved.
 Interrupting the subprocess wait loop terminates its child process group before
 removing the watchdog, so a stopped workflow does not leave the model CLI running.
 

@@ -634,7 +634,21 @@ def extract_final_text(stream_json_output: str) -> str:
             if continuation_prefix and stop_reason == "end_turn":
                 final_fragment = "".join(message_deltas)
                 if final_fragment and result in ("", final_fragment):
-                    result = "".join(continuation_prefix) + final_fragment
+                    fragments = [*continuation_prefix, final_fragment]
+                    result = "".join(fragments)
+                    # A model may restart an unfinished JSON document after
+                    # max_tokens. Only consider complete documents beginning
+                    # at message boundaries; preserve ordinary prose prefixes.
+                    if result.lstrip().startswith(("{", "[")):
+                        for start in range(len(fragments) - 1, 0, -1):
+                            candidate = "".join(fragments[start:])
+                            try:
+                                parsed = _json.loads(candidate)
+                            except _json.JSONDecodeError:
+                                continue
+                            if isinstance(parsed, (dict, list)):
+                                result = candidate
+                                break
             # Empty result.result is treated as "no result" and falls
             # through to the text_delta fallback. Some Claude Code
             # vendors (e.g. kimi via moonshot/Parasail) emit
@@ -652,7 +666,7 @@ def extract_final_text(stream_json_output: str) -> str:
                 continue
             if event.get("type") == "message_start":
                 if stop_reason == "max_tokens":
-                    continuation_prefix.extend(message_deltas)
+                    continuation_prefix.append("".join(message_deltas))
                 else:
                     continuation_prefix = []
                 message_deltas = []
