@@ -307,6 +307,11 @@ For contributor verification of built distributions, see the
 [installed-wheel smoke test](scripts/README.md). It tests fresh wheel installs
 outside the checkout and records remaining installer resource limitations.
 
+Try the [independently verified change example](examples/verified-change/README.md)
+to see a correct edit accepted, misleading passing tests rejected, and an
+interrupted commit reconciled without repeating the edit. The default walkthrough
+uses deterministic editors and makes no model calls.
+
 ## Subscribe
 
 Subscribe at

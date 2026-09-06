@@ -34,6 +34,17 @@ jobs:
       - name: Build and test installed wheels outside checkout
         shell: bash
         run: uv run --no-project --python '${{ matrix.python }}' python scripts/smoke_wheels.py --work-dir "$RUNNER_TEMP/bob-wheels"
+      - name: Independently verified change and interruption recovery
+        shell: bash
+        run: '"$RUNNER_TEMP/bob-wheels/venv/bin/python" -I examples/verified-change/run.py demo "$RUNNER_TEMP/bob-example"'
+      - name: Preserve verified example evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: verified-example-${{ matrix.os }}-py${{ matrix.python }}
+          path: ${{ runner.temp }}/bob-example
+          include-hidden-files: true
+          retention-days: 7
       - name: Preserve packaging evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

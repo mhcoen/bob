@@ -24,6 +24,12 @@ no inherited provider credentials or Python path overrides, and a temporary
 inside each probe. Installed Python CLI launchers are exercised with `--help`
 through isolated Python processes; no provider CLI is needed.
 
+The CI wheel jobs also run the separate
+[verified-change example](../examples/verified-change/README.md) with the installed
+wheel interpreter. That example executes real Git and candidate Python subprocesses
+and retains acceptance and interruption evidence in its own seven-day artifact.
+It does not run inside the wheel probe's subprocess-denying audit hook.
+
 The smoke verifies:
 
 - `bob`, `bob-plan`, `orchestra`, `mcloop`, and `duplo` launcher startup;

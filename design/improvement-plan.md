@@ -2,9 +2,11 @@
 
 Status: in progress, 2026-09-05. Slice A and the initial Slice B persistence /
 explicit-reconciliation deliverables are implemented within the documented
-ownership and durability limits. The independently verified example (Slice C)
-is next. Automatic replay, cross-tool transactions, and cryptographic binding of
-check output to candidates are not implied by these reliability improvements.
+ownership and durability limits. The independently verified reference example
+(Slice C) is implemented; see its [walkthrough](../examples/verified-change/README.md).
+Its candidate binding and explicit reconciliation belong to the example harness.
+Automatic replay and cross-tool transactions are not implied for ordinary runs.
+The operator interface and bounded execution work (Slice D) is next.
 
 This records the repository review and turns its recommendations into bounded
 deliverables. It is a design document, not an executable McLoop queue. Promote
@@ -496,3 +498,37 @@ external editors, direct library/utility paths, and complete extraction-run
 transactions remain unsupported. No automatic replay or acceptance attestation
 is claimed. Slice C is next: exercise the supported lifecycle end to end with
 an independently controlled oracle and deliberately incorrect candidates.
+
+### Slice C: independently checked reference example (2026-09-05)
+
+The preceding reliability changes passed all five hosted jobs on `c64c34fe`:
+[run 34009350618](https://github.com/mhcoen/bob/actions/runs/34009350618), including
+7,050 workspace tests, with 136 skipped.
+
+Workspace tasks `T-000045`–`T-000047` deliver the
+[walkthrough](../examples/verified-change/README.md) and its
+[contract](verified-example.md). The harness composes real persistence, acceptance,
+Git, and ledger APIs with deterministic editors. All candidates pass the fixture's
+existing tests; the independent oracle accepts the correct fix and rejects the
+wrong implementation, removed assertions, no-op, and unrelated documentation.
+It binds checks to an exported staged tree and refuses a candidate whose tests
+change the checked bytes. Process death after commit leaves unresolved receipts;
+explicit reconciliation repeats checks before task completion and resume.
+
+Local validation:
+
+- Full workspace suite: 7,073 passed, 125 skipped, nine existing warnings.
+- Twelve example regressions cover candidate verdicts, exact commit/ledger
+  evidence, recovery refusal after oracle/project/commit changes, file-path
+  restrictions, preserved output, and modification of the checked snapshot.
+- Clean installed-wheel smoke and the six-scenario example passed using the
+  installed interpreter. Artifacts: `/private/tmp/bob-verified-example-wheels`
+  and `/private/tmp/bob-example-installed`.
+- The documented manual interrupt/recover commands passed. Ruff and actionlint
+  passed. Four wheel CI jobs now run the example and retain its evidence.
+
+The external-editor JSON protocol is opt-in and tested with a deterministic
+executable; no live provider was invoked. The example has finite behavioral
+coverage, no hostile-code sandbox, and supports reconciliation at one explicit
+boundary. These limits are documented in the walkthrough. Hosted validation of
+this slice is pending the implementation push.

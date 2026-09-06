@@ -99,4 +99,12 @@ Extend conservative recovery to pre-verification execution and preserve original
 - [x] T-000042: Extend McLoop recovery evidence across task execution, retries, checkpoint commits, and other bare-loop mutations. Preserve ambiguous run outcomes before scheduling on restart. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
 - [x] T-000043: Stage Duplo example replacements and reference moves with retained prior files and explicit recovery evidence; serialize pipeline ownership and refuse unresolved multi-file operations. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
 - [x] T-000044: Inject task, checkpoint, directory publication, and process-interruption failures; document recovery procedures and validate locally plus hosted CI. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
+## Phase 11: Independently verified example (Slice C)
+<!-- phase_id: phase_011 -->
+
+Contract: design/verified-example.md. The harness composes production persistence and acceptance APIs with a bounded editor.
+
+- [x] T-000045: Define the independent CLI requirement and oracle boundary; implement a one-attempt reference harness with exact-candidate evidence and adversarial editors. <!-- created_at: 2026-09-06T03:50:51.694398Z --> <!-- completed_at: 2026-09-06T04:01:06Z -->
+- [x] T-000046: Exercise process interruption after commit and explicit reconciliation without repeating the edit; preserve plan, receipt, and ledger evidence. <!-- created_at: 2026-09-06T03:50:51.694398Z --> <!-- completed_at: 2026-09-06T04:01:06Z -->
+- [ ] T-000047: Document and gate the example in CI, including an opt-in external editor protocol; validate locally and verify hosted checks. <!-- created_at: 2026-09-06T03:50:51.694398Z -->
 ## Bugs
