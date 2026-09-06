@@ -14,14 +14,17 @@ its own inputs. From the Bob repository root, after activating its environment:
 
 ```sh
 mkdir -p local/local-dictation/ref
+mkdir -p local/local-dictation/.orchestra
 cp examples/local-dictation/SPEC.md local/local-dictation/SPEC.md
 cp examples/local-dictation/ref/*.md local/local-dictation/ref/
+cp examples/local-dictation/orchestra-config.json local/local-dictation/.orchestra/config.json
 cd local/local-dictation
 duplo design --plan
 ```
 
 The command invokes configured model services. It sends the specification and
 reference material for design review, then generates the implementation plan.
+The example configuration uses Codex to author and judge, with Claude reviewing.
 It does not build the application. Re-running it reuses a current accepted design
 and resumes planning from the first unsaved phase.
 
@@ -43,6 +46,11 @@ another invocation. [Review notes](ref/REVIEW_NOTES.md) accompany the new inputs
 The third attempt exposed contradictory definitions retained across revisions.
 The authoring instructions now require each protocol to have one definition.
 Review continues with the completed judgments and additional model-lease findings.
+The fourth attempt exposed JSON restarts after output limits. Orchestra now
+recovers the complete replacement document. Its review also identified a staging
+lease that could not be acquired during installation and overlapping delivery
+attempts without a shared executor. The next invocation changes the author to
+Codex and retains the findings as revision inputs.
 No implementation plan has been generated. Model outputs in the evidence directory
 retain their wording.
 

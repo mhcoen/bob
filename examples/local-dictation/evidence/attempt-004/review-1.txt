@@ -1,0 +1,85 @@
+The D-001 through D-043 proposal is not ready for acceptance. The coverage table lists each of the fourteen named requirements exactly once, but several operational contracts remain inconsistent or incomplete.
+
+## Blocking defects
+
+1. D-022 cannot acquire the model lease required by D-033 during installation.
+
+D-033 lists installation smoke tests among model-lease holders, but permits acquisition only when an installation referencing the `setHash` is already `installed` or `orphaned_runtime`. D-022 performs the smoke test before inserting the installation row. Materialization during that test has the same problem.
+
+A staging lease needs separate eligibility, keyed to a durable `model_staging` row and the prospective `setHash`. The design must state how this lease excludes sweeps, archival and competing publication until activation succeeds or staging is discarded.
+
+2. D-022 does not define publication when the content-addressed blob already exists.
+
+The installation sequence unconditionally renames staging into `Models/blobs/<setHash>`. The proposal also requires two installations with identical content and different notices to share one blob. On the second import, the destination already exists. An ordinary rename may fail or replace a working installation.
+
+D-022 needs a serialized, no-replace publication protocol. When the blob exists, the installer should verify it and reference it. Concurrent installers need a defined winner and cleanup rule. No path may overwrite the existing blob.
+
+3. The sandbox boundary does not provide an access mechanism for job scratch.
+
+The data layout places `Scratch/<jobId>` under the main Application Support directory. D-003 permits sandboxed services to write job scratch and materialized caches, but its three access mechanisms cover model assets only. F2 assumes scratch writes succeed without specifying how the service receives access.
+
+Choose container-local scratch with store registration and sweeping, or pass an opened directory handle or sandbox extension for each job. The failure and deletion rules must identify who can remove scratch after a service crash.
+
+4. D-004 still lacks a complete global resource and priority model.
+
+Two gaps remain.
+
+A new recording may begin while an earlier dictation is rewriting. Both jobs have the same “interactive model work” priority. Eviction occurs only for a higher-priority arrival, so the earlier generation job can prevent the new run from obtaining preview or recognition capacity. That contradicts D-011’s claim that the preview ladder always produces text.
+
+Decode and ingest memory are also outside the summed admission calculation. Non-model work is admitted by session count and represented by a 200 MB floor, while the decode protocol permits 300 MB of growth before failure, excluding the decoder’s baseline footprint. The advertised 8 GB bound therefore does not cover every admitted process.
+
+The scheduler needs an ordering for overlapping interactive runs and a resource charge for every active ingest and decode job. The interactive reservation must cover the current recording’s preview and recognition under the maximum admitted non-model load.
+
+5. Delivery has no process-wide serialization boundary.
+
+D-008 through D-010 define one delivery attempt correctly, but the one-actor-per-run architecture allows attempts from different runs to overlap. Two coordinators can both revalidate the same target, interleave accessibility writes or paste events, and take nested pasteboard snapshots. The per-attempt idempotency rows do not prevent this.
+
+A single delivery executor must own accessibility writes, event posting and pasteboard mutation. Its design needs queue ordering, cancellation behavior and target revalidation after an attempt reaches the front of the queue.
+
+6. D-043 resume behavior is not representable in the run state machine.
+
+A service interruption fails the run at its current stage, and `failed` is part of the terminal state. D-043 then resumes the same run from staging. No transition permits a terminal run to return to `diarizing`, and the recovery contract says diarization is resumed only after user action without defining the resulting state change.
+
+Introduce a non-terminal `interrupted_resumable` state, or keep the run immutable and create a new execution attempt tied to the same manifest and checkpoint. Define how repeated crashes, cancellation and deletion affect that state.
+
+7. Cross-window speaker identity still contains unresolved behavioral decisions.
+
+D-023 says clusters are matched across windows using centroid distance, although the supplied research establishes no universal threshold. The proposal does not define whether a match merges cluster identities, creates a suggestion, or merely records candidate distances. It also omits threshold, tie and no-match behavior.
+
+The `assigned` attribution state is likewise undefined. Segments default to `unverified`, carried assignments remain `unverified`, and direct user action produces `assigned_by_user`, yet notes may attribute segments in `assigned`. No transition into that state is specified.
+
+The 256-centroid limit compounds the problem: “later windows match only against existing centroids” does not define what happens when a new speaker appears after the cap.
+
+Define cross-window links as non-destructive proposals unless an approved calibration supports automatic merging. Specify every attribution-state transition and the overflow behavior. Notes must consume only states whose evidentiary basis is defined.
+
+8. D-025’s continuity token does not establish continued ownership of a pause.
+
+An unchanged player launch identity, item identity and playback position cannot prove that no manual action occurred. A user can play, seek back and pause at the same position; coarse or rounded position values make the collision easier. The proposal acknowledges that automatic resume would then reverse the user’s pause. That directly conflicts with the Desktop behavior requirement.
+
+Automatic resume needs an adapter-provided monotonic state revision, command transaction identifier, or another observable that changes on every intervening play, pause and seek. An adapter lacking such evidence must remain controlling-only. The corresponding open question currently asks only whether the token is readable, which is insufficient.
+
+9. The long-input memory tests can accept duration-proportional growth.
+
+“Not distinguishable from zero at 95 percent confidence” treats failure to detect growth as evidence of constant memory. A noisy or underpowered three-point measurement can pass a meaningful positive slope. The 500 MB speech and 300 MB decoder allowances also permit steady linear growth that eventually exceeds memory because recording duration has no cap.
+
+Use an equivalence criterion: the upper confidence bound on the slope must remain below a pre-approved maximum. The protocol should also establish a duration-independent absolute ceiling after warm-up and include enough repeated measurements to estimate variance. Speech, decoding and diarization all need this form.
+
+10. D-019 introduces a persistent security-scoped bookmark without giving it a lifetime.
+
+The imported source is copied into the library, yet D-019 also records a security-scoped bookmark “for provenance.” The schema does not identify where the bookmark lives, whether it is ever dereferenced, or whether deletion and retention remove it. A bookmark is an access capability, not merely descriptive provenance.
+
+Either omit it and retain non-authorizing source metadata, or give it a row tied to the recording, a defined use, and deletion rules identical to the copied source.
+
+## Improvements that can wait
+
+D-030 now records the CAF packet-table frame counts and tests decoded trimming, resolving the previous omission. The fast chunk-deletion path should still be conditioned explicitly on obtaining reliable priming and frame accounting before the first chunk is removed. The current assumption describes a fallback but does not identify that switch point.
+
+The absolute recognition review samples twenty transcripts without defining selection or aggregation. Preselect the sample or use a recorded random, language-stratified procedure. Define whether “two corrections per 100 words” is evaluated per transcript or over the sample, so short utterances do not produce ambiguous results.
+
+The model lifecycle defines cleanup for orphan blobs and failed staging but not orphan notice directories created before an activation transaction that never commits. Add those directories to launch reconciliation.
+
+The Text delivery coverage entry says permission loss routes the result “to History and the clipboard.” D-032 and the delivery behavior hold the result and offer Copy; they do not automatically place it on the clipboard. Correct the coverage claim or specify the automatic clipboard effect.
+
+The earlier objections concerning partial diarization rows, carried `assigned_by_user` status, production alignment, lower-priority cross-slot eviction, accessibility-write revalidation, CAF valid-frame fields, shared cache ownership, non-monotone rubrics, comparative-only recognition acceptance, decoder memory criteria and failed-staging retention no longer apply. The current proposal supplies concrete contracts for those points.
+
+No project files were changed.

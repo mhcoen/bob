@@ -1,0 +1,1208 @@
+{
+  "purpose": "A single-user macOS dictation application: it captures speech, recognizes it, optionally rewrites it under a selected mode, and inserts the result into the application the user was working in. Every speech and language operation runs on the user's Mac, with no cloud fallback, account, paywall, or artificial cap on recording length. In scope: recording controls, text delivery, recording display, built-in modes, custom modes, automatic mode selection, vocabulary, context, languages, input sources, meetings, history, models, desktop behavior. Out of scope: cloud inference, settings synchronization, paywalls, enterprise billing, Windows and iOS clients. The full product is designed before implementation because several requirements fix the schema, process model and ingest boundary in ways that are expensive to retrofit: re-recognition with a different model while artifacts stay attributable (D-029), notes derived from a transcript plus diarization plus editable assignments (D-037), deletion during active work (D-024, D-033), settings snapshots (D-006), crash recovery without duplicate delivery (D-010, D-031), and duration-independent memory in every process (D-042). Lexical checks are necessary conditions, not proof of fidelity; unavailable evidence stays unknown; every unperformed measurement is named with a range, its basis and a failure action, approved before its gate runs (D-035). The mcwhisper and super inventories are evidence about scope and do not bind this design.",
+  "architecture": "## Layering\n\nDictationCore depends only on DictationPorts; adapters depend on ports and system frameworks; nothing depends on an adapter except the app shell. Core holds no AppKit, AVFoundation, SQLite or XPC, so the run machine, mode resolution, vocabulary, prompt assembly, check disposition, delivery policy and scheduling policy run without a microphone, model or window server.\n\n## Targets (D-002)\n\nOne SPM package. DictationPorts holds protocols (AudioSource, SpeechRecognizer, TextGenerator, Diarizer, DecoderProvider, ContractChecker, TextInserter, ContextProvider, ModelStore, RecordingStore, LeaseBroker, ShortcutRegistrar, MediaPlayerAdapter, RuntimeCapabilityDescriptor) and the value types they exchange (TransformationContract, CheckReport, WorkingDataContract, DeliveryProfile, RunManifest), so core owns check disposition without importing the checker. DictationCore, TextValidation (checker plus per-language packs), DictationStore (schema, migrations, journal and sealer, tombstones, generations, leases, staging, materialized registry), AudioIngest, SpeechRuntimeWhisperKit with SpeechRuntimeWhisperCpp when Intel is required, DiarizerSpeakerKit, LanguageRuntimeLlamaCpp, InferenceIPC, SystemIntegration and DictationUI follow. Five bundled XPC services: SpeechService, GenerationService, DiarizationService and DecodeService must not reach the network; ModelDownloader may. Each service is a thin main over a library target so swift test covers its logic; the Xcode target owns entitlements, hardened runtime and notarization.\n\n## Process model (D-003, D-028, D-036, D-040)\n\nThe shell is unsandboxed because selected-text insertion and a session event tap are unavailable to a sandboxed App Store build (D-036). Each inference service is sandboxed with the network client entitlement withheld, so egress is denied by the system; that boundary has no fallback. Assets reach a service by passed descriptors, a read-only exception scoped to Models/blobs, or in-container materialization, whichever F2 shows a runtime needs; materialized caches are store-owned (D-040). Durable service state is the job scratch directory and that cache. An external command-line decoder ships only if F2 shows a spawned child is confined; otherwise formats are added inside DecodeService (D-018). Diarization has its own service because its runtime may download by default and loads a separately counted model set. Nothing listens on a port. ModelDownloader holds the network entitlement, an allowlist and staging-only writes, runs on explicit user action, and cannot be started by an inference service. Connection interruption fails the run at its stage, keeps committed results, and rebuilds the service on the next admission.\n\n## Runs and stages (D-006, D-029)\n\nA recording owns audio; every derived text belongs to a run pinning the settings and inputs that produced it. Kinds: dictation, import, meeting, notes, reprocess_recognition, reprocess_diarization, reprocess_text. Stages: idle, arming, capturing, sealing, recognizing, diarizing, refining, rewriting, noting, delivering, terminal. Each stage a run can occupy has a cancellation effect (D-007) and a recovery transition (D-031). A dictation run: arming starts the microphone into a 5-second pre-roll ring at the trigger while it resolves mode (D-014), resolves the target under a 1-second watchdog (D-008), samples context against a 200 ms budget (D-016), acquires a model lease (D-033) and fsyncs manifest v0 with disposition active; capturing flushes the ring into the journal while the preview runs on a parallel tap; sealing commits the artifact (D-030) and then recording, artifact and run rows in one transaction, the first point the recording exists in History; recognizing runs one pass over the complete audio and discards the provisional stream; refining applies vocabulary and filler passes; rewriting generates and checks; delivering runs the ladder under a committed idempotency record. Imports enter at capturing, meetings at arming with two streams, reprocessing at its named stage. Notes are a separate run because their manifest pins inputs that do not exist when a meeting arms (D-037).\n\n## Admission and priority (D-004)\n\nOne actor per run owns its state, rows and files; the audio callback thread only writes into lock-free rings. One ResourceScheduler admits all work under one priority order: live capture and its sealing, then interactive model work (a dictation run's recognition, preview and awaited rewrite), then user-initiated foreground reprocessing, then background batch work. One live capture session at a time; a second trigger is refused. Live capture writing and sealing are exempt from admission; seekable ingest takes one of a bounded number of ingest slots. Model slots are speech-primary, speech-preview, generation and diarization, one occupant each, admitted on residency plus declared working-data ceiling (D-027, D-042). When a higher-priority job cannot be admitted, the scheduler evicts occupants in ascending priority, oldest first, across every slot until slot and budget suffice; an evicted diarization job keeps its staging and resumes (D-043), a job with verified checkpoint equivalence resumes, others restart. Activation refuses any pairing whose interactive minimum (speech-primary residency plus its ceiling plus the non-model floor) does not fit, so eviction always frees enough for recognition. Preemption counts are shown; a user setting defers preemption. Backlog above 30 seconds per live stream pauses batch admission, above 60 stops ingest, above 120 stops capture and seals as interrupted. Background finalization of cancelled sessions runs one at a time, yields to live capture, and is completed by recovery at the next launch if unfinished.",
+  "data_lifecycle": "## Layout\n\nUnder Application Support/LocalDictation: library.sqlite (WAL); Recordings/<uuid>/ with manifest.json, journal/<stream>/{<seq>.pcm, index.log}, audio/<stream>.caf, source/, context/, staging/<runId>/; Models/blobs/<setHash>/, Models/notices/<installationId>/, Models/.staging/; Scratch/<jobId>/. Materialized caches live at materialized/<setHash>/ inside a service container and are store-owned (D-040). One writer connection; RunActor writes only through repositories that enforce tombstone, generation and lease rules.\n\n## Ownership before the History row (D-033)\n\nBefore the sealing commit the unit of ownership is the session directory, named by a UUIDv7 no other actor knows, written only by its RunActor, with manifest.json carrying a disposition (active, cancelled, abandoned) fsynced on change. Cancellation or deletion before commit is a disposition, not a tombstone, and recovery honors it.\n\n## Leases, defined once (D-033)\n\nArtifact lease: scope is a recording; acquisition requires the row to exist, be untombstoned and match the expected generation; holders are workers, playback, export and retention. Model lease: scope is a setHash, optionally with service_kind for materialization; acquisition requires an installation referencing that setHash in state installed or orphaned_runtime and, where pinned, that installation installed; holders are model-loading jobs, installation smoke tests, live preview and materialization copies. A dictation run holds a model lease from arming, before any recording row exists, and an artifact lease from the sealing commit. A lease records holder pid, process start time, connection id, scope and heartbeat, and is reclaimable only when the holder is provably gone (process absent, start time differs, or connection invalidated); the heartbeat is progress display only.\n\n## Provenance (D-029)\n\nrecordings(id, created_at, source_kind, duration_ms, interrupted, alignment_state, deleted_at, generation, audio_state, display_run_id); audio_artifacts(id, recording_id, role, path, codec, sample_rate, channels, sha256, byte_length, rate_reduced, measured_rate_ratio, alignment_residual_ms); processing_runs(id, recording_id, recording_generation, kind, entry_stage, manifest_json, runtime_revisions_json, app_pipeline_revision, state, reason); results(id, run_id, recording_id, kind, primary_input_result_id, text, params_json, params_rendered); result_dependencies(result_id, input_kind in {result, speaker_assignment_revision, audio_artifact}, input_id, role); plus segments, derived_segments, speaker_*, modes, mode_revisions, vocabulary_revisions, rules, model_installations, model_assets, materialized_assets, model_staging, leases, context_digests, retained_context, delivery_attempts, delivery_attempt_rungs, delivery_profiles, jobs. Recognition and diarization results have no primary input; a diarization result names its audio artifacts by dependency rows and a notes result names its diarization result and assignment revision. Invariants are stated per result kind in verification. Results are immutable after insert (trigger on results.text); reprocessing inserts. app_pipeline_revision hashes the validator pack set, prompt templates, vocabulary pipeline and core version, so two results from one model under different application code stay distinguishable.\n\n## Assignments (D-037)\n\nspeaker_assignment_revisions(id, recording_id, diarization_result_id, content_hash, derived_from_revision_id); derived_segments(revision_id, id, source_segment_id, start_ms, end_ms) is the segmentation a revision presents, one-to-one in revision 1 and subdivided on split; speaker_assignments(revision_id, derived_segment_id, identity_id, attribution_state, carried_from_revision_id). Names are append-only with effective_from. One invariant: assigned_by_user is written only by a direct user action on that revision's derived segment. When a new diarization produces different boundaries, prior assignments are carried by time overlap as unverified proposals with their source revision recorded, because temporal overlap after a boundary change is not evidence of the same speaker; confirming sets assigned_by_user. A notes run pins transcript, diarization result, assignment revision and identity-name hash; its text is immutable and cites derived segment ranges through the pinned revision, and History reports drift with a regenerate action.\n\n## Diarization staging (D-043)\n\nA windowed diarization run appends window output and cluster centroids to Recordings/<uuid>/staging/<runId>/, fsynced per window, invisible to search and provenance. One transaction publishes the diarization result, its segments, assignment revision 1 and its derived segments, then staging is deleted. Cancellation deletes staging; interruption retains it as resumable so the same run continues under its pinned manifest; recording deletion removes it and aborts the publish under the generation check; a launch sweep removes staging whose run is terminal and not resumable. Staging grows with meeting length while decoded windows and inference memory stay bounded, and centroid state grows with distinct speakers to a cap of 256, above which later windows match only existing centroids and the transcript records the cap.\n\n## Audio journal and recovery (D-030)\n\nChunks of headerless native PCM, two seconds by default, are written to <seq>.pcm.part, fsynced, renamed, with the directory fsynced. index.log holds three records: head {stream, rate, channels, bit_depth, codec, frames_per_packet, priming_frames from the encoder at initialization, crc32}, fsynced before any data record; data {record_seq, chunk_seq, first_packet_index, packet_count, source_frames encoded into those packets, caf_data_byte_offset, caf_data_byte_length, varint per-packet byte sizes, crc32}; seal {last_data_record_seq, total_packets, total_source_frames, priming_frames, remainder_frames, pakt_byte_offset, file_length, sha256, crc32}. Sealer cycle: encode; append packet bytes to the CAF data chunk whose size field is -1 during capture; fsync the file; append the data record and fsync; delete covered chunks and fsync the directory. These records reconstruct the packet table exactly: encoded frames equal total_packets times frames_per_packet, valid frames are the sum of source_frames, remainder is encoded minus priming minus valid, so decoded output can be trimmed after the PCM is deleted; per-packet sizes are recorded because a table cannot be rebuilt from a count and an offset. Finalization: commit remaining chunks, append pakt and fsync, patch the data size and fsync, hash and append the seal record and fsync, commit rows. Recovery accepts the CRC-valid, in-range prefix, stops at the first failure, finalizes if the prefix ends in a matching seal record, and otherwise truncates to the last accepted data record, commits surviving chunks and finalizes again, which converges. Worst-case loss is one chunk period plus unflushed data; F3 measures it, the chunk period is the knob, and the fallback is retaining chunks until the artifact decodes and hashes. Dictation seals as 16 kHz mono ALAC at roughly 50 to 60 MB per hour; meeting streams seal at native rate, and reducing that rate is a user setting because it replaces the artifact irreversibly, recorded as rate_reduced.\n\n## Alignment in production (D-023)\n\nEvery buffer carries a host timestamp. At seal, each stream's measured sample rate is fitted from frames delivered against host time elapsed, stored as measured_rate_ratio, and used to place both streams on one timeline; this is the only production correction and nothing is injected into a user's meeting. The residual is stored, and a recording above the approved bound is marked alignment_degraded, which disables cross-stream echo marking and states the uncertainty beside timestamps. Injected tones exist only in the fixture, where they score this estimator against ground truth.\n\n## Models (D-022, D-038, D-040, D-041)\n\nIdentity is a hash over a manifest listing path and hash of every behavior-affecting asset (weights, tokenizer, configuration, template, feature parameters, companions). Publisher and revision are optional labels; their absence records provenance unknown with an editable label and blocks nothing (D-041). Installation stages, verifies, smoke-tests per kind, writes and fsyncs notices under Models/notices/<installationId>/, renames into Models/blobs/<setHash>, then commits installation, asset rows and the active pointer in one transaction; a missing notice file at launch marks notice_missing without blocking use. Failed staging is kept in model_staging with its error for seven days or until dismissal, and only orphaned or dismissed staging is swept. materialized_assets is keyed by (set_hash, service_kind), matching the content-addressed path. One retention invariant governs every physical model artifact, blob or cache: retained while an installation referencing that setHash is installed or orphaned_runtime, while a model lease is live, or while a materialization lease is live; released only when none holds. Archiving clears one installation's claim only, so archiving one of two installations sharing content removes neither; adapter removal deletes nothing and moves installations to orphaned_runtime, listed with their sizes.\n\n## Settings, context, interruption, deletion\n\nMode revisions are content-addressed and append-only, and a run reads its manifest rather than live settings. Context defaults to digests; opt-in retention stores a file with a retained_context row, fsynced before the row, deleted with the recording and excluded from the index (D-039). Transient copies release at stated points: the screen frame when Vision returns, a distilled source when distillation returns, a prose source at the earliest of prompt assembly, the end of refining for a run with no generation stage, and any terminal state; prompts release at reply completion, failure or cancellation. Recovery by state (D-031): arming removes the directory; capturing seals and commits as interrupted; sealing finalizes idempotently or applies a cancelled disposition; recognizing, rewriting and noting fail with inputs standing and never resume generation; diarizing commits nothing and retains resumable staging; refining re-runs from pinned committed inputs; a completed meeting with no notes run gets a Generate action; delivering moves in-flight attempts to needs_review with nothing re-posted. The ordering rule is that a durable record of intent precedes an externally visible irreversible effect while a locally idempotent effect is followed by its commit. Deletion sets a tombstone, increments the generation and signals cancellation; each worker commits in one transaction re-reading the row and aborting on missing, tombstoned or re-generated state, removing scratch and staging, so a late response cannot recreate a deleted recording. Hard deletion runs when the last artifact lease releases and at launch, until when the recording reads as deleting. Retention policies are ordinary deletion jobs under the same leases and checks; discarding audio disables playback, re-recognition and re-diarization while text reprocessing remains.",
+  "failure_behavior": "## Cancellation (D-007)\n\narming: nothing kept. capturing: capture stops and the journal is discarded, or sealed as interrupted under a per-mode setting. sealing: returns immediately, writes the disposition, and lets the idempotent seal finish as bounded background finalization, so the user never waits on encode or disk. recognizing: stops at a checkpoint, keeps audio, saves no partial transcript because a truncated one that looks complete is worse than none. diarizing: commits no result or segment rows and deletes staging (D-043). refining: keeps the recognition result. rewriting and noting: keep their pinned inputs, save nothing partial. delivering: cancellable until the first external effect; afterwards the app records the rung, reports the attempt, and does not try to undo an edit elsewhere.\n\n## Permissions (D-032)\n\nMicrophone denial disables recording controls while import works; revocation during capture seals as interrupted. Screen Recording denial removes system audio and screen context, degrading meetings to microphone with a marker and marking a truncated system stream at its timestamp. Accessibility loss disables probing, insertion, readback and revalidation, so delivery holds while recognition and rewriting continue. Input Monitoring loss removes push-to-talk and falls back to a Carbon hotkey. Browser automation loss makes URL predicates non-matching; player automation loss removes that adapter, leaving the manual actions. Capabilities are re-probed on notification and at arming, with recovery reported once. Secure input at arming marks the run delivery-unavailable; secure input at delivery holds the result with copy offered.\n\n## Delivery (D-008, D-009, D-010)\n\nOne target per focus outcome: the latched element while focused; the currently focused element when the latched application is frontmost and follow-focus is on, the default; otherwise hold. Revalidation of frontmost process, window and element precedes every external effect, meaning the accessibility write, every posted event and the Return; a mismatch before any effect ends the attempt as held with Deliver and Copy offered, and a mismatch afterwards ends it as unconfirmed. Confirmation is a content predicate: the expected text at the expected insertion location with the caret or selection immediately after it, never a length comparison. Ladder: rung 0 probes settability and issues no write, routing a negative or failed probe to rung 2; rung 1 revalidates and sets AXSelectedText, never AXValue, and after the write falls through only for codes in the approved pre-effect class, which ships empty and permanently excludes messaging failures and timeouts; rung 2 revalidates, writes the pasteboard and posts Command-V, where an unchanged readback is not a rejection because a delayed consumer can apply the paste later, so it falls through only when an applicable profile's rejection signal fires; rung 3 revalidates and types up to 400 characters. A profile applies only while its bundle identifier, role, application version range and macOS version range cover the target and its measurement is within two macOS minor releases. Attempt states: pending (committed before any effect), in_progress, delivered, unconfirmed, held, failed, needs_review; rejection is a rung outcome, and a rung's rejected outcome and the next rung's start are one transaction, so no row rests without a transition. At launch pending, in_progress and unconfirmed become needs_review; nothing is re-posted. The pasteboard is snapshotted before writing and restored only after confirmed delivery with an unchanged change count or on the user's action, never on a timer; after an unconfirmed outcome the transcript stays there and the panel says so. Submission posts Return after a confirmed delivery only if the delivered text still sits where it was confirmed.\n\n## Services, models, resources\n\nA crash fails the run at its stage, keeps committed results, releases credit, slot and leases, and offers retry; a diarization run keeps staging. Three crashes on one installation mark it suspect. A service that stops consuming credit is terminated after a no-progress interval. Download or import failure keeps staging with its error and leaves the active installation untouched; a failed smoke test activates nothing; missing publisher, revision, notice or benchmark data never gates activation (D-041); materialization failure removes the directory, registers nothing and fails the job. A pinned run against archived or missing assets is refused with a restore offer, and loading never downloads. A reprocess pinning an absent runtime revision is refused with that revision named. A pairing over budget is refused with the arithmetic shown, labeled measured or declared, and overridable. Disk-full or repeated fsync failure stops capture and seals to the last complete chunk. An unsupported import leaves its source untouched. A job crossing its declared ceiling is terminated with the measured figure recorded rather than the ceiling raised.\n\n## Generated text (D-012)\n\nAlways run: expansion ratio, context overlap rejecting spans of eight or more tokens present in context and absent from the transcript, vocabulary survival, script sanity, and orthographic interrogative detection reported as a signal. With a pack: interrogative survival in order, content-word recall, unsupported-sentence detection. An observed violation retries once with a stricter instruction and then delivers the normalized transcript while retaining the generated text marked contract_violation; for a summarizing contract the citation requirement governs and uncited bullets drop. Without a pack the model still runs and its output is produced, retained, searchable and one click from delivery, because pack coverage must not restrict model use; what changes is that a mode declaring answersQuestions false delivers the normalized transcript, whatever the orthographic signal says, since that signal can find a question mark and cannot show none was asked. There is no override, because one would let a mode contradict its own declaration. Context is a term list per source by default, and a prose source additionally requires the language-dependent set to be available and to pass before generated text is delivered automatically. These checks are necessary conditions: they can pass on text whose meaning changed, and an instruction obeyed in words absent from prose context is undetectable by every listed check. Requiring a runtime proof for every utterance would be unsatisfiable, so what bounds the damage is that the transcript is preserved, delivery is the only automatic external effect and is reviewable, and the adversarial corpus measures how far the checks reach.\n\n## Meeting attribution (D-023)\n\nPer-segment calibrated confidence is stored as unknown and no margin is stored, because the cited declaration establishes neither; centroid cosine distance, where a centroid exists, is the only quantitative evidence and proposes cross-recording identity for confirmation rather than applying it. Segments default to unverified, notes attribute only assigned or user-assigned segments, cross-window matches are marked and mergeable, and echo-correlated segments are excluded from microphone-side attribution unless the recording is alignment_degraded, where that marking is disabled. Carried assignments from a prior revision are unverified proposals (D-037).\n\n## Media and device restore (D-025)\n\nAutomatic pausing needs an adapter addressing an identified player. Automatic resumption needs an observed playing-to-paused transition after the app's command and a continuity token, comprising player launch identity, current item identity and playback position, that is unchanged when read again at resume; any differing component, any non-paused state or an unreadable token revokes ownership. The token rather than the notification stream carries the claim, because notification delivery is not guaranteed. The residual limit is stated: a play and re-pause returning to the identical item and position is indistinguishable. A controlling-only adapter pauses and offers manual resume and never resumes automatically; a player with no adapter gets explicit Pause media and Resume playback actions labeled as a toggle whose recipient and effect the app cannot confirm, because that key can start a paused player while an unrelated client keeps the output device active. Hardware input volume is restored only if the current value still equals what the app set.",
+  "evolution": "Task-level phases follow acceptance; what belongs here is ordering, acceptance evidence and extension cost.\n\n## Gates (D-034)\n\nEach range, basis and failure action is approved before the gate runs, and gates govern shipped defaults, never an imported model. F1 measures recognition against comparative and absolute criteria, latency, service memory at three durations, cancellation latency, checkpoint equivalence and the preview arm, and precedes freezing preemption policy, admission arithmetic and the default pairing. F2 loads each model kind by all three access mechanisms, asserts denial of egress and of writes outside job scratch and materialized directories from the service and from a spawned child, and precedes freezing entitlements, the access path and the decoder extension mechanism; child confinement is a shipping condition. F3 kills the writer at randomized offsets, at both fsync points, at every finalization write and during recovery, recording lost interval, decoded valid frame count and trimming against reference PCM, and convergence, plus the sealer backlog under contention. F4 populates the pre-effect class, profiles and snapshot limit from observed per-target behavior. F5 inventories the diarizer's fields and centroid availability and measures its memory at three durations under whole-input and windowed operation.\n\n## Order\n\nThe store, run machine, manifest, both lease scopes and the recovery table come first against fakes. Capture and delivery depend on those and no model. Recognition depends on capture, the model store and the materialized lifecycle. Vocabulary and Standard depend on recognition; generation modes depend on vocabulary, the check sets and F2. Mode rules and context depend on modes, retained context and the permission matrix. System audio and import depend on the ingest port, ingest admission and the memory protocols. Meetings depend on system audio, F5, the diarization service with its staging artifact, and user acquisition of weights; notes depend on the notes run and the revision schema. Languages and retention depend on results and leases. Desktop integration depends on capture and delivery, with the automatic media path limited to adapters supplying the continuity token.\n\n## Acceptance evidence\n\nRecovery outcomes for every non-terminal state after a kill at that boundary; the F3 loss bound with decoded frame counts matching the durable prefix; the dated F4 matrix with the attempt and rung tables exercised including focus change between probe and write; recognition rows bound to machine, model and runtime revision plus the usability review; table-driven vocabulary determinism; rubric scores under the monotone rule with violation and hold rates; per-language recognition and translation scores; model tests covering unlabeled import, shared blob and shared cache archival, adapter removal deleting nothing, and a network-denied session; browser and shadowing matrices; per-process memory at three durations with decoder registration checks; meeting tests covering alignment estimator agreement, diarization measures, staging publish and resume, and provenance drift; deletion and retention races; and a manual desktop matrix recording which adapters supplied a token and what resumed automatically.\n\n## Extensions and costs\n\nA new source implements AudioSource with a live-or-seekable descriptor; a per-source pipeline would be shorter and would duplicate the parts most likely to be wrong, since a long-input memory bug would exist only in the import path. A decoder implements DecoderProvider under credit, as a confined child where F2 allows or inside the service otherwise, and must pass the registration measurement in D-018. Replacing a runtime touches an adapter and a service binary: params_json under a stable application schema plus params_rendered keeps old rows readable, common parameters render generically with optional per-runtime hooks, so interface work is bounded rather than eliminated. Storage effect is bounded by D-038 and D-040: attribution survives archival, physical artifacts release when no claim remains, adapter removal deletes nothing, and because that leaves storage held until the user acts, the model manager reports retained bytes and states at install time how much a replacement adds and archiving releases. Accepted maintenance: GRDB migrations, vendored C and C++ runtimes with pinning and re-evaluation, dated expiring delivery profiles and error-class entries, one player adapter per player with its own token, materialized caches with markers and sweeps, validator packs per language, two fsyncs per chunk period, and five entitlement sets that fail closed. Intel support means a second adapter, model tier, budget and evaluation run; 8 GB machines need a smaller pairing, sequential residency, no preview slot and descriptor passing over materialization, both being adapter and policy changes that leave the store and run machine untouched.",
+  "verification": "## Approval (D-035)\n\ndocs/behavior/ holds a table per subsystem giving, per state and event, the expected next state, persisted effect and user-visible effect, covering cancellation per stage, permission loss, focus change during delivery including between probe and write, crash at each boundary, lease conflict per scope, admission and cross-slot preemption, materialization outcomes, staging publish and resume, and check disposition. Rows cite a SPEC.md clause or are marked derived. The approver is the user as product owner or a delegate in docs/behavior/OWNERS, and the same approver signs each range with its basis and failure action before its gate runs, the rubric rules before scoring, and the pre-effect class and each profile before either licenses a fallthrough; a missed range returns to the approver where its action says so rather than being dropped by engineering. Every range below is proposed and unapproved, which is why approval precedes the gate.\n\n## Automated\n\nProperty tests over every state and event pair assert per-kind invariants: recognition and diarization results have no primary input, a diarization result has at least one audio_artifact dependency, normalized derives from recognition, rewritten from normalized, translation from recognition or normalized, and notes from a transcript with exactly one diarization and one assignment-revision dependency; plus no delivery without a committed attempt row, no results for a run cancelled before sealing, artifacts on disk exactly when rows say so, immutable result text, notes pinning inputs that committed first, and assigned_by_user only where a user action wrote it. Provenance tests re-recognize and re-diarize one recording and assert each artifact resolves to one transcript, diarization result, assignment revision, installation, runtime revision and application pipeline revision. Drift tests rename, split and re-diarize and assert notes unchanged, drift reported and carried assignments unverified. Crash injection at every stage boundary asserts the approved outcome, including no re-delivery, no automatic notes run, idempotent re-sealing, and resumable staging with no segment rows; staging tests assert a resumed run publishes what an uninterrupted run publishes, cancellation deletes staging and deletion aborts the publish. Finalization tests kill at every write and during recovery and assert convergence and that decoded valid frame count and trimming match retained reference PCM. Scheduler tests assert an interactive run preempts batch speech, an interactive rewrite preempts batch notes generation, an interactive run evicts batch diarization holding the budget with staging retained, a job without checkpoint equivalence restarts whole, and the shed sequence fires. Lease tests assert smoke tests and preview acquire model leases with no recording row, model leases block blob and cache removal, artifact leases require an untombstoned recording at the expected generation, and archiving one of two installations sharing a setHash removes neither blob nor cache while archiving the last releases both. Delivery tests cover a not-settable target reaching rung 2 with no write, focus change between probe and write ending held with no write, error codes inside and outside the class, equal-length replacement, an unrelated edit, a delayed-consumer paste staying unconfirmed, version-mismatched and expired profiles making rung 3 unreachable, a crash after a rejected rung recovering as needs_review, and an edit before Return suppressing submission; pasteboard tests cover restore, non-restore and refusal above the snapshot limit. Isolation tests attempt egress and out-of-container writes from each service and from a spawned child and assert failure, with symbol and dependency scans corroborating only. Materialized tests cover marker and hash verification, a kill mid-copy surviving while its materialization lease is live, corruption detection, adapter removal deleting nothing, and size reporting. An offline session covers dictation, import, meeting with notes and a model load with the network denied. Long-input tests sample the app, SpeechService, DecodeService and any child, DiarizationService and GenerationService at 10 minutes, 1 hour and 3 hours, asserting per-duration ceilings and flat slopes, plus session and ingest limits and termination on ceiling breach. Further suites cover prompt injection, check disposition per unpacked language, vocabulary determinism, model lifecycle including unlabeled import and notice_missing and failed staging surviving relaunch, retained-context lifetimes, alignment estimator agreement with the tone fixture, migrations from fixtures, leading audio with a delayed-arming case asserting preroll_truncated, and panel placement across display changes.\n\n## Human review\n\n40 recordings per mode per shipped language are scored 0 to 2 on meaning preserved, no invented facts, questions still questions, vocabulary terms intact and formatting within contract, by two independent reviewers with third-reviewer adjudication above one point. The ship rule is monotone, so a lower score is never more acceptable: no item scores 0 on any criterion; at most 10 percent score 1 on meaning, invented facts or questions; at most 20 percent score 1 on vocabulary or formatting. The prohibition on any 0 is derived from the specification; the percentages and corpus size are proposals, and 40 items resolves a violation rate only to roughly plus or minus 9 points. The corpus includes adversarial cases built to pass lexical checks while changing meaning: negation, quantities, modality, swapped attribution, an appended answer, a copied context sentence, and an obeyed prose instruction. Translation uses 30 bilingual utterances per source language scored against the retained source transcript rather than the audio, with recognition rate reported beside it, on adequacy, names and numbers, and no added content, under the same monotone rule of no 0 and at most 10 percent scoring 1 on any criterion; chrF is descriptive. Notes are scored on the mode scale with automatic citation validation. Delivery behavior is verified by hand across TextEdit, Mail, Notes, Safari plain and contenteditable, Chrome, Xcode, Terminal, VS Code, Slack, Messages and Figma, recording versions in every cell along with settability, content survival, predicate evaluability, per-error-code effects, rejection signals, delayed-consumer paste, non-Latin and right-to-left text, input methods, secure fields and focus changes.\n\n## Protocols, ranges, basis, actions\n\nNone executed. F1 comparative: corpus-level word error rate per language against a comparator checkpoint and quantization fixed before the gate, within 15 percent relative or 1.0 point absolute where the comparator is below 5 points; basis a proposed tolerance; action promotes the harness to a shipping adapter. F1 absolute, because a comparison alone can be met by two unusable transcribers: at most 12 percent word error rate on the internal set plus a usability review of 20 transcripts needing at most 2 corrections per 100 words with no meaning-changing error, the review being the criterion; basis proposals standing for the point where correcting beats redictating; action drops that language as a supported default, keeps it selectable and labeled below the acceptance basis, and returns the choice of another default to the owner. F1 latency: p50 3.0 s and p95 6.0 s to final transcript for a 30-second utterance; basis designer proposals; action changes model size or quantization and otherwise returns to the approver, who approves a revised range or accepts publishing the measured figure. F1 memory: slope indistinguishable from zero at 95 percent confidence with 500 MB absolute growth; basis the credit window, with the ceiling unmeasured slack. F1 preview: first text within 1.5 s, updates every 2 s, no dropped frames, and paired non-inferiority with a one-sided 95 percent bound of 1.0 point over 40 utterances; action ships the highest passing rung and otherwise returns a release question. Decode path: slope indistinguishable from zero with 300 MB absolute growth across the three durations; basis the credit and decode windows; action disables that format, withdrawing a built-in decoder or failing an external decoder's registration so a buffering decoder never reaches user work. F3: lost interval at most 4 seconds over 200 kills, every recovery decoding with matching valid frames and trimming, convergence; basis two chunk periods; action shortens the period or adopts retain-until-verified. F3 sealer: backlog under 30 seconds with a concurrent import and loaded CPU, shed sequence firing, background finalization yielding. F4: no pass or fail, populating shipped data, where a code enters the class only if every observed instance left content unchanged and it is not a messaging failure or timeout. F5: field inventory plus the F1 slope criterion with 1.0 GB absolute growth; action selects the windowed contract and reports its stitching cost. Diarization quality: error rate with missed speech, false alarm and confusion separated, plus segment-level error and median edits per 30 minutes, with the shipped meeting default becoming channel labels above 30 percent segment error or 15 edits; basis proposals tied to user cost; this decides a default, not availability. Language detection: at most 5 percent confidently misdetected at the shipped threshold; action raises the threshold. Alignment: at most 50 ms residual over 60 minutes and the production estimator within 50 ms of the tone-derived correction; action marks recordings alignment_degraded above the measured bound and reconsiders the macOS 15 unified stream. Until measurements exist, language support is reported as publisher-declared and unmeasured and no latency claim appears.",
+  "assumptions": [
+    "Baseline macOS 14.0. Basis: RESEARCH records macOS 14 and Xcode 16 as prerequisites of the package selected in D-020 and D-023, and ScreenCaptureKit system audio predates 14. Reconsider if that dependency is dropped, or if alignment residual forces the WWDC24 unified stream, raising the floor to macOS 15.",
+    "Apple Silicon with 16 GB is the evaluation target and Intel is unsupported in the first release. Basis: the specification names the target; the limit is the engineering decision in D-001, since a second architecture doubles evaluation before the primary target is measured. Reconsider when an Intel requirement is confirmed.",
+    "A sandboxed service with the network entitlement withheld can load models through descriptors, a read-only path exception, or in-container materialization. Basis: per-service sandboxes are documented, Core ML and Metal need no exception, and a service may always write its own container; unverified for these runtimes. Reconsider at F2; there is no fallback outside the boundary.",
+    "A child spawned by a sandboxed service inherits its sandbox. Basis: App Sandbox documents child inheritance; unverified for a command-line decoder. Reconsider at F2, where it is a shipping condition rather than a setting.",
+    "No accessibility set-attribute error code is known to establish that no write occurred. Basis: no such guarantee appears in the cited documentation, and messaging failures arise exactly where the request may still be queued. Reconsider when F4 supplies per-code observations, never for messaging failures or timeouts.",
+    "Model residency plus working data fits an 8 GB budget on the target: speech 0.8 to 1.6 GB, preview under 400 MB, an 8B model at 4-bit near 4.5 to 5 GB, a few hundred MB of cache at 8k context, diarization in the tens to low hundreds of MB, and under 200 MB of ingest memory. Basis: published quantized sizes and cache arithmetic, with no measured residency and no allowance for workspaces or Metal heaps. Reconsider at the first F1 and F5 descriptors.",
+    "Materializing an installation costs one extra copy of its assets and no more. Basis: the copy is byte-for-byte and verified against the same hashes, so the cost is arithmetic. Reconsider at F2, which records which runtimes need it.",
+    "Maximum audio loss after abrupt termination is one chunk period plus unflushed data within it. Basis: chunks are fsynced and renamed individually, encoded bytes precede the record naming them, and records carry CRCs, packet sizes and frame counts; unmeasured. Reconsider after F3, which shortens the chunk period or triggers retain-until-verified.",
+    "The ALAC encoder reports priming frames at initialization and remainder follows from encoded minus priming minus valid frames. Basis: CAF packet tables define these fields and Core Audio converters expose prime information; unverified for this configuration. Reconsider at F3; if priming is unavailable at initialization it is recorded from the converter before any chunk is deleted, and otherwise chunks are retained until the artifact is verified.",
+    "Per-stream host timestamps make each stream's measured sample rate observable in every production recording, so clock drift can be corrected without injecting signals into a user's meeting. Basis: AVAudioEngine and ScreenCaptureKit deliver host-domain buffer timestamps; residual accuracy is unmeasured. Reconsider at the alignment measurement, whose tones score this estimator in the fixture only.",
+    "ALAC encoding of live capture runs far below realtime, so the sealer holds its backlog under 30 seconds. Basis: sample-rate and packet arithmetic for 16 kHz mono or two native-rate streams; unmeasured under contention. Reconsider at F3; the shed sequence bounds the failure and cancellation during sealing does not depend on it.",
+    "Prompt-based vocabulary biasing raises the chance a term is recognized and guarantees nothing. Basis: it is a decoder prompt rather than a decoding constraint, bounded near 224 tokens, and the product text says so. Reconsider if a runtime exposes real biasing or constrained decoding.",
+    "Lexical and structural checks are necessary conditions and not proof that a mode obeyed its contract, and an instruction obeyed in words absent from prose context is undetectable by every listed check. Basis: recall, interrogative survival, expansion ratio and overlap can all pass on text whose meaning changed. Reconsider if the adversarial corpus finds a class surviving every check.",
+    "Leaving the transcript on the pasteboard after an unconfirmed delivery beats restoring on a timer. Basis: any fixed delay races a delayed consumer and losing the user's text is worse. Reconsider if F4 finds targets whose consumption can be acknowledged.",
+    "Music and Spotify expose a readable continuity token of player launch identity, item identity and playback position. Basis: both expose playback state and position through scripting interfaces; unverified here, and notification delivery is not assumed complete. Reconsider during adapter implementation: an unreadable token means the adapter ships controlling-only.",
+    "A CoreAudio device-running flag is evidence that something is playing and not of ownership, of a key's recipient, or of any pause. Basis: it identifies neither the application nor the effect of a posted key, so it only decides whether to offer the manual action. Reconsider if a supported API supplies player identity and pause confirmation.",
+    "AVFoundation covers wav, aiff, caf, mp3, m4a in AAC and ALAC, mp4, m4v and mov. Basis: system decoder coverage. Reconsider at the first refusal, with opus in webm or matroska likely, where F2 decides the extension path.",
+    "FTS5 is compiled into the system SQLite on the baseline. Basis: it has shipped enabled for several releases, though this is a setup check rather than a verified fact. Reconsider immediately if the check fails; the fallback is a bundled SQLite with a larger binary and an update obligation.",
+    "Separate microphone and system streams give better attribution than a mixed stream, and channel origin is a capture fact rather than a claim about who spoke. Basis: structural, since both paths exist, while speaker echo into the microphone is not covered by structure. Reconsider after diarization and echo evaluation.",
+    "The diarizer supplies cluster boundaries and centroids with distance helpers, supplies no per-segment confidence or margin, and may supply no centroid for a speaker. Basis: stated in RESEARCH for SpeakerKit v1.1.0 from source inspection with no inference experiment run. Reconsider at F5.",
+    "Whether the diarizer holds memory proportional to duration is unknown, and the windowed contract needs no capability the SDK is not known to have. Basis: RESEARCH is silent on long-recording behavior, and window-and-stitch uses bounded whole-input diarization plus the exposed centroid comparison. Reconsider at F5's duration measurement.",
+    "Diarization staging grows with meeting length while decoded windows and inference memory stay bounded, and centroid state grows with distinct speakers. Basis: segment records are tens of bytes and a centroid is a fixed-size vector; unmeasured. Reconsider if cluster counts approach the 256-centroid cap.",
+    "A 200 ms context budget, a 1 second target watchdog and a 5 second pre-roll ring are tolerable during arming. Basis: design choices about perceived responsiveness with no user study; capture never waits because the ring starts at the trigger. Reconsider if screen context routinely misses the deadline or preroll_truncated appears in practice.",
+    "The 10 MB pasteboard snapshot limit and the 0.5 detection threshold are starting values. Basis: the first avoids duplicating large payloads during a latency-sensitive operation; the second sends unfavored detections to the visible fallback. Reconsider from the F4 snapshot-cost and detection measurements.",
+    "Audio, transcripts and retained context are protected by file-system permissions and whatever full-disk encryption the user enabled, not application-level encryption. Basis: consistency with the rest of the library and no threat model separating context from audio. Reconsider if a threat model asks for at-rest encryption.",
+    "Weights offered for download are limited to assets whose notices permit redistribution. Basis: RESEARCH records the WhisperKit model card as MIT and component-specific notices for the diarization collection. Reconsider per asset as the inventory is compiled; an asset that cannot be offered stays importable with licence unknown."
+  ],
+  "decisions": [
+    {
+      "id": "D-001",
+      "title": "macOS baseline and hardware target",
+      "choice": "Deployment target macOS 14.0 and Apple Silicon for the first release, with later-OS APIs gated at runtime and never required.",
+      "rationale": "The runtimes in D-020 and D-023 ship in one package whose recorded prerequisites are macOS 14 and Xcode 16, and system-audio capture exists at 14. Apple Silicon only is an engineering decision, not a reading of the specification: a second architecture needs its own model format, budget and evaluation before the primary target has any measurement.",
+      "alternatives": [
+        {
+          "option": "Baseline macOS 15 for the unified capture stream",
+          "tradeoff": "One capture path and a shared clock; excludes Sonoma users for a convenience host-time alignment already covers."
+        },
+        {
+          "option": "Ship Intel and Apple Silicon together",
+          "tradeoff": "Broader coverage; doubles evaluation before either side is measured."
+        },
+        {
+          "option": "Baseline macOS 13",
+          "tradeoff": "Wider reach; below the dependency's prerequisite and adds an unevaluated OS."
+        }
+      ],
+      "consequences": "Meetings align two streams by host time, and the alignment range decides whether that holds. Intel waits for the second adapter, with the reason recorded here rather than attributed to the user.",
+      "reconsider_when": "The Argmax dependency is dropped, alignment residual exceeds its range, or an Intel requirement is confirmed."
+    },
+    {
+      "id": "D-002",
+      "title": "Package layout and dependency direction",
+      "choice": "One SPM package with a pure core, a ports target holding protocols and the value types they exchange, a deterministic checker behind a port, adapter and service targets, and a thin Xcode shell as composition root.",
+      "rationale": "A replaceable runtime, four input sources, a diarizer and a per-application insertion mechanism are all adapters; keeping policy free of frameworks lets cancel, crash, delete-during-processing and delivery ladders be exercised before any runtime exists. Contract and report types live in ports so core owns disposition without importing the checker.",
+      "alternatives": [
+        {
+          "option": "Core depends on TextValidation directly",
+          "tradeoff": "One fewer protocol; swapping or stubbing a check strategy becomes a code change in core."
+        },
+        {
+          "option": "Single application target",
+          "tradeoff": "Faster early progress; behavioral tests then need permissions and real models."
+        }
+      ],
+      "consequences": "Adapters need explicit wiring and boundary value types, and there are two entry points: swift test for logic and the Xcode scheme for the signed application and services.",
+      "reconsider_when": "The port boundary needs escape hatches leaking framework types into core."
+    },
+    {
+      "id": "D-003",
+      "title": "Inference in bundled sandboxed XPC services with three model-access mechanisms",
+      "choice": "Speech, generation, diarization and decoding each run in a sandboxed bundled service with the network client entitlement withheld; assets arrive by descriptors, a read-only path exception, or in-container materialization, whichever F2 shows the runtime needs; durable service state is job scratch and that cache.",
+      "rationale": "RESEARCH records per-service sandboxes, independent termination, and that a symbol scan cannot establish a lack of network access, while a withheld entitlement is a process property covering dynamically loaded code. Three mechanisms exist so a failed access method never becomes a reason to leave the boundary, and the third needs no exception at all.",
+      "alternatives": [
+        {
+          "option": "Unsandboxed fallback service",
+          "tradeoff": "Some runtime always usable; replaces system denial with evidence RESEARCH rejects."
+        },
+        {
+          "option": "Runtimes linked into the app",
+          "tradeoff": "Lowest latency; a native crash kills the app mid-run."
+        },
+        {
+          "option": "Upstream HTTP server on localhost",
+          "tradeoff": "Reuses tooling; opens a port every local process can reach."
+        }
+      ],
+      "consequences": "Interruption is normal and rebuilt on next admission; audio crosses under credit so memory is measured per service; materialization doubles on-disk footprint under D-040; five entitlement sets fail closed.",
+      "reconsider_when": "F2 shows a runtime loads under no mechanism, selecting the alternative adapter rather than relaxing the boundary."
+    },
+    {
+      "id": "D-004",
+      "title": "One priority order across all admitted work",
+      "choice": "One actor per run, a lock-free callback path, and one scheduler applying the priority order, slots, cross-slot preemption, interactive minimum, ingest slots, backlog shed sequence and bounded background finalization defined in the architecture section.",
+      "rationale": "Slot-local preemption would leave an interactive rewrite behind batch notes generation and an interactive recognition behind a budget held by batch diarization, which is the failure centralized admission exists to prevent, so priority spans every slot and the summed budget. Only live sources lose data when deferred, which is the exemption line, and bounding background finalization stops cancelled seals filling the capture lane.",
+      "alternatives": [
+        {
+          "option": "Preempt only within the needed slot",
+          "tradeoff": "Less eviction; interactive work stays blocked by lower-priority work holding the budget elsewhere."
+        },
+        {
+          "option": "Automatic aging for preempted batch work",
+          "tradeoff": "Guarantees batch progress; delays work the user is waiting on, which the deferral setting already offers."
+        },
+        {
+          "option": "Serial first-come queue",
+          "tradeoff": "Predictable; the user waits behind batch work."
+        }
+      ],
+      "consequences": "Long imports and diarization are interrupted when the user dictates, resuming from staging or restarting; constant dictation can starve batch work, shown as a preemption count; the callback thread needs review discipline.",
+      "reconsider_when": "A runtime's resume reproduces the unpreempted transcript, or a machine class makes concurrent residency fit."
+    },
+    {
+      "id": "D-005",
+      "title": "SQLite with FTS5 for metadata and text, files for audio, context and staging",
+      "choice": "GRDB over SQLite in WAL mode with FTS5 over result text, per-recording directories for large artifacts, and numbered migrations tested against fixtures.",
+      "rationale": "Search is a stated requirement and bm25 with snippets is why SQLite wins; deletion during active work, lease acquisition, model activation and the diarization publish each need a transaction combining a check with a write. Large artifacts stay outside the database to keep backup and migration times short and to keep context out of the index.",
+      "alternatives": [
+        {
+          "option": "SwiftData",
+          "tradeoff": "Least code with native observation; no full-text index and migrations are harder to test against fixtures."
+        },
+        {
+          "option": "Core Data with an external index",
+          "tradeoff": "Mature; a second index to keep consistent with deletions."
+        }
+      ],
+      "consequences": "A dependency with its own cadence; FTS triggers must track inserts and deletes; files and rows can disagree after a crash, which recovery resolves.",
+      "reconsider_when": "FTS5 is absent on the baseline, or library sizes favor an external index."
+    },
+    {
+      "id": "D-006",
+      "title": "Runs as state machines with a per-run settings snapshot",
+      "choice": "A state machine per run in pure core, with a manifest fsynced at run start pinning mode revision, model installations, runtime, adapter and application pipeline revisions, vocabulary revision, language, translation flag, validator packs and parent inputs; capture starts at the trigger into a bounded pre-roll ring.",
+      "rationale": "A run reads its manifest rather than live settings, so a mode edit or model switch mid-run cannot change a result's meaning, and recording the application pipeline revision matters because updated checker packs or prompt templates change output while the model identity is unchanged. Notes are a separate kind because the manifest is fsynced at run start and their inputs do not exist then.",
+      "alternatives": [
+        {
+          "option": "Read live settings per stage",
+          "tradeoff": "No snapshot machinery; a mid-run edit silently changes a result's meaning."
+        },
+        {
+          "option": "One meeting run with a manifest extension",
+          "tradeoff": "One run per meeting; the manifest stops being one fsynced snapshot and recovery must judge which extension was durable."
+        },
+        {
+          "option": "Pin model identity only",
+          "tradeoff": "Fewer fields; results under different check or prompt code become indistinguishable."
+        }
+      ],
+      "consequences": "A meeting produces at least two runs; a crash before the notes run leaves a Generate action; settings apply from the next run; an arming stall beyond the ring records preroll_truncated rather than losing audio silently.",
+      "reconsider_when": "A requirement needs mid-run settings changes, such as switching language during a meeting."
+    },
+    {
+      "id": "D-007",
+      "title": "Cancellation defined for every stage",
+      "choice": "The stage-indexed table in the failure behavior section, with sealing returning immediately behind a durable disposition and diarizing deleting its staging artifact and committing nothing.",
+      "rationale": "The specification requires defined effects at every stage. Sealing does not block the user because the disposition is durable and the seal idempotent; recognizing and diarizing save nothing partial because output covering part of the input is indistinguishable from complete output; rewriting keeps the normalized result because the expensive work is done.",
+      "alternatives": [
+        {
+          "option": "Block cancellation until the seal completes",
+          "tradeoff": "The outcome is applied immediately; a stalled disk makes the escape path unresponsive."
+        },
+        {
+          "option": "Keep diarization staging after cancellation",
+          "tradeoff": "Cheap continuation later; cancel would leave state the user believes was discarded."
+        },
+        {
+          "option": "Cancel discards everything",
+          "tradeoff": "One rule; throws away a completed recognition because the rewrite was unwanted."
+        }
+      ],
+      "consequences": "Workers need checkpoints; a cancelled recording can leave the panel before its files are gone, so the panel says finishing while background finalization runs.",
+      "reconsider_when": "Users repeatedly re-record after cancelling during recognition, arguing for clearly marked partial transcripts."
+    },
+    {
+      "id": "D-008",
+      "title": "Target resolved once per focus outcome, revalidated before every external effect",
+      "choice": "Latch process, window, element, readback capability and settability at arming; resolve one target per focus outcome; revalidate immediately before the accessibility write, every posted event and the Return, ending as held on a pre-effect mismatch and unconfirmed afterwards.",
+      "rationale": "Every ladder mechanism acts on whatever is focused when it runs, including the accessibility write, so focus can move between the probe and that write and writing then would put text where the focus policy says to hold. Separating held from unconfirmed keeps a mismatch where nothing was written from being reported as an uncertain delivery.",
+      "alternatives": [
+        {
+          "option": "Revalidate only before posted events",
+          "tradeoff": "Fewer round trips; the preferred rung writes into an element the user has left."
+        },
+        {
+          "option": "Deliver into whatever is frontmost",
+          "tradeoff": "No held results; text lands in the wrong application."
+        },
+        {
+          "option": "Always hold and require confirmation",
+          "tradeoff": "Never wrong; adds a click to every dictation."
+        }
+      ],
+      "consequences": "The panel needs a held state and History must show undelivered results; revalidation adds a cheap query per effect; the same-application default occasionally targets another field, which is a per-mode setting.",
+      "reconsider_when": "Holds fire often enough to annoy, arguing for opt-in re-focus as the default for users who enable it."
+    },
+    {
+      "id": "D-009",
+      "title": "Insertion ladder with a settability probe, an evidence-based pre-effect class, versioned profiles and a content predicate",
+      "choice": "The four-rung ladder, fallthrough rules, predicate, profile applicability and pasteboard handling defined in the failure behavior section, with AXValue never set, the pre-effect class shipping empty and permanently excluding messaging failures, and rung 3 reachable only through an applicable unexpired profile.",
+      "rationale": "RESEARCH separates value from selected text, notes a paste carries no acknowledgment of consumption, and records that a set-attribute call can fail for messaging reasons without guaranteeing no write occurred. The probe handles the case error classification was really used for, before anything is written, and version-scoped profiles stop a stale signal licensing typing after an update.",
+      "alternatives": [
+        {
+          "option": "Any non-success error treated as pre-effect",
+          "tradeoff": "Reaches rung 2 more often; duplicates text when the target later applied the write."
+        },
+        {
+          "option": "Unchanged readback counts as rejection",
+          "tradeoff": "More automatic coverage; duplicates text when a consumer pastes later."
+        },
+        {
+          "option": "Stop after rung 2 always",
+          "tradeoff": "Never types; loses the only path for targets with no accessibility insertion and a rejecting paste handler."
+        }
+      ],
+      "consequences": "Typing is rare and the common uncertain outcome is unconfirmed with the transcript on the pasteboard; until F4 populates the class a rung-1 error always ends the attempt; profiles and class entries are dated shipped data with expiry.",
+      "reconsider_when": "F4 admits an error class, finds a real rejection signal, or a supported insertion API appears."
+    },
+    {
+      "id": "D-010",
+      "title": "Delivery idempotency with no non-terminal resting state and no automatic retry",
+      "choice": "Commit an attempt row before any external effect and a rung row per rung; use the state set and launch transitions in the failure behavior section; write a rung's rejected outcome and the next rung's start in one transaction; never re-post automatically.",
+      "rationale": "A paste into an unreadable target gives no confirmation, so after a crash delivered and about-to-deliver are indistinguishable and retry risks inserting a paragraph twice. Per-rung records exist because an effect can begin on one rung and stop on another, and the single transaction leaves no crash window between the two writes.",
+      "alternatives": [
+        {
+          "option": "Rejected as an attempt state",
+          "tradeoff": "Fewer schema changes; it means mid-flight, which in_progress already means."
+        },
+        {
+          "option": "Retry pending deliveries at launch",
+          "tradeoff": "Recovers a pre-post crash; duplicates text after posting."
+        },
+        {
+          "option": "One attempt row with no rung detail",
+          "tradeoff": "Simpler; needs_review cannot say which mechanism touched the target."
+        }
+      ],
+      "consequences": "A crash mid-delivery yields a needs_review item naming the last rung whose effect began, and re-delivery is always explicit.",
+      "reconsider_when": "A target class emerges whose consumption can be acknowledged."
+    },
+    {
+      "id": "D-011",
+      "title": "Non-activating recording panel with a preview ladder that always produces text",
+      "choice": "A borderless nonactivating panel at status-bar level, never key, movable by background, remembering placement as a fraction of its display's visible frame; provisional text styled and labeled distinctly and never persisted; a waveform from an allocation-free envelope; a preview ladder of the primary streaming pass, a preview-class model under 400 MB in its own slot, then batched updates at pauses, with waveform-only excluded.",
+      "rationale": "Activating the panel would break the delivery target D-008 depends on, and provisional text is a different artifact from the committed result. A provisional live transcript is a named requirement, so slot reservation plus a capped preview slot makes the ladder executable rather than nominal.",
+      "alternatives": [
+        {
+          "option": "A normal window",
+          "tradeoff": "Standard behavior; activates the app and breaks targeting."
+        },
+        {
+          "option": "Menu bar popover only",
+          "tradeoff": "No extra window; cannot sit near where the user types."
+        },
+        {
+          "option": "Waveform and a voice-activity indicator",
+          "tradeoff": "Capture never disturbed; drops a named requirement."
+        }
+      ],
+      "consequences": "A preview model is a second installation to manage and budget; the panel labels the active rung; text visibly changes when the final transcript arrives.",
+      "reconsider_when": "Measurement shows the primary pass drops buffers or fails non-inferiority, selecting a lower rung."
+    },
+    {
+      "id": "D-012",
+      "title": "Modes as versioned revisions with structured contracts and a stated disposition for every unchecked path",
+      "choice": "Each mode carries a contract with allowed operations, an answersQuestions flag, a content bound, validator languages and per-source context representation; revisions are content-addressed and pinned per run; checking runs through the port with disposition in core; context is a term list by default and prose opt-in raises the delivery bar.",
+      "rationale": "Prompt wording cannot enforce that a question stays a question, so permitted transformations are machine-checkable with a defined failure path, and disposition never rests on the orthographic marker, which cannot show that no question was asked. No override exists because one would let a mode contradict its declaration while the specification requires answering to be explicitly part of the mode.",
+      "alternatives": [
+        {
+          "option": "Prompt instructions only",
+          "tradeoff": "Simplest; the failure mode is an answer pasted into a document."
+        },
+        {
+          "option": "Per-mode override for unpacked languages",
+          "tradeoff": "No degradation for multilingual users; lets a mode contradict itself."
+        },
+        {
+          "option": "Skip generation without a pack",
+          "tradeoff": "Uniform conservatism; makes pack coverage a restriction on model use."
+        },
+        {
+          "option": "A second model judging faithfulness",
+          "tradeoff": "Catches drift lexical checks miss; a second latency-path pass with a shared failure mode."
+        }
+      ],
+      "consequences": "Modes need a contract to save; prose modes accept holds when checks are unavailable; unpacked-language rewrites are retained but not auto-delivered for answersQuestions false modes; bad thresholds surface as frequent visible fallbacks.",
+      "reconsider_when": "Hold rates stay high on correct output, or the adversarial corpus finds a class passing every check."
+    },
+    {
+      "id": "D-013",
+      "title": "Built-in mode set and their contracts",
+      "choice": "Standard, Email, Note and Meeting notes, read-only, with enumerated permitted transformations, summarization confined to Meeting notes under a citation requirement, all declaring answersQuestions false and defaulting context to term lists.",
+      "rationale": "The specification asks for ordinary dictation plus task-specific output with transformations specified per mode; Meeting notes is where summarization is the point, so recall cannot guard it and citation fits what it may do.",
+      "alternatives": [
+        {
+          "option": "One configurable mode with toggles",
+          "tradeoff": "Less to explain; the contract dissolves into a toggle matrix hard to check."
+        },
+        {
+          "option": "An assistant mode that answers questions",
+          "tradeoff": "An obvious use of a local model; it is the flagged hazard, so it would declare answersQuestions and be visibly distinct."
+        }
+      ],
+      "consequences": "Customizing duplicates a built-in into a user mode with the same starting contract, keeping the built-in corpus meaningful; four modes means four corpora per shipped language.",
+      "reconsider_when": "Users routinely duplicate a built-in to make the same edit."
+    },
+    {
+      "id": "D-014",
+      "title": "Automatic mode selection by ordered rules latched at arming",
+      "choice": "A user-ordered list evaluated at arming, first match wins, list position being the complete precedence rule, with specificity only proposing an insertion point and flagging shadowed rules; an unobtainable predicate does not match and the default mode applies when nothing matches.",
+      "rationale": "First match on an ordered list is the mail-filter model and makes conflict resolution readable top to bottom, so runtime behavior never depends on an invisible comparison. Treating an unobtainable predicate as a non-match keeps a missing permission from producing a wrong mode, and latching prevents a mid-sentence change.",
+      "alternatives": [
+        {
+          "option": "Highest specificity wins",
+          "tradeoff": "No shadowed rules; the user cannot override a specific rule with a general one."
+        },
+        {
+          "option": "Numeric priority with specificity tiebreak",
+          "tradeoff": "Fine control; two ordering mechanisms and a list whose order does not determine behavior."
+        },
+        {
+          "option": "Continuous re-evaluation",
+          "tradeoff": "Follows the user; the mode could change mid-sentence."
+        }
+      ],
+      "consequences": "The effective mode and its source appear in the panel and menu bar; dragging is the only precedence control; browser URL availability is enumerated rather than assumed.",
+      "reconsider_when": "Rule lists outgrow manual ordering, arguing for grouping rather than hidden precedence."
+    },
+    {
+      "id": "D-015",
+      "title": "Vocabulary as staged passes with defined order and match precedence",
+      "choice": "Prompt-slot biasing, then deterministic replacement over the recognition result with longest match and list-order tie-break, boundary-aware through ICU, case-preserving, non-overlapping and non-cascading, then a per-mode filler pass, then reapplication after generation with a survival check; both texts retained.",
+      "rationale": "The mechanisms fail differently: biasing shifts probabilities and guarantees nothing, replacement is exact and belongs on text, and the post-generation pass exists because a model will sometimes normalize an unusual proper noun back to a common word. Stating precedence removes ambiguity under which two implementations could diverge while satisfying the same prose.",
+      "alternatives": [
+        {
+          "option": "First matching rule wins",
+          "tradeoff": "Easy to explain; a short early rule pre-empts a longer specific one."
+        },
+        {
+          "option": "Replacement only after generation",
+          "tradeoff": "One pass; generation reasons over mis-recognized terms."
+        },
+        {
+          "option": "Cascading to a fixpoint",
+          "tradeoff": "Handles chained rules; order-dependent results and possible loops."
+        }
+      ],
+      "consequences": "Two texts per run; the editor must explain one probabilistic and one exact effect and show which rule won; large vocabularies force prompt-slot selection, which the panel can display.",
+      "reconsider_when": "A runtime exposes real biasing or constrained decoding."
+    },
+    {
+      "id": "D-016",
+      "title": "Context sampled at arming, distilled by default, digest retention, stated lifetimes",
+      "choice": "Focused-element text, an opt-in screen frame through Vision, and pasteboard text sampled in parallel against a 200 ms deadline, capped, distilled to term lists unless a mode opts a source into prose, with digest-only retention by default and the release points listed in the data lifecycle.",
+      "rationale": "Sampling once at arming bounds cost and makes a run reproducible, and digest retention avoids accumulating copies of unrelated documents while still reporting that original context is gone. Keying prose release on the earliest of assembly, the end of refining and any terminal state covers runs with no generation stage, which would otherwise hold raw context for a whole capture.",
+      "alternatives": [
+        {
+          "option": "Sample at generation time",
+          "tradeoff": "Fresher context off the latency path; the user has often switched windows by then."
+        },
+        {
+          "option": "Retain full text by default",
+          "tradeoff": "Reprocessing reproduces the original result; the library accumulates screens and clipboards."
+        },
+        {
+          "option": "Continuous screen sampling",
+          "tradeoff": "Captures changes while speaking; sustained cost and a larger retention question."
+        }
+      ],
+      "consequences": "Screen recognition may miss the deadline and is then absent and noted; reprocessing without retained context differs, which History explains; term lists contribute names rather than sentences unless a mode opts in.",
+      "reconsider_when": "Term lists prove too lossy for the modes that most need context."
+    },
+    {
+      "id": "D-017",
+      "title": "Languages: per-mode selection or detection with a recorded threshold, translation as a derived result",
+      "choice": "Explicit language or detection against a threshold starting at 0.5, with below-threshold runs recorded undetermined and falling back visibly; translation is a separate declared operation whose result names the exact parent it translated; installations declare supported languages, labeled publisher-declared and unmeasured.",
+      "rationale": "Recognition, rewriting and translation are different properties measured differently, and scoring translation against the retained source transcript keeps recognition errors from being charged to translation. Naming the parent keeps translation provenance intact after a second recognition, and the threshold is written down because its effect is a wrong-language transcript when too low.",
+      "alternatives": [
+        {
+          "option": "Always auto-detect",
+          "tradeoff": "Nothing to configure; short utterances misdetect with no way to pin a known language."
+        },
+        {
+          "option": "Translate by replacing the transcript",
+          "tradeoff": "One text per recording; original wording becomes unrecoverable."
+        },
+        {
+          "option": "Translate inside the rewrite",
+          "tradeoff": "One pass; a failed check cannot separate translation from formatting error."
+        }
+      ],
+      "consequences": "History shows several artifacts per recording and must make each parent obvious; an inaccurate manifest can overstate coverage, so claims are attributed to it; every shipped language needs both a recognition and a bilingual set.",
+      "reconsider_when": "Measured accuracy justifies a different threshold, or per-segment identification supports code-switching."
+    },
+    {
+      "id": "D-018",
+      "title": "One ingest port with timing and credit, a declared matrix, and an in-boundary extension with a registration check",
+      "choice": "All sources emit timestamped native frames with stream id, clock domain, sequence and discontinuity flag, with conversion as an explicit later stage and credit bounding every queue; the initial matrix is what system decoders cover; extension is a DecoderProvider implemented as a confined child where F2 allows or inside DecodeService otherwise, and either must pass a long-file registration measurement showing memory independent of duration before it can be selected.",
+      "rationale": "An untimestamped canonical buffer cannot express two native streams aligned by host time with gaps visible, nor backpressure. The registration check exists because requiring a decoder to consume a stream does not stop it buffering internally, and discovering that during a three-hour import is too late.",
+      "alternatives": [
+        {
+          "option": "External decoder with a disclosed trust transfer",
+          "tradeoff": "Any format with a binary works; an opt-in cannot waive the requirement that audio stays on the machine."
+        },
+        {
+          "option": "Canonical untimestamped buffers",
+          "tradeoff": "Simplest consumers; alignment and flow control have nowhere to live."
+        },
+        {
+          "option": "Decode whole files into memory",
+          "tradeoff": "Simplest; a three-hour file is roughly 700 MB before any model loads."
+        }
+      ],
+      "consequences": "Every source carries timing metadata; live overrun is a visible discontinuity; without child confinement, adding a format is development work; canonical conversion discards content above 8 kHz, so originals are kept and meetings seal at native rate.",
+      "reconsider_when": "A runtime benefits from a higher input rate, or system decoders cover the formats driving the extension."
+    },
+    {
+      "id": "D-019",
+      "title": "Imports are copy-in and commit-late",
+      "choice": "Open the source read-only, copy into the session directory, record a bookmark, and commit the row only when the artifact is complete; on failure remove the directory and leave no row; moving the original is a post-commit step the user can decline.",
+      "rationale": "A failed import leaves its source unchanged if the path never opens it for writing or deletes it, and committing after completion prevents a History entry pointing at nothing.",
+      "alternatives": [
+        {
+          "option": "Reference the source in place",
+          "tradeoff": "No duplication; the library breaks when the file moves."
+        },
+        {
+          "option": "Transcode and discard the original",
+          "tradeoff": "Smaller library; blocks reprocessing with a better decoder."
+        }
+      ],
+      "consequences": "Imports duplicate storage, visible in the size view and covered by retention; video imports copy the whole file though only audio is used.",
+      "reconsider_when": "Video imports become common enough that extracted audio plus a bookmark wins."
+    },
+    {
+      "id": "D-020",
+      "title": "WhisperKit ships, whisper.cpp is the F1 comparison harness and designed second adapter",
+      "choice": "Ship WhisperKit behind SpeechRecognizer with an explicit local model folder and acquisition disabled, and build a measurement-only whisper.cpp harness inside F1 with the comparator fixed and approved before the gate runs; promote it when Intel is required, F1 misses a range, or notices rule the first choice out.",
+      "rationale": "It is a Swift package matching the stated build, its model card is the only positive licensing evidence for weights the app might offer, and the diarizer ships in the same package. Accuracy, latency and long-recording behavior are unestablished, so the comparison arm is measurement code and the comparator is fixed in advance so it cannot be chosen after results.",
+      "alternatives": [
+        {
+          "option": "whisper.cpp as the shipping runtime",
+          "tradeoff": "Intel coverage today; C interop in the hot path and a second dependency for diarization."
+        },
+        {
+          "option": "Maintain both permanently",
+          "tradeoff": "Maximum flexibility; two parameter translations and evaluation runs before evidence says both have a role."
+        },
+        {
+          "option": "Apple's built-in recognition",
+          "tradeoff": "No models to manage; model choice and availability are not exposed."
+        }
+      ],
+      "consequences": "F1 carries a second measurement path; Intel waits for promotion; results record installation and revisions; no accuracy or latency claim appears before F1.",
+      "reconsider_when": "F1 misses a range, notices block the weights, or Intel becomes a requirement."
+    },
+    {
+      "id": "D-021",
+      "title": "llama.cpp embedded in the generation service, GGUF models",
+      "choice": "Embed llama.cpp as a library with Metal on Apple Silicon, streaming tokens over the connection, with no server binary, publishing a working-data contract over cache and workspace as a function of context length.",
+      "rationale": "RESEARCH asks that an embedded worker be compared with a local service including whether network access is possible; embedding controls acquisition and lifecycle, and GGUF reaches the quantized models users already have, which matters because user-supplied models are in scope.",
+      "alternatives": [
+        {
+          "option": "MLX generation",
+          "tradeoff": "Apple-native performance; a different format and fewer ready quantizations."
+        },
+        {
+          "option": "Core ML converted models",
+          "tradeoff": "System-managed execution; per-model conversion makes user models impractical."
+        },
+        {
+          "option": "The server on localhost",
+          "tradeoff": "Reuses tooling; the reachability concerns in D-003 apply."
+        }
+      ],
+      "consequences": "Vendored C++ with build time and pinning, a runtime revision per run, and quantization and context length as user-visible settings surfaced through D-027.",
+      "reconsider_when": "MLX coverage becomes comparable, or measured latency is unacceptable and another runtime beats it."
+    },
+    {
+      "id": "D-022",
+      "title": "Model identity over every behavior-affecting asset, immutable installs, transactional activation, per-kind checks",
+      "choice": "Identity is a hash over a manifest of every behavior-affecting asset; installation stages, verifies, smoke-tests per kind, writes and fsyncs notices keyed by installation, renames into a content-addressed blob path, then commits installation, asset rows and the active pointer in one transaction; failed staging is retained with its error; quality never gates activation and runtimes receive absolute paths.",
+      "rationale": "A rename plus a database update needs an ordering rule, and hashing only weights would let a tokenizer or template change output under one identity. Notices are keyed by installation because identical bytes from different origins can carry different terms, and writing them before the transaction stops a row claiming a notice that never reached disk. A generic smoke test cannot catch a diarizer missing its clusterer.",
+      "alternatives": [
+        {
+          "option": "Notices under the blob hash",
+          "tradeoff": "One directory per content; two installations under different terms cannot both be represented and archiving would take the notices."
+        },
+        {
+          "option": "Hash weights only",
+          "tradeoff": "Cheaper; two installs differing in tokenizer become indistinguishable."
+        },
+        {
+          "option": "Install in place with rollback",
+          "tradeoff": "No staging space; a failure mid-write leaves a corrupt live model."
+        }
+      ],
+      "consequences": "Installation needs space for staged, stored and materialized copies, checked first; hashing is a visible step; a runtime update changes the recorded revision on new runs.",
+      "reconsider_when": "Hashing time becomes a usability problem, or a model kind's descriptor does not fit the per-kind pattern."
+    },
+    {
+      "id": "D-023",
+      "title": "Meetings: host-time alignment, SpeakerKit diarization in its own service, channel origin as fact",
+      "choice": "Two artifacts aligned in production by the per-stream measured-rate estimator, with recordings above the residual bound marked alignment_degraded; diarization behind a port in its own service with download disabled, explicit model folder and concurrency recorded in the manifest; whole-input operation only where F5 measures it flat, otherwise 10-minute windows with 30-second overlap through the staging artifact in D-043; confidence stored as unknown with centroid distance proposing identity for confirmation; notes as a separate run with per-bullet citations.",
+      "rationale": "The requirement asks for an explicit runtime and editable names, and the documented configuration flags are what keep acquisition controlled, which is also why it has its own service. Alignment needs an observable that exists in a real meeting, so buffer host timestamps are used rather than reference tones, which cannot be injected into a user's meeting and whose fixture-derived rate would not describe their hardware. Evidence is represented at the boundary the cited declaration supports.",
+      "alternatives": [
+        {
+          "option": "Tone-derived correction in production",
+          "tradeoff": "Direct ground truth; requires injecting audible markers or reusing a fixture rate that does not describe the user's devices."
+        },
+        {
+          "option": "Whole-input diarization with no duration contract",
+          "tradeoff": "Best clustering; leaves the memory behavior of the longest input unspecified."
+        },
+        {
+          "option": "Diarize a mixed recording",
+          "tradeoff": "One capture path; discards the channel signal."
+        },
+        {
+          "option": "Apply cross-recording identity above a threshold",
+          "tradeoff": "Less user work; the SDK defines no universal threshold."
+        }
+      ],
+      "consequences": "Two native-rate artifacts per meeting; weights are an explicit acquisition step; windowing can split a speaker across a boundary until merged, at a measured frequency; unverified attribution is the normal state; if measured error or correction cost exceeds range the default becomes channel labels with diarization user-enablable.",
+      "reconsider_when": "F5 shows flat whole-input operation, exposes per-segment evidence, or evaluation calibrates centroid distance."
+    },
+    {
+      "id": "D-024",
+      "title": "History: append-only results over identified runs, full-text search, tombstones with generations",
+      "choice": "Recordings expand into runs and result chains; search is FTS5 over result text excluding retained context; reprocessing inserts a run and results with a user-movable displayed-run pointer; deletion tombstones, increments a generation and signals cancellation, and every worker commits in one transaction that aborts on a missing, tombstoned or re-generated row.",
+      "rationale": "A late response cannot recreate a deleted recording only if the check and the insert are one transaction, and the generation covers delete-then-recreate at one identifier. Organizing by run is what makes reprocessing comparable, since each run names its inputs, models and code revisions.",
+      "alternatives": [
+        {
+          "option": "Hard delete and let workers fail",
+          "tradeoff": "No bookkeeping; a constraint violation becomes the race outcome and scratch is orphaned."
+        },
+        {
+          "option": "Wait for worker acknowledgement",
+          "tradeoff": "No tombstone state; a hung worker blocks the delete indefinitely."
+        },
+        {
+          "option": "Overwrite results on reprocessing",
+          "tradeoff": "Simpler list; comparing a new model against the old becomes impossible."
+        }
+      ],
+      "consequences": "Deleted recordings hold disk until leases release, so the interface says deleting; FTS triggers must handle deletion; multi-run recordings need a detail view making inputs and outputs obvious.",
+      "reconsider_when": "Result rows dominate database size."
+    },
+    {
+      "id": "D-025",
+      "title": "Menu bar surface, software input gain, and automatic resumption only under a verifiable continuity token",
+      "choice": "A status item for state, mode, recent results and settings; software gain by default with metering and clipping indication and opt-in hardware volume restored only on an unchanged value; two adapter levels, where automatic resumption requires an observed playing-to-paused transition after the app's command plus an unchanged continuity token of player launch identity, item identity and playback position read again at resume; controlling-only adapters and unsupported players get manual actions only.",
+      "rationale": "The specification requires an integration that identifies the player and confirms the pause, and says opting in does not remove that condition; ownership must also survive until the resume, and notification delivery is not guaranteed, so resting on stream completeness would assert a property no adapter supplies. A token read at both ends carries the claim with evidence, and posting the media key automatically is excluded because a toggle can start a paused player while an unrelated client keeps the device active.",
+      "alternatives": [
+        {
+          "option": "Trust an observed notification stream with gap detection",
+          "tradeoff": "Simpler adapters; a missed notification is undetectable, so ownership rests on completeness nothing guarantees."
+        },
+        {
+          "option": "Poll and resume if still paused",
+          "tradeoff": "Works with any state-reading adapter; cannot distinguish an untouched pause from a play and re-pause."
+        },
+        {
+          "option": "Private MediaRemote",
+          "tradeoff": "Per-application state without adapters; undocumented and breakable."
+        },
+        {
+          "option": "Do not touch playback",
+          "tradeoff": "Nothing to get wrong; leaves background audio in recordings."
+        }
+      ],
+      "consequences": "Automatic resume covers only players with a readable token, so coverage is narrow and grows per integration, with the menu showing each level; a stated residual is a play and re-pause returning to the identical item and position.",
+      "reconsider_when": "A supported API supplies player identity, pause confirmation and change notification."
+    },
+    {
+      "id": "D-026",
+      "title": "Distinct toggle and push-to-talk bindings with evidence-based stuck-key recovery",
+      "choice": "One consuming session event tap handling keyDown, keyUp and flagsChanged; separate bindings validated at bind time; push-to-talk finalizing on keyUp with optional tap-to-lock; recovery from tap-disabled, lock and sleep notifications plus a 1 Hz key-state poll; no maximum duration; Carbon fallback without the tap.",
+      "rationale": "Overloading one binding with a hold discriminator leaves the first hold window undefined. Polling the physical key addresses the real problem, an undelivered key-up, with evidence about that key, while a maximum-hold watchdog would truncate valid speech and act as the duration limit the specification prohibits.",
+      "alternatives": [
+        {
+          "option": "One binding with a hold discriminator",
+          "tradeoff": "One combination; undefined behavior in the first hold window."
+        },
+        {
+          "option": "Carbon hotkeys only",
+          "tradeoff": "No Accessibility requirement; no key-up, so push-to-talk cannot exist."
+        },
+        {
+          "option": "A maximum hold watchdog",
+          "tradeoff": "Stops a stuck key; truncates a long push-to-talk recording."
+        }
+      ],
+      "consequences": "The app sits on the keyboard path, so the handler must stay fast or the tap is disabled by timeout, which the re-enable path monitors; users configure two shortcuts; the poll runs only during push-to-talk.",
+      "reconsider_when": "A supported API provides global hotkeys with key-up."
+    },
+    {
+      "id": "D-027",
+      "title": "One declared budget covering residency, working data and the non-model floor",
+      "choice": "8 GB peak across app and services, counting model residency and declared working data per job, four slots with one occupant each unloaded after ten idle minutes, a 400 MB preview cap, a 200 MB non-model ceiling, and refusal at activation with the arithmetic shown and labeled measured or declared, overridable, including the interactive-minimum check in D-004.",
+      "rationale": "The specification forbids artificial quotas and requires honest limits, which differs from ignoring the ceiling, since swap turns a latency problem into a system-wide stall. Counting only weights hides the quantity that grows with the work, and labeling the basis keeps a refusal computed from declared numbers from becoming an invisible limit.",
+      "alternatives": [
+        {
+          "option": "Count weights only",
+          "tradeoff": "Simpler; the quantity scaling with input sits outside the budget."
+        },
+        {
+          "option": "No residency limit",
+          "tradeoff": "Fastest where memory allows; drives the target into swap."
+        },
+        {
+          "option": "Rely on memory pressure notifications",
+          "tradeoff": "Adapts to real conditions; reacts after the stall starts."
+        }
+      ],
+      "consequences": "First use after idle pays a load; diarization and notes run sequentially under declared numbers; a job exceeding its ceiling is terminated with the figure recorded; until descriptors exist the budget can be wrong in either direction, which the refusal says.",
+      "reconsider_when": "Measured figures differ materially from declared ones, or the ceiling stops binding."
+    },
+    {
+      "id": "D-028",
+      "title": "Egress control enforced by the service sandbox with no exception",
+      "choice": "Inference and decoding run in services denied network access, with downloads confined to an explicitly invoked downloader on a host allowlist writing only to staging, runtimes constructed with acquisition disabled behind a build check, and an external decoder shipped only under F2 child confinement; no setting runs user audio through an unconfined process.",
+      "rationale": "The specification requires audio, transcripts and context to stay on the Mac, and RESEARCH notes a runtime that may download by default and states that a symbol scan cannot establish a lack of network access. Consent cannot convert a hard requirement into a preference, and an in-service decoder satisfies both the requirement and the request for an extension mechanism.",
+      "alternatives": [
+        {
+          "option": "External decoder with disclosed trust transfer",
+          "tradeoff": "Any format works; the process handling the user's audio is unconstrained."
+        },
+        {
+          "option": "Unsandboxed service with a narrowed claim",
+          "tradeoff": "Any runtime usable; the offline property rests on rejected evidence."
+        },
+        {
+          "option": "Allow runtimes to fetch missing models",
+          "tradeoff": "Better first run; makes network access a side effect of loading."
+        }
+      ],
+      "consequences": "Entitlements are part of the signed product and fail closed; a runtime that cannot load inside the boundary is not shipped for that kind; without child confinement, adding a format is development work; container writes are not egress.",
+      "reconsider_when": "F2 shows a required kind has no adapter inside the boundary, which is a product-owner question."
+    },
+    {
+      "id": "D-029",
+      "title": "Runs as the provenance spine with a dependency table naming non-result inputs",
+      "choice": "Every result belongs to a run, names its primary input where its kind has one, and records other inputs in result_dependencies including assignment revisions and audio artifacts; invariants are per result kind; results are immutable after insert.",
+      "rationale": "A recording cannot have exactly one transcript while remaining re-recognizable, so parentage is a foreign key. A result-typed column could not name an assignment revision, leaving notes provenance nothing to point at, and two kinds legitimately have no textual parent, which is why a single invariant would fail on a correct diarization result.",
+      "alternatives": [
+        {
+          "option": "Single parent with other inputs in the manifest",
+          "tradeoff": "Fewer rows; provenance queries cannot join, so History parses manifests."
+        },
+        {
+          "option": "Fixed nullable columns per input kind",
+          "tradeoff": "Cheaper joins; a new result kind needs a migration."
+        },
+        {
+          "option": "Infer parentage by timestamp",
+          "tradeoff": "No new table; breaks whenever runs overlap."
+        }
+      ],
+      "consequences": "More joins and a run-oriented detail view; the invariant suite has one case per kind, which is the only satisfiable form; search can return two recognitions of one recording, disambiguated by result rows.",
+      "reconsider_when": "Users never re-recognize or re-diarize, though the same structure makes translations and notes attributable."
+    },
+    {
+      "id": "D-030",
+      "title": "Crash-safe capture with full packet-table accounting and idempotent finalization",
+      "choice": "The journal layout, head, data and seal record formats including priming frames, per-chunk source frames and per-packet sizes, the sealer cycle, finalization order and recovery rule defined once in the data lifecycle.",
+      "rationale": "Encoded bytes are fsynced before the record naming them, so recovery never builds a table over data that never reached disk. Packet sizes are recorded because a table cannot be rebuilt from a count and an offset, and frame counts are recorded because sizes alone do not describe the exact valid duration, which matters because the PCM is deleted as soon as its bytes are durable.",
+      "alternatives": [
+        {
+          "option": "Packet sizes without frame counts",
+          "tradeoff": "Smaller records; recovery cannot reconstruct valid and trimmed duration after the PCM is gone."
+        },
+        {
+          "option": "Treat a present pakt chunk as the commit signal",
+          "tradeoff": "No extra record; a torn table write is indistinguishable from a complete one."
+        },
+        {
+          "option": "Write the container directly",
+          "tradeoff": "No journal or extra fsyncs; recovery rests on an untested property of a format storing its table at the end."
+        }
+      ],
+      "consequences": "Two fsyncs per chunk period per stream plus three in finalization, an idempotent recovery path F3 tests, and roughly a 30-second window of journal files beside the artifact; the fallback is retaining chunks until the artifact decodes and hashes.",
+      "reconsider_when": "F3 shows an unacceptable bound, or a container with an incrementally durable index removes the need."
+    },
+    {
+      "id": "D-031",
+      "title": "State-indexed recovery with an explicit durability ordering rule",
+      "choice": "Every non-terminal state has an authoritative transition, listed once in the data lifecycle, with pre-commit disposition honored from the session manifest; recovery completes deterministic stages and never resumes generation, diarization or delivery without user action.",
+      "rationale": "A sweep covering only some states leaves the rest to whichever test author reaches them first, which is the deferral the specification prohibits, and naming the ordering rule makes new stages easy to place. Recording disposition in the manifest is what makes a cancellation issued before the History row exists survive a crash.",
+      "alternatives": [
+        {
+          "option": "Discard any in-flight run",
+          "tradeoff": "One rule; throws away a completed recognition after a crash during a rewrite."
+        },
+        {
+          "option": "Resume everything automatically",
+          "tradeoff": "Least friction; re-runs unwanted generation and risks delivering into whatever is focused."
+        },
+        {
+          "option": "Ask the user per run at launch",
+          "tradeoff": "No wrong default; invites blind dismissal."
+        }
+      ],
+      "consequences": "A crashed meeting leaves a Generate action or resumable staging rather than new output, and behavior tables must cover every state for the crash suite to assert against.",
+      "reconsider_when": "A stage appears whose effects are neither externally visible nor idempotent."
+    },
+    {
+      "id": "D-032",
+      "title": "Permissions as a capability-by-state matrix",
+      "choice": "The matrix over capability, run state and active adapter in the failure behavior section, with defined effects for denial, revocation and restoration.",
+      "rationale": "Mapping every revocation to a capture failure would end a valid recording because a delivery permission changed during recognition, and would report a lost shortcut permission as an audio failure; capabilities serve different stages.",
+      "alternatives": [
+        {
+          "option": "One global failure state",
+          "tradeoff": "Simple; stops valid work and misreports the cause."
+        },
+        {
+          "option": "Ignore revocation until next use",
+          "tradeoff": "No mid-run interruption; a later failure disconnected from the user's change."
+        }
+      ],
+      "consequences": "The matrix is longer than a rule, directly testable and part of the approved tables; each capability needs a probe and a notification path; Accessibility loss mid-delivery holds rather than posting blind.",
+      "reconsider_when": "A capability's loss needs a dimension beyond adapter identity."
+    },
+    {
+      "id": "D-033",
+      "title": "Two lease scopes after commit, session-directory ownership before it, reclamation by liveness",
+      "choice": "Artifact leases scoped to a recording and model leases scoped to a setHash with their distinct eligibility rules, holders and reclamation rule defined in the data lifecycle, with pre-commit ownership held by the session directory and its manifest disposition.",
+      "rationale": "Model use needs its own eligibility because installation, its smoke test and live preview happen before any recording row exists, and a session directory cannot establish ownership of a shared model cache; keying the model lease to the setHash and installation state lets installation checks and pre-capture work participate. Defining staleness by holder liveness keeps a suspended app or a stalled worker from having its artifact deleted underneath it.",
+      "alternatives": [
+        {
+          "option": "One scope requiring a recording row",
+          "tradeoff": "One rule; installation, smoke tests and preview have no recording to name, so they bypass the protocol or invent a row."
+        },
+        {
+          "option": "Reclaim after a heartbeat timeout",
+          "tradeoff": "Recovers any stall; deletes an artifact a live but delayed holder is using."
+        },
+        {
+          "option": "Placeholder recording row at arming",
+          "tradeoff": "One mechanism; History gains rows for recordings that may never exist."
+        }
+      ],
+      "consequences": "Every consumer acquires the lease matching its scope, including playback, preview and cache deletion; recovery has two ownership paths to test; a wedged live holder blocks retention, which is reported rather than forced.",
+      "reconsider_when": "Lease contention delays retention enough to matter."
+    },
+    {
+      "id": "D-034",
+      "title": "Measurements precede the boundaries they can invalidate",
+      "choice": "Five gates run before the boundaries depending on them, each with its range, basis and failure action approved before it runs; F2's child-confinement result is a shipping condition; gates govern shipped defaults only.",
+      "rationale": "Several decisions depend on unmeasured properties, and scheduling them after the ports and schema built on them would let a negative result invalidate that work. A range with its basis and action is what makes a result decide something, and two gates produce shipped data rather than a verdict, which is stated so their absence is not read as failure.",
+      "alternatives": [
+        {
+          "option": "Start the skeleton and measure later",
+          "tradeoff": "Visible progress sooner; a negative result forces rework of the port, scheduler, writer or meeting schema."
+        },
+        {
+          "option": "Decide acceptance after seeing numbers",
+          "tradeoff": "Avoids arguing thresholds in advance; invites fitting the threshold to the result."
+        },
+        {
+          "option": "Accept the unknowns as implementation risks",
+          "tradeoff": "No gates; hands behavioral decisions to whichever task hits them."
+        }
+      ],
+      "consequences": "Some work produces evidence rather than shippable behavior, including a measurement-only harness, and the decisions fed by gates carry conservative defaults until evidence lands.",
+      "reconsider_when": "A gate's fallback proves acceptable enough that the measurement is not worth its cost."
+    },
+    {
+      "id": "D-035",
+      "title": "Named approval authority, traceability, and approved ranges with recorded basis",
+      "choice": "Behavior tables cite SPEC.md clauses or are marked derived, the approver is the user as product owner or a named delegate, and the same approver signs gate ranges with basis and failure action before each gate, rubric rules before scoring, and the pre-effect class and profiles before either licenses a fallthrough; a missed range returns to the approver rather than being dropped by engineering.",
+      "rationale": "A passing test proves only that code met its assertions, so assertions need an owner. Ranges are approved because they decide which runtime and defaults ship, and each carries its basis so a derived criterion is distinguishable from an invented one; the delivery class and profiles are the shipped data that can license a second write into another application.",
+      "alternatives": [
+        {
+          "option": "Peer review by any member",
+          "tradeoff": "Cheap; two people can share a misreading with nobody empowered to settle it."
+        },
+        {
+          "option": "Leave thresholds to engineering",
+          "tradeoff": "Less owner time; a missed target could be discarded by the party it constrains."
+        },
+        {
+          "option": "SPEC.md as the only source",
+          "tradeoff": "No second artifact; it does not enumerate state and event pairs, so implementers fill gaps silently."
+        }
+      ],
+      "consequences": "Acceptance, gates and fallthrough data all wait on approval, putting the owner on the critical path in three places, while derived rows and unbased ranges stay visible as categories.",
+      "reconsider_when": "Approval becomes the dominant delay, arguing for pre-approved templates."
+    },
+    {
+      "id": "D-036",
+      "title": "Direct Developer ID distribution, ad hoc signing for local builds",
+      "choice": "Ship outside the Mac App Store, notarized with the hardened runtime, as an unsandboxed shell containing sandboxed services; App Store submission is not planned.",
+      "rationale": "The specification settles this in substance: it asks for direct distribution for this example and requires a consuming event tap with key-up and selected-text insertion into other applications, neither available to a sandboxed App Store build.",
+      "alternatives": [
+        {
+          "option": "Mac App Store",
+          "tradeoff": "System updates and a familiar install; the sandbox removes push-to-talk and accessibility insertion."
+        },
+        {
+          "option": "Unsigned distribution",
+          "tradeoff": "No certificate cost; Gatekeeper blocks casual installation and TCC grants become fragile."
+        },
+        {
+          "option": "Both builds",
+          "tradeoff": "Reach plus capability; two feature sets and test matrices."
+        }
+      ],
+      "consequences": "Updates need their own mechanism and release packaging carries certificates and notarization; ad hoc builds have unstable identity, so permission grants are re-requested and developers keep a stably signed build.",
+      "reconsider_when": "A product decision requires App Store presence, which would require revising Text delivery and Recording controls first."
+    },
+    {
+      "id": "D-037",
+      "title": "Notes as a separate run pinning assignments over versioned derived segments, with carried assignments unverified",
+      "choice": "The revision chain, derived segments, attribution states, the assigned_by_user invariant, overlap carry-forward as unverified proposals and the notes run's pinned inputs, defined in the data lifecycle.",
+      "rationale": "Notes depend on user-editable data, so the snapshot rule extends to assignments, splits and names, and starting the run after its inputs commit makes the pin real. Splitting needs its own representation because mapping source segments to identities leaves a split nowhere to live. Carrying an assignment into new boundaries by time overlap is an inference rather than the user's act, so treating it as assigned_by_user would let a guess inherit the evidentiary status the meeting design withholds elsewhere.",
+      "alternatives": [
+        {
+          "option": "Carry assignments as assigned_by_user",
+          "tradeoff": "No re-confirmation work; an overlap guess becomes indistinguishable from a user assignment and appears in notes."
+        },
+        {
+          "option": "Split by mutating diarization segments",
+          "tradeoff": "One segment table; model output stops being immutable and citations become unresolvable."
+        },
+        {
+          "option": "No splitting",
+          "tradeoff": "Simplest schema; a merged-speaker segment leaves the user no correction."
+        },
+        {
+          "option": "Regenerate notes automatically on change",
+          "tradeoff": "Always current; silently replaces text the user relied on."
+        }
+      ],
+      "consequences": "A meeting produces at least two runs, speaker edits write small revisions deleted with the recording, a crash before the notes run leaves a Generate action, and after re-diarization the user confirms proposals rather than finding assignments applied.",
+      "reconsider_when": "F5 shows overlap-based proposals are usually wrong, which would drop carry-forward."
+    },
+    {
+      "id": "D-038",
+      "title": "Installation lifecycle states bound storage when a runtime is replaced",
+      "choice": "States installed, archived, orphaned_runtime and missing; archiving clears one installation's claim while retaining row, hashes, capabilities and notices, with History rendering from params_rendered and reprocessing refused with a restore offer; adapter removal deletes nothing; physical release follows the single retention invariant; the manager reports retained bytes and, at install time, what a replacement adds and archiving releases.",
+      "rationale": "Reference counting cannot bound storage because results reference installations permanently, so separating what persists for attribution from what persists for execution is what makes the bound achievable. Because adapter removal deletes nothing, storage stays held until the user acts, so the numbers are surfaced rather than left theoretical.",
+      "alternatives": [
+        {
+          "option": "Retain assets for any referenced installation",
+          "tradeoff": "Reprocessing always available; storage grows without bound."
+        },
+        {
+          "option": "Delete assets on adapter removal",
+          "tradeoff": "Bounded automatically; destroys reprocessing on a build change the user did not make."
+        },
+        {
+          "option": "Archive automatically by age or size",
+          "tradeoff": "No user decision; removes reprocessing without warning."
+        }
+      ],
+      "consequences": "Four states appear in the manager and History, restoring requires the same assets by manifest hash, and missing is distinguished from archived so an unexpected disappearance reads as an error.",
+      "reconsider_when": "Users archive and restore the same installations repeatedly."
+    },
+    {
+      "id": "D-039",
+      "title": "Retained context as an owned artifact with a stated lifetime",
+      "choice": "Opt-in retention stores the sample as a file with a row naming run, recording, source kind, representation, path, length and hash, fsynced before the row, deleted with the recording and by retention, and excluded from the index; otherwise only a digest exists.",
+      "rationale": "Promising retained context while the schema listed digests only would leave owner, deletion and migration to whichever task first stored a string, which is the deferral the specification prohibits for persistent data. Files rather than columns because recognition output can be large and deletion then rides on directory removal.",
+      "alternatives": [
+        {
+          "option": "A column on the run",
+          "tradeoff": "One fewer file kind; large samples inflate the database and its migrations."
+        },
+        {
+          "option": "Index retained context",
+          "tradeoff": "Search finds surrounding material; returns hits in text the user never spoke."
+        },
+        {
+          "option": "Retain nothing",
+          "tradeoff": "Least storage; reprocessing cannot reproduce an original result even when wanted."
+        }
+      ],
+      "consequences": "Retention appears in the size view and per-recording detail, the mode editor states the cost, and protection is the file system's.",
+      "reconsider_when": "A threat model asks for at-rest encryption, applying to the whole library."
+    },
+    {
+      "id": "D-040",
+      "title": "Materialized caches are content-owned store artifacts under one retention invariant",
+      "choice": "The service copies assets into materialized/<setHash>/, verifies every asset against the installation manifest, then writes and fsyncs a marker; the app registers materialized_assets keyed by (set_hash, service_kind); retention, release, sweeps and lease participation follow the single invariant in the data lifecycle, and adapter removal deletes nothing.",
+      "rationale": "The third access mechanism keeps the egress boundary exception-free, and an unowned copy would reintroduce the problem D-038 solves in a place no accounting enumerates. Keying by content matches the content-addressed path: two installations of identical bytes share one copy, so an installation-keyed deletion rule would let archiving one remove the cache the other is using. The marker gives crash recovery a signal independent of size comparison, and the materialization lease gives an in-progress copy an owner before its marker and row exist.",
+      "alternatives": [
+        {
+          "option": "Key the cache and deletion by installation",
+          "tradeoff": "One owner per copy; installations sharing content share one path, so archiving one deletes the other's cache."
+        },
+        {
+          "option": "Treat the copy as private service state",
+          "tradeoff": "No table or sweep; gigabytes accumulate outside the storage bound and the size report."
+        },
+        {
+          "option": "Materialize per job",
+          "tradeoff": "Nothing persists; every run pays a multi-gigabyte copy dominating first-token latency."
+        },
+        {
+          "option": "Symlink into the blob store",
+          "tradeoff": "No second copy; a confined process following the link is still confined, so this is a path exception renamed."
+        }
+      ],
+      "consequences": "A runtime needing materialization doubles its footprint, shown in the manager and checked at activation; verification adds a hash pass; a crashed copy costs at most one sweep interval.",
+      "reconsider_when": "F2 shows no runtime needs materialization, or descriptor loading appears upstream."
+    },
+    {
+      "id": "D-041",
+      "title": "Local model import identity when provenance metadata is absent",
+      "choice": "Identity rests on the manifest hash; publisher, revision, licence identifiers and notices are optional, their absence recording provenance unknown or licence unknown with an editable label; nothing about missing metadata affects compatibility, the smoke test, activation or use, and the only consequence is that the downloader will not offer that asset.",
+      "rationale": "The specification requires compatible user-supplied models to work and forbids an absent benchmark from disabling one, so an identity scheme needing publisher and revision would make missing metadata a compatibility gate by another route. Hashing the manifest gives complete identity from the bytes, so labels can be decoration; the download restriction limits what the app offers, not what the user runs.",
+      "alternatives": [
+        {
+          "option": "Require publisher and revision",
+          "tradeoff": "Readable identity; a compatible directory cannot be installed without invented metadata."
+        },
+        {
+          "option": "Refuse activation without a notice",
+          "tradeoff": "Every asset has recorded terms; the user's own model becomes unusable on a paperwork condition."
+        },
+        {
+          "option": "Mark provenance-unknown installations unsupported",
+          "tradeoff": "Sets expectations; reads as a capability limit on a model that works."
+        }
+      ],
+      "consequences": "Two installations can be distinguished only by a hash prefix until renamed, so labels are editable and the hash is shown; notices keyed by installation mean an identical import keeps its own terms.",
+      "reconsider_when": "Unlabeled imports become common enough that hash prefixes dominate the interface."
+    },
+    {
+      "id": "D-042",
+      "title": "Every model-bound job declares a working-data contract constant in input duration",
+      "choice": "Each adapter publishes a ceiling expressed in parameters the app controls and never in input duration; speech and decoding satisfy it through credit windows with the decoder registration check, diarization through flat whole-input operation or the windowed contract in D-043, generation through context length and windowed notes; admission counts the ceiling, breaches terminate the job, and the long-input protocol samples every participating process with its own decode-path range and action.",
+      "rationale": "The specification forbids memory proportional to decoded duration, and credit bounds a queue rather than a producer: a diarizer accumulating embeddings or a decoder buffering a file would break the requirement while every credit window stayed correct. Giving the decode path its own range means a buffering decoder is rejected before shipping rather than found during a user's import.",
+      "alternatives": [
+        {
+          "option": "Rely on credit alone",
+          "tradeoff": "One mechanism; says nothing about what a component holds internally."
+        },
+        {
+          "option": "Measure only the app and speech service",
+          "tradeoff": "Cheaper; the least-known processes go unmeasured."
+        },
+        {
+          "option": "Cap meeting and import duration",
+          "tradeoff": "Bounds memory trivially; the specification forbids artificial limits."
+        },
+        {
+          "option": "Window everything unconditionally",
+          "tradeoff": "One path and a guaranteed bound; pays cross-window identity cost where a runtime is measurably flat."
+        }
+      ],
+      "consequences": "Adapters carry a descriptor field that must stay honest, a wrong declaration surfaces as a terminated job rather than swap, and process-level sampling replaces a single memory graph.",
+      "reconsider_when": "A runtime exposes its own memory contract, or growth is bounded but not constant, needing a declared function."
+    },
+    {
+      "id": "D-043",
+      "title": "Windowed diarization writes a run-owned staging artifact published in one transaction",
+      "choice": "Window output and cluster centroids go to run-owned staging under the recording directory, fsynced per window and invisible to search and provenance; one transaction publishes the diarization result, segments, assignment revision 1 and derived segments, then deletes staging; cancellation deletes it, interruption retains it as resumable for the same run under its pinned manifest, recording deletion removes it and aborts the publish, and a sweep removes staging whose run is terminal and not resumable.",
+      "rationale": "Committing rows per window would contradict the cancellation and recovery rules and leave a partial segment set indistinguishable from a complete one, while discarding window output would make a crash hours into a meeting cost the whole run. Staging separates durability from visibility, localizes the storage growth the specification allows, and gives cross-window cluster state a defined home and lifetime.",
+      "alternatives": [
+        {
+          "option": "Commit segment rows per window",
+          "tradeoff": "Progress visible and resumable with no artifact; a cancelled or crashed run leaves a partial set that looks complete."
+        },
+        {
+          "option": "Keep window output in memory",
+          "tradeoff": "Nothing to sweep; a crash discards hours of work and cluster state grows in the process that must stay bounded."
+        },
+        {
+          "option": "Stage inside the service container",
+          "tradeoff": "The service owns its scratch; the store could not size, sweep or delete it with the recording."
+        },
+        {
+          "option": "Publish incrementally into a hidden partial result",
+          "tradeoff": "One storage mechanism; a partial result is still a row search, provenance and notes can reach."
+        }
+      ],
+      "consequences": "One more artifact kind with sweeps, size accounting and deletion rules; a resumed run stays attributable to the settings it started with; resume applies to interruption and not cancellation, which the panel states.",
+      "reconsider_when": "F5 shows the runtime accepts incremental input with resumable state, or whole-input operation measures flat."
+    }
+  ],
+  "coverage": [
+    {
+      "requirement": "Recording controls",
+      "decision_ids": [
+        "D-026",
+        "D-006",
+        "D-007",
+        "D-031",
+        "D-032",
+        "D-036"
+      ],
+      "explanation": "A consuming session event tap gives global toggle and push-to-talk from another application as separate validated bindings with per-mode variants, available because of the distribution decision (D-036, D-026); lost key-up is recovered from notifications and a key-state poll, so there is no duration cap. Capture starts at the trigger into the pre-roll ring while arming runs concurrently (D-006). Without Accessibility or Input Monitoring, toggle falls back to a Carbon hotkey and push-to-talk is unavailable with an explanation (D-032). Cancellation has a defined effect at every stage including sealing, diarizing and noting, with sealing returning immediately behind a durable disposition (D-007), and a crash resolves through the state-indexed recovery contract over the same stages (D-031)."
+    },
+    {
+      "requirement": "Text delivery",
+      "decision_ids": [
+        "D-008",
+        "D-009",
+        "D-010",
+        "D-032"
+      ],
+      "explanation": "The transcript is inserted at the caret or over the selection through AXSelectedText, never the element's value (D-009). One target is resolved per focus outcome and revalidated before every external effect, including the accessibility write, with a pre-effect mismatch ending as held and a later one as unconfirmed (D-008). Duplicate delivery is prevented by evidence-based fallthrough: a probe routes unsupported targets before any write, only approved pre-effect codes permit a next rung with messaging failures excluded, an unchanged readback is never a rejection, and typing needs an applicable unexpired profile. Submission posts Return only after confirmation and only if the text still sits where it was confirmed. Clipboard state is snapshotted and restored only on confirmation or user action. Permission loss and secure input route results to History and the clipboard (D-032), and no attempt rests in a state without a recovery transition (D-010)."
+    },
+    {
+      "requirement": "Recording display",
+      "decision_ids": [
+        "D-011",
+        "D-006",
+        "D-004",
+        "D-027"
+      ],
+      "explanation": "A provisional live transcript and waveform appear in a non-activating panel that never becomes key and remembers placement fractionally with clamping when a display is gone (D-011). Provisional text is styled and labeled distinctly, replaced by the final transcript, and never persisted because it was produced over partial context and is a different artifact from the committed result (D-006). Failures appear as a panel row with a reason and one action. The ladder is executable rather than nominal because interactive runs reserve the speech-primary slot and preempt batch work across slots (D-004) and the preview model has its own capped slot counted with its working data (D-027), with stated latency, update, dropped-frame and paired non-inferiority criteria and no waveform-only end state."
+    },
+    {
+      "requirement": "Built-in modes",
+      "decision_ids": [
+        "D-013",
+        "D-012"
+      ],
+      "explanation": "Standard, Email, Note and Meeting notes cover ordinary dictation and task-specific output with permitted transformations enumerated per mode and summarization confined to Meeting notes under a citation requirement (D-013). All declare that they do not answer questions, and the claim is bounded by what the checks establish (D-012): an observed violation retries once and then delivers the normalized transcript while retaining the generated text marked contract_violation, and without a validator pack the rewrite is produced and retained while the delivered text is the normalized transcript, with no override, because a question-mark signal cannot show that no question was asked. The checks are necessary conditions, which is why the adversarial corpus and the monotone rubric decide whether a built-in ships."
+    },
+    {
+      "requirement": "Custom modes",
+      "decision_ids": [
+        "D-012",
+        "D-006",
+        "D-022",
+        "D-029",
+        "D-041"
+      ],
+      "explanation": "Users author prompts and formatting rules, and each mode fills a structured contract the editor requires before saving (D-012). Modes select local speech and language models by content identity covering every behavior-affecting asset (D-022), computable for a user-built model with no publisher or licence metadata (D-041). Every save creates a content-addressed revision, and every run pins it with model installations, runtime, adapter and application pipeline revisions, vocabulary, language and validator packs (D-006), so work in progress reads its snapshot and a later edit cannot change a saved result's meaning; History shows the producing revision and diffs it. Results stay attributable through their run (D-029), and check coverage changes only whether a rewrite is delivered automatically, never which models may run."
+    },
+    {
+      "requirement": "Automatic mode selection",
+      "decision_ids": [
+        "D-014",
+        "D-032",
+        "D-011"
+      ],
+      "explanation": "Rules match bundle identifier and, where readable, URL, evaluated at arming with first match winning over a user-ordered list whose position is the entire precedence rule and whose shadowed entries are flagged (D-014). A predicate whose input cannot be obtained does not match and evaluation continues, so denied automation or screen recording narrows matching without disturbing capture (D-032); with no match the default applies. The mode is latched into the manifest so it cannot change mid-sentence, and the effective mode with its source appears in the panel and menu bar every run (D-011). Browser URL availability is a dated matrix, and an incomplete one degrades to bundle-identifier rules."
+    },
+    {
+      "requirement": "Vocabulary",
+      "decision_ids": [
+        "D-015",
+        "D-020",
+        "D-012"
+      ],
+      "explanation": "Terminology enters at four points in fixed order relative to recognition and language processing: prompt-slot biasing, deterministic replacement with longest-match and list-order precedence over the recognition result, a separate filler pass, and reapplication after generation (D-015). Biasing shifts decoding probabilities and the interface says so, with no claim that adding a name guarantees recognition, because the mechanism is a prompt rather than a constraint (D-020). Replacement is ICU-boundary-aware with a stated fallback for unspaced scripts, case-preserving and non-cascading, so implementations cannot diverge. Vocabulary survival is a language-independent check that runs with or without a pack (D-012), so a model normalizing an unusual proper noun is caught, and both texts are retained."
+    },
+    {
+      "requirement": "Context",
+      "decision_ids": [
+        "D-016",
+        "D-012",
+        "D-039",
+        "D-028",
+        "D-032"
+      ],
+      "explanation": "Active-application text, an opt-in screen frame through Vision, and pasteboard text are sampled at arming against a 200 ms deadline, capped, with omissions recorded (D-016). Context is data supplied to a mode: every source is distilled to a term list, removing instruction-shaped sentences rather than detecting them later, and a prose source additionally requires the language-dependent set to be available and to pass before automatic delivery, with the residual limit stated (D-012). Retention defaults to a digest, and opting in stores an owned artifact deleted with the recording (D-039). Every transient copy has a release point on every path, including runs with no generation stage. Missing permissions leave a named state (D-032), and context never leaves the machine because it crosses only into services the system denies network access, with no component excepted (D-028)."
+    },
+    {
+      "requirement": "Languages",
+      "decision_ids": [
+        "D-017",
+        "D-012",
+        "D-029",
+        "D-022"
+      ],
+      "explanation": "Recognition language is explicit or detected against a recorded threshold with a visible fallback below it (D-017). Translation into English is a separate declared operation naming the exact parent result it translated, so the source transcript is preserved and stays identifiable after re-recognition (D-029). Recognition, rewriting and translation are evaluated separately, translation being scored against the retained source transcript so recognition errors are charged to recognition. Compatibility is declared per installation and checked at activation, with language claims attributed to the publisher and marked unmeasured (D-022). Pack coverage restricts neither models nor languages; it changes only automatic delivery for a mode declaring it does not answer questions (D-012)."
+    },
+    {
+      "requirement": "Input sources",
+      "decision_ids": [
+        "D-018",
+        "D-019",
+        "D-042",
+        "D-004",
+        "D-028"
+      ],
+      "explanation": "Microphone, system audio and imported audio and video implement one AudioSource emitting timestamped native frames with conversion as a later stage and credit bounding queues (D-018). The initial matrix is what system decoders cover, and the extension mechanism is a DecoderProvider as a confined child or inside the decode service, chosen by F2, with no setting that runs audio through an unconfined process (D-028). The memory requirement is met by a declared contract constant in duration plus per-process measurement and a decode-path range with a failure action, since credit bounds a queue and not a producer (D-042). Concurrency is bounded to one live session with seekable ingest in slots while live capture stays exempt (D-004). A failed import leaves its source unchanged because the path opens it read-only and commits only after completion (D-019)."
+    },
+    {
+      "requirement": "Meetings",
+      "decision_ids": [
+        "D-023",
+        "D-043",
+        "D-037",
+        "D-042",
+        "D-006",
+        "D-030",
+        "D-027"
+      ],
+      "explanation": "Two streams are captured crash-safely (D-030) and aligned in production by the per-stream measured-rate estimator, with recordings above the residual bound marked alignment_degraded (D-023). Channel origin is recorded as a capture fact rather than speaker identity. Diarization has a named runtime in its own sandboxed service with acquisition disabled, is a run stage with cancellation, recovery and admission (D-006, D-027), and carries a duration contract: flat whole-input operation or bounded windows whose output lives in a run-owned staging artifact published in one transaction, never as partial rows (D-042, D-043). Evidence is represented at the boundary the cited declaration supports, with confidence unknown and centroid distance proposing identity for confirmation. Assigning, merging, splitting and renaming append revisions over versioned derived segments, carried assignments after re-diarization are unverified proposals, and notes are a separate run pinning transcript, diarization result, assignment revision and names, citing derived segment ranges and dropping uncited bullets (D-037). Quality is reported with components separated plus segment-level and correction-cost measures that decide a default rather than availability."
+    },
+    {
+      "requirement": "History",
+      "decision_ids": [
+        "D-024",
+        "D-029",
+        "D-031",
+        "D-033",
+        "D-005"
+      ],
+      "explanation": "Recordings are searchable through FTS5 over result text and playable from the sealed artifact (D-005, D-024). Each recording expands into runs and result chains, so reprocessing through another model or mode inserts new runs and results while earlier results stay immutable and attributable, with each naming its inputs, mode revision, installations and code revisions (D-029). Deletion during active processing tombstones, increments a generation and signals cancellation, and every worker commits in one transaction that aborts on a missing, tombstoned or re-generated row, so a late response cannot recreate a deleted recording; deletion before the sealing commit is a manifest disposition (D-033). Retention policies are ordinary deletion jobs under the same leases, and discarding audio disables playback and re-recognition while text reprocessing remains. Interrupted work resolves through the recovery contract covering diarizing and noting (D-031), and space reads as deleting until the last lease releases."
+    },
+    {
+      "requirement": "Models",
+      "decision_ids": [
+        "D-022",
+        "D-041",
+        "D-038",
+        "D-040",
+        "D-020",
+        "D-021",
+        "D-023",
+        "D-027",
+        "D-028",
+        "D-003",
+        "D-002"
+      ],
+      "explanation": "The library browses and manages speech, preview, language and diarization installations with capabilities, sizes, notices and owning runtime (D-022). Identity hashes every behavior-affecting asset and each run also records runtime, adapter and application pipeline revisions. Because identity is computable from bytes, a compatible local model imports and activates with no publisher, licence or benchmark metadata, labeled provenance unknown and unmeasured, and the only consequence is that the app will not offer those assets for download (D-041). Compatibility and smoke tests are per kind and never quality judgments. Installation stages, verifies, tests, writes notices, renames and commits in one transaction, so a failed download or import cannot replace a working installation. Loading never downloads: absolute paths, prohibited downloading initializers, an explicitly invoked downloader and network-denied services (D-003, D-028, D-023). Replacing a runtime has bounded interface and storage effect: separate adapter targets and descriptors (D-002, D-020, D-021), rows rendering from params_rendered, adapter removal deleting nothing, archiving releasing blobs and caches once no claim remains under one retention invariant, and caches registered, verified, lease-aware and swept (D-038, D-040). Activation over budget is refused with the arithmetic shown, labeled measured or declared, and overridable (D-027)."
+    },
+    {
+      "requirement": "Desktop behavior",
+      "decision_ids": [
+        "D-025",
+        "D-011",
+        "D-032",
+        "D-001"
+      ],
+      "explanation": "A menu bar status item shows state, effective mode, recent results and settings alongside the recording panel (D-011, D-025). Microphone level adjustment is software gain by default with metering and clipping indication, so the common case changes no system state; hardware volume is opt-in and restored only when the current value still equals what the app set, with a mismatch leaving it as found. Media control is confined to what the app can own over time: an adapter identifies the player and pauses it, and automatic resumption additionally requires an observed pause transition plus an unchanged continuity token read again at resume, because a query-only adapter cannot distinguish an untouched pause from a play and re-pause and notification streams are not guaranteed complete. Players without that evidence get manual actions only, and the media key is never posted automatically because it can start a paused player while an unrelated client keeps the device active. Losing automation removes that adapter (D-032), and the APIs these behaviors use sit under the baseline in D-001 with availability checks and defined fallbacks."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Which access mechanism does each runtime need inside a network-denied sandboxed service, and is a child of DecodeService confined?",
+      "blocking": false,
+      "resolution": "Gate F2 before entitlements, the access path and the decoder extension freeze. The boundary is fixed either way: a runtime loading under none of the three is replaced by the alternative adapter, and an unconfined child means the external decoder is not built and formats are added inside the service. Only a model kind with no adapter that loads inside the boundary reaches the product owner."
+    },
+    {
+      "question": "Which accessibility error codes, if any, are returned only before the target applied the write?",
+      "blocking": false,
+      "resolution": "Gate F4 populates the approved class per code, target and version; it ships empty and permanently excludes messaging failures and timeouts. The ladder does not wait, because the settability probe already routes unsupported targets and an unclassified error ends the attempt as unconfirmed with the transcript on the pasteboard. A permanently empty class costs one click in rare cases."
+    },
+    {
+      "question": "How does the shipping speech runtime behave on long input and under cancellation, and does it meet accuracy, latency and memory ranges?",
+      "blocking": false,
+      "resolution": "Gate F1 with ranges, bases and actions approved first, including an absolute acceptance basis so a comparison alone cannot pass two unusable transcribers. Failure promotes the measurement harness to a shipping adapter, changes the default pairing, or returns the latency question to the approver."
+    },
+    {
+      "question": "How much audio is lost on an abrupt kill, does finalization survive a crash at every write, and does the rebuilt table trim correctly?",
+      "blocking": false,
+      "resolution": "Gate F3 asserts a maximum lost interval, decoded valid frame count and trimming against retained reference PCM, and convergence of repeated recovery, plus the backlog under contention. Failure shortens the chunk period, adopts retain-until-verified, or reduces ingest slots and raises encode priority."
+    },
+    {
+      "question": "Which targets support selected-text insertion with a preserved field, allow the predicate to be evaluated, and expose a rejection signal, at which versions?",
+      "blocking": false,
+      "resolution": "Gate F4's dated matrix, which scopes profiles and their expiry. The ladder does not wait: with no applicable profile, typing is unreachable and an uncertain outcome is unconfirmed with the transcript left on the pasteboard."
+    },
+    {
+      "question": "Which fields does the pinned diarizer expose, does it accept incremental input, and does its service hold memory proportional to meeting duration?",
+      "blocking": false,
+      "resolution": "Gate F5. The schema already stores unknown where the declaration establishes nothing, and the structural fallback needs no unavailable capability: 10-minute windows with overlap through the staging artifact and centroid matching, whose identity cost is then measured. No centroid means cross-recording naming is a user action with no proposal."
+    },
+    {
+      "question": "Do the initial media player adapters expose a continuity token that shows no playback change intervened?",
+      "blocking": false,
+      "resolution": "Confirm per player during implementation against the manual matrix including a play-and-repause between pause and resume. A confirmed token ships the adapter as observing; otherwise it ships controlling-only, pausing and offering manual resume. Coverage is a measured list rather than a promise."
+    },
+    {
+      "question": "Which languages get validator packs at ship, and how often does a missing pack withhold automatic delivery from users who wanted the rewrite?",
+      "blocking": false,
+      "resolution": "Ship the English pack with the first generation modes and add packs driven by measured checks_partial and one-click delivery rates. No model or language is blocked meanwhile, and a mode intended for an unpacked language can be authored as a revision declaring that it answers questions, which the indicator shows."
+    },
+    {
+      "question": "Which browsers expose the current URL, and which need automation permission or provide nothing?",
+      "blocking": false,
+      "resolution": "A dated per-browser table before URL rules ship; an unreadable URL is a non-match, so an incomplete table degrades to bundle-identifier rules and the default mode."
+    },
+    {
+      "question": "Is FTS5 compiled into the system SQLite on the baseline?",
+      "blocking": false,
+      "resolution": "A runtime check during store setup; if absent, build GRDB against a bundled SQLite, accepting a larger binary and an update obligation, recorded against D-005."
+    },
+    {
+      "question": "Is an 8B-class instruct model at 4-bit the right default for Email and Meeting notes now that preview, diarization and working data share the budget?",
+      "blocking": false,
+      "resolution": "Score two or three sizes against the fidelity corpus under the approved rubric, pair the result with the F5 footprint, the preview slot and declared ceilings, and pick a default that fits with meetings running. Model selection is per mode, so a wrong default is a settings change."
+    },
+    {
+      "question": "Which diarization weight assets may be offered for download rather than only imported?",
+      "blocking": false,
+      "resolution": "Compile the notice inventory per asset against the component-specific references, storing each notice under the acquiring installation so archiving cannot remove it. The feature ships either way, because weights are user-acquired and an asset without redistribution terms stays importable with licence unknown."
+    }
+  ]
+}

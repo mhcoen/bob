@@ -1,0 +1,41 @@
+{
+  "workflow_run": "c0e0a4093266",
+  "status": "interrupted; unaccepted",
+  "author": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "reviewer": {
+    "adapter": "codex_text",
+    "model": "gpt-5.6-sol"
+  },
+  "judge": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "input_digest": "a6c60ae442f0d48f6be4be6e7aff8f46256e74a9e6e62c234196d6eda3a53d62",
+  "interruption": "Stopped after the first judgment to change author roles and remove abandoned JSON fragments. The complete proposal remains unaccepted.",
+  "completed_stages": {
+    "1": [
+      "propose",
+      "review",
+      "judge"
+    ]
+  },
+  "recovery": {
+    "pending_attempt_id": "1e9eef50c0de49bab6224f1e2861561b",
+    "completed_round": 1,
+    "source_sha256": {
+      ".duplo/design-runs/c0e0a4093266/payloads/c0e0a4093266__propose__1.json": "4c287715ac9af4b240c0d8feca58c3a2beced4e71753e524b5934a2fdbac11b2",
+      ".duplo/design-runs/c0e0a4093266/payloads/c0e0a4093266__review__1.json": "f9e7c2d9a2d133c719a2ada77f53aa31379d0f8f6bd251fdbdbfd0e1df98883a",
+      ".duplo/design-runs/c0e0a4093266/payloads/c0e0a4093266__judge__1.json": "2be24706239427ce5b33be13895ae2844e19a2d28bc78c38de9ec6d0dfdec13d"
+    },
+    "extraction": "Complete replacement document recovered from the response; original payload retained."
+  },
+  "sha256": {
+    "proposal-1.json": "fb33081441911be5bb4811a4bcec81b648ac42d2bdabb337f16e88f1ff8a8ab6",
+    "judgment-1.json": "6e6ee3f9e7b9006d35c7f9afc190b4bd39347918c1cd13287d59e7f949bb19fb",
+    "inputs.json": "a3022da71c645fb86195e8ea61226155c49fa871ab4382de2544de4f79347c4e",
+    "review-1.txt": "3d76a7863fe018a6e6223b19fd3d41f5adc4d4e336fcf444cb53576f9b8cf896"
+  }
+}

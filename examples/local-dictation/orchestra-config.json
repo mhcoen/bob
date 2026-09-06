@@ -1,0 +1,47 @@
+{
+  "role_bindings": {
+    "software_design": {
+      "pattern": "software_design",
+      "max_rounds": 6,
+      "author": {
+        "model": "codex"
+      },
+      "reviewer": {
+        "model": "opus"
+      },
+      "judge_role": {
+        "model": "codex"
+      }
+    },
+    "plan_author": {
+      "pattern": "plan_author",
+      "max_rounds": 6,
+      "proposer": {
+        "model": "codex"
+      },
+      "reviewer": {
+        "model": "opus"
+      },
+      "judge_role": {
+        "model": "codex"
+      },
+      "criteria": [
+        {
+          "id": "task_granularity_5_to_15",
+          "description": "The phase body has between 5 and 15 top-level checklist items, inclusive.",
+          "required": true
+        },
+        {
+          "id": "batch_user_auto_discipline",
+          "description": "[BATCH] marks only parents whose subtasks are all concrete (file paths, function names, explicit values) and need no design decisions, and never a parent that contains a [USER] or [AUTO] subtask. [USER] is reserved for genuinely human-only checks with no scriptable form; any scriptable verification uses a helper-script task plus an [AUTO:run_cli] task instead of a [USER] task.",
+          "required": true
+        },
+        {
+          "id": "feat_fix_annotations_present",
+          "description": "Every task implementing a feature from the input list ends with a [feat: \"...\"] annotation; tasks that fix a bug or issue end with a [fix: \"...\"] annotation; scaffolding or structural tasks that map to no feature carry no annotation.",
+          "required": true
+        }
+      ]
+    }
+  }
+}

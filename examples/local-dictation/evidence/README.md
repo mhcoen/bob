@@ -1,5 +1,32 @@
 # Recorded design attempts
 
+## Attempt 4
+
+Run `c0e0a4093266`, September 6, 2026. The first judgment requested revision.
+The invocation was stopped before its next author pass to change the role
+configuration. No design was accepted.
+
+| File | Contents |
+| --- | --- |
+| [Inputs](attempt-004/inputs.json) | Specification and references supplied to this invocation. |
+| [Proposal](attempt-004/proposal-1.json) | The complete final document from Claude's response. |
+| [Review](attempt-004/review-1.txt) | Codex's findings on installation ownership and other protocols. |
+| [Judgment](attempt-004/judgment-1.json) | Requested revisions and the disputed media-resume ruling. |
+| [Receipt](attempt-004/receipt.json) | File digests and recovery provenance. |
+
+Claude restarted its JSON document twice after output limits. Orchestra joined
+the abandoned drafts to the final document. The parser now recognizes a complete
+replacement beginning at a message boundary. Replaying the retained response
+produces the same 43-decision document used by the reviewer. The exported proposal
+excludes the abandoned fragments; the receipt identifies the original payload.
+
+The review found that the installation smoke test requires a model lease whose
+eligibility depends on a later installation commit. It also found uncoordinated
+delivery attempts and an undefined transition for resuming interrupted
+diarization. The judge confirmed those findings. Its acceptance of a playback
+position as sufficient pause-ownership evidence conflicts with the specification;
+the next invocation's review notes preserve that objection.
+
 ## Attempt 1
 
 Run `16561ebc722c`, September 6, 2026. The judge requested revision of the first

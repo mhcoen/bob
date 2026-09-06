@@ -111,3 +111,37 @@ one authoritative location and reference it elsewhere. Keep the complete design
 for this example within roughly 12,000 words by removing repetition and draft
 history. Preserve every required behavior and the reasons for consequential
 choices. A shorter document still needs exact ownership and recovery rules.
+
+## Review of c0e0a4093266, proposal 1
+
+The completed judgment requests revision. Its confirmed findings carry forward.
+The supplied previous proposal is the complete final JSON document. Abandoned
+fragments from two output-limit restarts were removed during recovery; the
+original response remains in the evidence store. Acceptance remains false.
+
+D-022 smoke-tests a staged model before inserting its installation row. D-033
+requires that row before acquiring the model lease needed by the smoke test.
+Define staging eligibility and its exclusion against deletion and competing
+publication. Activation must remain transactional. Reconcile every model-lease
+holder against the state in which it first needs access.
+
+The judgment again waives the media-ownership condition. That waiver conflicts
+with the specification. An unchanged playback position cannot establish that
+the user has taken no intervening action. A player can resume and return to the
+same position before the app observes it. Position granularity does not resolve
+the ambiguity. Automatic restoration requires evidence that remains valid across
+every intervening control action, such as an adapter's monotonic state revision.
+If an adapter lacks that evidence, automatic restoration is unavailable for that
+adapter. Keep manual player controls. Do not invent such an API for a real player
+or describe an untested adapter as supported.
+
+Installation checks must distinguish runtime compatibility from content quality.
+A valid empty recognition or diarization result, or immediate end-of-sequence
+from generation, does not alone establish incompatibility. Check model loading
+and the result contract. Report quality limitations without imposing an unrelated
+restriction on compatible imports.
+
+Revise the complete design in place. Remove duplicate protocol definitions and
+superseded rules. Aim for 8,000 to 12,000 words across the entire JSON document,
+including decision records. Preserve consequential alternatives and failure
+semantics. Do not return an abbreviated patch or reproduce abandoned drafts.
