@@ -106,6 +106,10 @@ binding:
 The `*_text` adapters are read-only and used for synthesis or
 discussion roles. The `*_agent` adapters can edit the workspace and
 are used for the single mutating step in a code-edit workflow.
+The Claude text adapter selects its built-in tools with `--tools Read,Glob,Grep`.
+`--allowedTools` preapproves those tools; it does not remove other tools inherited
+from local settings. The adapter also disables inherited MCP servers. See the
+[Claude CLI reference](https://code.claude.com/docs/en/cli-usage).
 
 Claude can continue a long response after reaching an output limit. Its final
 result record may contain only the last fragment. The adapters assemble text

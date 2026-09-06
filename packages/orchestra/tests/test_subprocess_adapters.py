@@ -309,6 +309,11 @@ def test_write_log_does_not_persist_prompt_argv(tmp_path: Path) -> None:
 
     adapter = ClaudeCodeTextAdapter()
     cmd = adapter._build_command(model="opus")
+    # Preapproval alone leaves tools from local settings available.
+    assert cmd[cmd.index("--tools") + 1] == "Read,Glob,Grep"
+    assert cmd[cmd.index("--allowedTools") + 1] == "Read,Glob,Grep"
+    assert "--strict-mcp-config" in cmd
+    assert cmd[cmd.index("--mcp-config") + 1] == '{"mcpServers":{}}'
     log_path = _subprocess.write_log(
         tmp_path,
         "task containing SECRET_TOKEN_123 in label",

@@ -40,8 +40,11 @@ output limit, and the adapter supplied only the last fragment to the reviewer.
 The complete proposal was recovered from the retained stream. It remains unaccepted.
 
 The response parser and conflicting role instructions have been corrected.
-Retrying now preserves the prior proposal and its objections. The next run is
-blocked by automatic approval review, which requires separate authorization for
-Claude and Codex to reuse their generated drafts and reviews. Permission for the
-specification and public research notes has already been given. No implementation
-plan has been generated.
+Retrying now preserves the prior proposal and its objections. The user has
+confirmed permission for Claude and Codex to exchange generated material through
+review and planning. The retry is in progress. No implementation plan has been
+generated.
+
+The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
+service can deny network access independently of its containing app's sandbox
+status. Its recorded results state the tested OS and the limits of the check.

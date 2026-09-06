@@ -36,7 +36,6 @@ recovery record identifies the source log by its digest and keeps acceptance
 false. These exported model outputs preserve their original wording. CLI session
 logs remain local; they are not part of this evidence directory.
 
-Automatic approval review refused the next invocation because it would reuse
-the generated proposal and review. The user had approved sending the specification
-and public research to Claude and Codex; the approval check requires explicit
-permission for those services to exchange and reuse their generated artifacts.
+Automatic approval review initially refused reuse of the generated proposal and
+review. The user reaffirmed permission for the exchanges needed to complete the
+example. The retry has started with the recovered proposal and current inputs.

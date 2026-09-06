@@ -1,9 +1,10 @@
 """Text-role adapter backed by Claude Code with read-only tools.
 
 Used for proposer, critic, adjudicator, and synthesizer roles. Does
-not mutate the workspace. The ``--allowedTools`` flag is set to
-``Read,Glob,Grep`` so the subprocess cannot edit, write, or run shell
-commands. Output is captured verbatim and returned as the model
+not mutate the workspace through its built-in tools. ``--tools`` limits
+the available tools to ``Read,Glob,Grep``; ``--allowedTools`` permits
+their use without prompts. Inherited MCP servers are disabled. Output is
+captured verbatim and returned as the model
 payload's ``output`` field.
 
 Subprocess invocation patterns (command shape, env passthrough, stream
@@ -36,7 +37,7 @@ from orchestra.errors import OrchestraError
 from orchestra.spine import InvocationRequest, PreparedInvocation
 
 ALLOWED_TOOLS: str = "Read,Glob,Grep"
-"""Read-only tool list. Enforced via the CLI's ``--allowedTools`` flag."""
+"""Read-only built-in tool list, selected with the CLI's ``--tools`` flag."""
 
 # Markers in the CLI's stream-json output that indicate a Cloudflare
 # rate-limit response. The Moonshot anthropic-compatible endpoint is
@@ -297,8 +298,13 @@ class ClaudeCodeTextAdapter:
         cmd: list[str] = [
             self._cli,
             "-p",
+            "--tools",
+            self._allowed_tools,
             "--allowedTools",
             self._allowed_tools,
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
             "--permission-mode",
             "default",
             "--output-format",
