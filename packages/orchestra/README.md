@@ -115,6 +115,8 @@ Claude can continue a long response after reaching an output limit. Its final
 result record may contain only the last fragment. The adapters assemble text
 across explicit `max_tokens` continuations before passing it to the workflow.
 Text from earlier tool turns is excluded from that assembly.
+Interrupting the subprocess wait loop terminates its child process group before
+removing the watchdog, so a stopped workflow does not leave the model CLI running.
 
 Third-party models are reached by pointing Claude Code at the
 provider's own Anthropic-compatible endpoint: the shipped bindings

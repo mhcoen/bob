@@ -15,12 +15,68 @@ subprocess is enough to trigger a progress dot. No live LLM call.
 
 from __future__ import annotations
 
+import os
+import signal
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from orchestra.adapters import _subprocess
+
+
+@pytest.mark.skipif(os.name != "posix", reason="Process groups require POSIX")
+def test_interrupt_stops_child_and_descendants(tmp_path, monkeypatch):
+    import json
+
+    processes = []
+    child_handles = []
+
+    def interrupt_on_ready(line):
+        processes.extend(json.loads(line))
+        child_handles.append(_subprocess.get_active_process())
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_subprocess, "_record_activity_from_line", interrupt_on_ready)
+    script = (
+        "import json, os, subprocess, sys, time\n"
+        "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])\n"
+        "print(json.dumps([os.getpid(), child.pid]), flush=True)\n"
+        "time.sleep(60)\n"
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            _subprocess.run_session(
+                [sys.executable, "-c", script],
+                tmp_path,
+                env={"PATH": "/usr/bin:/bin"},
+                silent=True,
+            )
+        assert len(processes) == 2
+        deadline = time.monotonic() + 3
+        remaining = list(processes)
+        while remaining and time.monotonic() < deadline:
+            for pid in remaining[:]:
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    remaining.remove(pid)
+            if remaining:
+                time.sleep(0.02)
+        assert not remaining, f"Processes survived interruption: {remaining}"
+        assert _subprocess.get_active_process() is None
+        assert not (tmp_path / ".mcloop/active-pid").exists()
+    finally:
+        if processes:
+            try:
+                os.killpg(processes[0], signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        for child in child_handles:
+            if child is not None:
+                child.wait(timeout=3)
 
 
 @pytest.fixture

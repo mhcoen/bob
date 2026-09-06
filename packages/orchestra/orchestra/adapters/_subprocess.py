@@ -1213,6 +1213,15 @@ def run_session(
         reader_thread.join(timeout=5)
         process.wait()
         return _assemble(head_lines, tail_lines, dropped), process.returncode
+    except BaseException:
+        # A Python interrupt must stop the child before removing its watchdog.
+        try:
+            os.killpg(pgid, 9)
+        except OSError:
+            process.kill()
+        process.wait()
+        reader_thread.join(timeout=2)
+        raise
     finally:
         _kill_watchdog(watchdog)
         _remove_pid_file(pid_file)
