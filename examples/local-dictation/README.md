@@ -15,7 +15,7 @@ its own inputs. From the Bob repository root, after activating its environment:
 ```sh
 mkdir -p local/local-dictation/ref
 cp examples/local-dictation/SPEC.md local/local-dictation/SPEC.md
-cp examples/local-dictation/ref/RESEARCH.md local/local-dictation/ref/RESEARCH.md
+cp examples/local-dictation/ref/*.md local/local-dictation/ref/
 cd local/local-dictation
 duplo design --plan
 ```
@@ -33,17 +33,15 @@ The [workflow documentation](../../packages/duplo/SOFTWARE-DESIGN.md) describes
 rejection and recovery behavior. Scripted regressions exercise the state machine;
 they do not establish the quality of a model-generated design.
 
-The [recorded attempt](evidence/README.md) contains two model-generated proposals
-and the review of the first proposal. Its judge requested revision. The second
-proposal exposed an Orchestra bug: Claude continued a long response after its
-output limit, and the adapter supplied only the last fragment to the reviewer.
-The complete proposal was recovered from the retained stream. It remains unaccepted.
+The [recorded attempts](evidence/README.md) preserve rejected proposals with their
+reviews. The first attempt exposed a truncated-response bug in Orchestra and
+conflicting role instructions. Both have been corrected. The second found missing
+meeting provenance and unsafe delivery confirmation. Its judge also waived the
+specification's media-ownership condition, so the condition was clarified before
+another invocation. [Review notes](ref/REVIEW_NOTES.md) accompany the new inputs.
 
-The response parser and conflicting role instructions have been corrected.
-Retrying now preserves the prior proposal and its objections. The user has
-confirmed permission for Claude and Codex to exchange generated material through
-review and planning. The retry is in progress. No implementation plan has been
-generated.
+The current invocation is revising the last proposal. No implementation plan has
+been generated. Model outputs in the evidence directory retain their wording.
 
 The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
 service can deny network access independently of its containing app's sandbox

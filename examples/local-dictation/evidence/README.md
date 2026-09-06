@@ -1,4 +1,6 @@
-# Recorded design attempt
+# Recorded design attempts
+
+## Attempt 1
 
 Run `16561ebc722c`, September 6, 2026. The judge requested revision of the first
 proposal. The second proposal was recovered after an adapter error and has not
@@ -18,7 +20,7 @@ speech recognition under different models. It also found undefined recovery
 states and an insertion path that could replace a text field's contents.
 The judge confirmed those defects and identified a recording-duration cap that
 conflicted with the specification. The second proposal attempts to address the
-objections and records five blocking questions. Those questions remain unresolved.
+objections and records five blocking questions.
 
 The review also revealed a prompt conflict. The shared inputs instructed every
 role to return the author's schema, so the reviewer encoded its objections as a
@@ -36,6 +38,38 @@ recovery record identifies the source log by its digest and keeps acceptance
 false. These exported model outputs preserve their original wording. CLI session
 logs remain local; they are not part of this evidence directory.
 
-Automatic approval review initially refused reuse of the generated proposal and
-review. The user reaffirmed permission for the exchanges needed to complete the
-example. The retry has started with the recovered proposal and current inputs.
+## Attempt 2
+
+Run `d16f5186f5a9`, September 6, 2026. The complete proposal reached the reviewer.
+The judge requested revision. The invocation was stopped during its next author
+pass because the judge had waived the specification's media-ownership condition.
+No design was accepted.
+
+| File | Contents |
+| --- | --- |
+| [Inputs](attempt-002/inputs.json) | The specification and references used in this invocation. |
+| [Proposal](attempt-002/proposal-1.json) | Revised design with 35 decisions. |
+| [Review](attempt-002/review-1.txt) | Codex's findings, including incomplete meeting provenance. |
+| [Judgment](attempt-002/judgment-1.json) | Requested corrections and the disputed media-resume ruling. |
+| [Receipt](attempt-002/receipt.json) | File digests and the reason for interruption. |
+
+The review found a paste-confirmation rule that could insert text twice. The
+capture journal could also record durable index entries before the corresponding
+audio was durable. Meeting notes did not pin the speaker assignments used to
+generate them. The judge confirmed those defects.
+
+The judge dismissed the media-resume finding on the ground that the proposed
+ownership proxy was disclosed and optional. The specification requires ownership
+before restoration; disclosure does not satisfy that condition. The next inputs
+make the condition explicit and record direct distribution as the example's
+assumption. [Additional review notes](../ref/REVIEW_NOTES.md) identify the remaining
+concerns and supply a versioned source for SpeakerKit's centroid API.
+
+The live run also revealed that Claude's text adapter preapproved read tools
+without removing tools inherited from local settings. The adapter now selects its
+built-in read tools explicitly and disables inherited MCP servers. CLI verification
+reported only `Read`, `Glob`, and `Grep`, with no MCP servers loaded.
+
+The third invocation uses the clarified inputs and preserved review. The local
+XPC probe is retained separately; its findings are excluded from the model inputs
+after automatic approval review rejected transmitting that material.

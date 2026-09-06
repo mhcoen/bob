@@ -20,6 +20,11 @@ for a feature paywall or arbitrary usage restriction. Intel support remains a
 hardware compatibility question. Identify the consequences of each runtime
 choice and what would be required to support other Macs.
 
+Use direct distribution for this worked example. App Store submission is not
+planned. A local build may use ad hoc signing; Developer ID signing and notarization
+belong to release packaging. Record the consequences of that choice without
+requiring a separate product-owner decision before design review can finish.
+
 All inference must run on this Mac. There is no cloud fallback and no required
 account or subscription. No artificial recording-duration or usage quotas.
 All features remain available subject to actual hardware and model capabilities.
@@ -126,12 +131,20 @@ evaluation is part of development; it must not become an application feature gat
 Desktop behavior: menu bar access; microphone level adjustment; optional pause
 and resumption of media playback. Restore state only when the application still
 owns the change. Define behavior for competing applications or manual user edits.
+A media-key toggle and an idle output device do not establish ownership of a
+pause. An opt-in setting does not remove this condition. Automatic restoration
+needs an integration that identifies the affected player and confirms the pause
+transition. Unsupported players may offer an explicit user action for resumption.
 
 ## References
 
 - ref/RESEARCH.md
   role: docs
   notes: Primary-source observations and limits of the available evidence.
+
+- ref/REVIEW_NOTES.md
+  role: docs
+  notes: Findings from the worked example's rejected design revision.
 
 ## Notes
 

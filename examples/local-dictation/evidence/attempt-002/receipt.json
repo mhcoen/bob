@@ -1,0 +1,26 @@
+{
+  "workflow_run": "d16f5186f5a9",
+  "status": "interrupted; unaccepted",
+  "author": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "reviewer": {
+    "adapter": "codex_text",
+    "model": "gpt-5.6-sol"
+  },
+  "judge": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "input_digest": "55720c16932731f0153a183ba38fcb62b44a37e1d506c64b1509c853ca56b5f0",
+  "first_judgment": "iterate",
+  "interruption": "Stopped during author revision 2 after the judge treated the media-ownership requirement as best effort. Specification clarified before the next invocation.",
+  "publication": "No accepted software design or implementation plan was published.",
+  "sha256": {
+    "inputs.json": "515db181e9fd4399913e28d144dd26b2748f131e673b6d228f4e0026728dea5a",
+    "judgment-1.json": "b2e1e3df26fe53c2eeb981f1f78c917a4b5feb67c910e29c5d770940fc0de530",
+    "proposal-1.json": "22398b548300f0aace1f0d5e401338bcfe102d3bb25cf8b454614b8ab9dabd71",
+    "review-1.txt": "037d138e4d3d10f6675925c6c7d9f70e62a8c82857a080b243ab5e577ef36534"
+  }
+}

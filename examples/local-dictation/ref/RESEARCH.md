@@ -75,3 +75,13 @@ checked for that target. Posting a paste event supplies no general acknowledgmen
 that the target has consumed the clipboard contents.
 [Value attribute](https://developer.apple.com/documentation/applicationservices/kaxvalueattribute),
 [selected text attribute](https://developer.apple.com/documentation/applicationservices/kaxselectedtextattribute).
+
+## Evidence from the second review
+
+SpeakerKit v1.1.0 exposes `speakerCentroidEmbeddings` in `DiarizationResult`, with
+cosine-distance helpers for comparing centroids. A speaker can have no centroid;
+the SDK supplies no universal threshold for treating a match as the same person.
+The result declaration does not establish per-segment confidence or margin outputs.
+Keep unavailable evidence distinct from measured values. No diarization experiment
+was run during this inspection.
+[Versioned API source](https://raw.githubusercontent.com/argmaxinc/argmax-oss-swift/v1.1.0/Sources/SpeakerKit/DiarizationResult.swift).

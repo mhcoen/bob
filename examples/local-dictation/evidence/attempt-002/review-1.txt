@@ -1,0 +1,73 @@
+The proposal is not ready for acceptance. The coverage table contains each of the fourteen requirements exactly once, but several entries claim behavior that the referenced decisions do not establish.
+
+## Blocking defects
+
+1. The run state machine omits work required by Meetings. D-006 defines no diarization stage, while D-023 introduces diarization as a model-bound operation with its own results and failure modes. D-007 therefore gives no cancellation behavior for diarization and also omits cancellation during `sealing`. D-031’s claim that every non-terminal state has a recovery transition is false for any diarization state added during implementation.
+
+Meeting-note provenance has the same gap. Notes depend on a transcript, diarization output, and mutable speaker assignments, but D-029 permits only one `derived_from_result_id`, and the run manifest does not pin a diarization result or speaker-assignment revision. Editing names or rerunning diarization can change how a saved note is interpreted without changing its recorded provenance.
+
+Resolve this by placing diarization and note generation in an explicit run lifecycle, with cancellation and recovery outcomes. Diarization output and speaker assignments need immutable revisions that a notes run pins. If a result can have several inputs, the schema needs to represent all of them.
+
+2. D-023 assumes SpeakerKit capabilities not established by the cited research. The decision requires per-segment clustering distance and margin, accessible centroid embeddings, cross-run embedding matching, and explicit concurrency control. RESEARCH establishes the configuration fields and warns that its threshold is not calibrated; it does not establish that the remaining evidence is exposed by the API. The open question asks whether usable evidence exists but marks the answer nonblocking even though the schema and name-remapping behavior depend on it.
+
+Resolve this with a thin adapter experiment before freezing the meeting schema. Record the outputs actually available from SpeakerKit and revise the attribution model if distances, margins, or embeddings cannot be obtained. “Ship anyway with unknown confidence” does not resolve the cross-run identity dependency.
+
+3. Text delivery still lacks a safe confirmation rule. D-009 treats a change in value length or selected-text range as proof that a paste succeeded. A paste replacing a selection with equal-length text can change neither measurement, causing synthetic typing to duplicate the result. An unrelated user edit can change either measurement and be misread as successful delivery. The same weakness affects the stated confirmation of `AXSelectedText`.
+
+D-008 also says that focus moving within the same application sends text to the current element, while D-009 and Failure behavior operate on the latched element. The submit rule compounds the conflict: Return is posted only when the delivery path “posted events,” which excludes the preferred `AXSelectedText` path even after confirmed insertion.
+
+D-010 does not define a completed state. Its declared states omit `delivered` and `needs_review`, although recovery creates `needs_review`. If `posted` means successful delivery, the launch rule incorrectly turns successful attempts into review items.
+
+Resolve these defects by specifying one target for each focus outcome, a confirmation predicate tied to the expected text at the expected selection, and an unconfirmed outcome whenever that predicate is unavailable. No fallback may run merely because length or range did not change. Add the complete attempt-state transition table. Submission should follow confirmed insertion, independent of whether insertion used an accessibility operation or posted events.
+
+4. D-012 does not enforce the behavior claimed for questions or context. Preserving an interrogative does not prevent the model from appending an answer. Content-word recall and expansion limits also permit an answer composed from words already present in the question. The eight-token context-overlap check detects copying; it does not detect compliance with a screen instruction expressed in new words. The proposal acknowledges that these checks are only necessary conditions, while the Built-in modes and Context coverage entries say they enforce the requirements.
+
+The adversarial corpus may reveal this failure during development, but it does not prevent an unsafe output at runtime. Resolve the contradiction by defining a conservative runtime outcome for text whose compliance cannot be established. That may require falling back to normalized text, holding the result for review, or restricting how raw context can participate in modes whose instruction hierarchy cannot be checked. The proposal cannot call these invariants enforced while its own counterexamples pass them.
+
+5. The journal durability protocol in D-030 is incomplete. The sealer fsyncs `index.log` and deletes source chunks, but it does not state that the corresponding CAF packet bytes are fsynced before the index entry becomes durable. After a crash, the index may name packet data that never reached durable storage. The index fields also need to contain everything required to reconstruct the variable-packet metadata, not only packet count and byte offset.
+
+F3’s stated fallback is only to shorten the chunk period. That helps tail-loss frequency; it does not repair an invalid cross-file commit order or a CAF representation that cannot be reconstructed as proposed.
+
+Resolve this by defining the exact write, fsync, index, and deletion order and the complete recovery metadata. F3 also needs a structural fallback, such as retaining recoverable chunks until a valid sealed artifact is durable, if reconstruction fails.
+
+6. The XPC process boundary is internally incomplete. Architecture names SpeechService, GenerationService, DecodeService, and ModelDownloader, but D-023 never places diarization in a service. Running `DiarizerSpeakerKit` in the unsandboxed shell would bypass D-028’s inference isolation. Sharing SpeechService would alter its one-model residency and failure contract.
+
+D-003 and D-028 describe sandbox enforcement as settled, while F2 can replace it with an unsandboxed service and a weaker claim. F2 also determines whether the external decoder inherits restrictions and whether directory-based models can load. Those outcomes change the trust boundary, not a parameter inside it. The open question should not be marked nonblocking.
+
+Resolve this by assigning diarization to a named service and making F2 an acceptance gate for D-003 and D-028. Test the actual model-directory and external-decoder paths, not a synthetic child alone. If the sandboxed arrangement fails, the revised boundary and weaker guarantee need product-owner approval before design acceptance.
+
+7. Resource scheduling excludes required consumers. D-004 and D-027 account for one speech model and one generation model, while D-023 adds diarization models with separately configurable segmenter and embedder concurrency. The design never states whether diarization can coexist with recognition or generation, how its memory enters the 8 GB budget, or which work it preempts.
+
+The incremental sealer is placed in the batch lane. A long batch job can therefore prevent it from maintaining the claimed thirty-second journal window during live capture. D-004 also says an unsupported runtime restarts from its “last committed checkpoint,” although checkpoint validity is the property the descriptor has not established.
+
+Resolve this by including diarization and service workspaces in admission accounting, giving the live capture writer and sealer an execution guarantee independent of model batch work, and defining whole-job restart as the fallback when no valid checkpoint exists. D-011’s reconsideration condition cannot simply remove provisional transcription if it proves expensive; provisional live text is a named requirement. The design needs another local preview strategy or must treat inability to provide one on the evaluation target as a release blocker.
+
+8. Runtime replacement does not have a bounded storage effect. Evolution says old runtime blobs can be released once nothing references them, but History results permanently reference their model installations. Under D-022’s garbage-collection rule, successive runtime replacements can therefore retain every old multi-gigabyte model indefinitely.
+
+Resolve this by separating retained installation identity and notices from retained weight availability. The design needs a state in which old results remain attributable while the old weights are discarded, with History explaining that reprocessing through that installation is unavailable. It should also state how runtime-specific parameters remain readable after the presentation hook or adapter is removed.
+
+9. D-025 violates the desktop ownership rule. The proposal admits that a media-key toggle identifies neither the recipient nor whether a pause occurred. Making automatic resume opt-in does not establish ownership. The same-device and device-idle checks still allow the app to start a different player or reverse a manual change.
+
+Manual Resume is a user action and does not present this defect. Resolve the objection by removing unconfirmed automatic resume or limiting it to integrations that identify the player and confirm the pause transition and unchanged state.
+
+10. Verification records measurements without defining how they decide acceptance. F1 has no recognition, latency, or memory threshold for retaining WhisperKit. F3 has no maximum acceptable loss interval. The diarization protocol reports error rate and unknown-confidence share, but D-023 says speaker separation ships regardless of the result. The fidelity rubric has criteria but no scoring rule or rejection condition.
+
+D-035 establishes who approves expectations, which fixes the earlier authority defect. It does not state what that owner is asked to approve for these measurements. Resolve this by recording product-approved acceptance ranges and the action attached to each failed range before running the experiments. These are development gates for the shipped defaults, not application feature gates for compatible imported models.
+
+11. The proposal leaves one explicitly blocking product decision unresolved. The first open question says Developer ID distribution determines whether required delivery and shortcut behavior can exist. The architecture already assumes that answer throughout D-003, D-009, and D-026. A design with this question still marked blocking cannot be accepted.
+
+Resolve it by confirming Developer ID distribution and recording it as a decision. If Mac App Store distribution is required, the specification or the affected architecture must change before implementation planning.
+
+## Improvements that can wait
+
+D-014 mixes “first match wins” with a specificity tiebreak “within equal priority,” but no priority field is defined. Choose list order as the complete precedence rule or define an explicit priority value before the rule schema is implemented.
+
+The 200 ms arming period in D-006 occurs before capture begins. Push-to-talk users may speak on key-down and lose the first phoneme or word. Add a leading-audio test and either capture during arming or make the ready boundary perceptible.
+
+D-016 defines persistent context retention but not the lifetime of the raw screen frame, clipboard text, XPC message buffers, generation state, or scratch files. State when these are released and whether any service writes prompts or context to disk.
+
+D-022’s compatibility fields are too generic for all model kinds. Speech, generation, and diarization installations need type-specific required assets and smoke tests. The load test limits the immediate risk, so the exact descriptors can be settled with the adapter work.
+
+The fixed 10 MB clipboard snapshot threshold in Failure behavior has no basis or reconsideration condition. It should become a measured or configurable resource limit.
+
+Several objections from the prior review no longer apply. D-029 repairs re-recognition provenance for ordinary text results; D-018 adds timing and cross-process flow control; D-022 repairs activation ordering; D-032 replaces global permission failure; D-026 removes the duration cap; D-033 brings retention under the lease protocol. The absence of task-level implementation phases is not a defect at this review stage, as the current review instructions place those phases after design acceptance.
