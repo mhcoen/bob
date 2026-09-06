@@ -37,3 +37,41 @@ Speech recognition and text generation need separate capability contracts.
 Latency and recognition quality require measurements on identified hardware
 with a documented model revision and representative audio. Speaker attribution
 needs its own evaluation. Documentation alone does not resolve those questions.
+
+## Follow-up inspection after the first design review
+
+Apple documents separate sandboxes for bundled XPC services. A service can fail
+or be terminated independently of its client; the client must handle connection
+interruption and rebuild worker state. Evaluate signed XPC services with network
+entitlements withheld for inference. An unsandboxed application shell does not
+by itself settle the service's sandbox configuration. A scan for socket symbols
+cannot establish that a process lacks network access.
+[Apple XPC guide](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/CreatingXPCServices.html).
+
+The WhisperKit model repository identifies its license as MIT. Preserve the
+license and revision of each selected model in its installation manifest;
+the SDK's license alone does not describe every model a user might import.
+[WhisperKit model card](https://huggingface.co/argmaxinc/whisperkit-coreml/blob/main/README.md).
+
+SpeakerKit's `PyannoteConfig` exposes an explicit `download` flag and local
+`modelFolder`, with separate segmenter and embedder concurrency settings.
+Defaults vary by OS version. The adapter must supply those values explicitly.
+The available clustering threshold is not evidence of a calibrated probability
+that a speaker label is correct. Represent unavailable confidence as unknown.
+[Configuration source](https://github.com/argmaxinc/argmax-oss-swift/blob/main/Sources/SpeakerKit/Pyannote/PyannoteConfig.swift).
+
+The public SpeakerKit model collection has component-specific license references.
+Its embedder refers to WeSpeaker; its clusterer refers to VBx. Removing a
+proprietary notice from a repository does not establish terms for every asset.
+Model distribution needs an inventory of the exact weights and their notices.
+Local import and runtime integration can be designed without bundling those weights.
+[Embedder notice](https://huggingface.co/argmaxinc/speakerkit-coreml/blob/main/speaker_embedder/pyannote-v3/README.txt),
+[clusterer notice](https://huggingface.co/argmaxinc/speakerkit-coreml/blob/main/speaker_clusterer/pyannote-v4/README.txt).
+
+Apple distinguishes an accessibility object's value from its selected text.
+For an editable field, setting its value can replace the field's contents.
+Dictation insertion needs a selection-aware operation whose behavior has been
+checked for that target. Posting a paste event supplies no general acknowledgment
+that the target has consumed the clipboard contents.
+[Value attribute](https://developer.apple.com/documentation/applicationservices/kaxvalueattribute),
+[selected text attribute](https://developer.apple.com/documentation/applicationservices/kaxselectedtextattribute).

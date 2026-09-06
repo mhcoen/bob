@@ -19,7 +19,10 @@ detects new files and appends tasks for anything missing.
   `.duplo/design-runs/` and a readable `SOFTWARE_DESIGN.md` projection. Checks
   observed input changes before publication, preserves edited projections, and
   records a pending attempt before provider execution. Phase binding records
-  the design digest and applicable decision IDs. See `SOFTWARE-DESIGN.md`.
+  the design digest and applicable decision IDs. Retries carry the last available
+  proposal and its objections into a fresh review, including rejected attempts.
+  The shared proposal schema applies only to the author; review and judgment
+  retain their own output contracts. See `SOFTWARE-DESIGN.md`.
 
 - `design_command.py`: Implements `duplo design` and `duplo design --plan` for
   specifications with an explicit scope list. Reviews design before generating

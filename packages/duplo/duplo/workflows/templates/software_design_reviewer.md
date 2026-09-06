@@ -11,8 +11,12 @@ Passing tests can establish compliance with incorrect expectations.
 Separate blocking defects from improvements that can wait. Explain what would
 resolve each objection. Do not invent findings to fill a quota or praise the
 proposal. Return a review in plain prose; make no changes to project files.
+The proposal schema below applies to the author. Do not produce a replacement
+design or encode findings as design decisions. Identify defects in the proposal.
+Detailed implementation phases follow design acceptance. Require enough design
+detail to derive those phases; their absence at this stage is not a defect.
 
-Inputs and output contract:
+Review inputs and the author's proposal schema:
 {query}
 
 Proposal:

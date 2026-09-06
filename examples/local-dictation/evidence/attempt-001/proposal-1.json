@@ -1,0 +1,819 @@
+{
+  "purpose": "A single-user macOS dictation application that captures speech, recognizes it, optionally rewrites it according to a user-selected mode, and inserts the result into whatever application the user was working in. Every speech and language operation runs on the user's Mac. There is no cloud fallback, no account, no subscription gate, and no artificial cap on recording length or usage; the only limits are the hardware and the models the user has installed.\n\nIn scope: recording controls, text delivery, recording display, built-in modes, custom modes, automatic mode selection, vocabulary, context, languages, input sources, meetings, history, models, and desktop behavior. Out of scope: cloud inference, account-based settings sync, paywalls, enterprise billing and authentication, and any Windows or iOS client.\n\nThis document covers the full intended product before implementation phases are cut. That ordering is deliberate. Several requirements constrain the persistence schema and the process model in ways that are expensive to retrofit: deletion of a recording while a worker is producing a result for it, reprocessing an old recording under changed settings without altering the earlier result, snapshotting mode settings so a later edit does not change the meaning of an already-saved output, and bounding memory on a multi-hour import. If those are discovered by whichever implementation task first hits them, the schema and the job model get patched into a shape that cannot express them cleanly.\n\nThe historical feature inventories from the user's earlier mcwhisper and super experiments are treated as evidence about desired scope. Their generated plans and dependency choices do not bind this design.",
+  "architecture": "## Layering rule\n\nOne rule governs dependency direction: `DictationCore` depends only on `DictationPorts`; adapters depend on `DictationPorts` and on system frameworks; nothing depends on an adapter except the composition root in the app shell. `DictationCore` contains no AppKit, no AVFoundation, no SQLite, and no network code, so the session state machine, mode resolution, vocabulary pipeline, prompt assembly, and scheduling policy can be exercised without a microphone, a model, or a window server.\n\n## Package and target layout (D-002)\n\nSwift Package Manager package `LocalDictation` with library targets:\n\n- `DictationPorts`: protocols and value types shared by core and adapters (`AudioSource`, `SpeechRecognizer`, `TextGenerator`, `Diarizer`, `TextInjector`, `FocusObserver`, `ContextProvider`, `ModelStore`, `RecordingStore`, `ShortcutRegistrar`, `MediaController`, `RuntimeDescriptor`).\n- `DictationCore`: session state machine, `RunManifest` assembly, mode resolution and rule evaluation, vocabulary pipeline, prompt assembly, output validator, `ResourceScheduler` policy.\n- `DictationStore`: SQLite schema, migrations, repositories, file library, tombstone and job-token logic.\n- `AudioIngest`: `AVAudioEngine` microphone source, `ScreenCaptureKit` system-audio source, `AVAssetReader` streaming file decoder, resampling to the canonical buffer format.\n- `SpeechWhisperKit` and `SpeechWhisperCpp`: two `SpeechRecognizer` adapters.\n- `LanguageRuntimeClient`: IPC client for the generation helper.\n- `SystemIntegration`: accessibility injection, pasteboard, `CGEventTap` shortcuts, media control, status item, permission probes.\n- `DictationUI`: SwiftUI views, the recording panel, settings, history browser.\n\nExecutable targets: `dictation-llm-helper` (embeds llama.cpp) and `dictation-asr-helper` (embeds the chosen speech runtime when that runtime is a C/C++ library). The shipping `.app` is a thin Xcode target that depends on the local package, because entitlements, hardened runtime, privacy usage strings, and notarization are not expressible in `Package.swift`. `swift test` covers `DictationCore`, `DictationStore`, and the pure parts of the adapters; the Xcode target adds UI and integration tests.\n\n## Process model (D-003)\n\nThree kinds of process: the app, inference helpers, and a downloader that only runs on explicit user action. Inference runs in child helper processes rather than in-process, and never behind a local HTTP server.\n\nA local HTTP endpoint would bind a port reachable by every other process on the machine, would need its own authentication story, and is the component most likely to acquire proxy or forwarding behavior through configuration the app does not control. RESEARCH names this concern for llama.cpp's server tooling specifically. The helper reads model files from paths the parent passes, communicates over an inherited socket pair with a length-prefixed message protocol, and contains no socket-creation code of its own. Crash isolation is a second benefit: a bad quantization that segfaults llama.cpp takes down a helper, and the app reports a model load failure rather than dying with the user's in-flight transcript.\n\n## The lifetime of a recording (D-006)\n\nComponent boundaries follow this sequence, not the other way around.\n\n1. `idle`.\n2. `arming` (budget 200 ms): resolve the effective mode from the automatic-selection rules; latch the delivery target (frontmost PID, bundle identifier, window number, focused `AXUIElement`); sample context sources in parallel against the budget; assemble a `RunManifest` recording the mode revision id, speech model id, language model id, vocabulary revision id, language setting, and translation flag; allocate a UUIDv7 session id; create the session directory; write manifest v0 and fsync it.\n3. `capturing`: the audio source writes into a lock-free ring from its real-time callback; a writer task drains the ring, appends to the session audio file, and feeds a provisional recognizer; the panel shows live text and an envelope.\n4. `finalizing`: stop the source, flush and fsync audio, commit the `recordings` row. This is the first point at which the recording exists in History.\n5. `recognizing`: a full pass over the complete audio produces the source transcript with segment timings and per-segment average log-probability. The provisional stream is discarded rather than promoted; it was computed over partial context and is not the same artifact.\n6. `refining`: deterministic vocabulary replacement and optional filler removal produce the normalized transcript. Both texts are retained.\n7. `rewriting` (only if the mode has a generation stage): prompt assembly, generation in the helper, output validation.\n8. `delivering`: exactly one attempt, guarded by a committed idempotency record.\n9. Terminal: `complete`, `cancelled(stage)`, or `failed(stage, reason)`.\n\nFile imports enter at step 3 with a seekable source and skip the delivery-target latch; meetings enter at step 3 with two sources and continue to a notes-generation job instead of delivery. That is why the same machine serves all input sources.\n\n## Concurrency and ownership (D-004)\n\nOne `SessionActor` per session owns that session's state machine, its rows, and its files; it is the only writer for them. The audio callback thread never touches an actor, allocates, or locks; it writes samples and a 10 ms RMS/peak envelope into two rings.\n\nA single `ResourceScheduler` actor admits model-bound work in three lanes. `capture` is never queued. `interactive` covers the provisional pass, the final recognition, and the rewrite for the session the user is waiting on. `batch` covers file imports, meeting-notes generation, and reprocessing from History. At most one speech job and one generation job hold a loaded model at a time. An interactive job preempts a batch job at its next chunk boundary; batch jobs checkpoint per chunk, so preemption costs one chunk of work rather than a restart. If the scheduler cannot admit the provisional pass, the panel shows the waveform with live preview marked paused, and the final result is unaffected.\n\n## Component responsibilities\n\n- `ModeResolver` (core) maps `(foreground app, URL if readable, explicit override)` to a mode revision, and is a pure function of the rule list and that tuple.\n- `VocabularyPipeline` (core) is pure text-to-text with an explicit stage order.\n- `PromptAssembler` (core) builds the generation request: mode instructions, then context fenced with a per-run random delimiter and labeled as reference material, then the normalized transcript, then the task line restated.\n- `OutputValidator` (core) checks the generated text against the mode's declared transformation set and decides between accept, retry-once, and fall back to the normalized transcript.\n- `DeliveryCoordinator` (core policy) plus `TextInjector` (adapter) split the focus decision from the injection mechanism, so focus policy is testable without a window server.\n- `RecordingStore` (adapter) is the only component that writes History rows and library files, and it enforces the tombstone and job-token rules for every writer.\n\n## Why this supports the whole scope as phases land\n\nThe state machine, the `RunManifest` snapshot, append-only results, and job tokens all exist in the first phase against fake adapters. Every later phase adds an adapter behind an existing port (a new audio source, a second speech runtime, a diarizer) or a new result kind (translation, notes), and none of them changes how a session is recorded, cancelled, or deleted. The parts that are hard to change late are the parts that are built first and exercised against fakes, where a cancel-at-every-stage test suite is cheap to run.",
+  "data_lifecycle": "## Stores and ownership\n\nTwo stores, one owner each. `DictationStore` owns everything under `~/Library/Application Support/LocalDictation/`:\n\n```\nlibrary.sqlite            metadata, results, FTS index (WAL mode)\nRecordings/<uuid>/        manifest.json, audio.caf, mic.caf, system.caf, segments.json\nModels/<runtimeKind>/     activated model directories\nModels/.staging/<uuid>/   in-flight downloads and imports\nScratch/<jobId>/          worker temporaries\n```\n\nA single writer connection with WAL; readers (History browser, search) use separate read connections. `SessionActor` never writes SQLite directly; it calls repository methods that enforce the delete rules described below.\n\n## Persistence choice (D-005)\n\nSQLite through GRDB, with FTS5 over result text. History search over transcripts is a stated requirement, and FTS5 with `bm25` ranking and snippets is the reason SQLite wins here; SwiftData and Core Data have no comparable text index and their migration behavior is harder to test. Schema versions are explicit numbered migrations with a test that runs every migration against a fixture database from the prior version.\n\nCore tables: `recordings`, `results`, `segments`, `speakers`, `speaker_assignments`, `modes`, `mode_revisions`, `vocabulary_revisions`, `models`, `context_digests`, `delivery_attempts`, `jobs`.\n\n## Audio artifacts\n\nCanonical processing format is 16 kHz mono Float32. Recorded audio is stored as Apple Lossless in a CAF container at 16 kHz mono, roughly 50 to 60 MB per hour by arithmetic from 16-bit PCM at 115 MB per hour; lossy encoding is rejected because reprocessing with a better model later is a requirement. Imported files are copied into the session directory in their original encoding and decoded on demand, so an import does not discard information the user brought.\n\n## Settings snapshots and derived results\n\nA mode is a named entity with an append-only chain of `mode_revisions`; each revision is content-addressed over its prompt, formatting rules, declared transformations, and model selections. A session's `RunManifest` stores revision ids, not names. Editing a mode creates a new revision and leaves every saved result pointing at the revision that produced it, which is what makes \"later edits must not silently change the meaning of a saved result\" true rather than aspirational. The History detail view shows the revision that produced a result and offers a diff against the current revision.\n\n`results` rows are append-only. A recording has exactly one source transcript, and every later artifact (normalized text, rewritten text, translation, meeting notes) is a separate row carrying `mode_revision_id`, `speech_model_id`, `language_model_id`, and a `params_json` blob in a stable schema. Reprocessing inserts rows; it never updates them. `recordings.current_result_id` is a user-movable pointer that decides what the list view shows. A translation never replaces the source transcript; it references it.\n\n## Context retention (D-016)\n\nBy default the app stores a SHA-256 digest, byte length, and source kind for each context sample in `context_digests`, not the text. That is enough to tell a user reprocessing an old recording that the original context is unavailable, without keeping a copy of whatever was on screen. Retention of the text is opt-in per mode, shown in History when present, and deleted with the recording.\n\n## Interrupted operations\n\nThe session directory and `manifest.json` are written before capture starts, and the manifest is updated at each stage transition with an atomic write-and-rename plus fsync. The `recordings` row is committed at `finalizing`. On launch, a recovery sweep reconciles the two:\n\n- Session directory with a manifest in `capturing` and a non-empty audio file: the audio is finalized by reading what was flushed, a `recordings` row is created with `interrupted = true`, and it appears in History with the option to recognize it. Nothing is delivered.\n- Session directory in `arming` or with no usable audio: removed.\n- `delivery_attempts` row in `pending` or `posted` at launch: moved to `needs_review` and never re-posted. The app cannot tell whether a posted paste landed, so it refuses to guess, which is how duplicate delivery is avoided after a crash (D-010).\n- `Scratch/<jobId>` directories with no live job: removed.\n- Staged model directories with no completed verification: removed.\n\n## Deletion, including during active processing (D-024)\n\nDeletion sets `recordings.deleted_at`, increments `recordings.generation`, and signals cancellation to any job holding a token for that recording. Every worker carries `(recording_id, generation)` from the moment it is admitted. A worker's commit path is one transaction that re-reads the recording row and aborts if the row is missing, `deleted_at` is set, or the generation differs; on abort it deletes its scratch directory and returns. A late response from a worker therefore cannot recreate a deleted recording, because the insert and the check are the same transaction.\n\nAudio files and rows are hard-deleted by a reaper that runs when the last job token for that recording is released, and again at launch. Until then the recording is invisible in the UI. Deletion of a recording cascades to its results, segments, speaker assignments, context digests, delivery attempts, and FTS entries.\n\nRetention defaults to keeping everything. Optional policies (age-based, size-based, and a \"drop audio but keep text\" variant) run at launch and daily, and the first run shows exactly what it would remove before removing it.",
+  "failure_behavior": "## Cancellation by stage (D-007)\n\nCancellation has a defined effect everywhere, and the panel names the effect at the time.\n\n- `arming`: nothing was captured; session directory removed; no History row.\n- `capturing`: capture stops; by default the audio is discarded and no History row is created; a per-mode setting keeps the audio as an `interrupted` recording instead.\n- `recognizing`: the worker is cancelled at its next chunk boundary; audio is kept; the recording is marked cancelled; no partial transcript is saved, because a truncated transcript that looks complete is worse than none. The user can run recognition again from History.\n- `refining`: the source transcript is already committed; the normalized result is dropped.\n- `rewriting`: generation is cancelled; the normalized transcript is kept as the result and offered for delivery.\n- `delivering`: cancellable up to the moment the first event is posted. After that the app reports that delivery was attempted and stops; it does not try to undo keystrokes in another application.\n\n## Permissions\n\nEach permission has a named degraded state rather than a disabled app.\n\n- Microphone denied: recording controls are disabled with a link to the settings pane; file import still works.\n- Accessibility denied: the event tap cannot be created, so push-to-talk is unavailable and the toggle falls back to a Carbon hotkey; text delivery falls back to placing the result on the pasteboard with a panel notice, and History keeps everything.\n- Input Monitoring denied: same fallback path as Accessibility for shortcut handling.\n- Screen Recording denied: system-audio capture and screen context are unavailable; microphone recording, all modes, and all rules that do not require screen context continue to work; meetings degrade to microphone-only with a visible marker on the recording.\n- Automation denied for a browser: URL-based rules do not match, the default mode is used, and the panel shows that the mode came from the fallback.\n- Revocation mid-session: the capture source reports an error, the session moves to `failed(capturing, permissionRevoked)`, whatever audio was flushed is kept as an interrupted recording, and nothing is delivered.\n\n## Secure input\n\nIf `IsSecureEventInputEnabled()` is true at arming, the session records but is marked delivery-unavailable up front. If it becomes true by delivery time, the app does not synthesize keystrokes, holds the result in History, offers copy, and says that another application has secure input active. Password fields are the common case and silently dropping text there would be the worst failure available.\n\n## Delivery failures (D-008, D-009)\n\n- Focus moved to a different application by delivery time: default is to hold. The panel becomes an actionable card with the text, a Deliver button, and a Copy button. An opt-in setting re-activates the latched application first, which steals focus, so it is not the default.\n- Focus moved to a different element in the same application: deliver into the current element (default on, per mode), because that matches the common case of clicking into the field while speaking.\n- Latched application has quit: hold and offer copy.\n- Accessibility set-value path unsupported: fall through to pasteboard and Command-V.\n- Pasteboard changed by another application between our write and our restore: leave the newer content alone and report that the pasteboard was not restored.\n- Pasteboard snapshot too large to hold (over 10 MB, or types that cannot be captured): mark the restore partial in advance and tell the user in the panel.\n- Paste rejected by the target: fall through to synthesized Unicode keystrokes for texts under 400 characters; above that, refuse and offer copy, because slow synthetic typing into an unknown application is a good way to interleave with the user's own input.\n- Submit modifier: the modifier state sampled at stop is honored only when delivery went to the latched element through a path where we posted events. A held delivery never auto-submits.\n\n## Model and runtime failures (D-022)\n\n- Download interrupted or hash mismatch: the staging directory is removed; the active installation is untouched; the error names the expected and computed digests.\n- Import of a user-supplied model that fails the load smoke test: it stays in staging with the error attached and is not activated; the previous model remains active.\n- Helper crash during generation: the client observes the socket close, marks the job failed with the exit status, keeps the source transcript, and offers retry. Three crashes on the same model mark it suspect in the model list.\n- Requested model no longer on disk: the session fails at the stage that needed it, keeps the audio, and points at the model manager. Model loading never falls back to downloading.\n- Combination of models exceeding the memory budget: refused at activation with the arithmetic shown, overridable by the user.\n\n## Resource and storage failures\n\n- Disk full during capture: capture stops, the audio written so far is finalized, the recording is marked interrupted, and the panel reports the reason.\n- Import of an unsupported format: the file is not modified, the session directory is removed, and the error names the format and the optional external decoder path (D-018).\n- Audio device removed mid-session: capture stops and the session is finalized as interrupted; the app does not silently switch devices under an active recording.\n\n## Desktop restore failures (D-025)\n\nInput gain and media playback are restored only when the app still owns the change. Device volume is restored only if the current value equals the value the app set. Playback resumes only if the app sent the pause, the same output device is still default, the output device is still idle, and under ten minutes have elapsed. Any mismatch means no restore, and the menu shows that playback was left as the user or another application set it.",
+  "evolution": "## Phase order\n\nThe order is chosen so the decisions that are expensive to change are exercised first against fakes.\n\n0. Skeleton: package layout, ports, the full session state machine, store schema v1 with migrations, the recording panel shell, fake audio source, fake recognizer, fake injector. Exit criterion is the whole lifetime running end to end on fakes, including cancel at every stage, crash injection at every stage boundary, and delete-during-processing.\n1. Real capture and delivery: microphone source, shortcut registrar, the injection ladder, pasteboard restore, focus policy, permission flows, menu bar item.\n2. Speech runtime: the bake-off (see open questions), then the chosen adapter; source transcripts persisted; History list with playback.\n3. Vocabulary pipeline, the Standard built-in mode, and the output validator.\n4. Generation helper, Email and Note modes, prompt assembly, per-mode validator rules, custom mode editor with revisions.\n5. Model library: staged install, verification, activation, user-supplied models, offline enforcement tests.\n6. Automatic mode selection and context sources, with the permission-degraded states.\n7. Input sources: system audio, audio and video import, streaming decode, the format matrix, the long-file memory ceiling test.\n8. Meetings: dual-stream capture, diarization hypotheses, speaker name editing, notes with citations.\n9. Languages and translation as derived results, retention policies, evaluation harness runs.\n\n## Adding a new input source\n\nA new source implements `AudioSource`, emitting the canonical buffer stream plus a `SourceDescriptor` (live or seekable, known duration, native rate and channel layout). Only the arming step branches on live versus seekable, because a live source latches a delivery target and a file source does not. The alternative considered was a pipeline per source, with microphone, system audio, and import each owning its own chunking, resampling, and cancellation. That version is shorter today and duplicates the parts most likely to be wrong: a memory bug on long input would exist in the import path only, and cancellation semantics would drift between paths. The cost of the chosen shape is a lowest-common-denominator port: a 48 kHz stereo source loses information at the boundary. That is mitigated by keeping imported files in their original encoding and by recording meeting streams at their native rate before conversion, so a future feature that needs full-band audio has it.\n\n## Replacing a model runtime\n\nRuntimes are separate adapter targets plus separate helper binaries, each publishing a `RuntimeDescriptor` that names the model kinds it loads and a parameter schema. Settings render parameters from that schema, so a new runtime adds no bespoke UI, and `results.params_json` stores parameters under a stable application-level schema with a runtime-specific extension blob, so History rows from an old runtime stay readable after a swap.\n\nThe alternative is calling the runtime API directly from feature code. That removes a layer and some translation code. Under it, replacing WhisperKit with whisper.cpp touches every call site, the settings UI, and the persisted parameters, and old History rows referencing removed parameter names become uninterpretable. Given that RESEARCH explicitly flags the speech runtime choice as unresolved (licensing, long-recording behavior, integration cost), designing as though the first choice is permanent would be the wrong bet.\n\nStorage effect of a runtime swap is bounded by giving each runtime its own `Models/<runtimeKind>/` subtree. Weights are not shared across runtimes, so having two installed costs the sum of their model sets; the model manager shows per-runtime totals and offers to delete a runtime's subtree when its adapter is removed.\n\n## Maintenance costs accepted\n\n- GRDB: a dependency with its own release cadence, plus migration discipline. Paid for by FTS5 and tested migrations.\n- Vendored C++ (whisper.cpp, llama.cpp): long build times, periodic vendoring, and API drift across upstream releases. Pinned to tagged revisions with an update checklist that reruns the evaluation harness.\n- `CGEventTap` and accessibility injection: per-application behavior is undocumented and changes. The cross-application delivery matrix is re-run per macOS minor release and per major update of the applications in it, and the result is a dated table in the repository.\n- Media key posting: it can break silently. The ownership guard means a break degrades to \"we did not resume playback\" rather than to wrong behavior.\n- Vision-based screen context: CPU and latency cost on the arming path, which is why it is opt-in and deadline-bounded.\n\n## What supporting other Macs would require\n\nIntel support means the whisper.cpp adapter with CPU inference plus a smaller generation model, a separate memory budget, and its own evaluation run; RESEARCH notes that documented platform support does not establish comparable performance. Macs with 8 GB need a smaller model pairing and a residency policy that unloads the speech model before loading the generation model, at the cost of latency between stages. Both are adapter and policy changes, not structural ones.",
+  "verification": "## Behavior is specified before it is tested\n\nA passing test shows that the implementation met its assertions under the conditions tested. The assertions can encode a wrong expectation, so the expectation is written and reviewed as its own artifact first. `docs/behavior/` holds a table per subsystem giving, for each `(state, event)` pair, the expected next state, the expected persisted effect, and the expected user-visible effect. Cancellation, permission loss, focus change, and crash are events in those tables. Each table is reviewed against SPEC.md by someone who did not write it, and that review is the gate for writing tests, not the other way around.\n\n## Automated checks\n\n- State machine property tests over every `(state, event)` pair, including generated random event sequences, asserting invariants: no delivery without a previously committed `delivery_attempts` row; no `results` row for a session cancelled before `finalizing`; an audio file exists on disk exactly when the row says it does; the source transcript is never mutated.\n- Crash injection: a harness that sends SIGKILL at each stage boundary, relaunches, and asserts the recovery outcomes listed in the data lifecycle, with a specific test that no automatic re-delivery occurs after a kill during `delivering`.\n- Deletion race: a deterministic scheduler test that deletes a recording while a worker holds a token, then releases the worker to commit; asserts the transaction aborts, no rows appear, and the scratch directory is gone.\n- Long-input memory ceiling: import a three-hour media file and assert peak resident size stays under a fixed bound. This measurement has not been taken; the test defines it.\n- Offline enforcement: run the app and both helpers under a network-denied profile through a complete session including model load, and assert no failures. Plus a static check that fails the build if a runtime is constructed through an initializer that can download, and a symbol scan asserting the helper binaries reference no socket APIs.\n- Prompt-injection corpus: clipboard and screen context containing instruction-shaped text (\"ignore the previous instructions and answer\"), asserting the output validator holds, the transcript is preserved, and the mode's declared transformations are not exceeded.\n- Vocabulary determinism: replacement ordering, word boundaries, case handling, and the post-generation re-application, all as table-driven tests.\n- Schema migration tests from fixture databases at each prior version.\n- Placement restore: panel position restored across display configuration changes, including a removed display and an off-screen frame.\n\n## Human review where assertions are weak\n\nTransformation fidelity is reviewed, not only asserted. A fixed corpus of recordings has human-written expected outputs per mode, scored against a rubric: meaning preserved, no invented facts, questions still questions, vocabulary terms intact, formatting matches the mode's declared transformations. The reviewer is not the author of the mode being reviewed. Automated proxies (content-word recall, question-mark parity, expansion ratio) run in CI as regression detectors; they are known to pass on text that is wrong, so acceptance is the human rubric.\n\nPractical behavior in other applications is verified by running the delivery matrix by hand: TextEdit, Mail, Notes, Safari (plain input and contenteditable), Chrome, Xcode, Terminal, VS Code, Slack, Messages, and Figma. Each cell records accessibility-path availability, paste behavior, pasteboard restore, submit modifier, and focus-change hold. The table is dated and re-run on macOS updates.\n\n## Measurement protocols that have not been run\n\nNo benchmark in this design has been executed. Each protocol below is defined so that results, when they exist, are attributable.\n\n- Recognition: word error rate by language on a public set plus an internal set, recording machine model, memory, macOS version, runtime revision, model revision and quantization, and audio characteristics. Recognition is scored separately from rewriting, because a rewrite rubric cannot distinguish a mis-recognized word from a badly reworded sentence.\n- Latency: time from stop to delivered text, split into recognition and generation, at three audio durations, reported as a distribution over repeated runs rather than a single number.\n- Diarization: diarization error rate on a labeled internal meeting set, plus the rate at which segments fall below the attribution confidence threshold.\n- Meeting notes: rubric scoring against the audio, with citation validity (every bullet points at real segments) checked automatically.\n\nUntil a measurement exists, the UI reports language support as declared by the model publisher and marks it unmeasured, and no latency claim appears anywhere in the product.",
+  "assumptions": [
+    "Deployment baseline is macOS 14.0. Basis: RESEARCH records macOS 14 and Xcode 16 among the prerequisites of the Argmax Swift package, and ScreenCaptureKit system-audio capture predates 14. The separate microphone stream output added in the WWDC24 material requires a later system, so microphone capture uses AVAudioEngine on all supported versions rather than depending on it. Reconsider if the selected speech runtime raises its floor, or if combined mic-plus-system capture through one ScreenCaptureKit stream becomes necessary for clock alignment in meetings.",
+    "Apple Silicon with 16 GB is the evaluation target and Intel is unsupported in the first release. Basis: stated in the specification. RESEARCH notes whisper.cpp supports Intel, so the second speech adapter keeps the option open without a structural change. Reconsider when an Intel requirement is confirmed; the work is a memory budget, a model pairing, and a separate evaluation run.",
+    "Model residency fits an 8 GB application budget on a 16 GB machine: a turbo-class speech model at roughly 0.8 to 1.6 GB of weights, an 8B-class generation model at 4-bit quantization at roughly 4.5 to 5 GB plus a few hundred MB of KV cache at 8k context. Basis: published quantized file sizes and standard KV arithmetic, not measured resident size. Reconsider at the first RSS measurement on the target machine, and whenever a user activates a larger pairing, at which point the residency manager refuses and shows the arithmetic.",
+    "The application ships unsandboxed with hardened runtime and Developer ID notarization. Basis: setting values on accessibility elements of other applications and running a session-level event tap are not available to a sandboxed application without exceptions that are not granted outside the Mac App Store. Reconsider if App Store distribution becomes a goal, which would remove push-to-talk and the accessibility delivery path rather than merely change them.",
+    "A single CoreAudio 'device is running somewhere' flag on the default output device is an adequate proxy for 'media is playing'. Basis: it is a public property and needs no private framework. Reconsider on reports that the app pauses nothing or resumes the wrong application; the fallback is per-application opt-in pausing.",
+    "Prompt-based vocabulary biasing in the whisper family raises the chance a term is recognized and guarantees nothing. Basis: the mechanism is a decoder prompt, not a decoding constraint, and the prompt slot is bounded (on the order of 224 tokens). The product text says as much. Reconsider if a runtime exposes real biasing or constrained decoding, which would move some vocabulary work from post-processing into recognition.",
+    "AVFoundation covers the initial import format matrix: wav, aiff, caf, mp3, m4a (AAC and ALAC), mp4, m4v, and mov. Basis: system decoder coverage. Reconsider on the first format it refuses (opus in webm and matroska are the likely ones), at which point the optional external decoder adapter is enabled for that user.",
+    "FTS5 is compiled into the system SQLite on the deployment baseline. Basis: it has shipped enabled for several macOS releases, but this is a build-setup check rather than a verified fact here. Reconsider immediately if the check fails; the fallback is GRDB built against a bundled SQLite, which increases binary size and adds an update obligation.",
+    "Separate microphone and system-audio streams give better speaker attribution than diarizing a mixed stream, so meetings record two streams. Basis: structural (the two capture paths already exist and channel origin is certain), not measured. Reconsider after diarization error rate is measured; if a mixed-stream diarizer performs comparably, the second stream becomes an optimization rather than a requirement.",
+    "Lossless 16 kHz mono audio at roughly 50 to 60 MB per hour makes indefinite retention acceptable by default. Basis: arithmetic from 16-bit PCM at 115 MB per hour and typical lossless ratios. Reconsider when a library crosses a user-visible size threshold, at which point the retention policy UI is surfaced rather than a default silently applied.",
+    "A 200 ms arming budget is tolerable before speech starts, and context sources that miss it are skipped for that session. Basis: a design choice about perceived responsiveness, not a measurement of user tolerance. Reconsider if screen-context sampling routinely misses the deadline and users want it; the change is to move sampling off the critical path and wait for it only at the rewrite stage, which trades arming latency for rewrite latency.",
+    "Results are stored as full text rather than diffs against the source transcript. Basis: simpler search indexing and simpler deletion. Reconsider if text ever dominates library size, which is unlikely next to audio."
+  ],
+  "decisions": [
+    {
+      "id": "D-001",
+      "title": "macOS baseline and hardware target",
+      "choice": "Deployment target macOS 14.0, Apple Silicon only for the first release, with later-OS features gated at runtime and never required.",
+      "rationale": "RESEARCH records macOS 14 and Xcode 16 as prerequisites of the Argmax Swift package, which is the leading speech runtime candidate. ScreenCaptureKit system-audio capture is available at that baseline. The microphone stream output described in the WWDC24 material arrived later, so microphone capture uses AVAudioEngine everywhere and the newer stream output is not on the critical path. The specification names Apple Silicon with 16 GB as the evaluation target.",
+      "alternatives": [
+        {
+          "option": "Baseline macOS 15 to use the unified ScreenCaptureKit microphone plus system-audio stream",
+          "tradeoff": "Cleaner clock alignment for meetings and one capture path instead of two, at the cost of excluding Sonoma users for a convenience the two-stream design already handles through host-time alignment."
+        },
+        {
+          "option": "Baseline macOS 13 for wider reach",
+          "tradeoff": "Falls below the stated prerequisite of the primary speech runtime candidate, forcing the whisper.cpp path as the only option and adding an untested OS to the support matrix."
+        },
+        {
+          "option": "Ship Intel and Apple Silicon together from day one",
+          "tradeoff": "Doubles the evaluation burden (RESEARCH warns that documented Intel support does not establish comparable performance) and forces a second model-size tier before the primary target is measured."
+        }
+      ],
+      "consequences": "Meetings must align two capture streams by host time rather than receiving them from one stream. Intel users are unsupported until the whisper.cpp adapter and a CPU-sized model pairing are evaluated. Any API newer than 14.0 is behind an availability check with a defined fallback.",
+      "reconsider_when": "The chosen speech or diarization runtime raises its minimum OS, an Intel requirement is confirmed, or two-stream clock alignment proves unreliable in measured meeting recordings."
+    },
+    {
+      "id": "D-002",
+      "title": "Package layout and dependency direction",
+      "choice": "One SPM package with a pure core, a ports target of protocols, adapter targets per external concern, and a thin Xcode app shell that acts as the composition root. Core depends only on ports; nothing depends on an adapter except the shell.",
+      "rationale": "The scope includes two model runtimes whose selection is unresolved, four input sources, and a delivery mechanism whose behavior varies per target application. Each of those is an adapter. Keeping the session state machine, mode resolution, vocabulary pipeline, and validator free of system frameworks makes the parts that encode product behavior testable without a microphone or a window server, which is what allows phase 0 to exercise cancel, crash, and delete-during-processing before any runtime exists.",
+      "alternatives": [
+        {
+          "option": "Single application target with feature folders",
+          "tradeoff": "Less indirection and faster early progress; every behavioral test then needs system permissions and real models, and swapping a runtime touches feature code throughout."
+        },
+        {
+          "option": "Separate SPM packages per subsystem in a workspace",
+          "tradeoff": "Stronger boundaries and independent versioning, at the cost of cross-package version churn for a single-application project with one consumer."
+        }
+      ],
+      "consequences": "Adapters need explicit wiring in the shell and value types at the port boundary rather than passing framework types around. The `.app` cannot be produced by `swift build` alone because entitlements and privacy strings live in the Xcode target, so there are two build entry points: `swift test` for logic and the Xcode scheme for the shipping application.",
+      "reconsider_when": "The port boundary starts requiring per-adapter escape hatches that leak framework types into core, which would mean the abstraction is fighting the domain rather than serving it."
+    },
+    {
+      "id": "D-003",
+      "title": "Inference runs in child helper processes, not in-process and not behind a local HTTP server",
+      "choice": "Generation runs in `dictation-llm-helper`, a child process launched by the app, communicating over an inherited socket pair with a length-prefixed message protocol. Speech recognition uses the same pattern when the runtime is a C or C++ library. No component listens on a TCP port.",
+      "rationale": "RESEARCH notes that llama.cpp ships server tooling alongside library integration material and asks that process ownership and network reachability be treated as a design concern. A local HTTP endpoint binds a port that every other process on the machine can reach, needs its own authentication, and is the component most likely to acquire proxying behavior through configuration outside the app's control. The specification requires that captured audio, transcripts, and application context never leave the Mac. A helper with no socket-creation code makes that checkable by scanning symbols rather than by reading configuration. Crash isolation is the second reason: a bad quantization that faults the runtime should not take the user's in-flight transcript with it.",
+      "alternatives": [
+        {
+          "option": "Link llama.cpp into the application process",
+          "tradeoff": "Lowest latency and no IPC code; a native crash kills the app mid-session, and address-space growth from model loading is permanent for the process lifetime."
+        },
+        {
+          "option": "Run the llama.cpp HTTP server on localhost",
+          "tradeoff": "Reuses upstream tooling including its API surface; opens a port to all local processes, adds a configuration surface with forwarding behavior the app does not own, and makes the offline guarantee an operational claim rather than a structural one."
+        },
+        {
+          "option": "XPC service in the app bundle",
+          "tradeoff": "System-managed lifecycle and a typed interface; launchd-managed restarts complicate model residency accounting, and passing large model file handles plus streaming token output is more awkward than a socket pair the app owns."
+        }
+      ],
+      "consequences": "A serialization boundary and a lifecycle to manage (launch, health, restart, teardown at quit). Streaming tokens for live rewrite feedback need a chunked message type. Model residency is tracked in the parent but held in the child, so accounting is by declared size plus periodic sampling of the child's footprint.",
+      "reconsider_when": "IPC overhead measurably dominates generation latency for short dictations, or the runtime gains a supported in-process Swift API with equivalent crash isolation."
+    },
+    {
+      "id": "D-004",
+      "title": "Concurrency model and resource scheduling",
+      "choice": "One actor per session owning its state and rows; a real-time audio callback writing into lock-free rings; a single `ResourceScheduler` actor with capture, interactive, and batch lanes admitting at most one speech job and one generation job at a time, with interactive preempting batch at chunk boundaries.",
+      "rationale": "The scope puts a latency-sensitive dictation path next to long-running batch work (multi-hour imports, meeting notes, reprocessing) on a machine that cannot hold several models resident. Without an explicit admission policy the first task to hit contention invents one. Making it a single actor with named lanes puts the policy in one testable place, and chunk-level checkpointing makes preemption cost one chunk rather than a restart.",
+      "alternatives": [
+        {
+          "option": "Unstructured task concurrency with a global lock around model access",
+          "tradeoff": "Less code; priority inversion when a three-hour import holds the lock while the user is dictating, with no clean preemption point."
+        },
+        {
+          "option": "Serial queue for all model work, first come first served",
+          "tradeoff": "Predictable and simple; the user waits behind a batch job, which is the failure the requirements most obviously care about."
+        },
+        {
+          "option": "Allow concurrent speech and generation model residency without admission control",
+          "tradeoff": "Better pipelining on a large machine; on the 16 GB target it invites swap, which turns a latency problem into a system-wide stall."
+        }
+      ],
+      "consequences": "Batch workers must be written with resumable chunk checkpoints, which is extra structure in the import and notes paths. The live provisional pass is an admitted job and can be denied, so the recording display must have a defined state for 'preview paused'. The audio callback thread has hard constraints (no allocation, no locks, no actor hops) that need review discipline.",
+      "reconsider_when": "Measurements show a machine class where concurrent speech and generation residency fits comfortably, making the single-job-per-kind rule an unnecessary latency cost."
+    },
+    {
+      "id": "D-005",
+      "title": "Persistence: SQLite with FTS5 for metadata, files for audio",
+      "choice": "SQLite through GRDB in WAL mode for all metadata and result text, with an FTS5 index over result text; audio and large blobs as files in a per-session directory. Explicit numbered migrations with fixture-based migration tests.",
+      "rationale": "History requires search across transcripts and results, and FTS5 with bm25 ranking and snippets is the reason to prefer SQLite here. The delete-during-processing rule requires a transactional check-and-insert in the worker commit path, which needs real transactions. Keeping audio out of the database keeps the database small enough that its backup, integrity check, and migration times stay short.",
+      "alternatives": [
+        {
+          "option": "SwiftData",
+          "tradeoff": "Least code for models and views and native SwiftUI observation; no full-text index, and migration behavior is harder to test against fixtures, which matters for a schema that must survive many phases."
+        },
+        {
+          "option": "Core Data with an external search index",
+          "tradeoff": "Mature and Apple-supported; adds a second index to keep consistent with deletions, which is exactly the consistency problem the tombstone rules are trying to contain."
+        },
+        {
+          "option": "Raw libsqlite3 with a hand-written wrapper",
+          "tradeoff": "No third-party dependency; reimplements migrations, statement caching, and observation, which is where the maintenance actually accumulates."
+        },
+        {
+          "option": "JSON files per recording with an in-memory index",
+          "tradeoff": "Trivially inspectable and easy to back up; search and transactional deletion during active work both become bespoke, and the index must be rebuilt on every launch."
+        }
+      ],
+      "consequences": "A third-party dependency with its own release cadence and a migration discipline to maintain. FTS triggers must be kept in sync with result inserts and deletes, covered by tests. Database and files can disagree after a crash, which the launch reconciliation sweep exists to resolve.",
+      "reconsider_when": "The system SQLite lacks FTS5 on the baseline (then GRDB is built against a bundled SQLite), or library sizes make a per-recording file layout with an external index preferable."
+    },
+    {
+      "id": "D-006",
+      "title": "Recording lifetime as an explicit state machine with a settings snapshot",
+      "choice": "A nine-state machine (idle, arming, capturing, finalizing, recognizing, refining, rewriting, delivering, terminal) in the pure core, with a `RunManifest` written and fsynced at arming that pins mode revision, model ids, vocabulary revision, language setting, and translation flag for the whole run.",
+      "rationale": "Component boundaries follow this sequence rather than the other way around. The manifest is what makes 'snapshot settings for work already in progress' true: a run reads its manifest, never live settings, so editing a mode or switching models mid-run cannot change what a result means. The same manifest is what a reprocess copies and mutates, and what the recovery sweep reads after a crash.",
+      "alternatives": [
+        {
+          "option": "Read live settings at each stage",
+          "tradeoff": "No snapshot machinery; a mode edit or model switch during a long recognition silently changes the semantics of the result, which the requirements forbid."
+        },
+        {
+          "option": "Implicit state through nullable database columns",
+          "tradeoff": "Fewer types; illegal states become representable and cancellation semantics per stage lose their single definition point."
+        },
+        {
+          "option": "Per-source pipelines with their own lifecycles",
+          "tradeoff": "Each source is simpler on its own; cancellation, crash recovery, and delivery rules then need to be reimplemented and kept consistent across microphone, system audio, import, and meetings."
+        }
+      ],
+      "consequences": "Every new capability must declare where it sits in the sequence and what cancellation at that point means. Settings changes take effect on the next session rather than the current one, which needs to be visible in the interface so it does not read as a bug.",
+      "reconsider_when": "A requirement arrives that genuinely needs mid-run settings changes, such as switching language during a long meeting, which would need a segmented manifest rather than one per run."
+    },
+    {
+      "id": "D-007",
+      "title": "Cancellation contract defined per stage",
+      "choice": "A stage-indexed table of cancellation effects, enforced in the core and shown in the recording panel: arming discards everything; capturing discards audio by default with an opt-in to keep it as interrupted; recognizing keeps audio and saves no partial transcript; refining drops the normalized result; rewriting keeps the normalized transcript and offers it for delivery; delivering is cancellable only before the first event is posted.",
+      "rationale": "The specification requires defined effects at every processing stage. The two judgment calls are worth naming. Recognizing saves no partial transcript because a truncated transcript that looks complete is more damaging than an absent one. Rewriting keeps the normalized transcript because at that point the expensive work is done and the user usually still wants their words.",
+      "alternatives": [
+        {
+          "option": "Cancel always discards everything",
+          "tradeoff": "One rule to remember; throws away a completed recognition because the user did not want the rewrite, which is the most common late cancel."
+        },
+        {
+          "option": "Cancel always keeps everything",
+          "tradeoff": "Nothing is ever lost; a cancelled sentence spoken into the wrong window still persists to History, which is a privacy surprise."
+        },
+        {
+          "option": "Prompt the user at cancel time",
+          "tradeoff": "No wrong default; a modal on the escape path is exactly when a user does not want a dialog."
+        }
+      ],
+      "consequences": "Workers need cancellation checkpoints at chunk boundaries so cancel is prompt without being abrupt. The panel needs a per-stage message so the effect is visible when it happens rather than discovered later in History.",
+      "reconsider_when": "Usage shows people repeatedly re-recording after a cancel during recognition, which would argue for keeping partial transcripts clearly marked as partial."
+    },
+    {
+      "id": "D-008",
+      "title": "Delivery target latched at arming, with an explicit focus-change policy",
+      "choice": "Latch the frontmost PID, bundle identifier, window number, and focused accessibility element at arming. At delivery: same element delivers; same application with a different element delivers by default (per-mode toggle); different application holds and shows an actionable card with Deliver and Copy; latched application gone holds. Re-focusing the original target before delivery is opt-in because it steals focus.",
+      "rationale": "The intended target is the one the user was looking at when they started speaking, and the recording panel is built as a non-activating panel (D-011) so showing it does not disturb the latch. Holding rather than delivering into an unexpected application is the conservative choice: text inserted into the wrong window may be unrecoverable and may be sensitive, while a hold costs one click.",
+      "alternatives": [
+        {
+          "option": "Always deliver into whatever is frontmost at delivery time",
+          "tradeoff": "No held results and no extra interaction; text lands in the wrong application whenever the user switches away during processing, which is common on longer recognitions."
+        },
+        {
+          "option": "Always re-activate the latched application and deliver",
+          "tradeoff": "Matches intent most of the time; yanks focus away from whatever the user chose to do next, sometimes several seconds later."
+        },
+        {
+          "option": "Always hold and require confirmation",
+          "tradeoff": "Never wrong; adds a click to every dictation, which defeats the point of a dictation tool."
+        }
+      ],
+      "consequences": "The panel needs a held state with actions, and History needs to show undelivered results. The 'same application, different element' default will occasionally deliver into a different field in the same window, which is the accepted case because it matches clicking into the target field while speaking.",
+      "reconsider_when": "The held state fires often enough to be annoying, which would suggest making opt-in re-focus the default for users who enable it, or shortening processing so focus changes are rarer."
+    },
+    {
+      "id": "D-009",
+      "title": "Injection ladder with pasteboard preservation",
+      "choice": "Try accessibility set-value on the latched element first; fall back to pasteboard plus a synthesized Command-V; fall back to synthesized Unicode keystrokes for texts under 400 characters. Snapshot pasteboard items before writing and restore after 300 ms only if the change count still matches ours. Post the submit Return only when the modifier was held at stop, delivery went to the latched element, and the path posted events.",
+      "rationale": "The accessibility path avoids touching the pasteboard entirely and can be read back to confirm, but many targets (terminals, Electron applications, some web views) do not support setting selected text. The paste path works nearly everywhere at the cost of borrowing the pasteboard. Synthetic typing is a last resort because it interleaves with the user's own input and is slow, so it is capped by length. Restoring only on an unchanged change count avoids clobbering something the user copied while we were working.",
+      "alternatives": [
+        {
+          "option": "Pasteboard plus Command-V only",
+          "tradeoff": "One code path to maintain; always disturbs the pasteboard, including where the accessibility path would have been clean and confirmable."
+        },
+        {
+          "option": "Synthetic typing only",
+          "tradeoff": "Never touches the pasteboard; slow for long text, drops characters under load in some targets, and interleaves badly with user typing."
+        },
+        {
+          "option": "A dedicated input method (IMK) to insert text",
+          "tradeoff": "The system-supported route for text insertion and it avoids both the pasteboard and event synthesis; requires the user to install and select an input method, which changes their typing setup for a dictation feature."
+        }
+      ],
+      "consequences": "Behavior varies per target application, so a dated cross-application matrix is part of verification rather than an afterthought. Success cannot be confirmed on the paste and typing paths, so 'delivered' means 'events were posted', which is why automatic retry is prohibited (D-010). Pasteboard restore is best-effort and says so when it is partial.",
+      "reconsider_when": "The input-method route becomes acceptable to users, or a supported API for text insertion into another application appears."
+    },
+    {
+      "id": "D-010",
+      "title": "Delivery idempotency and no automatic retry",
+      "choice": "Commit a `delivery_attempts` row (recording, result, target, state) before posting any event. States are pending, posted, held, failed. On launch, any pending or posted row becomes needs_review. The app never re-posts a delivery automatically; re-delivery is a user action from History or the panel.",
+      "rationale": "The paste and typing paths give no confirmation that text landed, so after a crash the app cannot distinguish 'delivered' from 'about to deliver'. Any automatic retry policy therefore risks pasting the same paragraph twice into someone's document. Committing the attempt before posting means the recovery sweep always sees evidence that an attempt was in flight, and needs_review surfaces it without acting.",
+      "alternatives": [
+        {
+          "option": "Retry pending deliveries on launch",
+          "tradeoff": "Recovers the case where the app died before posting; duplicates text in the case where it died after, with no way to tell them apart."
+        },
+        {
+          "option": "No attempt record; recover from the session state machine",
+          "tradeoff": "One fewer table; the window between deciding to deliver and posting is exactly where a crash is unrecoverable without a durable record."
+        },
+        {
+          "option": "Confirm delivery by reading the target back through accessibility",
+          "tradeoff": "Would allow safe retry where it works; unavailable in the targets that need the paste path most, so it cannot be the general rule."
+        }
+      ],
+      "consequences": "After a crash mid-delivery the user has a needs_review item and decides. Re-delivery is always explicit, which is one extra interaction in a rare case.",
+      "reconsider_when": "A confirmable delivery path covers the common targets, making a bounded automatic retry safe for those targets specifically."
+    },
+    {
+      "id": "D-011",
+      "title": "Recording display as a non-activating panel with provisional and final states distinguished",
+      "choice": "An NSPanel with nonactivating and borderless style, status-bar window level, joining all spaces, movable by background, ordered front without becoming key. Live provisional text is rendered in a secondary style with a live label; the final transcript replaces it in the primary style with a brief change highlight. A waveform is drawn from a 10 ms RMS and peak envelope computed on the capture thread. Failures appear as a row with a short reason and one action. Placement is stored as a fraction of the screen's visible frame plus the display identifier, clamped to the primary display if that display or frame is gone.",
+      "rationale": "The panel must never become key, because activating it would break the delivery-target latch that D-008 depends on. Provisional and final text are different artifacts (the provisional pass sees partial context and is discarded, not promoted), so they are shown differently rather than silently swapped. Fractional placement survives resolution changes and display reconfiguration, which is the common failure of remembered window positions.",
+      "alternatives": [
+        {
+          "option": "A normal SwiftUI window",
+          "tradeoff": "Standard behavior and less AppKit; it activates the application and changes the frontmost application, which breaks delivery targeting."
+        },
+        {
+          "option": "Menu bar popover only",
+          "tradeoff": "No extra window to manage; anchored to the menu bar, so it cannot be placed near where the user is typing, and it dismisses on outside clicks."
+        },
+        {
+          "option": "Promote the provisional transcript as the final result to cut latency",
+          "tradeoff": "Feels faster; delivers text produced from partial context as though it were final, which is the confusion the requirement asks to prevent."
+        }
+      ],
+      "consequences": "Panel behavior is AppKit-managed with SwiftUI content, so its focus and level behavior needs its own tests. Users see text change when the final transcript arrives, which is why the change is highlighted rather than silent. Envelope computation must stay allocation-free on the capture thread.",
+      "reconsider_when": "Measurements show the provisional and final transcripts agree closely enough that the visible swap is more distracting than informative, which would argue for showing provisional text more quietly."
+    },
+    {
+      "id": "D-012",
+      "title": "Modes as versioned revisions with declared transformations and an output validator",
+      "choice": "A mode has an append-only chain of content-addressed revisions covering prompt, formatting rules, declared transformation set, and model selections. Runs pin a revision id. Generated output passes an `OutputValidator` that checks the declared set: for modes without `answersQuestions`, interrogatives in the normalized transcript must survive in order; expansion ratio must stay under the mode's limit; content-word recall must exceed the mode's threshold. On failure, retry once with a stricter instruction, then fall back to the normalized transcript and mark the result as a validator fallback.",
+      "rationale": "The requirement that a dictated question stays a question, and that a mode does not answer it unless answering is its declared behavior, cannot be enforced by prompt wording alone; instruction-following models drift, particularly when context contains instruction-shaped text. Making the permitted transformations a machine-checkable property of the mode turns that requirement into a gate with a defined failure path. Content-addressed revisions are what make a later mode edit unable to change the meaning of an already-saved result.",
+      "alternatives": [
+        {
+          "option": "Prompt instructions only, no validator",
+          "tradeoff": "Simplest and preserves whatever the model produces; the failure mode is a model answering a dictated question and that answer being pasted into the user's document."
+        },
+        {
+          "option": "Mutable modes with no revisions",
+          "tradeoff": "A simpler editor and one row per mode; editing a mode retroactively changes what History says produced an old result."
+        },
+        {
+          "option": "Validate by asking a second model whether the output is faithful",
+          "tradeoff": "Catches semantic drift that lexical checks miss; costs a second generation pass on the latency path and inherits the same failure mode it is meant to detect."
+        }
+      ],
+      "consequences": "Thresholds per mode need tuning against the fidelity corpus, and a badly tuned threshold shows up as frequent fallbacks, which is visible and correctable rather than silent. The mode list accumulates revisions, so the editor shows history and offers to prune unreferenced ones. Lexical checks cannot catch every meaning change, which is why human rubric review is the acceptance gate in verification.",
+      "reconsider_when": "Fallback rates stay high on correct outputs (thresholds too strict), or the fidelity review finds meaning changes that pass every check (thresholds insufficient), which would argue for a semantic check on a sampled basis."
+    },
+    {
+      "id": "D-013",
+      "title": "Built-in mode set and their permitted transformations",
+      "choice": "Four read-only built-in modes, each declaring its transformation set. Standard: punctuation, capitalization, optional disfluency removal, vocabulary substitution; no reordering, no summarizing, no answering. Email: adds Standard plus salutation and sign-off from a template, paragraph breaks, register adjustment, no new factual content, body content-word recall gated. Note: adds list and heading structure with recall gated. Meeting notes: summarization permitted, recall check replaced by a citation check requiring every bullet to reference a real segment range, with uncited bullets dropped.",
+      "rationale": "The specification asks for ordinary dictation plus task-specific output and for permitted transformations to be specified per mode. Meeting notes are the one mode where summarization is the point, so its guard cannot be recall; a citation requirement is the check that fits what it is allowed to do. None of the four declares `answersQuestions`, so a dictated question stays a question in all of them.",
+      "alternatives": [
+        {
+          "option": "One configurable mode with toggles",
+          "tradeoff": "Less to explain and fewer entities; the permitted-transformation contract dissolves into a toggle matrix that is hard to validate against."
+        },
+        {
+          "option": "A larger built-in catalog (messages, code comments, social posts, and more)",
+          "tradeoff": "More out-of-box coverage; each mode needs its own fidelity corpus and rubric, and the custom mode system already covers these."
+        },
+        {
+          "option": "Ship an assistant mode that answers dictated questions",
+          "tradeoff": "An obvious extension of having a local language model; it is the behavior the requirements single out as a hazard, so if added it must declare `answersQuestions` and be visibly distinct in the mode indicator."
+        }
+      ],
+      "consequences": "Built-in modes are read-only; customizing one duplicates it into a user mode, which keeps the built-in fidelity corpus meaningful. Four modes means four rubric corpora to maintain.",
+      "reconsider_when": "Users routinely duplicate a built-in mode to make the same edit, which is evidence the built-in should change."
+    },
+    {
+      "id": "D-014",
+      "title": "Automatic mode selection: ordered rules, specificity tiebreak, latched at arming",
+      "choice": "An ordered rule list evaluated at arming, first match wins. Rules are ordered by the user; within equal user priority, specificity decides (URL host plus path prefix, then URL host, then bundle identifier, then any). The selected mode is latched into the RunManifest for the whole session. If a predicate's input cannot be obtained (no automation permission for the browser, unsupported browser, screen recording denied), rules requiring that input do not match and evaluation continues; if nothing matches, the user's default mode applies. The settings editor flags rules that can never match because an earlier rule shadows them.",
+      "rationale": "First-match on a user-ordered list is the rule model people already understand from mail filters, and it makes conflict resolution inspectable rather than emergent. Treating an unobtainable predicate as a non-match (instead of an error or a guess) keeps a missing permission from turning into a wrong mode. Latching at arming means the mode cannot change under the user mid-sentence if they switch windows.",
+      "alternatives": [
+        {
+          "option": "Highest-specificity wins regardless of order",
+          "tradeoff": "No shadowed rules; the user cannot override a specific rule with a general one, which they sometimes want temporarily."
+        },
+        {
+          "option": "Re-evaluate the mode continuously during capture",
+          "tradeoff": "Follows the user if they switch targets while speaking; the mode could change mid-sentence, and the run's snapshot would no longer be a single manifest."
+        },
+        {
+          "option": "Infer the mode from what was said",
+          "tradeoff": "No rules to configure; requires recognition before mode selection, which inverts the pipeline, and makes the current mode unpredictable, which the requirements ask against."
+        }
+      ],
+      "consequences": "The effective mode and whether it came from a rule or the fallback are shown in the recording panel and the menu bar for every session. A user who switches applications mid-recording gets the mode chosen for where they started, which is consistent with the delivery latch in D-008. Browser URL availability varies per browser and is enumerated per browser rather than assumed.",
+      "reconsider_when": "Users regularly start a recording, notice the wrong mode, and cancel, which would argue for allowing a mode change during capture before recognition begins."
+    },
+    {
+      "id": "D-015",
+      "title": "Vocabulary as staged passes with a defined order around recognition and generation",
+      "choice": "Four stages in fixed order. (1) Recognition biasing: selected vocabulary terms placed in the decoder's prompt slot, capped to the runtime's limit and selected by mode relevance and recency. (2) Deterministic replacement over the source transcript: ordered rules, longest match first, word-boundary aware, case-preserving, non-overlapping, applied once with no cascading. (3) Filler removal as a separate toggleable pass over the replaced text, per mode. (4) After generation, the replacement table is applied once more to the generated text, and the validator checks that vocabulary terms survived. Source and normalized transcripts are both retained.",
+      "rationale": "The three mechanisms fail differently and must not be conflated. Prompt biasing changes decoding probabilities and guarantees nothing, so the interface says exactly that and never claims that adding a name makes it recognized. Deterministic replacement is exact and belongs on text, not in the decoder. The post-generation reapplication exists because a language model will sometimes 'correct' an unusual proper noun back to a common word, and the user's spelling should win.",
+      "alternatives": [
+        {
+          "option": "Replacement only after generation",
+          "tradeoff": "One pass instead of two; the generation stage then reasons over text containing mis-recognized terms, which degrades the rewrite itself."
+        },
+        {
+          "option": "Replacement only before generation",
+          "tradeoff": "Simpler; a model that alters a name in its output goes uncorrected."
+        },
+        {
+          "option": "Ask the language model to apply the vocabulary as instructions",
+          "tradeoff": "Handles inflection and context sensitivity that literal matching misses; makes an exact user-specified substitution probabilistic, which is the property users want from this feature."
+        },
+        {
+          "option": "Cascading replacement until fixpoint",
+          "tradeoff": "Handles chained rules; introduces ordering-dependent results and possible loops for a benefit users rarely need."
+        }
+      ],
+      "consequences": "Two texts per recording to store and show. The vocabulary editor must explain that terms have two distinct effects, one probabilistic and one exact. Prompt-slot budget forces selection when the vocabulary is large, and the selection heuristic is a place where behavior can surprise, so the panel can show which terms were included.",
+      "reconsider_when": "A speech runtime exposes real biasing or constrained decoding, which would move exact-name handling into recognition where it belongs."
+    },
+    {
+      "id": "D-016",
+      "title": "Context sources: sampled at arming, budget-bounded, digest-only retention, framed as data",
+      "choice": "Three optional sources sampled in parallel at arming against a 200 ms deadline: focused-element text and selection plus window title via accessibility (capped at 4000 characters), one screen frame of the focused window through ScreenCaptureKit with Vision text recognition (opt-in), and the first text item on the pasteboard (capped). Anything missing the deadline is omitted and noted on the run. Retention defaults to a SHA-256 digest, length, and source kind rather than the text; retaining the text is opt-in per mode and is deleted with the recording. In the prompt, context appears inside a per-run random delimiter, labeled as reference material, with mode instructions before it and the task line restated after it. The output validator (D-012) is the enforcement that context did not become instructions.",
+      "rationale": "Sampling once at arming bounds the cost and makes the run reproducible; sampling continuously would make the same recording produce different prompts depending on timing. Digest-only retention keeps the app from accumulating copies of unrelated documents and screens while still letting a reprocess report that the original context is gone. Delimiter framing reduces instruction-following on context text but does not prevent it, which is why the validator, not the framing, is treated as the guarantee.",
+      "alternatives": [
+        {
+          "option": "Sample context at generation time instead of arming",
+          "tradeoff": "Fresher context, and screen OCR would be off the latency-sensitive path; by then the user has often switched windows, so the sample describes somewhere they no longer are."
+        },
+        {
+          "option": "Retain full context text by default",
+          "tradeoff": "Reprocessing an old recording reproduces the original result exactly; the History database accumulates screen and clipboard contents by default, which is a privacy posture the product should not adopt silently."
+        },
+        {
+          "option": "Continuous screen context sampling during capture",
+          "tradeoff": "Captures what changed while speaking; sustained OCR cost during recording and a much larger retention question."
+        }
+      ],
+      "consequences": "Screen OCR may routinely miss the arming deadline on busy displays, in which case it is silently absent for that run and noted. Reprocessing a recording whose context was not retained produces a different result than the original, and History shows why. Prompt-injection resistance is a defense in depth rather than a proof, and the injection corpus in verification is the ongoing check.",
+      "reconsider_when": "Screen context is valuable enough that users want it reliably, which would move its sampling off the arming path and make the rewrite stage wait for it."
+    },
+    {
+      "id": "D-017",
+      "title": "Languages: per-mode selection or detection, translation as a derived result, capability declared per model",
+      "choice": "Each mode sets recognition language to an explicit code or auto. Auto uses the runtime's language identification with its probability; below threshold the run records `undetermined`, uses the mode's default language, and shows that in the panel. Translation to English is a separate declared operation producing a new result row referencing the source transcript, which is never overwritten. Each model's manifest declares its supported languages, and the interface labels those as declared by the model publisher and unmeasured by this project until an evaluation row exists.",
+      "rationale": "Recognition quality and rewriting quality are different properties measured by different methods (word error rate versus a human rubric), so they are represented and evaluated separately. Keeping translation as a derived row is what makes 'preserve the source transcript when a derived translation or rewrite is retained' structural rather than a convention. Marking language support as declared rather than verified keeps the product from promising coverage nobody measured.",
+      "alternatives": [
+        {
+          "option": "Always auto-detect",
+          "tradeoff": "Nothing to configure; short utterances and code-switching produce wrong detections, and the user has no way to pin the language they know they are speaking."
+        },
+        {
+          "option": "Translate by replacing the transcript",
+          "tradeoff": "One text per recording and a simpler History; the original wording is unrecoverable, which breaks reprocessing and review."
+        },
+        {
+          "option": "Use the language model to translate as part of the rewrite",
+          "tradeoff": "One pass instead of two; translation and formatting become entangled, and the transformation validator cannot tell a translation error from a formatting one."
+        }
+      ],
+      "consequences": "History shows several artifacts per recording, and the interface must make clear which one is the source. Per-model language claims come from manifests, so a user-supplied model with an inaccurate manifest can overstate its coverage; the interface attributes the claim to the manifest.",
+      "reconsider_when": "Measured detection accuracy on short utterances is high enough to make auto the safe default, or a runtime provides per-segment language identification that would support code-switching within one recording."
+    },
+    {
+      "id": "D-018",
+      "title": "One audio ingest port with streaming decode and a declared format matrix",
+      "choice": "All sources implement `AudioSource`, producing 16 kHz mono Float32 buffers plus a `SourceDescriptor`. Microphone via AVAudioEngine, system audio via ScreenCaptureKit, files via AVAssetReader decoding in 30-second windows with conversion. Initial matrix: wav, aiff, caf, mp3, m4a (AAC and ALAC), mp4, m4v, mov. Extension mechanism: a `DecoderProvider` port with an out-of-process command-line decoder adapter (the user points at an installed binary such as ffmpeg), disabled by default, run with no network access, output piped as raw PCM.",
+      "rationale": "Windowed decode is what keeps a three-hour import from needing memory proportional to its decoded duration; peak audio residency is one window plus the ring, on the order of tens of megabytes regardless of file length. RESEARCH notes that whisper.cpp's command-line example has input-format constraints, so an explicit decoding boundary is required in any case; making it a port means the runtime never sees a format it cannot handle. Not bundling a general decoder avoids the licensing and binary-size question while leaving a path for users who need it.",
+      "alternatives": [
+        {
+          "option": "Decode whole files into memory",
+          "tradeoff": "Simplest code; a three-hour file at 16 kHz Float32 is roughly 700 MB before any model loads, which the requirements rule out."
+        },
+        {
+          "option": "Bundle a general-purpose decoder",
+          "tradeoff": "Every format works out of the box; adds licensing obligations, a large binary, and a security update responsibility for a decoder parsing untrusted files."
+        },
+        {
+          "option": "Pre-transcode imports to a canonical file before processing",
+          "tradeoff": "One decode path for everything downstream; doubles storage for imports and adds a slow step before the user sees anything."
+        }
+      ],
+      "consequences": "The port converts to 16 kHz mono, so information above that is lost at the boundary; imported originals are kept and meeting streams are recorded at native rate first, so a future feature can still reach full-band audio. External decoding runs another program on user files, so it is off by default and the chosen binary is shown in settings.",
+      "reconsider_when": "A speech runtime benefits from a higher input rate, or an unsupported format becomes common enough to justify bundling a decoder."
+    },
+    {
+      "id": "D-019",
+      "title": "Imports are copy-in and commit-late, leaving the source untouched",
+      "choice": "Import opens the source read-only, copies it into the session directory, and records a security-scoped bookmark for provenance. The History row is committed only when the audio artifact is complete and readable. On any failure the session directory is deleted and no row exists. An optional 'move original after import' happens only after commit, as a separate step the user can decline.",
+      "rationale": "The requirement that a failed import leaves its source unchanged is satisfied structurally if the import path never opens the source for writing and never deletes it. Committing the row only after the artifact is complete keeps the failure from leaving a History entry that points at nothing.",
+      "alternatives": [
+        {
+          "option": "Reference the source in place without copying",
+          "tradeoff": "No storage duplication; the library breaks when the user moves or deletes the file, and reprocessing a year later finds nothing."
+        },
+        {
+          "option": "Transcode on import and discard the original",
+          "tradeoff": "Smaller library and one decode path; discards information and makes reprocessing with a better decoder impossible."
+        },
+        {
+          "option": "Create the History row first and fill it in",
+          "tradeoff": "Progress is visible in the list immediately; a failure leaves a broken row that the recovery sweep has to reason about."
+        }
+      ],
+      "consequences": "Imports duplicate storage, which is visible in the library size and covered by retention policy. Very large video imports copy the whole file even though only the audio track is used; the copy is the audio-bearing original, and extracting only the audio track is a possible refinement once the cost is measured.",
+      "reconsider_when": "Users import large video files often enough that storing only the extracted audio plus a bookmark becomes worth the loss of the original."
+    },
+    {
+      "id": "D-020",
+      "title": "Speech runtime: WhisperKit as the intended primary behind a port, whisper.cpp as the second adapter",
+      "choice": "Implement `SpeechRecognizer` twice. WhisperKit (from the Argmax Swift package) is the intended primary for Apple Silicon because it is a Swift package with Core ML and Metal execution, matching the toolchain. whisper.cpp is the second adapter, covering Intel, older systems, and the case where the primary's licensing or long-recording behavior fails review. Selection is per model in the model manifest, not global.",
+      "rationale": "RESEARCH establishes what each candidate documents and explicitly states that none of it establishes accuracy or resource behavior for this application; it also flags model licensing and long-recording behavior as open for the Swift package, and notes that whisper.cpp's documented platform breadth does not imply matching performance. Committing to one runtime before the bake-off would be a choice without evidence. Two adapters behind one port makes the choice a configuration outcome rather than a rewrite, and the second adapter is the Intel story anyway.",
+      "alternatives": [
+        {
+          "option": "whisper.cpp only",
+          "tradeoff": "One runtime, C API, broadest hardware coverage, no Swift package licensing question; C interop and manual memory management in the hot path, and Core ML execution paths need extra work."
+        },
+        {
+          "option": "WhisperKit only",
+          "tradeoff": "Best toolchain fit and the least integration code; leaves Intel unsupported structurally and makes an unresolved licensing question load-bearing."
+        },
+        {
+          "option": "Apple's built-in speech recognition",
+          "tradeoff": "No models to manage and no download; on-device availability and language coverage are controlled by the system, and model choice, which the requirements demand, is not exposed."
+        }
+      ],
+      "consequences": "Two adapters to maintain and two sets of parameters to translate into the stable `params_json` schema. Results record which runtime produced them, so a runtime change is visible in History rather than confusing. Until the bake-off runs, no accuracy or latency claim is made anywhere.",
+      "reconsider_when": "The bake-off shows one runtime dominating on accuracy, latency, memory, and licensing, at which point the loser becomes a maintenance decision rather than a hedge."
+    },
+    {
+      "id": "D-021",
+      "title": "Generation runtime: llama.cpp embedded in a helper, GGUF models",
+      "choice": "Embed llama.cpp as a library in `dictation-llm-helper`, loading GGUF models with Metal acceleration on Apple Silicon and CPU otherwise. Streaming tokens back over the socket pair for live rewrite feedback. No server binary.",
+      "rationale": "RESEARCH records llama.cpp as providing local inference with Metal support and both library-oriented integration and server tooling, and asks that an embedded worker be compared against a local service including whether network access is possible. Embedding the library gives control over acquisition and lifecycle; GGUF gives access to the broad set of quantized models users already have, which matters because the requirements include user-supplied models.",
+      "alternatives": [
+        {
+          "option": "MLX-based generation",
+          "tradeoff": "Apple-native, actively developed, good Apple Silicon performance; a different model format, a smaller ecosystem of ready quantizations, and no Intel path."
+        },
+        {
+          "option": "Core ML converted models",
+          "tradeoff": "System-managed execution and no vendored C++; conversion work per model, and user-supplied model support becomes impractical."
+        },
+        {
+          "option": "The llama.cpp server on localhost",
+          "tradeoff": "Reuses upstream tooling; the reachability and forwarding concerns in D-003 apply directly."
+        }
+      ],
+      "consequences": "Vendored C++ with the build time, pinning, and update discipline that implies. The helper must be built for the target architectures and signed as part of the app bundle. Quantization choice becomes a user-visible setting with a memory consequence, surfaced through the residency policy in D-027.",
+      "reconsider_when": "MLX coverage of the quantized models users bring becomes comparable, or measured generation latency on the target machine is unacceptable and another runtime measurably beats it."
+    },
+    {
+      "id": "D-022",
+      "title": "Model identity, staged installation, and compatibility checks",
+      "choice": "Model identity is `(publisher name, revision string, SHA-256 over the ordered weight file set)`. Installation stages into `Models/.staging/<uuid>`, verifies size and hash, runs a load smoke test in the helper (load, then one second of silence through recognition or an eight-token generation), and only then atomically renames the directory into place and updates the manifest pointer. Compatibility is checked before activation against the installed runtime's descriptor: runtime kind, required runtime version range, quantization support, sample rate, declared context length. User-supplied models take the same path with user-entered manifest fields and the same smoke-test gate. Runtimes never load a model by name; they receive an absolute path to an activated directory.",
+      "rationale": "Hashing the weights rather than trusting a name is what makes 'the same model' a checkable claim across a rename or a re-download. Staging plus atomic rename is what makes a failed download or import unable to replace a working installation: the live directory is never opened for writing during an install. The smoke test catches the common user-supplied failure (a quantization the installed runtime cannot read) at install time rather than mid-dictation. RESEARCH warns that a default runtime initialization may download models, so passing explicit paths is the enforcement point.",
+      "alternatives": [
+        {
+          "option": "Identity by file name or publisher identifier only",
+          "tradeoff": "No hashing cost on multi-gigabyte files; two different quantizations under one name become indistinguishable in History."
+        },
+        {
+          "option": "Install in place and roll back on failure",
+          "tradeoff": "No staging space needed; a failure during the write leaves a corrupt live model, which is exactly the outcome the requirement forbids."
+        },
+        {
+          "option": "Let the runtime's own downloader manage models",
+          "tradeoff": "Much less code; hands acquisition to a component that may download implicitly, which breaks the offline contract."
+        }
+      ],
+      "consequences": "Installation needs free space for both the staged and the live copy, which the interface checks before starting. Hashing multi-gigabyte files takes time and is shown as a verification step. Failed user imports stay in staging with an attached error until dismissed, so staging needs its own cleanup in the launch sweep.",
+      "reconsider_when": "Hashing time on large models becomes a usability problem, which would argue for incremental hashing during download rather than a separate pass."
+    },
+    {
+      "id": "D-023",
+      "title": "Meetings: two captured streams, diarization as hypotheses, notes with citations",
+      "choice": "Record microphone and system audio as separate files aligned by host time, so 'me' versus 'the call' is structural. Within a stream, diarization produces `speakerHypothesis {clusterId, confidence}` per segment; below the threshold the segment is labeled unattributed rather than assigned. Display names live in a separate cluster-to-name mapping, so renaming never rewrites model output, and re-running diarization keeps names where cluster ids are stable and asks where they are not. Notes are generated by a built-in mode over the timestamped transcript, chunked to the model's context budget, with each bullet citing a segment range and uncited bullets dropped in the reduce pass. Diarization is off unless a diarizer is installed and its evaluation row exists.",
+      "rationale": "The requirement not to treat speaker identity as certain when the model gives insufficient evidence needs a representation that can express uncertainty, which is why confidence and an unattributed label are in the schema rather than a bare speaker name. Separating names from cluster ids means user edits and model output do not overwrite each other. RESEARCH names SpeakerKit as available in the Argmax package and notes its default initialization may download models, so its acquisition goes through the model store like everything else.",
+      "alternatives": [
+        {
+          "option": "Diarize a single mixed recording",
+          "tradeoff": "One file and one capture path; discards the certain channel-origin signal and makes the easiest attribution question (was that me?) an inference."
+        },
+        {
+          "option": "Assign every segment to the nearest cluster regardless of confidence",
+          "tradeoff": "Clean-looking transcripts; confidently wrong attributions in meeting notes, which is the failure mode the requirements call out."
+        },
+        {
+          "option": "Generate notes from the whole transcript in one pass",
+          "tradeoff": "Better global structure; exceeds context on long meetings and gives no way to check a bullet against the audio."
+        }
+      ],
+      "consequences": "Two audio files per meeting and roughly double the storage. Notes quality depends on chunk boundaries, mitigated by overlapping windows. Dropping uncited bullets can remove a correct summary line that failed to cite; the reduce prompt therefore requires citations explicitly, and the drop rate is tracked in evaluation. Diarization error rate has not been measured and no attribution quality is claimed.",
+      "reconsider_when": "Measured diarization error on mixed audio is close to the channel-separated result, or a diarizer exposes no usable confidence, in which case meetings ship with channel attribution only."
+    },
+    {
+      "id": "D-024",
+      "title": "History: append-only results, full-text search, tombstones with job generation tokens",
+      "choice": "One recording owns one audio artifact and many result rows, each recording its mode revision, model ids, and parameters. Reprocessing inserts a row and never mutates one; a user-movable pointer selects the displayed result. Search is FTS5 over result text with bm25 ranking and snippets. Deletion sets a tombstone and increments a generation counter; every worker carries `(recording_id, generation)` and its commit is a single transaction that aborts if the row is gone, tombstoned, or at a different generation. Hard deletion of rows and audio happens when the last job token is released, or at the next launch sweep.",
+      "rationale": "'A late worker response must not recreate a deleted recording' is only true if the existence check and the insert are the same transaction; any check-then-insert has a window. The generation counter additionally covers delete-then-recreate at the same identifier. Append-only results are what makes reprocessing under different models comparable rather than destructive, and what lets History explain how a result was produced.",
+      "alternatives": [
+        {
+          "option": "Hard delete immediately and let workers fail on missing rows",
+          "tradeoff": "No tombstone bookkeeping; a foreign key violation is a race outcome rather than a defined behavior, and scratch files are orphaned."
+        },
+        {
+          "option": "Cancel workers and wait for acknowledgement before deleting",
+          "tradeoff": "No tombstone state to reason about; the user's delete blocks on a worker that may be mid-chunk, and a hung worker blocks it indefinitely."
+        },
+        {
+          "option": "Overwrite the result on reprocessing",
+          "tradeoff": "One result per recording and a simpler list; comparing a new model against the old one becomes impossible, which is a stated use of reprocessing."
+        }
+      ],
+      "consequences": "Deleted recordings occupy disk until their jobs release, so the interface reports 'deleting' rather than claiming space is reclaimed. FTS triggers must handle result deletion, covered by tests. Many results per recording needs a History detail view that makes the source transcript and the current result distinguishable at a glance.",
+      "reconsider_when": "Result rows dominate database size, which would argue for storing older results compressed or on disk rather than inline."
+    },
+    {
+      "id": "D-025",
+      "title": "Desktop behavior: menu bar surface, software input gain, media control with ownership tracking",
+      "choice": "An NSStatusItem showing state, current mode, recent results, and settings, as the always-available surface. Microphone level is adjusted as software gain on captured buffers by default, with metering and a clipping indicator; setting the input device's hardware volume is opt-in. Media pausing checks whether the default output device is running before capture, posts a play/pause media key if so, and resumes afterwards only if the app sent the pause, the same output device is still default, the device is still idle, and under ten minutes have passed. Device volume is restored only if the current value equals the value the app set.",
+      "rationale": "Software gain does not change a system setting the user might rely on elsewhere, so the default has no restore obligation at all. Where the app does change system state, 'restore only when we still own the change' is enforced by comparing against the value the app set rather than assuming it survived. The output-device running flag is a public CoreAudio property and avoids depending on a private media framework for the play-state check.",
+      "alternatives": [
+        {
+          "option": "Always set the input device hardware volume",
+          "tradeoff": "Improves the signal reaching every consumer including the recognizer; changes a setting other applications share, and a crash leaves it changed."
+        },
+        {
+          "option": "Use the private MediaRemote framework for playback state and control",
+          "tradeoff": "Accurate per-application playback state and precise control; an undocumented interface that can break on any OS update and complicates notarization posture."
+        },
+        {
+          "option": "Per-application scripting for known players",
+          "tradeoff": "Precise control of Music, Spotify, and similar; requires automation permission per application and covers only an enumerated list."
+        },
+        {
+          "option": "Do not touch media playback",
+          "tradeoff": "Nothing to restore and nothing to get wrong; leaves background audio bleeding into recordings, which the requirement asks to address."
+        }
+      ],
+      "consequences": "The running-somewhere flag cannot tell which application is playing or whether the media key reached it, so resume can be declined in ambiguous cases and the menu says playback was left alone. Software gain cannot rescue a signal already clipped at the hardware, which the clipping indicator makes visible so the user can lower device gain themselves.",
+      "reconsider_when": "Users report that pausing frequently misses or that resume frequently declines, which would argue for per-application scripting for the players they actually use."
+    },
+    {
+      "id": "D-026",
+      "title": "Shortcuts through one event tap, with per-mode bindings and a documented fallback",
+      "choice": "A single `ShortcutRegistrar` owns a CGEventTap at the session level as a default (consuming) tap, handling keyDown, keyUp, and flagsChanged. Toggle starts and stops on keyDown. Push-to-talk arms on keyDown after a 200 ms hold (so a tap reads as a toggle) and finalizes on keyUp, with a watchdog that finalizes at the configured maximum hold if keyUp is lost to a disabled tap or a locked screen. Per-mode bindings register additional combinations that select the mode and start a session in one action. Conflicts within the app are detected at bind time; system conflicts are surfaced by a test-press step that reports if no event arrives. `kCGEventTapDisabledByTimeout` re-enables the tap. If the tap cannot be created, fall back to Carbon `RegisterEventHotKey` for toggle only and disable push-to-talk with an explanation.",
+      "rationale": "Push-to-talk needs key-up and the ability to consume the hotkey so it does not reach the foreground application; only an active event tap provides both. The tap needs the Accessibility permission, which text delivery already requires, so it adds no new permission. The Carbon fallback keeps the application usable when the permission is missing, at the cost of the feature that needs key-up.",
+      "alternatives": [
+        {
+          "option": "Carbon RegisterEventHotKey only",
+          "tradeoff": "No Accessibility permission needed and reliable consumption; no key-up event, so push-to-talk cannot be implemented."
+        },
+        {
+          "option": "NSEvent global monitors only",
+          "tradeoff": "Simple API with no tap lifecycle; events cannot be consumed, so the hotkey also reaches the foreground application."
+        },
+        {
+          "option": "A separate tap per registered shortcut",
+          "tradeoff": "Isolated failure per shortcut; multiplies tap overhead on every keystroke and multiplies the timeout-disable handling."
+        }
+      ],
+      "consequences": "The application sits on the keyboard event path, so its handler must stay fast; a slow handler gets the tap disabled by timeout, which the re-enable path treats as a monitored condition rather than an oddity. Secure input mode suppresses events entirely, which is why arming reports delivery-unavailable up front in that state.",
+      "reconsider_when": "A supported API for global hotkeys with key-up appears, or event tap latency is measured to affect typing."
+    },
+    {
+      "id": "D-027",
+      "title": "Model residency policy under a declared memory budget",
+      "choice": "Budget the application at 8 GB peak on the 16 GB target. At most one speech model and one generation model resident, unloaded after ten idle minutes. Activation of a pairing whose declared footprints plus estimated KV cache exceed the budget is refused with the arithmetic shown and an explicit override. The provisional pass reuses the resident speech model rather than loading a second one when the sum would exceed the speech budget.",
+      "rationale": "The specification forbids artificial quotas and requires honest reporting of limitations, which is different from ignoring the memory ceiling. Swapping on a 16 GB machine turns a latency problem into a system-wide stall, so the policy is stated up front with its arithmetic visible, and the user can override it because it is their machine.",
+      "alternatives": [
+        {
+          "option": "Load models on demand with no residency limit",
+          "tradeoff": "Simplest and fastest when memory allows; on the stated target a large pairing plus a browser drives the machine into swap."
+        },
+        {
+          "option": "Keep all selected models resident permanently",
+          "tradeoff": "Lowest per-session latency; several gigabytes held while the app is idle in the menu bar."
+        },
+        {
+          "option": "Rely on the system's memory pressure notifications alone",
+          "tradeoff": "Adapts to actual conditions rather than declared sizes; reacts after the fact, when the stall has already happened."
+        }
+      ],
+      "consequences": "First use after an idle period pays a model load, which the panel shows as a loading state. The budget is arithmetic over declared file sizes rather than measured resident size, so it is an assumption that the first measurement can invalidate in either direction. Memory pressure notifications are still observed and trigger early unload of idle models.",
+      "reconsider_when": "Measured resident size differs materially from declared sizes, or the app is run on machines where the ceiling is not binding."
+    },
+    {
+      "id": "D-028",
+      "title": "Egress control: no networking in inference paths, downloads isolated behind explicit user action",
+      "choice": "Inference helpers contain no networking code and are checked for socket-API symbols in CI. Model downloads run only from an explicit user action, through a separate downloader component restricted to an allowlist of model hosts, writing only into the staging directory. Runtime initializers that can download are prohibited by a static check; runtimes always receive an absolute local path. Setup may offer downloads; routine operation performs none. Audio, transcripts, and context never cross a process boundary other than the local socket pair to a helper.",
+      "rationale": "The specification requires that captured audio and transcripts stay on the Mac, that application context never reach external services, and that model loading not trigger implicit downloads. RESEARCH specifically notes that SpeakerKit's default initialization may download models. A guarantee enforced by code structure and a build-time check is verifiable; one enforced by careful calling conventions is not.",
+      "alternatives": [
+        {
+          "option": "Allow runtimes to fetch missing models automatically",
+          "tradeoff": "Better first-run experience with no model manager; makes network access a side effect of loading a model, which is the behavior the requirements forbid."
+        },
+        {
+          "option": "Rely on App Sandbox network entitlement withholding",
+          "tradeoff": "System-enforced rather than structural; the application is unsandboxed for accessibility injection reasons, so the entitlement is not available as the enforcement mechanism."
+        },
+        {
+          "option": "Ship no downloader at all and require manual model placement",
+          "tradeoff": "The strongest guarantee and the least code; makes first run considerably harder and pushes users toward downloading models through less careful means."
+        }
+      ],
+      "consequences": "The downloader is a distinct component with its own permission story and its own tests. Users who want a model outside the allowlist import it as a local file, which goes through the same verification. The offline claim is testable: a full session under a network-denied profile is part of verification.",
+      "reconsider_when": "The distribution and sandbox question in the open questions resolves differently, which changes which enforcement mechanism is available, not the requirement."
+    }
+  ],
+  "coverage": [
+    {
+      "requirement": "Recording controls",
+      "decision_ids": [
+        "D-026",
+        "D-007",
+        "D-006",
+        "D-004"
+      ],
+      "explanation": "Global toggle and push-to-talk from another application come from one session-level event tap that can both observe key-up and consume the hotkey (D-026); push-to-talk uses a 200 ms hold to distinguish from a toggle tap and a watchdog to finalize if key-up is lost. Shortcuts are configurable, including per-mode bindings that select a mode and start a session in one action, with in-app conflict detection at bind time and a test-press step for system conflicts the app cannot enumerate. When the Accessibility permission is absent the tap cannot be created, so the app falls back to a Carbon hotkey for toggle and says that push-to-talk is unavailable rather than failing silently. Cancellation has a defined effect at every stage (D-007) because the stages are explicit states (D-006): arming discards, capturing discards audio by default, recognizing keeps audio and saves no partial transcript, refining drops the normalized result, rewriting keeps the normalized transcript and offers it, and delivering is cancellable only before the first event is posted. Cancellation reaches workers at chunk checkpoints through the scheduler (D-004), so it is prompt without leaving partial work committed."
+    },
+    {
+      "requirement": "Text delivery",
+      "decision_ids": [
+        "D-008",
+        "D-009",
+        "D-010"
+      ],
+      "explanation": "The processed transcript is inserted through an injection ladder: accessibility set-value first, pasteboard plus Command-V next, synthesized Unicode keystrokes last for short text (D-009). Optional submission uses the modifier state sampled when the stop shortcut was released, and the Return is posted only when delivery went to the latched element through a path that posted events. The intended target is latched at arming and the focus-change policy is explicit (D-008): same element delivers, same application with a different element delivers by default, a different application holds and offers Deliver or Copy, and a departed application holds. The recording panel is non-activating so it cannot disturb the latch. Clipboard changes are handled by snapshotting items before writing and restoring after 300 ms only if the change count still matches, leaving newer user content alone and reporting a partial snapshot when items were too large to hold. Permissions denied or revoked route the result to History and the pasteboard with a named reason, and secure input suppresses synthesis entirely rather than dropping text into a password field. Duplicate delivery after a crash is prevented structurally (D-010): the attempt row is committed before any event is posted, and on launch pending or posted attempts become needs_review, never re-posted, because the paste path gives no confirmation that would make a retry safe."
+    },
+    {
+      "requirement": "Recording display",
+      "decision_ids": [
+        "D-011",
+        "D-006",
+        "D-004"
+      ],
+      "explanation": "A provisional live transcript is produced by a separate low-priority pass over a sliding window, and a waveform is drawn from a 10 ms RMS and peak envelope computed on the capture thread without allocation (D-011). The compact window is a non-activating, borderless panel at status-bar level that joins all spaces, is movable by its background, and is ordered front without becoming key so it cannot break the delivery latch. Placement is remembered as a fraction of the display's visible frame plus the display identifier, clamped to the primary display when the original display or frame is gone. Provisional text renders in a secondary style with a live label and is replaced by the final transcript in the primary style with a change highlight; the provisional result is discarded rather than promoted, because it was produced over partial context and is a different artifact (D-006). Recording and processing failures appear as a panel row with a short reason and one action, including the case where the scheduler declines the provisional pass while a batch job runs, which shows as preview paused rather than as a stalled transcript (D-004)."
+    },
+    {
+      "requirement": "Built-in modes",
+      "decision_ids": [
+        "D-013",
+        "D-012"
+      ],
+      "explanation": "Four built-in modes cover ordinary dictation and task-specific output: Standard, Email, Note, and Meeting notes (D-013). Each declares its permitted transformations explicitly rather than describing them in prose: Standard is limited to punctuation, capitalization, optional disfluency removal, and vocabulary substitution, with no reordering or summarizing; Email adds template salutation and sign-off, paragraph structure, and register adjustment, with no new factual content; Note adds list and heading structure; Meeting notes permits summarization because that is its purpose, and is guarded by a citation requirement instead of a recall threshold. None of the four declares the ability to answer questions, and the output validator enforces that interrogatives present in the normalized transcript survive in order in the output, with a single stricter retry and then a fall back to the normalized transcript marked as a validator fallback (D-012). A mode that answered dictated questions would have to declare that capability, which would also make it visibly distinct in the mode indicator."
+    },
+    {
+      "requirement": "Custom modes",
+      "decision_ids": [
+        "D-012",
+        "D-006",
+        "D-022"
+      ],
+      "explanation": "Users author prompts and formatting rules, and each custom mode selects its own local speech model and language model by identity, not by name (D-012, D-022). Every save produces a new content-addressed revision in an append-only chain, and every run pins the revision id into its RunManifest at arming along with the model ids, vocabulary revision, language setting, and translation flag (D-006). Work already in progress therefore reads its snapshot rather than live settings, so editing a mode or switching models while a recognition is running cannot change what the running job produces. Saved results keep pointing at the revision that produced them, and the History detail view names that revision and can diff it against the current one, so a later edit cannot silently change the meaning of an earlier result. Custom modes declare their permitted transformations like built-ins do, so the same validator applies; duplicating a built-in to customize it carries the built-in's declared transformation set as a starting point."
+    },
+    {
+      "requirement": "Automatic mode selection",
+      "decision_ids": [
+        "D-014",
+        "D-011"
+      ],
+      "explanation": "Rules match on the foreground application's bundle identifier and, where readable, the website URL, and are evaluated once at arming with first match winning over a user-ordered list (D-014). Conflicts resolve by that user order, with specificity (host plus path, then host, then bundle identifier, then any) as the tiebreak within equal priority, and the settings editor flags rules that can never fire because an earlier rule shadows them. When context cannot be obtained, because automation permission for a browser is denied, the browser does not expose its URL, or screen recording is off, rules requiring that input do not match and evaluation continues; if nothing matches, the user's default mode applies. The selected mode is latched for the session, so it cannot change mid-sentence. The effective mode is shown in the recording panel and the menu bar for every session, along with whether it came from a matching rule or from the fallback, which is what keeps the current mode apparent (D-011)."
+    },
+    {
+      "requirement": "Vocabulary",
+      "decision_ids": [
+        "D-015",
+        "D-020"
+      ],
+      "explanation": "User terminology and names enter at four defined points with a fixed order relative to recognition and language processing (D-015). Before recognition, selected terms are placed in the decoder's prompt slot, bounded by the runtime's limit and chosen by mode relevance and recency; this shifts decoding probabilities and is described in the interface as exactly that, with no claim that adding a name guarantees recognition under all conditions, because the mechanism is a prompt rather than a decoding constraint (D-020). After recognition, configurable text replacements run deterministically over the source transcript with longest-match-first, word-boundary-aware, case-preserving, non-overlapping, single-pass semantics. Filler removal is a separate pass after replacement, toggleable per mode. After generation, the replacement table is applied once more and the validator checks that vocabulary terms survived, because a language model will sometimes normalize an unusual proper noun back to a common word and the user's spelling should win. The source transcript and the normalized transcript are both retained, so the effect of each stage is inspectable."
+    },
+    {
+      "requirement": "Context",
+      "decision_ids": [
+        "D-016",
+        "D-028"
+      ],
+      "explanation": "Three optional sources are sampled at arming in parallel against a 200 ms deadline: focused-element text and selection plus window title through accessibility, one frame of the focused window through ScreenCaptureKit with Vision text recognition when opted in, and the first text item on the pasteboard (D-016). Sampling once at arming makes a run reproducible and bounds the cost; anything that misses the deadline is omitted and recorded as omitted. Retention defaults to a digest, byte length, and source kind rather than the text, so the library does not accumulate copies of unrelated documents and screens, while a later reprocess can still report that the original context is unavailable; retaining the text is opt-in per mode, visible in History, and deleted with the recording. Missing permissions produce named degraded states: no screen recording means no screen context and no system audio while everything else continues; no accessibility means no focused-element text. Context is supplied as data, fenced in a per-run random delimiter and labeled as reference material with mode instructions before it and the task restated after, and the output validator is the enforcement that it did not become instructions, since framing alone is not a guarantee. Context never leaves the machine, because it is only ever passed over the local socket pair to a helper with no networking code (D-028)."
+    },
+    {
+      "requirement": "Languages",
+      "decision_ids": [
+        "D-017",
+        "D-020",
+        "D-022"
+      ],
+      "explanation": "Recognition language is set per mode to an explicit code or to automatic detection using the runtime's language identification with its probability; below the confidence threshold the run is recorded as undetermined, the mode's default language is used, and the panel shows that this happened (D-017). Translation into English is a separate declared operation that produces a new result row referencing the source transcript, which is never overwritten, so a retained translation or rewrite always sits beside the words that were actually spoken. Recognition and rewriting are evaluated by different methods, word error rate for the first and a human rubric for the second, and reported separately, because a rewrite score cannot distinguish a mis-recognized word from a badly reworded sentence. Language compatibility is declared per model in its manifest and checked at activation against the installed runtime (D-022, D-020); the interface attributes those claims to the model publisher and marks them unmeasured until an evaluation row exists, so no language coverage is promised on the strength of documentation alone."
+    },
+    {
+      "requirement": "Input sources",
+      "decision_ids": [
+        "D-018",
+        "D-019",
+        "D-004"
+      ],
+      "explanation": "Microphone (AVAudioEngine), system audio (ScreenCaptureKit), and imported audio and video files (AVAssetReader) all implement one `AudioSource` port emitting 16 kHz mono Float32 buffers plus a descriptor stating whether the source is live or seekable (D-018). The initial format matrix is what the system decoders cover: wav, aiff, caf, mp3, m4a in AAC and ALAC, mp4, m4v, and mov. The extension mechanism is a `DecoderProvider` port with an out-of-process command-line decoder adapter the user enables and points at an installed binary, run with no network access and piping raw PCM, so unusual formats are reachable without bundling a general decoder. Files decode in 30-second windows, so peak audio residency is one window plus the ring regardless of file length, and a three-hour import does not need memory proportional to its decoded duration; the memory ceiling is an assertion in the test suite and the measurement has not been taken. A failed import leaves its source unchanged because the import path opens the source read-only, copies into the session directory, and commits the History row only after the artifact is complete; on failure the session directory is removed and no row exists (D-019). Imports run in the batch lane and yield to interactive dictation at chunk boundaries (D-004)."
+    },
+    {
+      "requirement": "Meetings",
+      "decision_ids": [
+        "D-023",
+        "D-027",
+        "D-024"
+      ],
+      "explanation": "A meeting captures microphone and system audio as two files aligned by host time, so the distinction between the local speaker and the remote participants is structural rather than inferred (D-023). Within a stream, diarization assigns each segment a cluster hypothesis with a confidence, and segments below the threshold are labeled unattributed rather than assigned to the nearest cluster, which is how the design avoids treating speaker identity as certain when the model provides insufficient evidence. Editing speaker names writes to a separate cluster-to-name mapping, so a rename never alters model output and re-running diarization preserves names where cluster ids are stable and asks where they are not. Timestamped notes are generated locally by a built-in mode over the diarized transcript, chunked to the language model's context budget with overlapping windows, where each bullet cites a segment range and uncited bullets are dropped in the reduce pass. The runtime choices are explicit: which diarizer is installed, which language model generates notes, and both are subject to the residency budget that keeps a long meeting from driving the machine into swap (D-027). Evaluation methods are named (diarization error rate on a labeled internal set, a human rubric plus automatic citation validity for notes) and have not been run, so no attribution quality is claimed. Meetings, their two audio artifacts, and their notes are ordinary History entries under the same retention and deletion rules (D-024)."
+    },
+    {
+      "requirement": "History",
+      "decision_ids": [
+        "D-024",
+        "D-005",
+        "D-006"
+      ],
+      "explanation": "Recordings are searchable through an FTS5 index over result text with bm25 ranking and snippets, and playable from the stored audio artifact (D-005, D-024). Reprocessing through a different model or mode inserts a new result row referencing the same recording, carrying the mode revision, speech and language model ids, and parameters that produced it (D-006); prior results are never mutated, and a user-movable pointer decides which result the list shows. The relationship between original audio and successive results is therefore one-to-many with full provenance on each result. Retention defaults to keeping everything, with optional age-based, size-based, and drop-audio-keep-text policies that show what they will remove before the first run. Deletion while processing is active sets a tombstone, increments a generation counter, and signals cancellation; every worker carries the recording id and generation from admission, and its commit is a single transaction that aborts if the row is missing, tombstoned, or at a different generation. A late worker response therefore cannot recreate a deleted recording, because the existence check and the insert cannot be separated. Audio files and rows are reclaimed once the last job token is released or at the next launch sweep, and the interface reports the interim state as deleting rather than claiming the space is already free."
+    },
+    {
+      "requirement": "Models",
+      "decision_ids": [
+        "D-022",
+        "D-020",
+        "D-021",
+        "D-028",
+        "D-027",
+        "D-003",
+        "D-002"
+      ],
+      "explanation": "A model library browses and manages installed speech and language models with their declared capabilities, sizes, and the runtime each belongs to (D-022). Identity is the publisher name, revision string, and a SHA-256 over the ordered weight file set, so two quantizations under the same name are distinguishable and a result in History can name exactly what produced it. Compatibility is checked before activation against the installed runtime's descriptor: runtime kind, required version range, quantization support, sample rate, declared context length. User-supplied models take the same path with user-entered manifest fields and the same load smoke test as the gate, so an unreadable quantization fails at install rather than mid-dictation. Installation stages into a separate directory, verifies, smoke-tests in the helper, and only then atomically renames into place, so a failed download or import cannot replace a working installation; a failed user import stays in staging with its error attached. Model loading never triggers a download, because runtimes receive absolute paths to activated directories and initializers that can fetch are prohibited by a build-time check, with acquisition confined to an explicitly invoked downloader on an allowlist (D-028). Replacing a runtime has bounded effect because runtimes are separate adapter targets and helper binaries (D-002, D-003, D-020, D-021), each owning its own models subtree so storage cost is attributable and removable, and each publishing a parameter schema the settings interface renders generically so a new runtime adds no bespoke screens. Activation of a model pairing whose declared footprints exceed the memory budget is refused with the arithmetic shown and an explicit override (D-027)."
+    },
+    {
+      "requirement": "Desktop behavior",
+      "decision_ids": [
+        "D-025",
+        "D-011",
+        "D-001"
+      ],
+      "explanation": "A menu bar status item is the always-available surface, showing current state, the effective mode, recent results, and settings, and it complements the recording panel rather than duplicating it (D-011, D-025). Microphone level adjustment is software gain applied to captured buffers by default, with metering and a clipping indicator, so the common case changes no system state and has nothing to restore; setting the input device's hardware volume is opt-in. Optional pausing of media playback checks whether the default output device is running before capture, using a public CoreAudio property rather than a private framework, and posts a play/pause media key when something is playing. Restoration happens only while the app still owns the change: playback resumes only if the app sent the pause, the same output device is still default, the device is still idle, and under ten minutes have elapsed; device volume is restored only if the current value still equals the value the app set. Competing applications and manual user edits therefore result in the app declining to restore and saying so in the menu, rather than overwriting a state someone else established. The macOS baseline and the public APIs these behaviors rely on are fixed by D-001, with anything newer gated behind availability checks and a defined fallback."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Which speech runtime is selected, and does the license of the weights we would offer for download permit that distribution? RESEARCH establishes what WhisperKit and whisper.cpp document but explicitly states that documentation does not establish accuracy or resource behavior, and it flags model licensing and long-recording behavior as unexamined.",
+      "blocking": true,
+      "resolution": "Run the bake-off before phase 2 completes: both adapters against the same audio corpus (30-second dictation, 10-minute session, 3-hour meeting) on the target Apple Silicon machine, recording word error rate by language, time to final transcript, peak resident size, and behavior at chunk boundaries, with runtime revision, model revision, quantization, and machine specification attached to every row. In parallel, review the license of each candidate model distribution for redistribution and for offering as a download. Until both are answered, build against the `SpeechRecognizer` port with the whisper.cpp adapter as the reference implementation, and make no accuracy or latency claim in the product."
+    },
+    {
+      "question": "Does the application ship unsandboxed under Developer ID (which the accessibility injection and session event tap appear to require), and if so what mechanism reliably denies network access to the inference helpers, given that per-process seatbelt initialization is deprecated?",
+      "blocking": true,
+      "resolution": "Spike before phase 0 ends, because it determines the entitlements files, the helper launch path, and how the offline contract is enforced. Build a helper, launch it under a restrictive profile, and assert that an outbound connect fails; separately assert that a helper built without networking code contains no socket-API symbols. If the profile mechanism proves unusable, the enforcement becomes the symbol scan plus the network-denied integration test, and the limitation is stated in the product rather than implied to be system-enforced. If sandboxing turns out to be viable with the required accessibility behavior, prefer it and record the change against D-003 and D-028."
+    },
+    {
+      "question": "Which local diarizer is used for meetings, under what license, and does it expose a confidence signal the design can threshold on? RESEARCH names SpeakerKit within the Argmax package and notes that its default initialization may download models.",
+      "blocking": true,
+      "resolution": "Resolve before phase 8 begins, since the meetings data model depends on the answer. Evaluate the candidate's license and its per-segment outputs against a labeled internal meeting set, reporting diarization error rate and the proportion of segments falling below threshold. Confirm that a model-folder configuration prevents any download. If no usable confidence signal exists, meetings ship with channel attribution only and diarization stays off until a candidate that exposes one is available; the schema already represents that state."
+    },
+    {
+      "question": "Can the provisional live transcription pass run alongside capture without dropping audio or degrading the final pass on the target machine?",
+      "blocking": false,
+      "resolution": "Measure during phase 2 alongside the bake-off: run capture with and without the provisional pass and compare dropped buffer counts, final word error rate, and time to final transcript. If the cost is material, the live preview degrades to waveform plus a voice-activity indicator, which the panel already has a state for."
+    },
+    {
+      "question": "Which browsers expose the current URL through accessibility, and which require automation permission or provide nothing?",
+      "blocking": false,
+      "resolution": "Enumerate per browser during phase 6 and record a dated table. The rule engine already treats an unreadable URL as a non-match rather than an error, so an incomplete table degrades to bundle-identifier rules and the default mode instead of blocking the feature."
+    },
+    {
+      "question": "Is FTS5 compiled into the system SQLite on the macOS 14 baseline?",
+      "blocking": false,
+      "resolution": "A one-line runtime check during phase 0 setup. If absent, build GRDB against a bundled SQLite, accepting a larger binary and an update obligation; record the change against D-005."
+    },
+    {
+      "question": "How does the chosen speech runtime behave on a three-hour input: does chunked feeding introduce boundary errors, and does resident size stay flat across the run? RESEARCH raises long-recording suitability as needing examination.",
+      "blocking": false,
+      "resolution": "Covered by the phase 7 import test, which samples resident size across a three-hour file and compares transcripts at chunk boundaries against overlapping-window output. Chunked feeding is already the design, so the exposure is boundary quality rather than memory, and overlap size is the tuning knob."
+    },
+    {
+      "question": "Is an 8B-class instruct model at 4-bit quantization good enough for the Email and Meeting notes modes on the 16 GB target, or does a smaller model with tighter prompts do better once the output validator is applied?",
+      "blocking": false,
+      "resolution": "Score two or three model sizes against the fidelity corpus during phase 4 using the human rubric, and record validator fallback rates per model. The result sets the recommended default pairing; the model selection is per mode either way, so a wrong initial default is a settings change rather than a design change."
+    }
+  ]
+}

@@ -87,6 +87,9 @@ Review attempts are recorded before model execution. An interrupted refresh
 leaves the previous design available for inspection and blocks reuse as current
 review evidence. Re-run the design command to make a new attempt. Failed attempts
 remain recorded. Model calls are not resumed midway through a round.
+The next attempt receives the latest available proposal and its objections,
+including a rejected proposal. Current inputs take precedence. Carrying that
+material forward does not accept it; the new attempt runs the complete review.
 
 `SOFTWARE_DESIGN.md` is generated from the reviewed record. Edits to that file
 are detected and preserved; move the desired changes into the specification and

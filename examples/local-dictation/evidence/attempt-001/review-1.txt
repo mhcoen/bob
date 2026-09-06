@@ -1,0 +1,443 @@
+{
+  "purpose": "The proposal is not ready for implementation. Its coverage table names all fourteen requirements once, yet several cross-section contradictions leave required behavior undefined or unsupported. The blocking defects concern result identity, crash recovery, long-input streaming, text insertion, context authority, meeting attribution, egress control, resource scheduling, model activation, permission revocation, recording shortcuts, retention races, and the phased acceptance plan. Later improvements concern the provisional platform choice and the claimed generic runtime interface.",
+  "architecture": "Blocking findings D-101 through D-114 require design changes. The largest boundary problem is that AudioSource emits untimestamped canonical buffers while meeting capture needs synchronized native streams and long-input recognition needs backpressure. The helper boundary also promises network isolation before an enforceable isolation mechanism has been selected. ResourceScheduler assumes resumable runtimes without evidence that either candidate supports bounded preemption. D-201 and D-202 are improvements that can wait until those defects are resolved.",
+  "data_lifecycle": "The artifact graph cannot represent re-recognition correctly. The proposal states that a recording has exactly one source transcript, while D-024 permits reprocessing through another speech model. Crash recovery covers interrupted capture and delivery, leaving finalizing, recognizing, refining, and rewriting unresolved. The CAF file is assumed recoverable after abrupt termination without a feasibility result. Model activation spans a filesystem rename and a database pointer update, so it is not atomic as written. Automated retention can also remove audio needed by an admitted job because its interaction with generation tokens is unspecified.",
+  "failure_behavior": "Delivery failure handling depends on signals the application may not have. D-009 admits that paste success cannot be confirmed, while the failure section claims that a rejected paste triggers synthetic typing. A fixed 300 ms pasteboard restoration delay can restore the old value before a slow target reads the new one. Permission revocation is treated as a capture failure even when the revoked capability is Accessibility, Input Monitoring, browser automation, or screen context. Media-key ownership is also overstated: posting a toggle does not prove which application paused or that any application paused.",
+  "evolution": "The phase list is an ordering sketch, not a complete implementation plan. Only phase 0 has an exit criterion. Several architecture-dependent experiments occur after the decisions they could invalidate, including long-input behavior in phase 7 and diarizer selection before phase 8. Software gain and media pause have no explicit phase. Each phase needs entry conditions, persisted-schema changes, migration work, failure cases, acceptance evidence, and rollback consequences. Blocking feasibility results must precede the components that depend on them.",
+  "verification": "The proposal recognizes that tests can encode incorrect expectations, but its review gate only requires someone other than the table author. That does not establish product authority or source fidelity. Expected behavior needs traceability to SPEC.md and approval by the user or a delegated product owner. The delivery matrix must include destructive replacement, selected-text insertion, delayed paste reads, non-Latin input, large or unsnapshotable pasteboards, secure fields, and focus changes during event posting. The long-input test must compare several durations and include helper-process memory; one three-hour run under an unspecified fixed bound cannot establish memory independent of duration. Transformation review needs adversarial cases that preserve lexical recall while changing meaning or answering a retained question.",
+  "assumptions": [
+    "The review treats a source transcript as the output of one identified recognition run. Basis: changing the speech model can change the recognized words. Reconsider only if reprocessing is intentionally limited to rewriting an immutable transcript, which would conflict with the stated ability to reprocess through other models.",
+    "Claims about runtime memory, pause and resume ownership, recoverable CAF files, and helper network isolation are treated as unverified. Basis: ref/RESEARCH.md says no application benchmarks were run, and the proposal records the isolation mechanism as a blocking experiment. Reconsider after reproducible measurements or platform evidence are attached to the relevant decisions.",
+    "macOS 14 and Apple Silicon are accepted as provisional planning targets. Basis: the specification names Apple Silicon with 16 GB as the evaluation target, while the macOS floor currently derives from an unselected runtime. Reconsider after the runtime bake-off and API availability matrix.",
+    "The requirement that context must not override processing instructions is treated as an output invariant. Basis: the specification states it without qualification. Reconsider only through an explicit specification change that describes context handling as risk reduction instead of enforcement."
+  ],
+  "decisions": [
+    {
+      "id": "D-101",
+      "title": "Blocking defect: the result graph cannot represent re-recognition",
+      "choice": "Reject the one-source-transcript-per-recording model in Data lifecycle, D-017, and D-024.",
+      "rationale": "D-024 allows reprocessing through other models, and each speech model can produce different recognized text. D-006 and Data lifecycle instead assign exactly one source transcript to the recording. Results cannot then identify which recognition output a normalization, translation, rewrite, or meeting note used.",
+      "alternatives": [
+        {
+          "option": "Introduce processing runs",
+          "tradeoff": "Model recording to processing_run to recognition_transcript to derived_result. This adds joins and gives every artifact complete provenance."
+        },
+        {
+          "option": "Limit reprocessing to existing text",
+          "tradeoff": "The simpler graph remains, but History can no longer re-recognize original audio through another speech model."
+        }
+      ],
+      "consequences": "Without a repair, History comparisons are ambiguous, translation provenance is wrong after re-recognition, and the invariant that the source transcript is never mutated can hide replacement under a supposedly unique row.",
+      "reconsider_when": "A revised schema identifies every recognition run and every derived artifact's immediate input."
+    },
+    {
+      "id": "D-102",
+      "title": "Blocking defect: interrupted processing recovery is incomplete",
+      "choice": "Do not accept the recovery sweep in Data lifecycle as the recovery contract for D-006.",
+      "rationale": "The sweep defines arming, capturing, delivery attempts, scratch cleanup, and staged models. It omits crash outcomes for finalizing, recognizing, refining, and rewriting. It also assumes that a partially written Apple Lossless CAF file can be finalized after SIGKILL, although no experiment or chunk-journal format establishes that property.",
+      "alternatives": [
+        {
+          "option": "Use independently recoverable audio chunks",
+          "tradeoff": "Persist numbered, fsynced chunks and seal them into the library artifact after capture. Recovery becomes explicit, with extra file management."
+        },
+        {
+          "option": "Prove CAF recovery",
+          "tradeoff": "Run kill-at-offset experiments against the exact writer implementation and record the maximum lost interval. A failure requires changing the storage format."
+        }
+      ],
+      "consequences": "The current crash-injection suite has no specified expected result for several states. A test author would have to invent those outcomes during implementation.",
+      "reconsider_when": "Every nonterminal state has an authoritative recovery transition, database and file ordering are specified, and interrupted audio recovery has been demonstrated."
+    },
+    {
+      "id": "D-103",
+      "title": "Blocking defect: the ingest contracts do not support meetings or bounded long-input processing",
+      "choice": "Replace the D-018 AudioSource contract before treating it as the common boundary.",
+      "rationale": "D-018 emits 16 kHz mono buffers and a basic source descriptor. D-023 requires two native streams aligned by host time. The contract carries no timestamps, discontinuities, track identity, clock domain, or backpressure. Windowed AVAssetReader decoding bounds decoder memory only; SpeechRecognizer may still accumulate the full decoded input.",
+      "alternatives": [
+        {
+          "option": "Use timestamped audio frames",
+          "tradeoff": "Carry clock identity, sequence, discontinuity, track metadata, and bounded-buffer ownership through ingest. Adapters become more explicit."
+        },
+        {
+          "option": "Separate live and seekable ports",
+          "tradeoff": "Each contract can express its own timing and retry rules, with some duplicated orchestration."
+        }
+      ],
+      "consequences": "The current port either leaks meeting-specific behavior around the abstraction or discards information needed for alignment. A three-hour decoder test can pass while the recognizer still uses memory proportional to duration.",
+      "reconsider_when": "The port expresses timing and flow control, and an end-to-end test across app and helper processes shows bounded memory at multiple input lengths."
+    },
+    {
+      "id": "D-104",
+      "title": "Blocking defect: text insertion can replace unrelated text and the fallback cannot observe rejection",
+      "choice": "Redesign D-009 before accepting cross-application delivery.",
+      "rationale": "An accessibility set-value operation can replace an entire control unless selected-text semantics are supported and verified. The proposal does not define cursor insertion, selection replacement, preservation of existing content, or rollback after partial failure. It later states that paste and typing success cannot be confirmed, which conflicts with the claimed fallthrough when a paste is rejected. The 300 ms restore delay has no evidence and can race a delayed paste read.",
+      "alternatives": [
+        {
+          "option": "Capability-specific insertion",
+          "tradeoff": "Use selected-text APIs only after probing their writability and readback behavior. Hold or copy when insertion cannot be confirmed safely."
+        },
+        {
+          "option": "Paste-only compatibility profiles",
+          "tradeoff": "Use per-application measured restore delays and disable automatic restoration where safe timing is unknown. Clipboard disturbance becomes visible."
+        }
+      ],
+      "consequences": "The current ladder can erase a field's existing value, paste stale clipboard data, or synthesize a duplicate after an unobservable success.",
+      "reconsider_when": "The design specifies insertion at a cursor or selection for each path, identifies observable failure signals, and defines safe behavior when the pasteboard cannot be fully restored."
+    },
+    {
+      "id": "D-105",
+      "title": "Blocking defect: the validator does not enforce mode authority over context",
+      "choice": "Reject the enforcement claim in D-012 and D-016.",
+      "rationale": "Random delimiters and instruction placement influence a model without constraining it. Question retention, expansion ratio, and content-word recall do not detect an appended answer, a changed relationship, or an instruction copied from context. The checks are also undefined for the multilingual behavior in D-017. Free-form custom prompts make permitted transformations impossible to infer unless users also supply a structured contract.",
+      "alternatives": [
+        {
+          "option": "Structured transformation contracts",
+          "tradeoff": "Require every generated mode to declare allowed operations and supported validator languages. Unsupported combinations fall back to normalized text."
+        },
+        {
+          "option": "Restrict context use",
+          "tradeoff": "Convert context into typed evidence fields and permit only transformations with source-linked validation. Some flexible custom-mode behavior is lost."
+        }
+      ],
+      "consequences": "The application can paste text produced under an instruction found on screen while reporting that the validator enforced the selected mode.",
+      "reconsider_when": "The design defines enforceable invariants for each transformation and language, plus a fail-closed path for outputs that cannot be validated."
+    },
+    {
+      "id": "D-106",
+      "title": "Blocking defect: meeting source channels are treated as speaker identity",
+      "choice": "Revise D-023 so channel origin and speaker attribution remain separate claims.",
+      "rationale": "A microphone can capture remote audio from speakers, and system audio can contain several applications or local playback. The labels me and the call are therefore uncertain. Diarization cluster identifiers are arbitrary and may be permuted on another run, so retaining edited names when identifiers happen to match is unsafe. The proposal also leaves the diarizer and confidence signal as a blocking open question despite the requirement for an explicit runtime choice.",
+      "alternatives": [
+        {
+          "option": "Source labels plus attribution hypotheses",
+          "tradeoff": "Store microphone or system as known source metadata, then attach speaker hypotheses with confidence and evidence."
+        },
+        {
+          "option": "Channel-only first release",
+          "tradeoff": "Meetings can distinguish capture sources, but speaker separation remains unavailable until a diarizer is selected and evaluated."
+        }
+      ],
+      "consequences": "Current notes can attach a user's edited speaker name to a different cluster after reprocessing and can state speaker identity with more certainty than the audio supports.",
+      "reconsider_when": "A diarizer is selected, cluster matching uses evidence beyond numeric labels, and echo or cross-channel leakage is represented in the evaluation."
+    },
+    {
+      "id": "D-107",
+      "title": "Blocking defect: egress isolation is promised before an enforcement mechanism exists",
+      "choice": "Treat D-003, D-018, and D-028 as unresolved until the helper and decoder trust boundaries are fixed.",
+      "rationale": "A symbol scan for socket calls cannot prove that linked frameworks, dynamically loaded code, or a launched executable lacks network behavior. D-018 permits an arbitrary user-selected decoder while claiming it runs without network access. The proposal's own open question says the process sandbox mechanism may be unavailable.",
+      "alternatives": [
+        {
+          "option": "Enforced helper sandbox",
+          "tradeoff": "Use a demonstrated process restriction with narrowly scoped file descriptors and no network capability. Platform feasibility must be established."
+        },
+        {
+          "option": "In-process vetted decoder set",
+          "tradeoff": "Remove arbitrary executable launch and maintain audited decoder dependencies inside the application's trust boundary."
+        }
+      ],
+      "consequences": "The application cannot currently substantiate the requirement that context and transcripts never reach external services. The external decoder also receives user files and can perform unrelated local side effects.",
+      "reconsider_when": "The spike selects an enforceable mechanism, the threat model covers inherited descriptors and subprocesses, and external decoder behavior matches the same contract."
+    },
+    {
+      "id": "D-108",
+      "title": "Blocking defect: scheduling and memory policy depend on unmeasured runtime properties",
+      "choice": "Make runtime resumability and measured residency prerequisites for D-004 and D-027.",
+      "rationale": "Chunk-boundary preemption assumes that speech and generation work can checkpoint without changing output or retaining full history. D-020 and D-021 provide no evidence for that property. The 8 GB ceiling uses weight-file estimates and user-entered manifests, omitting runtime workspaces, Metal allocations, audio buffers, and helper overhead. An approximate refusal can deny a pairing that would work, which resembles an arbitrary usage restriction despite the override.",
+      "alternatives": [
+        {
+          "option": "Measured capability descriptors",
+          "tradeoff": "Record actual peak memory, pause support, cancellation latency, and resume fidelity for each runtime and model revision."
+        },
+        {
+          "option": "Non-resumable batch policy",
+          "tradeoff": "Cancel and restart unsupported batch jobs or let interactive work wait behind a declared bound. Behavior is slower and accurate about runtime limits."
+        }
+      ],
+      "consequences": "The proposed scheduler may be impossible to implement for the chosen runtimes, and its admission arithmetic can understate memory enough to drive the Mac into swap.",
+      "reconsider_when": "The bake-off includes checkpoint behavior, cancellation latency, process RSS, Metal allocations, and transcript equivalence after preemption."
+    },
+    {
+      "id": "D-109",
+      "title": "Blocking defect: media-key toggling does not establish ownership",
+      "choice": "Remove automatic resume from D-025 unless pause success and target ownership can be identified.",
+      "rationale": "A CoreAudio device-running flag says that some client is active. It does not identify media playback. Posting a play-pause toggle does not prove which application received it or whether playback stopped. Matching the device and observing later idleness cannot show that the application still owns the change.",
+      "alternatives": [
+        {
+          "option": "Pause without automatic resume",
+          "tradeoff": "The app can offer a manual Resume action after recording and avoids starting the wrong player."
+        },
+        {
+          "option": "Per-application control",
+          "tradeoff": "Use supported automation for known players and restore only the application whose state transition was confirmed. Coverage is narrower and permissions increase."
+        }
+      ],
+      "consequences": "The current rule can start playback that the user stopped manually or toggle a different player after another application changed state.",
+      "reconsider_when": "A supported API supplies target identity and confirms both the pause transition and unchanged ownership before resume."
+    },
+    {
+      "id": "D-110",
+      "title": "Blocking defect: permission revocation has one incorrect global outcome",
+      "choice": "Replace the generic revocation rule in Failure behavior with capability-specific transitions.",
+      "rationale": "Only microphone or active system-audio permission loss should fail capture. Accessibility loss during recognition affects delivery, Input Monitoring loss affects shortcuts, browser automation loss affects URL rules, and Screen Recording loss after context sampling may have no effect on microphone capture. Marking every case failed(capturing, permissionRevoked) misstates persisted results and can stop usable work.",
+      "alternatives": [
+        {
+          "option": "Permission event table",
+          "tradeoff": "Define effects by permission, session state, and active adapter. The table is longer and directly testable."
+        }
+      ],
+      "consequences": "A harmless delivery-permission change can currently terminate recording, while a lost shortcut permission may be reported as an audio failure.",
+      "reconsider_when": "Every permission has a state-specific transition covering denial at launch, revocation during work, and restoration."
+    },
+    {
+      "id": "D-111",
+      "title": "Blocking defect: shortcut semantics are ambiguous and introduce a duration cap",
+      "choice": "Revise D-026 before accepting recording controls.",
+      "rationale": "D-026 states that toggle acts on keyDown and push-to-talk arms after a 200 ms hold so a tap acts as toggle. It never defines whether these are separate bindings or two interpretations of one binding, nor what happens during the first 200 ms. The watchdog's configured maximum hold caps a valid push-to-talk recording, conflicting with the prohibition on artificial recording-duration limits.",
+      "alternatives": [
+        {
+          "option": "Separate toggle and push-to-talk bindings",
+          "tradeoff": "Each action has unambiguous key transitions and independent conflict validation."
+        },
+        {
+          "option": "Explicit lost-key recovery",
+          "tradeoff": "Use screen lock, tap disablement, device loss, and a visible stuck-key recovery control without imposing a normal recording limit."
+        }
+      ],
+      "consequences": "A long held key can finalize a recording while the user is still speaking, and a short press can have conflicting meanings.",
+      "reconsider_when": "The event table defines each binding from keyDown through keyUp and removes any mandatory maximum duration."
+    },
+    {
+      "id": "D-112",
+      "title": "Blocking defect: model activation is not atomic as described",
+      "choice": "Replace the activation sequence in D-022 with immutable installations and a transactional active pointer.",
+      "rationale": "Renaming a staged directory and updating a SQLite manifest pointer are separate durability domains. A crash can leave the directory installed without the pointer or the pointer referencing an incomplete cleanup state. Replacing an existing nonempty directory is also not the simple atomic operation described. In-flight sessions need the previous hash to remain available after activation changes.",
+      "alternatives": [
+        {
+          "option": "Content-addressed immutable directories",
+          "tradeoff": "Install each verified hash once, switch the active model in a database transaction, and garbage-collect unreferenced hashes after job leases release."
+        },
+        {
+          "option": "Versioned slots with recovery journal",
+          "tradeoff": "Keep old and new slots plus an activation journal. Recovery logic becomes more involved."
+        }
+      ],
+      "consequences": "The present sequence can strand storage, break a pinned run, or expose a pointer whose files were reclaimed during runtime replacement.",
+      "reconsider_when": "Activation, crash recovery, concurrent model use, failed verification, and garbage collection share one specified generation protocol."
+    },
+    {
+      "id": "D-113",
+      "title": "Blocking defect: retention policies can race active work",
+      "choice": "Apply D-024 generation tokens to every retention action, including drop-audio-keep-text.",
+      "rationale": "D-024 defines safe deletion for an explicit recording delete. Data lifecycle separately introduces age, size, and audio-only retention jobs without stating whether they tombstone the recording, cancel workers, wait for playback, or invalidate queued reprocessing. Removing audio while a worker or player has an active claim needs its own state transition.",
+      "alternatives": [
+        {
+          "option": "Retention as scheduled deletion jobs",
+          "tradeoff": "Use the same leases and generation checks as user deletion, with a distinct text-retained terminal state."
+        },
+        {
+          "option": "Retention skips busy recordings",
+          "tradeoff": "Policies may run late, while active work remains undisturbed."
+        }
+      ],
+      "consequences": "A daily policy can currently remove the only audio artifact under an admitted job or leave History claiming playback and reprocessing are available.",
+      "reconsider_when": "Retention, playback, export, and reprocessing all participate in the same artifact lease protocol."
+    },
+    {
+      "id": "D-114",
+      "title": "Blocking defect: the phased plan and acceptance process are incomplete",
+      "choice": "Do not derive implementation work from Evolution in its current form.",
+      "rationale": "Phases 1 through 9 list features without entry gates, exit evidence, schema migrations, failure scenarios, or dependency decisions. The speech runtime, helper isolation, diarizer, and long-input properties are unresolved after architecture choices already depend on them. Verification delegates expected-behavior review to an unspecified independent person, which does not identify who may approve product semantics.",
+      "alternatives": [
+        {
+          "option": "Gate-based implementation plan",
+          "tradeoff": "For every phase, name prerequisite decisions, persisted changes, acceptance evidence, manual review owner, and recovery behavior."
+        },
+        {
+          "option": "Feasibility phase before the skeleton",
+          "tradeoff": "Resolve runtime streaming, helper isolation, crash-safe audio, and delivery viability before freezing ports and schema."
+        }
+      ],
+      "consequences": "Implementation tasks would decide behavior that the specification requires the design to settle. A passing suite could then validate expectations invented by the implementer.",
+      "reconsider_when": "Every phase has a traceable acceptance contract and every blocking experiment precedes the boundary it can invalidate."
+    },
+    {
+      "id": "D-201",
+      "title": "Improvement: make the platform and dual-runtime choices explicitly provisional",
+      "choice": "Keep macOS 14 and the second speech adapter as reversible planning assumptions until the bake-off.",
+      "rationale": "D-001 derives the OS floor from WhisperKit while D-020 says the runtime remains unselected. D-020 also commits to maintaining two implementations even though Intel is outside the first release and no evidence shows that both provide continuing value.",
+      "alternatives": [
+        {
+          "option": "Choose after thin spikes",
+          "tradeoff": "Build only enough of each adapter to measure the decisive properties, then ship one unless a second has a demonstrated role."
+        }
+      ],
+      "consequences": "Treating both as settled adds maintenance and may preserve an OS floor whose original reason disappears.",
+      "reconsider_when": "The bake-off and licensing review identify the shipping runtime and the minimum APIs actually used."
+    },
+    {
+      "id": "D-202",
+      "title": "Improvement: avoid promising a fully generic runtime settings interface",
+      "choice": "Narrow the Evolution claim that a parameter schema eliminates bespoke UI for new runtimes.",
+      "rationale": "A schema can render primitive controls, yet runtime parameters often have conditional validity, model-specific ranges, memory effects, and terminology that needs explanation. The proposed stable application-level parameter schema is not defined.",
+      "alternatives": [
+        {
+          "option": "Schema plus custom presentation hooks",
+          "tradeoff": "Common parameters remain generic, and runtimes can supply validation or specialized controls when required."
+        }
+      ],
+      "consequences": "The current claim understates the interface and migration work caused by future runtime replacement.",
+      "reconsider_when": "Two materially different runtimes have been represented without adapter-specific UI or persisted-parameter exceptions."
+    }
+  ],
+  "coverage": [
+    {
+      "requirement": "Automatic mode selection",
+      "decision_ids": [
+        "D-110",
+        "D-114"
+      ],
+      "explanation": "D-014 defines order, conflict resolution, fallback, latching, and visibility. The acceptance plan still needs capability-specific permission transitions and a browser matrix approved before URL rules ship."
+    },
+    {
+      "requirement": "Built-in modes",
+      "decision_ids": [
+        "D-105",
+        "D-114"
+      ],
+      "explanation": "D-013 names permitted transformations, but D-012 cannot enforce the prohibition on answering questions through lexical recall and punctuation checks, especially outside English."
+    },
+    {
+      "requirement": "Context",
+      "decision_ids": [
+        "D-105",
+        "D-107",
+        "D-110"
+      ],
+      "explanation": "Sampling and retention are specified in D-016. The proposal has not enforced instruction priority, helper egress isolation, or correct behavior for each permission revocation."
+    },
+    {
+      "requirement": "Custom modes",
+      "decision_ids": [
+        "D-101",
+        "D-105"
+      ],
+      "explanation": "Revision snapshots cover prompt edits, but free-form modes lack an enforceable transformation contract and their derived results need an explicit processing-run parent."
+    },
+    {
+      "requirement": "Desktop behavior",
+      "decision_ids": [
+        "D-109"
+      ],
+      "explanation": "Menu access and software gain are specified. Automatic playback restoration violates the ownership rule because a media-key toggle supplies no target or confirmed transition."
+    },
+    {
+      "requirement": "History",
+      "decision_ids": [
+        "D-101",
+        "D-102",
+        "D-113"
+      ],
+      "explanation": "Search, playback, and tombstoned deletion are described. Re-recognition provenance, interrupted processing recovery, and retention during active work remain defective."
+    },
+    {
+      "requirement": "Input sources",
+      "decision_ids": [
+        "D-103",
+        "D-107"
+      ],
+      "explanation": "The format matrix and copy-in behavior are explicit. The common port lacks timing and flow-control semantics, end-to-end long-input memory is unproven, and the external decoder isolation claim is unresolved."
+    },
+    {
+      "requirement": "Languages",
+      "decision_ids": [
+        "D-101",
+        "D-105"
+      ],
+      "explanation": "D-017 preserves translation as a derived artifact and separates recognition evaluation from rewriting. The artifact graph and validators do not yet support several recognition runs or language-specific enforcement."
+    },
+    {
+      "requirement": "Meetings",
+      "decision_ids": [
+        "D-103",
+        "D-106",
+        "D-108"
+      ],
+      "explanation": "D-023 provides editable names and timestamped-note intent. Its capture contract cannot carry the required timing, its source labels overstate speaker identity, and its diarizer remains unresolved."
+    },
+    {
+      "requirement": "Models",
+      "decision_ids": [
+        "D-107",
+        "D-108",
+        "D-112",
+        "D-201",
+        "D-202"
+      ],
+      "explanation": "Identity and staged verification are present. Activation atomicity, actual resource compatibility, offline enforcement, runtime selection, and interface evolution need revision."
+    },
+    {
+      "requirement": "Recording controls",
+      "decision_ids": [
+        "D-110",
+        "D-111"
+      ],
+      "explanation": "D-007 gives stage-specific cancellation effects. D-026 leaves toggle and hold semantics ambiguous, adds a maximum hold duration, and needs permission-specific degradation."
+    },
+    {
+      "requirement": "Recording display",
+      "decision_ids": [
+        "D-108",
+        "D-114"
+      ],
+      "explanation": "D-011 covers provisional styling, waveform, placement, and visible failures. Live recognition feasibility and its phase acceptance criteria remain unmeasured."
+    },
+    {
+      "requirement": "Text delivery",
+      "decision_ids": [
+        "D-104",
+        "D-110"
+      ],
+      "explanation": "Target latching and duplicate avoidance are defined. Safe insertion, observable fallback conditions, pasteboard timing, and capability-specific permission loss remain unresolved."
+    },
+    {
+      "requirement": "Vocabulary",
+      "decision_ids": [
+        "D-105",
+        "D-114"
+      ],
+      "explanation": "D-015 defines recognition bias, replacement order, filler removal, and post-generation handling without claiming guaranteed recognition. Validation across languages and acceptance of semantic side effects need explicit evidence."
+    }
+  ],
+  "open_questions": [
+    {
+      "question": "Can either speech runtime consume a bounded timestamped stream, cancel promptly, and resume after preemption without changing transcript quality?",
+      "blocking": true,
+      "resolution": "Measure thin adapters before freezing AudioSource, SpeechRecognizer, ResourceScheduler, or the long-input plan. Record memory slopes, boundary errors, cancellation latency, and resume equivalence."
+    },
+    {
+      "question": "What mechanism enforces zero network access for inference helpers and any external decoder?",
+      "blocking": true,
+      "resolution": "Demonstrate an enforceable process restriction on the deployment baseline. If none exists, remove arbitrary decoder execution and narrow the offline claim to properties the application can actually enforce."
+    },
+    {
+      "question": "Which insertion paths preserve existing text and selection state in the supported application matrix?",
+      "blocking": true,
+      "resolution": "Prototype cursor and selection insertion in the named applications, including slow paste consumers and unsnapshotable clipboard content. Define hold or copy behavior for every unconfirmable path."
+    },
+    {
+      "question": "Which diarizer supplies calibrated evidence suitable for an unattributed threshold, and how are edited names mapped after reclustering?",
+      "blocking": true,
+      "resolution": "Select and license a runtime, evaluate it on channel leakage and overlapping speech, then define cluster matching with user confirmation. Ship channel labels alone if the evidence is insufficient."
+    },
+    {
+      "question": "Who has authority to approve the expected-behavior tables and human fidelity outputs?",
+      "blocking": true,
+      "resolution": "Name the user or a delegated product owner as the normative reviewer. Require traceability from every expectation to SPEC.md, plus counterexamples designed to expose incorrect expectations."
+    },
+    {
+      "question": "Does the selected runtime still justify macOS 14 and a second speech adapter?",
+      "blocking": false,
+      "resolution": "Revisit D-001 and D-020 after the runtime and licensing bake-off. Record the minimum API set and the measured benefit of maintaining another adapter."
+    }
+  ]
+}

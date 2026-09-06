@@ -1,0 +1,30 @@
+{
+  "workflow_run": "16561ebc722c",
+  "status": "interrupted; unaccepted",
+  "author": {
+    "adapter": "claude_code_text",
+    "profile": "opus",
+    "observed_model": "claude-opus-5"
+  },
+  "reviewer": {
+    "adapter": "codex_text",
+    "model": "gpt-5.6-sol"
+  },
+  "judge": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "input_digest": "1f877dad9f58b74ee176cd8c6feac0e2e9e39c0d1fbd4d8079528820b4105cf1",
+  "first_judgment": "iterate",
+  "second_proposal": "Recovered by joining an explicit max_tokens continuation with its final fragment. The complete second proposal has not been reviewed.",
+  "source_log_sha256": "baf4ea23da55727d7989a82f57c03c30b09785f1ccf9807749f23c7602c1cfd4",
+  "review_scope": "review-1.txt and judgment-1.json concern proposal-1.json only.",
+  "publication": "No accepted software design or implementation plan was published.",
+  "sha256": {
+    "inputs.json": "4ac946694fe1929185f458894ae0543235dc2dab0eeea1d0b6ba17a1a757f1d4",
+    "judgment-1.json": "7a27203734a5296faa0e136d51045d90738a9b55169b58f5fbec78b2dfd4ea1b",
+    "proposal-1.json": "4947bafd35153372a44410083954aab7986d09b445f825b528dfe0a87e793276",
+    "proposal-2.json": "23b9b04b86c393bc29738017bb5d83f67cd4e285bd6089b5473fb00c5cd9cb4c",
+    "review-1.txt": "8637d1da9a3e4e75938fd4e4e72edf187ceacb8d777fe5a1339ee3e2969776e2"
+  }
+}

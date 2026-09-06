@@ -374,16 +374,28 @@ def ensure_design(root: Path, inputs: dict, *, refresh: bool = False) -> dict:
         policy_digest = _policy_digest()
         requirements = [f["name"] for f in inputs["requirements"]]
         query = (
-            "Author a software design for these inputs. Cover every named requirement exactly once.\n"
+            "Software-design review inputs. The proposal must cover every named requirement exactly once.\n"
             + json.dumps(inputs, indent=2)
-            + "\nReturn JSON conforming to this schema:\n"
+            + "\nProposal schema, for the author only. Other roles use their own output contracts:\n"
             + json.dumps(_schema("software_design.json"))
             + "\nKeep prose specific. Record assumptions with their basis and reconsideration conditions.\n"
         )
-        if accepted:
+        prior = next(
+            (
+                r
+                for r in reversed(state["attempts"])
+                if isinstance(r.get("proposal"), str) and r["proposal"].strip()
+            ),
+            None,
+        )
+        if prior is not None:
             query += (
-                "\nPrevious design for revision; current inputs take precedence:\n"
-                + json.dumps(accepted[-1]["design"])
+                "\nPrevious attempt for revision. It does not authorize publication. "
+                "Current inputs take precedence; resolve applicable objections and "
+                "explain any that no longer apply:\n"
+                + json.dumps(
+                    {k: prior.get(k) for k in ("proposal", "review", "verdict", "accepted")}
+                )
             )
         print("Authoring software design and reviewing engineering decisions …", flush=True)
         pending = {

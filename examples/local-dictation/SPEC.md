@@ -119,6 +119,9 @@ Models: browse and manage local speech and language models; permit compatible
 user-supplied models. Define model identity and compatibility checks. A failed
 model download or import must not replace a working installation. Replacing a
 runtime should have a bounded effect on storage and the interface.
+An absent benchmark or quality score must not disable a compatible imported
+model. Explain unmeasured quality and preserve the source transcript. Model
+evaluation is part of development; it must not become an application feature gate.
 
 Desktop behavior: menu bar access; microphone level adjustment; optional pause
 and resumption of media playback. Restore state only when the application still

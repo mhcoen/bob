@@ -13,14 +13,21 @@ A technology choice needs evidence or a stated assumption with a way to resolve
 it. Do not present unperformed experiments as results. Questions that prevent
 implementation remain blocking. Reasonable reversible assumptions can support
 progress when their consequences and reconsideration conditions are explicit.
+Make a concrete choice when the available evidence supports one. Distinguish
+measurements needed to evaluate that choice from decisions still unmade. A
+fallback must satisfy the requirement; removing a requested feature does not
+resolve a blocking question.
 
 On revision, address the review and validation feedback. Preserve decision IDs
 for the same decisions. Return the complete revised design.
+Reference decisions from the overview sections to avoid repeating explanations.
+Detailed implementation phases are produced after design acceptance. Describe
+dependencies and acceptance evidence here without drafting the task checklist.
 
 Avoid promotional language and stock contrast constructions. Write directly
 about the system. Avoid artificial groups of three and repeated conclusions.
 
-Inputs and output contract:
+Review inputs and proposal schema:
 {query}
 
 Previous proposal:

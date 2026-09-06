@@ -153,6 +153,25 @@ def test_false_judge_check_refuses_publication(tmp_path, monkeypatch, inputs):
     assert not (tmp_path / sd.DESIGN_FILE).exists()
 
 
+def test_retry_carries_rejected_proposal_and_review_without_accepting_it(
+    tmp_path, monkeypatch, inputs
+):
+    install(monkeypatch, [sample_design()], [verdict("stuck", failures=False)])
+    with pytest.raises(sd.SoftwareDesignError, match="not accepted"):
+        sd.ensure_design(tmp_path, inputs)
+    rejected = sd._read_state(tmp_path)["attempts"][-1]
+    assert not (tmp_path / sd.DESIGN_FILE).exists()
+
+    adapter = install(monkeypatch, [sample_design()], [verdict()])
+    record = sd.ensure_design(tmp_path, inputs)
+    prompt = adapter.proposer_prompts()[0]
+    assert "Worker ownership" in prompt
+    assert rejected["review"] in prompt
+    assert '"accepted": false' in prompt
+    assert sd._read_state(tmp_path)["attempts"][0] == rejected
+    assert sd.require_design(tmp_path, inputs)["id"] == record["id"]
+
+
 @pytest.mark.parametrize("change", ["spec", "reference", "document"])
 def test_changes_during_review_preserve_originals(tmp_path, monkeypatch, inputs, change):
     if change == "reference":

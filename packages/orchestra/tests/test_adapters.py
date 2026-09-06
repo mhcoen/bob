@@ -282,6 +282,61 @@ def test_extract_final_text_uses_last_result_when_multiple() -> None:
     assert extract_final_text("\n".join(lines)) == "final"
 
 
+@pytest.mark.parametrize("wrapped", [True, False])
+@pytest.mark.parametrize("result_kind", ["fragment", "complete", "empty"])
+def test_extract_final_text_reassembles_max_tokens_continuations(wrapped, result_kind):
+    """A long answer survives CLI continuation without tool narration or duplication."""
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    records = []
+
+    def message(text, stop):
+        events = [
+            {"type": "message_start", "message": {}},
+            {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+            {"type": "message_delta", "delta": {"stop_reason": stop}},
+            {"type": "message_stop"},
+        ]
+        records.extend(
+            {"type": "stream_event", "event": event} if wrapped else event for event in events
+        )
+
+    message("Reading the specification.", "tool_use")
+    message('{"decisions": [', "max_tokens")
+    message('{"id": "D-001"}', "max_tokens")
+    message("]}", "end_turn")
+    expected = '{"decisions": [{"id": "D-001"}]}'
+    result = {"fragment": "]}", "complete": expected, "empty": ""}[result_kind]
+    records.append({"type": "result", "subtype": "success", "result": result})
+    extracted = extract_final_text("\n".join(json.dumps(r) for r in records))
+    assert extracted == expected
+    assert json.loads(extracted) == {"decisions": [{"id": "D-001"}]}
+
+
+def test_extract_final_text_does_not_join_continuations_across_tool_turns():
+    import json
+
+    from orchestra.adapters._subprocess import extract_final_text
+
+    events = []
+    for text, stop in [
+        ("old prefix", "max_tokens"),
+        ("tool request", "tool_use"),
+        ("answer", "end_turn"),
+    ]:
+        events.extend(
+            [
+                {"type": "message_start"},
+                {"type": "content_block_delta", "delta": {"type": "text_delta", "text": text}},
+                {"type": "message_delta", "delta": {"stop_reason": stop}},
+            ]
+        )
+    events.append({"type": "result", "result": "answer"})
+    assert extract_final_text("\n".join(json.dumps(e) for e in events)) == "answer"
+
+
 def test_extract_final_text_falls_back_to_text_deltas() -> None:
     """When the stream lacks a result record (subprocess crashed
     mid-stream), concatenate every text_delta in order."""

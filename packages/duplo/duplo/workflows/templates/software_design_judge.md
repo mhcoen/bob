@@ -15,8 +15,11 @@ Accept requires every check to be true. Use iterate when revision can resolve
 the defects. Use stuck when a blocking issue needs evidence or a decision that
 the supplied material cannot support. Do not interpret model agreement as proof
 of engineering correctness. Make no changes to project files.
+The proposal schema in the inputs belongs to the author. Your output must use
+the judgment fields specified above. Detailed implementation phases are generated
+after design acceptance; judge whether the design supports deriving them.
 
-Inputs and output contract:
+Review inputs and the author's proposal schema:
 {query}
 
 Proposal:

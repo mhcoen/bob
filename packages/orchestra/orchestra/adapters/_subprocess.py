@@ -596,6 +596,8 @@ def extract_final_text(stream_json_output: str) -> str:
     1. The most recent record with ``type == "result"`` and a
        string-typed ``result`` field. Wins when the run completed
        cleanly and Claude Code emitted the canonical summary record.
+       When an explicit ``max_tokens`` continuation ends with a result
+       containing only the last fragment, include its preceding fragments.
     2. Concatenated ``text_delta`` text fields from every
        ``content_block_delta`` event in order. Used when the run
        crashed mid-stream and never produced a result record but did
@@ -608,6 +610,9 @@ def extract_final_text(stream_json_output: str) -> str:
         return ""
     last_result_text: str | None = None
     deltas: list[str] = []
+    message_deltas: list[str] = []
+    continuation_prefix: list[str] = []
+    stop_reason: str | None = None
     saw_stream_json_record = False
     for line in stream_json_output.splitlines():
         line = line.strip()
@@ -623,6 +628,13 @@ def extract_final_text(stream_json_output: str) -> str:
         rtype = record.get("type")
         if rtype == "result":
             result = record.get("result")
+            # Claude may continue a response after max_tokens and put only
+            # its final fragment in result. Join that explicit continuation
+            # chain without including narration from earlier tool calls.
+            if continuation_prefix and stop_reason == "end_turn":
+                final_fragment = "".join(message_deltas)
+                if final_fragment and result in ("", final_fragment):
+                    result = "".join(continuation_prefix) + final_fragment
             # Empty result.result is treated as "no result" and falls
             # through to the text_delta fallback. Some Claude Code
             # vendors (e.g. kimi via moonshot/Parasail) emit
@@ -631,23 +643,31 @@ def extract_final_text(stream_json_output: str) -> str:
             # via content_block_delta events.
             if isinstance(result, str) and result:
                 last_result_text = result
-        elif rtype == "stream_event":
-            event = record.get("event")
-            if isinstance(event, dict) and event.get("type") == "content_block_delta":
+            continuation_prefix = []
+            message_deltas = []
+            stop_reason = None
+        else:
+            event = record.get("event") if rtype == "stream_event" else record
+            if not isinstance(event, dict):
+                continue
+            if event.get("type") == "message_start":
+                if stop_reason == "max_tokens":
+                    continuation_prefix.extend(message_deltas)
+                else:
+                    continuation_prefix = []
+                message_deltas = []
+                stop_reason = None
+            elif event.get("type") == "message_delta":
+                delta = event.get("delta")
+                if isinstance(delta, dict) and isinstance(delta.get("stop_reason"), str):
+                    stop_reason = delta["stop_reason"]
+            elif event.get("type") == "content_block_delta":
                 delta = event.get("delta")
                 if isinstance(delta, dict) and delta.get("type") == "text_delta":
                     text = delta.get("text")
                     if isinstance(text, str):
                         deltas.append(text)
-        elif rtype == "content_block_delta":
-            # Some Claude Code versions emit the delta record at the
-            # top level instead of wrapping it in a stream_event. Treat
-            # both shapes the same.
-            delta = record.get("delta")
-            if isinstance(delta, dict) and delta.get("type") == "text_delta":
-                text = delta.get("text")
-                if isinstance(text, str):
-                    deltas.append(text)
+                        message_deltas.append(text)
     if last_result_text is not None:
         return last_result_text
     if deltas:

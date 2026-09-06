@@ -33,7 +33,15 @@ The [workflow documentation](../../packages/duplo/SOFTWARE-DESIGN.md) describes
 rejection and recovery behavior. Scripted regressions exercise the state machine;
 they do not establish the quality of a model-generated design.
 
-Live evidence status: the first attempt could not access the Claude login.
-An unsandboxed retry awaits explicit approval to send the example specification
-and public research to Anthropic Claude and OpenAI Codex. No accepted design or
-completed live plan is claimed from that attempt.
+The [recorded attempt](evidence/README.md) contains two model-generated proposals
+and the review of the first proposal. Its judge requested revision. The second
+proposal exposed an Orchestra bug: Claude continued a long response after its
+output limit, and the adapter supplied only the last fragment to the reviewer.
+The complete proposal was recovered from the retained stream. It remains unaccepted.
+
+The response parser and conflicting role instructions have been corrected.
+Retrying now preserves the prior proposal and its objections. The next run is
+blocked by automatic approval review, which requires separate authorization for
+Claude and Codex to reuse their generated drafts and reviews. Permission for the
+specification and public research notes has already been given. No implementation
+plan has been generated.
