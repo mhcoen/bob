@@ -56,6 +56,11 @@ with Fable reviewing, and retains the findings as revision inputs.
 No implementation plan has been generated. Model outputs in the evidence directory
 retain their wording.
 
+The first Astra call reached the stream-inactivity limit without a final response.
+The Codex text adapter now uses the total call limit for that timer too. Its
+diagnostic output is excluded from proposals. Review continues from the last
+complete design with Astra authoring and Fable reviewing.
+
 The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
 service can deny network access independently of its containing app's sandbox
 status. Its recorded results state the tested OS and the limits of the check.

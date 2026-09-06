@@ -4,11 +4,8 @@ Used for proposer, critic, adjudicator, and synthesizer roles when the
 user has bound a role to Codex. Mirrors ``ClaudeCodeTextAdapter`` in
 shape (constructor, prepare/invoke/cancel/describe contract,
 manages_own_timeout flag) so the api layer's per-role dispatcher and
-the executor's outcome-derivation treat it identically. The differences
-are the command line and the output handling: Codex emits final
-assistant text on stdout rather than the stream-json transcript Claude
-Code emits, so the captured output is returned as the model payload's
-``output`` field unchanged.
+the executor's outcome-derivation treat it identically. The final
+message file supplies the response. Raw CLI output stays in the log.
 
 Read-only enforcement: ``*_text`` adapters are documented as read-only
 in the project README. Claude Code text enforces that with an explicit
@@ -143,31 +140,32 @@ class CodexTextAdapter:
         # v...\n...\nuser\n<prompt>") before the completion, so the raw stdout is
         # no longer "just the answer" the way it was on 0.128. Routing the final
         # message to a file and reading that gives the clean completion
-        # regardless of banner/echo changes. stdout is kept only as a fallback.
+        # regardless of banner/echo changes. stdout remains diagnostic evidence.
         fd, last_message_path = tempfile.mkstemp(prefix="codex_last_", suffix=".txt")
         os.close(fd)
         run_cmd = list(inner["cmd"]) + ["--output-last-message", last_message_path]
-        output, exit_code = run_session(
-            run_cmd,
-            inner["cwd"],
-            env=inner["env"],
-            timeout=int(inner["timeout_s"]),
-            silent=True,
-            stdin_bytes=stdin_arg,
-        )
         last_message = ""
         try:
-            last_message = Path(last_message_path).read_text(encoding="utf-8").strip()
-        except OSError:
-            last_message = ""
+            output, exit_code = run_session(
+                run_cmd,
+                inner["cwd"],
+                env=inner["env"],
+                timeout=int(inner["timeout_s"]),
+                # Codex can remain silent while producing a long response.
+                # Use the configured total cap for this text call.
+                idle_timeout_s=int(inner["timeout_s"]),
+                silent=True,
+                stdin_bytes=stdin_arg,
+            )
+            try:
+                last_message = Path(last_message_path).read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
         finally:
             try:
                 os.unlink(last_message_path)
             except OSError:
                 pass
-        # Prefer the clean final message. Fall back to raw stdout only if codex
-        # wrote nothing to the file (e.g. an early error before any completion).
-        answer = last_message if last_message else output
         log_path = write_log(
             inner["log_dir"],
             inner["task_label"],
@@ -178,12 +176,15 @@ class CodexTextAdapter:
             attempt=prepared.request.attempt,
         )
         verdict = verdict_for_exit_code(exit_code)
+        if exit_code == 0 and not last_message:
+            verdict = "error"
         return {
-            "output": answer,
+            "output": last_message,
             "verdict": verdict,
             "fields": {
                 "exit_code": exit_code,
                 "log_path": str(log_path),
+                "final_message_missing": not bool(last_message),
             },
             "tokens_in": None,
             "tokens_out": None,

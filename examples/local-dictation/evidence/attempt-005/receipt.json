@@ -1,0 +1,30 @@
+{
+  "workflow_run": "4f83b8a08682",
+  "status": "author timed out; no proposal",
+  "actors": {
+    "author": {
+      "adapter": "codex_text",
+      "model": "gpt-6-astra"
+    },
+    "reviewer": {
+      "adapter": "claude_code_text",
+      "model": "fable"
+    },
+    "judge_role": {
+      "adapter": "codex_text",
+      "model": "gpt-6-astra"
+    }
+  },
+  "input_digest": "2fc4be62abeaa8cd42006be0cf16f574c1561cb22e3981ac4023fafe7586ab8d",
+  "completed_stages": {},
+  "exit_code": -103,
+  "error": "The author call hit the stream-inactivity timeout and produced no final message. Diagnostic output was removed from the proposal field; the original payload remains local.",
+  "diagnostic_source": {
+    "payload_ref": ".duplo/design-runs/4f83b8a08682/payloads/4f83b8a08682__propose__1.json",
+    "sha256": "c5d7bac68900077deb28ebe6bf7dbd461ba7d31548031d8370e6ad4a2428a454",
+    "reason": "CLI diagnostics contain echoed inputs and tool output, with no completed proposal."
+  },
+  "sha256": {
+    "inputs.json": "ad83b320703420c8fbdca6efec772d3a4bd56ccdfd78e0c06c25a9ec1c75d9aa"
+  }
+}

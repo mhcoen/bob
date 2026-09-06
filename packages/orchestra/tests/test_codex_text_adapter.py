@@ -283,18 +283,17 @@ def test_prepare_default_timeout_when_not_set() -> None:
 # --------------------------------------------------------------------
 
 
-def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
+def test_invoke_returns_final_message_unchanged_no_stream_json_extraction(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Codex emits final text on stdout. The adapter must NOT call
-    ``extract_final_text`` on it. A stream-json-shaped string fed
-    through invoke() should reach the caller unchanged."""
+    """A JSON-shaped final message retains its complete text."""
     fake_stdout = '{"type": "result", "subtype": "success", "result": "would-be-extracted"}'
-    monkeypatch.setattr(
-        codex_text_mod,
-        "run_session",
-        lambda cmd, cwd, env, timeout, silent, **kw: (fake_stdout, 0),
-    )
+
+    def fake_run_session(cmd, *args, **kwargs):
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text(fake_stdout)
+        return "diagnostic output", 0
+
+    monkeypatch.setattr(codex_text_mod, "run_session", fake_run_session)
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",
@@ -303,9 +302,46 @@ def test_invoke_returns_stdout_unchanged_no_stream_json_extraction(
     adapter = CodexTextAdapter()
     prepared = adapter.prepare(_request(prompt="x", external_inputs={"project_dir": str(tmp_path)}))
     payload = adapter.invoke(prepared)
-    # No --output-last-message file was written by the mock, so the adapter
-    # falls back to raw stdout unchanged.
     assert payload["output"] == fake_stdout
+
+
+@pytest.mark.parametrize("exit_code, verdict", [(0, "error"), (7, "error"), (-103, "timeout")])
+def test_missing_final_message_does_not_publish_diagnostics(
+    tmp_path, monkeypatch, exit_code, verdict
+):
+    diagnostics = 'user\n{"proposal": "echoed input"}\ntool output\n'
+    monkeypatch.setattr(codex_text_mod, "run_session", lambda *a, **kw: (diagnostics, exit_code))
+    adapter = CodexTextAdapter()
+    prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
+    payload = adapter.invoke(prepared)
+    assert payload["output"] == ""
+    assert payload["verdict"] == verdict
+    assert diagnostics in Path(payload["fields"]["log_path"]).read_text()
+
+
+@pytest.mark.parametrize("delay, timeout, verdict", [(0.4, 2, "complete"), (5, 1, "timeout")])
+def test_quiet_codex_call_obeys_total_timeout(tmp_path, monkeypatch, delay, timeout, verdict):
+    import sys
+
+    from orchestra.adapters import _subprocess
+
+    monkeypatch.setattr(_subprocess, "IDLE_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(_subprocess, "PROGRESS_QUEUE_INTERVAL", 0.02)
+    script = tmp_path / "quiet_cli.py"
+    script.write_text(
+        "import sys, time\nfrom pathlib import Path\n"
+        f"time.sleep({delay})\n"
+        "Path(sys.argv[sys.argv.index('--output-last-message') + 1]).write_text('complete draft')\n"
+    )
+    adapter = CodexTextAdapter(default_timeout_s=timeout)
+    monkeypatch.setattr(adapter, "_build_command", lambda model: [sys.executable, str(script)])
+    prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
+    payload = adapter.invoke(prepared)
+    assert payload["verdict"] == verdict
+    if verdict == "complete":
+        assert payload["output"] == "complete draft"
+    else:
+        assert payload["fields"]["exit_code"] == _subprocess.TIMEOUT_KILL_EXIT
 
 
 def test_invoke_prefers_output_last_message_over_banner_stdout(
@@ -343,11 +379,11 @@ def test_invoke_prefers_output_last_message_over_banner_stdout(
 def test_invoke_returns_complete_verdict_on_zero_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(
-        codex_text_mod,
-        "run_session",
-        lambda cmd, cwd, env, timeout, silent, **kw: ("done.", 0),
-    )
+    def fake_run_session(cmd, *args, **kwargs):
+        Path(cmd[cmd.index("--output-last-message") + 1]).write_text("done.")
+        return "diagnostic output", 0
+
+    monkeypatch.setattr(codex_text_mod, "run_session", fake_run_session)
     monkeypatch.setattr(
         codex_text_mod,
         "write_log",

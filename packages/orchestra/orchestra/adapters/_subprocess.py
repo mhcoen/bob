@@ -921,6 +921,7 @@ def run_session(
     *,
     silent: bool = False,
     stdin_bytes: bytes | None = None,
+    idle_timeout_s: float | None = None,
 ) -> tuple[str, int]:
     """Run ``cmd`` in ``cwd``, stream output, return ``(output, exit_code)``.
 
@@ -961,12 +962,19 @@ def run_session(
     truncate a session. Callers converting a millisecond budget must
     go through ``timeout_s_from_ms``, which floors any explicit cap at
     1s.
+
+    ``idle_timeout_s`` overrides the stream-inactivity limit for this call.
+    The default uses ``IDLE_TIMEOUT_S``. Clients with long silent responses
+    can set it to their total timeout; the wall-clock cap still applies.
     """
     if timeout is not None and timeout <= 0:
         raise ValueError(
             f"timeout must be a positive number of seconds or None, got {timeout}; "
             "pass None to disable the wall-clock cap"
         )
+    idle_limit = IDLE_TIMEOUT_S if idle_timeout_s is None else idle_timeout_s
+    if idle_limit <= 0:
+        raise ValueError("idle_timeout_s must be positive")
     # Decode the prompt BEFORE spawning anything: a non-UTF-8 byte
     # raises here, in the caller's frame, while there is no child
     # process, watchdog, or pid file to leak. (Previously the decode
@@ -1088,12 +1096,12 @@ def run_session(
                     process.kill()
                 process.wait()
                 return _assemble(head_lines, tail_lines, dropped), TIMEOUT_KILL_EXIT
-            if (time.monotonic() - last_event_time) > IDLE_TIMEOUT_S:
+            if (time.monotonic() - last_event_time) > idle_limit:
                 if not silent:
                     elapsed_min = (time.monotonic() - last_event_time) / 60.0
                     print(
                         f"\n!!! No stream activity for {elapsed_min:.1f} min "
-                        f"(IDLE_TIMEOUT_S={IDLE_TIMEOUT_S:.0f}s). Killing session.",
+                        f"(idle timeout={idle_limit:.0f}s). Killing session.",
                         flush=True,
                     )
                 try:

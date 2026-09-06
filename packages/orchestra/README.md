@@ -120,6 +120,11 @@ complete document beginning at a message boundary. A prose prefix is preserved.
 Interrupting the subprocess wait loop terminates its child process group before
 removing the watchdog, so a stopped workflow does not leave the model CLI running.
 
+Codex text calls can remain silent while producing a long response. They use
+the configured total call limit for the inactivity timer too. Their response
+comes from the CLI's final-message file. A missing final message fails the call;
+diagnostic output stays in the local log and cannot become the next design draft.
+
 Third-party models are reached by pointing Claude Code at the
 provider's own Anthropic-compatible endpoint: the shipped bindings
 route Kimi to `api.moonshot.ai` with `MOONSHOT_API_KEY` and DeepSeek
