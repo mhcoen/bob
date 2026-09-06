@@ -106,5 +106,5 @@ Contract: design/verified-example.md. The harness composes production persistenc
 
 - [x] T-000045: Define the independent CLI requirement and oracle boundary; implement a one-attempt reference harness with exact-candidate evidence and adversarial editors. <!-- created_at: 2026-09-06T03:50:51.694398Z --> <!-- completed_at: 2026-09-06T04:01:06Z -->
 - [x] T-000046: Exercise process interruption after commit and explicit reconciliation without repeating the edit; preserve plan, receipt, and ledger evidence. <!-- created_at: 2026-09-06T03:50:51.694398Z --> <!-- completed_at: 2026-09-06T04:01:06Z -->
-- [ ] T-000047: Document and gate the example in CI, including an opt-in external editor protocol; validate locally and verify hosted checks. <!-- created_at: 2026-09-06T03:50:51.694398Z -->
+- [x] T-000047: Document and gate the example in CI, including an opt-in external editor protocol; validate locally and verify hosted checks. <!-- created_at: 2026-09-06T03:50:51.694398Z --> <!-- completed_at: 2026-09-06T04:03:13Z -->
 ## Bugs

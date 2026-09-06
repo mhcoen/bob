@@ -530,5 +530,11 @@ Local validation:
 The external-editor JSON protocol is opt-in and tested with a deterministic
 executable; no live provider was invoked. The example has finite behavioral
 coverage, no hostile-code sandbox, and supports reconciliation at one explicit
-boundary. These limits are documented in the walkthrough. Hosted validation of
-this slice is pending the implementation push.
+boundary. These limits are documented in the walkthrough.
+
+Hosted validation on implementation commit `55812bab` passed all five jobs in
+[run 34010439016](https://github.com/mhcoen/bob/actions/runs/34010439016): all four
+installed-wheel demonstrations passed and uploaded evidence, and the macOS
+workspace suite passed 7,062 tests with 136 skipped and nine existing warnings.
+Tasks `T-000045`–`T-000047` are complete within the documented reference-harness
+scope. Slice D is next.
