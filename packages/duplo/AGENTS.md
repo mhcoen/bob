@@ -339,7 +339,9 @@ detects new files and appends tasks for anything missing.
   `save_code_examples()` stores extracted code examples
   in duplo.json. `save_examples()` saves each code example as a
   separate JSON file in `.duplo/examples/<index>_<slug>.json` for
-  review and editing. `load_examples()` reads examples back from
+  review and editing. Replacement stages a new directory and retains the old
+  generation under `.duplo/operations/`. `load_examples()` takes the operation
+  lock and refuses unresolved publication before reading examples back from
   `.duplo/examples/`, falling back to duplo.json for backward
   compatibility. `EXAMPLES_DIR` constant (`.duplo/examples`).
   `save_doc_structures()` stores extracted doc structures.
@@ -362,7 +364,10 @@ detects new files and appends tasks for anything missing.
   `.duplo/references/` and saves their descriptions to duplo.json.
   `move_references()` moves processed reference files (images, PDFs,
   text files) into `.duplo/references/` to keep the project directory
-  clean. `REFERENCES_DIR` constant (`.duplo/references`).
+  clean. Moves and accepted-frame copies stage content first, retain source
+  and overwritten-destination backups, and leave recovery receipts on failure.
+  Frame operations also retain prior `duplo.json` bytes.
+  `REFERENCES_DIR` constant (`.duplo/references`).
 
 - `roadmap.py`: Generates a phased build roadmap via ``Codex -p``.
   `generate_roadmap()` produces a JSON array of phases (phase number,
@@ -502,6 +507,15 @@ detects new files and appends tasks for anything missing.
   longer calls McLoop directly. The user runs McLoop separately
   after duplo generates the plan.
 
+- `file_ops.py`: Owns recoverable example-directory replacement and reference
+  publication. Cooperating pipelines and public file operations share a
+  nonblocking POSIX ownership lock. Versioned receipts under `.duplo/operations/`
+  distinguish pending publication from completed operations; original files and
+  prior example directories are retained. `duplo recover` (dispatched by
+  `main.py` before logging) prints read-only JSON; explicit acknowledgement keeps
+  backups and records an operator explanation without replaying file operations.
+  Missing/corrupt receipts and unsupported symlink/directory entries are refused.
+
 - `state.py`: Owns versioned `duplo.json` and processing-manifest persistence.
   `read_state()` validates without rewriting legacy files; `edit_state()` uses
   shared locked atomic JSON transactions and writes schema version 1.
@@ -514,7 +528,10 @@ detects new files and appends tasks for anything missing.
   and rejects intervening edits before saving. Scrape timestamps update only
   their field under a lock; the unchanged-content branch checks its snapshot.
   File-hash publication compares the observed checkpoint before replacing it.
-  These per-file operations do not make an entire pipeline run a transaction.
+  `_subsequent_run()` and `_fix_mode()` hold the file-operation owner and refuse
+  unresolved multi-file work before provider calls. `main.py` also holds that
+  owner around normal/fix dispatch. This does not make an entire pipeline run
+  a transaction, and `init`/`reauthor` have separate ownership contracts.
 
 ### Top-level files
 
@@ -542,6 +559,8 @@ test_investigator.py, test_spec_reader.py, test_roadmap.py.
 
 `test_product_state.py` covers identity corruption, legacy migration, and
 interrupted saves with preserved original bytes.
+`test_file_ops.py` covers staged examples/references, retained backups, abrupt
+process death, startup refusal, ownership, and read-only recovery reporting.
 `test_state.py` covers the main state and processing manifests, stale model
 results, interrupted updates, and cooperating process writers.
 

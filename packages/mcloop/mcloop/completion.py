@@ -11,6 +11,7 @@ import fcntl
 import json
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -22,6 +23,7 @@ from bob_tools.json_state import StateError, atomic_write_json, edit_json_object
 from mcloop.git_ops import run_git_bounded
 
 _STAGES = ("verified", "commit_returned", "plan_updated", "settled", "acknowledged")
+_EXECUTION: ContextVar[tuple[Path, Path] | None] = ContextVar("mcloop_execution", default=None)
 
 
 class RecoveryRequired(StateError):
@@ -80,12 +82,32 @@ def guarded_loop(function: Callable[..., Any]) -> Callable[..., Any]:
     def wrapped(checklist_path: Path, *args: Any, **kwargs: Any) -> Any:
         with project_owner(checklist_path.parent):
             require_reconciled(checklist_path.parent)
-            return function(checklist_path, *args, **kwargs)
+            token = _EXECUTION.set(None)
+            try:
+                result = function(checklist_path, *args, **kwargs)
+                execution = _EXECUTION.get()
+                if execution is not None:
+                    with edit_json_object(execution[1], validate=_validate) as data:
+                        data["stage"] = "returned"
+                        data["observations"].append(
+                            {
+                                "stage": "returned",
+                                "timestamp": _now(),
+                                "outcome": str(getattr(result, "status", "returned")),
+                                **_snapshot(execution[0]),
+                            }
+                        )
+                return result
+            finally:
+                _EXECUTION.reset(token)
 
     return wrapped
 
 
 def _validate(data: dict[str, Any]) -> None:
+    if type(data.get("schema_version")) is int and data["schema_version"] == 2:
+        _validate_execution(data)
+        return
     if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
         raise StateError("Unsupported completion receipt version; preserve the receipt.")
     for key in (
@@ -151,13 +173,16 @@ def pending_receipts(project_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
         _validate(data)
         if data["id"] != path.stem:
             raise StateError(f"Completion identity does not match {path}; preserve the receipt.")
-        if data["stage"] not in ("settled", "acknowledged"):
+        if data["stage"] not in ("settled", "acknowledged", "returned"):
             pending.append((path, data))
     return pending
 
 
-def require_reconciled(project_dir: Path) -> None:
+def require_reconciled(project_dir: Path, *, allow_active_run: bool = False) -> None:
     pending = pending_receipts(project_dir)
+    execution = _EXECUTION.get()
+    if allow_active_run and execution is not None and execution[0] == project_dir.resolve():
+        pending = [(p, d) for p, d in pending if p.resolve() != execution[1]]
     if pending:
         raise RecoveryRequired(
             f"Unresolved completion {pending[0][1]['id']} at {pending[0][0]}. "
@@ -180,6 +205,103 @@ def _snapshot(project_dir: Path) -> dict[str, Any]:
     }
 
 
+def _validate_execution(data: dict[str, Any]) -> None:
+    for key in ("id", "stage", "created_at", "plan_path", "plan_before"):
+        if not isinstance(data.get(key), str):
+            raise StateError(f"Invalid execution receipt {key}; preserve the receipt.")
+    if data["stage"] not in ("active", "returned", "acknowledged"):
+        raise StateError("Invalid execution receipt stage; preserve the receipt.")
+    observations = data.get("observations")
+    if (
+        not isinstance(observations, list)
+        or not observations
+        or any(
+            not isinstance(item, dict)
+            or not isinstance(item.get("stage"), str)
+            or not isinstance(item.get("timestamp"), str)
+            for item in observations
+        )
+    ):
+        raise StateError("Invalid execution observations; preserve the receipt.")
+    if observations[0]["stage"] != "started":
+        raise StateError("Execution receipt lacks its starting observation.")
+    if data["stage"] == "returned" and observations[-1]["stage"] != "returned":
+        raise StateError("Execution receipt lacks its return observation.")
+    if data["stage"] == "acknowledged":
+        resolution = data.get("resolution")
+        if (
+            not isinstance(resolution, dict)
+            or not isinstance(resolution.get("reason"), str)
+            or not resolution["reason"].strip()
+        ):
+            raise StateError("Execution receipt lacks explicit reconciliation.")
+
+
+def start_execution(plan_path: Path, *, allow_missing_plan: bool = False) -> None:
+    """Publish before the bare loop's first mutation, after read-only preflight."""
+    project_dir = plan_path.parent.resolve()
+    if _EXECUTION.get() is not None:
+        raise RecoveryRequired("An execution receipt is already active.")
+    require_reconciled(project_dir)
+    try:
+        plan_before = plan_path.read_text()
+    except FileNotFoundError:
+        if not allow_missing_plan:
+            raise
+        plan_before = ""
+    identity = uuid4().hex
+    path = _prepare_directory(project_dir) / f"{identity}.json"
+    data = {
+        "schema_version": 2,
+        "id": identity,
+        "stage": "active",
+        "created_at": _now(),
+        "plan_path": str(plan_path.resolve()),
+        "plan_before": plan_before,
+        "observations": [{"stage": "started", "timestamp": _now(), **_snapshot(project_dir)}],
+    }
+    _validate(data)
+    atomic_write_json(path, data)
+    _EXECUTION.set((project_dir, path.resolve()))
+
+
+def run_owned_command(
+    plan_path: Path, command: Callable[..., Any], *args: Any, **kwargs: Any
+) -> Any:
+    @guarded_loop
+    def invoke(path: Path) -> Any:
+        start_execution(path, allow_missing_plan=True)
+        execution_event(
+            path.parent,
+            "command_started",
+            command=getattr(command, "__name__", type(command).__name__),
+        )
+        return command(*args, **kwargs)
+
+    return invoke(plan_path)
+
+
+def execution_event(project_dir: Path, stage: str, **evidence: Any) -> None:
+    execution = _EXECUTION.get()
+    if execution is None or execution[0] != project_dir.resolve():
+        return
+    with edit_json_object(execution[1], validate=_validate) as data:
+        if data["stage"] != "active":
+            raise RecoveryRequired("Execution receipt is no longer active.")
+        data["observations"].append({"stage": stage, "timestamp": _now(), **evidence})
+
+
+@contextmanager
+def execution_operation(project_dir: Path, operation: str) -> Iterator[None]:
+    execution = _EXECUTION.get()
+    if execution is None or execution[0] != project_dir.resolve():
+        yield
+        return
+    execution_event(project_dir, f"{operation}_started", **_snapshot(project_dir))
+    yield
+    execution_event(project_dir, f"{operation}_returned", **_snapshot(project_dir))
+
+
 class Completion:
     def __init__(self, project_dir: Path, path: Path):
         self.project_dir = project_dir
@@ -199,7 +321,7 @@ class Completion:
     ) -> Completion:
         # Called while the bare loop owns the project, after verification and
         # before invoking Git. Direct callers must hold project_owner too.
-        require_reconciled(project_dir)
+        require_reconciled(project_dir, allow_active_run=True)
         identity = uuid4().hex
         path = _prepare_directory(project_dir) / f"{identity}.json"
         data = {

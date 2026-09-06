@@ -19,6 +19,7 @@ from duplo.state import read_state, edit_state
 from bob_tools.json_state import StateConflictError
 
 import argparse
+from duplo.file_ops import owned_pipeline
 import dataclasses
 import hashlib
 import re
@@ -749,6 +750,7 @@ def _add_bug_tasks_to_plan(plan_path: Path, entries: list[tuple[str, str]]) -> i
     return writes
 
 
+@owned_pipeline
 def _fix_mode(args: argparse.Namespace) -> None:
     """Report bugs and append fix tasks to PLAN.md without phase changes.
 
@@ -1662,6 +1664,7 @@ def _enforce_plan_sanity_gate(spec) -> None:
         sys.exit(1)
 
 
+@owned_pipeline
 def _subsequent_run() -> None:
     """Handle a subsequent duplo run.
 

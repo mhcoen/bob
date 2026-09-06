@@ -140,10 +140,14 @@ def test_real_loop_interruption_blocks_restart_without_replay(project, boundary,
             stop_after_one=True,
         )
 
-    receipt_path, receipt = pending_receipts(project)[0]
+    receipt_path, receipt = next(
+        (p, d) for p, d in pending_receipts(project) if d["schema_version"] == 1
+    )
     original_bytes = receipt_path.read_bytes()
     report = recovery_report(project)
-    assert report["pending"][0]["receipt"]["tasks"][0]["id"] == "T-000001"
+    completion_report = next(r for r in report["pending"] if r["receipt"]["schema_version"] == 1)
+    assert completion_report["receipt"]["tasks"][0]["id"] == "T-000001"
+    assert any(r["receipt"]["schema_version"] == 2 for r in report["pending"])
     assert report["current_git"]["head"]["stdout"].strip() == git(project, "rev-parse", "HEAD")
     assert (git(project, "rev-parse", "HEAD") == original_head) == (boundary == "before_commit")
     assert parse(plan)[0].checked == (boundary in ("after_plan", "after_ledger"))
@@ -348,7 +352,7 @@ def test_successful_loop_links_ledger_event_to_receipt(project):
     assert status.ok
     require_reconciled(project)
     receipts = list((project / ".mcloop" / "completions").glob("*.json"))
-    data = read_json_object(receipts[0])
+    data = next(d for p in receipts if (d := read_json_object(p))["schema_version"] == 1)
     events = storage.read_all()
     assert data["observations"][-1]["ledger_event_ids"] == [str(events[0].event_id)]
     assert data["observations"][-1]["ledger_run_id"] == events[0].run_id

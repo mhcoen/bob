@@ -512,12 +512,37 @@ Malformed, unsupported, or unreadable receipts are preserved and refused. Stop
 writers and repair or restore them from a known-good backup; acknowledgement is
 not a way around corrupt evidence. Never delete a live ownership lock.
 
-This is a conservative reconciliation gate, not an automatic resume transaction.
-It covers the window from successful receipt publication through verified commit
-settlement. Death before publication, editor-created/rate-limit checkpoints,
-no-diff completions, auto/user tasks, audit/maintain/investigation commands, and
-Duplo directory operations retain their earlier behavior. Successful receipts
-do not prove that a later push of the plan or post-run audit completed. See the
+Execution receipts now extend that gate before verification. After read-only
+preflight and before the first mutation, the bare loop writes a schema-version-2
+run record in the same directory. Task selection, editor attempts, and checkpoint
+boundaries append observations. It covers no-diff completions, auto/user tasks,
+rate/session-limit checkpoints, and post-run work as part of that run. Abrupt
+exit leaves an active receipt even if no signal handler or summary ran. Startup
+refuses it before checkpointing or launching another editor.
+
+Normal coordinator return records `returned` with its outcome, including failure;
+that means the coordinator handled its exit, not that every task succeeded.
+Unhandled errors, signals, and abrupt exits retain the active record. Single-task
+completion receipts remain separate: an interrupted run can require reconciling
+both IDs. `mcloop recover` reports both kinds, and each pending ID requires an
+explicit acknowledgement. Older McLoop versions reject the new execution schema.
+
+The `audit`, `maintain`, and `investigate` CLI commands share the ownership and
+execution gate. Maintenance records its input and current invariant;
+investigations record worktree paths and child-launch boundaries. Stop surviving
+child/worktree processes before acknowledgement. A command that exits abnormally,
+including a nonzero `SystemExit`, conservatively requires reconciliation. Direct
+library calls and other utility commands are outside this CLI ownership contract.
+
+Checkpoint status/staging/commit failures now propagate. McLoop treats a
+checkpoint as a no-op only after successfully observing an empty staged diff;
+a failed Git command is not interpreted as “nothing to commit.” Existing
+in-process retries of explicitly handled model/check failures remain supported.
+A restart after interruption is a separate decision requiring inspection.
+
+This is a conservative reconciliation gate, not automatic replay or rollback.
+The record does not bind check output cryptographically to a candidate, coordinate
+external writers, or prove the outcome of an unrecorded external effect. See the
 [workspace persistence contract](../../design/persistence.md) for failure windows.
 
 ### Model fallback

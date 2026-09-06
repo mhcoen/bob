@@ -220,16 +220,24 @@ def _sanitize_commit_msg(text: str, max_len: int = 200) -> str:
     return cleaned
 
 
-def _checkpoint(
+def _checkpoint(project_dir: Path, next_task: str = "", verbose: bool = False) -> None:
+    from mcloop.completion import execution_operation
+
+    with execution_operation(project_dir, "checkpoint"):
+        _checkpoint_impl(project_dir, next_task=next_task, verbose=verbose)
+
+
+def _checkpoint_impl(
     project_dir: Path,
     next_task: str = "",
     verbose: bool = False,
 ) -> None:
     """Stage and commit all changes as a checkpoint.
 
-    Stages both tracked modifications and untracked files
-    (except logs/ and .mcloop/) so orphaned files from
-    failed runs get committed before the next task.
+    Uses the shared staging filter for tracked modifications and untracked
+    files. The recovery receipt directory ignores its own contents. A failed
+    status, staging, diff, or commit command stops the operation; only a
+    successful empty staged diff is a no-op.
     """
     if not _has_git_repo(project_dir):
         print(
@@ -242,7 +250,9 @@ def _checkpoint(
         cwd=project_dir,
         label="checkpoint status",
     )
-    if result.returncode != 0 or not result.stdout.strip():
+    if result.returncode != 0:
+        raise RuntimeError(f"Checkpoint status failed: {result.stderr}")
+    if not result.stdout.strip():
         if verbose:
             print(formatting.system_msg("No pending changes to commit."), flush=True)
         return
@@ -252,6 +262,16 @@ def _checkpoint(
     if next_task:
         msg += f" (next: {_sanitize_commit_msg(next_task)})"
     _stage_safe(project_dir, label="checkpoint")
+    staged = _git(
+        ["git", "diff", "--cached", "--quiet"],
+        cwd=project_dir,
+        label="checkpoint staged diff",
+        silent=True,
+    )
+    if staged.returncode == 0:
+        return
+    if staged.returncode != 1:
+        raise RuntimeError(f"Checkpoint staged diff failed: {staged.stderr}")
     result = _git(
         ["git", "commit", "-m", msg],
         cwd=project_dir,
@@ -259,10 +279,10 @@ def _checkpoint(
         silent=True,
     )
     if result.returncode != 0:
-        # Nothing to commit is normal — status can report changes
-        # that add -u doesn't stage (e.g. untracked files that were
-        # skipped by the sensitive-file filter). Not an error.
-        pass
+        raise RuntimeError(
+            f"Checkpoint commit failed (exit {result.returncode}): {result.stderr}. "
+            "Inspect Git and run `mcloop recover` before retrying."
+        )
 
 
 def _push_or_die(project_dir: Path) -> None:
@@ -298,19 +318,25 @@ def _push_or_die(project_dir: Path) -> None:
 
 def _stage_safe(project_dir: Path, *, label: str = "") -> None:
     """Stage all changes while skipping sensitive files."""
-    _git(["git", "add", "-u"], cwd=project_dir, label=f"{label} add -u")
+    staged = _git(["git", "add", "-u"], cwd=project_dir, label=f"{label} add -u")
+    if staged.returncode != 0:
+        raise RuntimeError(f"Git staging failed: {staged.stderr}")
     untracked = _git(
         ["git", "ls-files", "--others", "--exclude-standard"],
         cwd=project_dir,
         label=f"{label} ls untracked",
     )
+    if untracked.returncode != 0:
+        raise RuntimeError(f"Git untracked-file lookup failed: {untracked.stderr}")
     for f in untracked.stdout.strip().splitlines():
         f = f.strip()
         if not f:
             continue
         if any(s in f for s in _SENSITIVE_PATTERNS):
             continue
-        _git(["git", "add", "--", f], cwd=project_dir, label=f"{label} add {f}")
+        staged = _git(["git", "add", "--", f], cwd=project_dir, label=f"{label} add {f}")
+        if staged.returncode != 0:
+            raise RuntimeError(f"Git staging failed for {f}: {staged.stderr}")
 
 
 def _commit(project_dir: Path, task_text: str, *, raw_message: bool = False) -> str:

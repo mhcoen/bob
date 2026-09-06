@@ -223,6 +223,22 @@ def main() -> None:
 
     Subsequent runs: resume interrupted phases or advance to the next one.
     """
+    if len(sys.argv) > 1 and sys.argv[1] == "recover":
+        from duplo.file_ops import recover
+
+        recovery_parser = argparse.ArgumentParser(prog="duplo recover")
+        recovery_parser.add_argument("--acknowledge", metavar="ID")
+        recovery_parser.add_argument("--reason")
+        recovery_args = recovery_parser.parse_args(sys.argv[2:])
+        from bob_tools.json_state import StateError
+
+        try:
+            recover(Path.cwd(), recovery_args.acknowledge, recovery_args.reason)
+        except (StateError, OSError) as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(6)
+        return
+
     # Establish the per-run log directory (.duplo/logs/<run_id>/) at process
     # start so every LLM call this process makes is recorded.
     call_log.start_run()
@@ -457,6 +473,8 @@ def main() -> None:
                 "                        EVENT_ID is the threshold_crossed event id.\n"
                 "                        Flags: --plan PATH, --ledger-dir PATH,\n"
                 "                        --out PATH, --council-config PATH.\n"
+                "  recover               Inspect interrupted file operations.\n"
+                "                        Flags: --acknowledge ID --reason TEXT.\n"
                 "  logs [RUN_ID]         Summarize a run's LLM-call log (per call_site:\n"
                 "                        model, path, duration, tokens; with a total).\n"
                 "                        Flags: --dir PATH.\n"
@@ -520,31 +538,46 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTSTP, _handle_signal)
 
-    duplo_path = Path(_DUPLO_JSON)
+    from duplo.file_ops import project_owner, require_reconciled
 
-    if args.command in ("fix", "investigate"):
-        if not duplo_path.exists():
-            print("No duplo project found. Run duplo first to initialize.")
-            sys.exit(1)
-        _pipeline._fix_mode(args)
-    else:
+    require_reconciled(Path.cwd())
+
+    # A fresh directory remains a read-only invitation to initialize.
+    if (
+        args.command not in ("fix", "investigate")
+        and not Path(_DUPLO_JSON).exists()
+        and not Path("SPEC.md").exists()
+    ):
         _check_migration(Path.cwd())
-        spec_path = Path.cwd() / "SPEC.md"
-        if spec_path.exists():
-            if args.url:
-                print("Project already initialized. URL argument ignored.")
-            _pipeline._subsequent_run()
-        elif not duplo_path.exists():
-            print("No SPEC.md found. Run `duplo init` first to create SPEC.md.")
-            sys.exit(0)
+        print("No SPEC.md found. Run `duplo init` first to create SPEC.md.")
+        sys.exit(0)
+
+    with project_owner(Path.cwd()):
+        duplo_path = Path(_DUPLO_JSON)
+
+        if args.command in ("fix", "investigate"):
+            if not duplo_path.exists():
+                print("No duplo project found. Run duplo first to initialize.")
+                sys.exit(1)
+            _pipeline._fix_mode(args)
         else:
-            # duplo.json exists but SPEC.md does not - migration check
-            # should have caught this. Defensive fallback in case the
-            # migration signals ever diverge.
-            print(
-                "No SPEC.md found. Run `duplo init` first to create SPEC.md.",
-                file=sys.stderr,
-            )
-            sys.exit(1)
+            _check_migration(Path.cwd())
+            spec_path = Path.cwd() / "SPEC.md"
+            if spec_path.exists():
+                if args.url:
+                    print("Project already initialized. URL argument ignored.")
+                _pipeline._subsequent_run()
+            elif not duplo_path.exists():
+                print("No SPEC.md found. Run `duplo init` first to create SPEC.md.")
+                sys.exit(0)
+            else:
+                # duplo.json exists but SPEC.md does not - migration check
+                # should have caught this. Defensive fallback in case the
+                # migration signals ever diverge.
+                print(
+                    "No SPEC.md found. Run `duplo init` first to create SPEC.md.",
+                    file=sys.stderr,
+                )
+                sys.exit(1)
 
     diagnostics_print_summary()

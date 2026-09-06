@@ -102,7 +102,8 @@ def test_command_exit_acceptance_runs_without_shell_and_passes() -> None:
     real_run = subprocess.run
 
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, kwargs))
+        if args[0] != "git":
+            calls.append((args, kwargs))
         return real_run(args, **kwargs)
 
     with (
@@ -140,7 +141,8 @@ def test_command_exit_acceptance_fails_on_nonzero_exit() -> None:
     real_run = subprocess.run
 
     def fake_run(args: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-        calls.append((args, kwargs))
+        if args[0] != "git":
+            calls.append((args, kwargs))
         return real_run(args, **kwargs)
 
     with (

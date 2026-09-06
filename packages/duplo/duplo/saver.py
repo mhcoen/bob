@@ -7,12 +7,12 @@ from copy import deepcopy
 import hashlib
 import json
 import re
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
 from bob_tools.json_state import StateError, read_json_object, update_json_object
 
+from duplo.file_ops import replace_examples, publish_references, project_owner
 from duplo.diagnostics import record_failure
 from duplo.state import edit_state, read_state, edit_manifest, read_manifest
 from duplo.parsing import strip_fences
@@ -867,9 +867,10 @@ def save_examples(
 
     Each file contains ``input``, ``expected_output``, ``source_url``, and
     ``language`` keys.  Files are named ``000_slug.json`` where the slug is
-    derived from the first line of the input.  Any existing files in the
-    directory are removed first so the directory always reflects the current
-    set of examples.
+    derived from the first line of the input. New files are staged before
+    publication; the previous directory is retained under .duplo/operations.
+    Non-JSON operator files are preserved. Interrupted publication requires
+    explicit reconciliation before loading or saving examples.
 
     Args:
         examples: List of :class:`CodeExample` objects to store.
@@ -878,22 +879,17 @@ def save_examples(
     Returns:
         Path to the ``examples`` directory.
     """
-    examples_dir = Path(target_dir) / EXAMPLES_DIR
-    if examples_dir.exists():
-        for existing in examples_dir.iterdir():
-            if existing.suffix == ".json":
-                existing.unlink()
-    else:
-        examples_dir.mkdir(parents=True, exist_ok=True)
-    for idx, ex in enumerate(examples):
-        filename = _example_filename(idx, ex)
-        filepath = examples_dir / filename
-        data = dataclasses.asdict(ex)
-        filepath.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return examples_dir
+    files = {_example_filename(i, ex): dataclasses.asdict(ex) for i, ex in enumerate(examples)}
+    return replace_examples(target_dir, files)
 
 
-def load_examples(
+def load_examples(*, target_dir: Path | str = ".") -> list[CodeExample]:
+    """Read examples under the operation lock, refusing unresolved publication."""
+    with project_owner(target_dir):
+        return _load_examples(target_dir=target_dir)
+
+
+def _load_examples(
     *,
     target_dir: Path | str = ".",
 ) -> list[CodeExample]:
@@ -1170,30 +1166,18 @@ def store_accepted_frames(
     Returns:
         List of destination paths for copied frames.
     """
-    refs_dir = Path(target_dir) / REFERENCES_DIR
-    refs_dir.mkdir(parents=True, exist_ok=True)
-
-    copied: list[Path] = []
-    json_entries: list[dict] = []
-    for entry in frame_descriptions:
-        src = Path(entry["path"])
-        if not src.exists():
-            continue
-        dest = refs_dir / entry["filename"]
-        shutil.copy2(src, dest)
-        copied.append(dest)
-        json_entries.append(
-            {
-                "filename": entry["filename"],
-                "state": entry["state"],
-                "detail": entry["detail"],
-            }
-        )
-
-    if json_entries:
-        save_frame_descriptions(json_entries, target_dir=target_dir)
-
-    return copied
+    # Validate authoritative state before publishing any frames.
+    read_state((Path(target_dir) / DUPLO_JSON).absolute())
+    entries = [entry for entry in frame_descriptions if Path(entry["path"]).exists()]
+    json_entries = [
+        {key: entry[key] for key in ("filename", "state", "detail")} for entry in entries
+    ]
+    return publish_references(
+        target_dir,
+        [(Path(entry["path"]), entry["filename"]) for entry in entries],
+        move=False,
+        after_publish=lambda: save_frame_descriptions(json_entries, target_dir=target_dir),
+    )
 
 
 def load_processed_videos(
@@ -1239,18 +1223,11 @@ def move_references(
 
     Each file in *paths* is moved (renamed) into the references
     directory, preserving the original filename.  If a file with the
-    same name already exists, it is overwritten.  Files that no longer
-    exist are silently skipped.
+    same name already exists, its prior bytes are retained in the operation
+    archive before replacement. Sources are removed only after publication;
+    copies of the original sources remain in the archive. Files that no longer
+    exist are skipped; ambiguous operations require `duplo recover`.
 
     Returns the list of destination paths for files that were moved.
     """
-    refs_dir = Path(target_dir) / REFERENCES_DIR
-    refs_dir.mkdir(parents=True, exist_ok=True)
-    moved: list[Path] = []
-    for src in paths:
-        if not src.exists():
-            continue
-        dest = refs_dir / src.name
-        shutil.move(str(src), dest)
-        moved.append(dest)
-    return moved
+    return publish_references(target_dir, [(src, src.name) for src in paths], move=True)

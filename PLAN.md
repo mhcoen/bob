@@ -91,4 +91,12 @@ Journal verified commit transitions and require explicit reconciliation of ambig
 - [x] T-000039: Add durable completion receipts and a read-only recovery report with explicit operator acknowledgement. Preserve unresolved evidence and stop bare-loop startup before retries or provider calls. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
 - [x] T-000040: Journal verified single-task and batch commit paths through Git, plan advancement, and ledger settlement. Stop ambiguous batch commit failures instead of automatically replaying them. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
 - [x] T-000041: Inject interruptions at completion boundaries, verify restart refusal and evidence preservation, and document supported recovery and remaining lifecycle gaps. <!-- created_at: 2026-09-05T08:08:31Z --> <!-- completed_at: 2026-09-05T08:21:01Z -->
+## Phase 10: Execution and multi-file recovery (Slice B)
+<!-- phase_id: phase_010 -->
+
+Extend conservative recovery to pre-verification execution and preserve originals during multi-file publication.
+
+- [x] T-000042: Extend McLoop recovery evidence across task execution, retries, checkpoint commits, and other bare-loop mutations. Preserve ambiguous run outcomes before scheduling on restart. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
+- [x] T-000043: Stage Duplo example replacements and reference moves with retained prior files and explicit recovery evidence; serialize pipeline ownership and refuse unresolved multi-file operations. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
+- [x] T-000044: Inject task, checkpoint, directory publication, and process-interruption failures; document recovery procedures and validate locally plus hosted CI. <!-- created_at: 2026-09-05T14:59:05Z --> <!-- completed_at: 2026-09-06T03:34:32Z -->
 ## Bugs

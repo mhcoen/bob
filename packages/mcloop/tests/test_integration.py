@@ -1362,18 +1362,23 @@ def test_checkpoint_commits_when_dirty(mock_run, tmp_path):
     dirty_result = MagicMock(returncode=0)
     dirty_result.stdout = "src/foo.py\n"
     dirty_result.stderr = ""
-    mock_run.return_value = dirty_result
+    mock_run.side_effect = lambda args, **kwargs: (
+        MagicMock(returncode=1, stdout="", stderr="")
+        if args[:3] == ["git", "diff", "--cached"]
+        else dirty_result
+    )
 
     _checkpoint(tmp_path)
 
     from mcloop.git_ops import _GIT_TIMEOUT_S
 
-    assert mock_run.call_count == 5
+    assert mock_run.call_count == 6
     assert [c.args[0] for c in mock_run.call_args_list] == [
         ["git", "status", "--porcelain"],
         ["git", "add", "-u"],
         ["git", "ls-files", "--others", "--exclude-standard"],
         ["git", "add", "--", "src/foo.py"],
+        ["git", "diff", "--cached", "--quiet"],
         ["git", "commit", "-m", "mcloop: checkpoint"],
     ]
     # Every git call is bounded and non-interactive so a hung remote or a

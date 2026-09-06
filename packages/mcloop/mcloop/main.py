@@ -65,9 +65,12 @@ from mcloop.claude_md_sync import handle_sync, reconcile_pending
 from mcloop.completion import (
     Completion,
     RecoveryRequired,
+    execution_event,
     guarded_loop,
     recovery_command,
     require_reconciled,
+    run_owned_command,
+    start_execution,
 )
 from mcloop.config import format_reviewer_status, load_reviewer_config
 from mcloop.conftest_guard import ensure_conftest_guard
@@ -806,7 +809,9 @@ def _main() -> None:
         return
 
     if args.command == "maintain":
-        _cmd_maintain(
+        run_owned_command(
+            checklist_path,
+            _cmd_maintain,
             checklist_path.parent,
             cli=args.cli,
             model=args.model,
@@ -823,11 +828,11 @@ def _main() -> None:
         return
 
     if args.command == "audit":
-        _cmd_audit(checklist_path, model=args.model)
+        run_owned_command(checklist_path, _cmd_audit, checklist_path, model=args.model)
         return
 
     if args.command == "investigate":
-        _cmd_investigate(args, checklist_path)
+        run_owned_command(checklist_path, _cmd_investigate, args, checklist_path)
         return
 
     if args.dry_run:
@@ -898,7 +903,7 @@ def _run_batch(
     Returns ("success", ""), ("failed", error_tail), or
     ("limited", output_tail).
     """
-    require_reconciled(project_dir)
+    require_reconciled(project_dir, allow_active_run=True)
     n = len(batch_children)
     labels = []
     for child in batch_children:
@@ -961,6 +966,11 @@ def _run_batch(
             eliminated.append(e)
 
     task_start = time.monotonic()
+    execution_event(
+        project_dir,
+        "batch_attempt_started",
+        task_ids=[child.task_id or "" for child in batch_children],
+    )
     result = run_task(
         combined_text,
         active_cli,
@@ -1301,6 +1311,7 @@ def run_loop(
     primary_model = primary_entry.model
 
     description = parse_description(plan_path)
+    start_execution(plan_path)
 
     # --retry: flip every [!] back to [ ] in the active files so
     # previously-failed tasks are eligible again this run. Runs before
@@ -1858,6 +1869,14 @@ def run_loop(
         if bug_only and task.stage != "Bugs":
             break
 
+        execution_event(
+            project_dir,
+            "task_selected",
+            task_id=task.task_id or "",
+            task_text=task.text,
+            plan_path=str(active_file),
+        )
+
         # If this is a parent with all children done, just check it off
         if task.children and all(c.checked for c in task.children):
             check_off(active_file, task)
@@ -2227,6 +2246,14 @@ def run_loop(
             limited_poll_cycles = 0
             while attempt < max_retries:
                 attempt += 1
+                execution_event(
+                    project_dir,
+                    "attempt_started",
+                    task_id=task.task_id or "",
+                    attempt=attempt,
+                    model=task_model,
+                    baseline=task_start_sha,
+                )
                 result = run_task(
                     task.text,
                     active_cli,

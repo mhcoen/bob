@@ -959,3 +959,60 @@ MIT. See [LICENSE](LICENSE).
 **Michael H. Coen**
 mhcoen@gmail.com | mhcoen@alum.mit.edu
 [@mhcoen](https://github.com/mhcoen)
+
+
+### Recovering file operations
+
+Example replacement and reference publication now retain originals in
+`.duplo/operations/<id>/`. New example files are staged together; the previous
+example directory is renamed to `before/` before the new directory is installed.
+Reference moves and accepted-frame copies preserve source copies and any
+previous destination bytes before publishing. Frame operations also preserve
+prior `duplo.json` bytes when it existed. Backups remain after success.
+
+A versioned `<id>.json` receipt is written before the first destructive action.
+If publication is interrupted, subsequent normal/fix pipelines and example
+readers stop instead of treating partial output as complete. A POSIX ownership
+lock serializes cooperating Duplo pipelines, file operations, and recovery
+acknowledgement. It does not coordinate older versions, external editors,
+McLoop, or Duplo's separate init/reauthor commands.
+
+Run `duplo recover` from the project directory for read-only JSON containing
+pending receipts, current paths, hashes, and retained backups. It makes no model
+calls and does not create a call log. Stop all writers before reconciliation:
+
+1. Preserve the operation directory. Compare staged/published files with the
+   backup paths and hashes in the receipt. A missing staged path can mean its
+   rename already succeeded, not that the operation never ran.
+2. For examples, either retain the complete new generation or restore the
+   retained `before/` directory after preserving any newer edits separately.
+   If the old directory was moved but the new one was not installed, the receipt
+   identifies both locations. Do not rerun extraction merely because the public
+   examples path is temporarily missing.
+3. For references, reconcile each destination and source independently. Source
+   backups remain even when the original source was already removed. Preserve
+   newer edits before restoring anything. For frames, also compare the recorded
+   prior `duplo.json` with current descriptions; restoring that whole JSON file
+   blindly can discard later unrelated state.
+4. After reviewing the actual files, record the decision with
+   `duplo recover --acknowledge <id> --reason "Describe the reconciliation"`.
+   This records the resolution and current evidence without moving files,
+   deleting backups, changing project state, or calling a model. Explicitly
+   resume the pipeline once the project is consistent.
+
+Malformed or unsupported receipts require repair or a known-good restore after
+writers stop; acknowledgement cannot bypass validation. Never unlink an active
+lock. Ordinary exceptions before receipt publication leave originals untouched
+and may leave unused staging files. Retained generations and source copies use
+additional disk space; remove them only after stopping writers and deciding they
+are no longer needed for recovery. Keep backups of these ignored directories
+separately from Git.
+
+This is per-operation reconciliation, not an automatic multi-file transaction
+or rollback of an entire extraction run. The local POSIX synchronization limits
+in [the persistence contract](../../design/persistence.md) still apply. Example
+publication refuses directory/symlink entries until their recursive preservation
+contract is defined; regular non-JSON files are retained. Reference destinations
+require unique simple filenames and regular files. Later external edits remain
+an unsupported concurrent writer, though source/destination hash changes seen
+before publication are refused.

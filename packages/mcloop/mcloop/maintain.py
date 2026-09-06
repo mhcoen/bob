@@ -249,10 +249,17 @@ def run_maintain(
     not stop the run. Returns a MaintainSummary with all results.
     """
     import mcloop.runner as _runner
+    from mcloop.completion import execution_event
 
     register_signal_handlers(_runner)
 
     project_dir = maintain_path.parent
+    execution_event(
+        project_dir,
+        "maintain_started",
+        maintain_path=str(maintain_path),
+        maintain_before=maintain_path.read_text(),
+    )
     log_dir = project_dir / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
@@ -282,6 +289,7 @@ def run_maintain(
     )
 
     for i, invariant_text in enumerate(invariants, 1):
+        execution_event(project_dir, "invariant_started", ordinal=i, text=invariant_text)
         print(
             formatting.task_header(str(i), invariant_text, cli),
             flush=True,

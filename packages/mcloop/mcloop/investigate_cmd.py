@@ -615,6 +615,8 @@ def _dispatch_auto_action(action: str, args: str) -> str:
 
 def _cmd_investigate(args, checklist_path: Path) -> None:
     """Handle the 'investigate' subcommand."""
+    from mcloop.completion import execution_event
+
     project_dir = checklist_path.parent
     stdin_text = ""
     if not sys.stdin.isatty():
@@ -638,12 +640,14 @@ def _cmd_investigate(args, checklist_path: Path) -> None:
 
     # Create or resume a git worktree for the investigation
     wt_description = ctx.user_description or "investigation"
+    execution_event(project_dir, "worktree_create_started", description=wt_description)
     try:
         wt_path, branch, resumed = worktree.create(wt_description, cwd=project_dir)
     except (ValueError, RuntimeError) as exc:
         print(f"Error creating worktree: {exc}", file=sys.stderr)
         sys.exit(1)
 
+    execution_event(project_dir, "worktree_created", worktree_path=str(wt_path), branch=branch)
     if resumed:
         print(f"Resuming investigation in {wt_path}", file=sys.stderr)
     else:
@@ -672,6 +676,12 @@ def _cmd_investigate(args, checklist_path: Path) -> None:
         cmd.extend(["--fallback-model", fallback_model])
 
     for verify_round in range(1, MAX_VERIFICATION_ROUNDS + 1):
+        execution_event(
+            project_dir,
+            "investigation_child_started",
+            worktree_path=str(wt_path),
+            verify_round=verify_round,
+        )
         print(f"Running mcloop in {wt_path} ...", file=sys.stderr)
         result = subprocess.run(cmd, cwd=str(wt_path))
 

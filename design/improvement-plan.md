@@ -1,11 +1,10 @@
 # Bob reliability and utility improvement plan
 
-Status: in progress, 2026-09-05. Slice A passed all five hosted CI jobs on
-`d4df6eee`. Slice B's first boundary covers persistence ownership, shared JSON
-updates, product identity recovery, and atomic run summaries. Main Duplo state
-and processing manifests are now migrated as the second boundary. Cross-system
-reconciliation now has a conservative gate for verified commit paths; other
-lifecycle paths remain pending.
+Status: in progress, 2026-09-05. Slice A and the initial Slice B persistence /
+explicit-reconciliation deliverables are implemented within the documented
+ownership and durability limits. The independently verified example (Slice C)
+is next. Automatic replay, cross-tool transactions, and cryptographic binding of
+check output to candidates are not implied by these reliability improvements.
 
 This records the repository review and turns its recommendations into bounded
 deliverables. It is a design document, not an executable McLoop queue. Promote
@@ -446,7 +445,54 @@ This boundary stops for explicit reconciliation; it does not automatically finis
 partially completed transactions. The existing batch path still emits no ledger
 events, and its receipt records that fact. No-diff completions, auto/user tasks,
 editor/rate-limit checkpoints, audit/maintain/investigation commands, and death
-before verified receipt publication retain earlier behavior. Extending attempt
-ownership to those paths and coordinating Duplo directory operations are the next
-Slice B work. Check output is not yet cryptographically bound to the candidate;
+before verified receipt publication retain earlier behavior. Those gaps are addressed for supported CLI/pipeline paths in the fourth
+boundary below. Check output is not yet cryptographically bound to the candidate;
 Slice C's independent acceptance record must address that separately.
+
+
+### Slice B fourth boundary: execution and multi-file operations (2026-09-05)
+
+The third boundary passed hosted CI on commit `282aa48e`:
+[run 33955029054](https://github.com/mhcoen/bob/actions/runs/33955029054), all five
+jobs passed; 7,014 tests passed, 136 skipped.
+
+Workspace tasks `T-000042`–`T-000044` extend the initial recovery contract:
+
+- McLoop writes a version-2 execution receipt before its first mutation and
+  observes task selection, attempts, and checkpoint entry/return. Abrupt exit
+  blocks restart even before verification, including editor-created commits,
+  no-diff completions, auto/user tasks, and rate/session-limit checkpoints.
+  Normal return records its outcome separately from successful task completion.
+- Audit/maintain/investigate CLI execution uses the same ownership and recovery
+  gate. Maintenance records its input/invariant; investigation records worktree
+  creation and child-launch paths. Checkpoint status, staging, diff, and commit
+  failures now stop instead of being treated as an empty checkpoint.
+- Duplo stages complete example generations, retains the prior directory, and
+  preserves regular non-JSON files. Reference publication retains both original
+  sources and overwritten destinations; frame operations retain prior state.
+  Normal/fix pipelines and example readers refuse unresolved operations.
+  `duplo recover` reports receipts and current paths/hashes read-only; explicit
+  acknowledgement retains the evidence and explanation without replay.
+
+Validation:
+
+- Activated workspace `python -m pytest -n 4 -q`: 7,061 passed, 125 skipped,
+  nine existing schema-smoke warnings.
+- 36 new regressions cover actual Git checkpoint interruptions, editor-created
+  commits, process death, CLI restart refusal, directory rename boundaries,
+  reference publication, changed sources, preserved originals, and recovery
+  reports/acknowledgements. Duplo's package mypy test and targeted McLoop
+  completion mypy passed; `.venv/bin/ruff check .` passed.
+- `python scripts/smoke_wheels.py --offline --work-dir
+  /private/tmp/bob-execution-operations-wheels` passed. Both installed recovery
+  commands ran outside the checkout without provider calls. Artifacts remain
+  in that directory.
+
+The [persistence contract](persistence.md) and package READMEs define operator
+reconciliation for every tested interruption window. Archives consume disk until
+an operator deliberately removes unneeded backups after stopping writers. Locks
+coordinate supported callers per tool; mixed McLoop/Duplo execution, older tools,
+external editors, direct library/utility paths, and complete extraction-run
+transactions remain unsupported. No automatic replay or acceptance attestation
+is claimed. Slice C is next: exercise the supported lifecycle end to end with
+an independently controlled oracle and deliberately incorrect candidates.

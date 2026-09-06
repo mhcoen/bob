@@ -2839,6 +2839,7 @@ def test_investigate_creates_worktree(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
         patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
     ):
@@ -2882,6 +2883,7 @@ def test_investigate_resumes_existing_worktree(tmp_path, capsys):
         patch("sys.stdin") as mock_stdin,
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
         patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
     ):
@@ -2918,6 +2920,7 @@ def test_investigate_no_description_uses_fallback(tmp_path):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3054,6 +3057,7 @@ def test_investigate_generates_plan_with_context(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3095,6 +3099,7 @@ def test_investigate_resume_does_not_overwrite_plan(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings") as mock_copy,
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3137,6 +3142,7 @@ def test_investigate_copies_settings_on_new(tmp_path, capsys):
         patch("sys.stdin") as mock_stdin,
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3175,6 +3181,7 @@ def test_investigate_runs_mcloop_with_no_audit(tmp_path):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3214,6 +3221,7 @@ def test_investigate_passes_model_to_subprocess(tmp_path):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result) as mock_run,
         patch("mcloop.investigate_cmd._investigation_passed"),
     ):
@@ -3248,6 +3256,7 @@ def test_investigate_propagates_nonzero_returncode(tmp_path):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._investigation_failed") as mock_failed,
         pytest.raises(SystemExit) as exc_info,
@@ -3281,6 +3290,7 @@ def test_investigate_verification_passes_calls_merge(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch("mcloop.investigate_cmd._launch_app_verification", return_value=None) as mock_verify,
         patch("mcloop.investigate_cmd._investigation_passed") as mock_passed,
@@ -3321,6 +3331,7 @@ def test_investigate_verification_fails_then_passes(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch(
             "mcloop.investigate_cmd._launch_app_verification",
@@ -3364,6 +3375,7 @@ def test_investigate_verification_exhausts_rounds(tmp_path, capsys):
         patch("mcloop.investigate_cmd.gather_bug_context", return_value=ctx),
         patch("mcloop.investigate_cmd.worktree.create") as mock_create,
         patch("mcloop.investigate_cmd._copy_project_settings"),
+        patch("mcloop.completion._snapshot", return_value={"head": None, "status": None}),
         patch("mcloop.investigate_cmd.subprocess.run", return_value=mock_result),
         patch(
             "mcloop.investigate_cmd._launch_app_verification",
@@ -5748,6 +5760,7 @@ def test_auto_wrap_push_failure(tmp_path, capsys):
     with (
         patch("mcloop.main.detect_run", return_value="python main.py"),
         patch("mcloop.main._git", side_effect=fake_git),
+        patch("mcloop.main._stage_safe"),
     ):
         _maybe_auto_wrap(tmp_path)
 
