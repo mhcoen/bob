@@ -19,6 +19,8 @@ the ``platform_addendum`` argument the planner would have received.
 
 from __future__ import annotations
 
+import pytest
+
 import dataclasses
 import json
 from unittest.mock import patch
@@ -144,3 +146,6 @@ class TestPlatformKnowledgeFlow:
         gitignore_lines = gitignore.read_text(encoding="utf-8").splitlines()
         assert ".build/" in gitignore_lines
         assert "*.app/" in gitignore_lines
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

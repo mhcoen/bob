@@ -1,0 +1,171 @@
+{
+  "type": "object",
+  "properties": {
+    "purpose": {
+      "type": "string",
+      "minLength": 1
+    },
+    "architecture": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_lifecycle": {
+      "type": "string",
+      "minLength": 1
+    },
+    "failure_behavior": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evolution": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verification": {
+      "type": "string",
+      "minLength": 1
+    },
+    "assumptions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 1
+    },
+    "decisions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^D-[0-9]{3}$"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "choice": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rationale": {
+            "type": "string",
+            "minLength": 1
+          },
+          "alternatives": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "option": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tradeoff": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "option",
+                "tradeoff"
+              ],
+              "additionalProperties": false
+            },
+            "minItems": 1
+          },
+          "consequences": {
+            "type": "string",
+            "minLength": 1
+          },
+          "reconsider_when": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "choice",
+          "rationale",
+          "alternatives",
+          "consequences",
+          "reconsider_when"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "coverage": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "requirement": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^D-[0-9]{3}$"
+            },
+            "minItems": 1
+          },
+          "explanation": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "requirement",
+          "decision_ids",
+          "explanation"
+        ],
+        "additionalProperties": false
+      },
+      "minItems": 1
+    },
+    "open_questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "minLength": 1
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "resolution": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "question",
+          "blocking",
+          "resolution"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "purpose",
+    "architecture",
+    "data_lifecycle",
+    "failure_behavior",
+    "evolution",
+    "verification",
+    "assumptions",
+    "decisions",
+    "coverage",
+    "open_questions"
+  ],
+  "additionalProperties": false
+}

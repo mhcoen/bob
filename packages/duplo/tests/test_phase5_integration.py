@@ -5795,3 +5795,6 @@ class TestCounterVtSubsequentRun:
         design_input = mocks["extract_design"].call_args[0][0]
         for item in design_input:
             assert isinstance(item, Path)
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

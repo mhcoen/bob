@@ -3,13 +3,29 @@
 Duplo duplicates apps. The user creates a project directory, drops
 in reference material (screenshots, PDFs, text files, URLs), and
 runs `duplo`. Duplo analyzes everything, identifies the product,
-extracts features and visual design, and generates a plan. The user
+extracts features and visual design, reviews a software design, and generates a plan. The user
 then runs McLoop separately to build it. Running `duplo` again
 detects new files and appends tasks for anything missing.
 
 ## Source files
 
 ### duplo/ (package)
+
+- `software_design.py`: Owns the software-design review stage. Uses Orchestra's
+  `software_design.orc` workflow with different author and reviewer actors.
+  Requires an accepting judgment and valid requirement-to-decision references;
+  unresolved blocking questions prevent publication. Saves versioned attempts
+  and input digests in `.duplo/software-design.json`, with workflow evidence in
+  `.duplo/design-runs/` and a readable `SOFTWARE_DESIGN.md` projection. Checks
+  observed input changes before publication, preserves edited projections, and
+  records a pending attempt before provider execution. Phase binding records
+  the design digest and applicable decision IDs. See `SOFTWARE-DESIGN.md`.
+
+- `design_command.py`: Implements `duplo design` and `duplo design --plan` for
+  specifications with an explicit scope list. Reviews design before generating
+  a roadmap. Uses `.duplo/design-roadmap.json` to resume unsaved phases against
+  the same design. Refuses unrelated existing plans and validates final scope
+  coverage. Makes no artifact commits or pushes.
 
 - `main.py`: CLI entry point. Runs from the current directory with
   no required arguments. On first run (no `.duplo/duplo.json`):
@@ -33,7 +49,7 @@ detects new files and appends tasks for anything missing.
   generates roadmap, moves processed reference
   files to `.duplo/references/`, saves file hash manifest to
   `.duplo/file_hashes.json` (via `hasher.py`), creates Phase 1
-  PLAN.md with design requirements, and runs McLoop. On subsequent
+  PLAN.md with design requirements. The user runs McLoop separately. On subsequent
   runs: detects file changes via hash manifest, analyzes new/changed
   top-level files the same way as first run (images to Vision, PDFs
   to text extraction, URLs to scraper) via `_analyze_new_files()`,
@@ -78,6 +94,8 @@ detects new files and appends tasks for anything missing.
   Both accept ``--images`` for user-supplied screenshots and
   ``--screenshot`` to capture via appshot. ``--file`` reads bugs
   from a file. Without subcommands, state detection is automatic.
+  `design` dispatches before ordinary pipeline processing and reports review
+  errors with a nonzero exit. `SOFTWARE_DESIGN.md` is a generated project artifact.
 
 - `scanner.py`: Scans the current directory for reference materials.
   `ScanResult` dataclass (images, videos, pdfs, text_files, urls, relevance).
@@ -532,6 +550,19 @@ detects new files and appends tasks for anything missing.
   unresolved multi-file work before provider calls. `main.py` also holds that
   owner around normal/fix dispatch. This does not make an entire pipeline run
   a transaction, and `init`/`reauthor` have separate ownership contracts.
+  New roadmaps require a reviewed software design. Phase generation checks its
+  input snapshot before publishing each phase; interrupted roadmaps must match
+  the design digest. Gap additions also require review and record decision
+  references in the appended work. Existing repair commands keep their contracts.
+
+`roadmap.py` accepts reviewed design context and records the design digest with
+decision references on phases. `planner.py` passes that context into phase
+authoring and binds returned typed phases to their design. Their low-level APIs
+remain composable; the pipeline and design command own the required preflight.
+`spec_reader.py` parses structured platform entries from Architecture so explicit
+stack choices do not require an additional model call.
+`council.py` computes the next phase ID from both explicit headers and canonical
+ID comments, preserving the sequence when a saved plan is extended.
 
 ### Top-level files
 
@@ -567,6 +598,11 @@ results, interrupted updates, and cooperating process writers.
 Video extraction unit tests mock ffmpeg availability; real ffmpeg tests cover
 scene detection and interval fallback with generated videos. They skip when
 the executable is absent and fail if video generation fails.
+
+`test_software_design.py` runs the review state machine with scripted model
+responses, covering rejection and stale inputs, interrupted refreshes, and
+decision references in canonical plans. Older pipeline tests explicitly use
+the `reviewed_software_design` fixture to isolate their existing stages.
 
 ## Keeping this file current
 

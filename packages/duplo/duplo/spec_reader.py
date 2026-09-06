@@ -606,6 +606,7 @@ def _parse_spec(text: str) -> ProductSpec:
             spec.behavior_contracts = _parse_contracts(body)
         elif key == "architecture":
             spec.architecture = _strip_comments(body).strip()
+            spec.platform_entries = _parse_platform_entries(spec.architecture)
             if _FILL_IN_RE.search(_strip_comments(body)):
                 spec.fill_in_architecture = True
         elif key == "design":
@@ -677,6 +678,24 @@ def _split_sections(text: str) -> dict[str, str]:
     else:
         sections[current_heading] = body
     return sections
+
+
+def _parse_platform_entries(body: str) -> list[PlatformEntry]:
+    entries: list[PlatformEntry] = []
+    current: dict[str, str] = {}
+    for line in body.splitlines() + [""]:
+        start = re.match(r"^\s*-\s+platform:\s*(\S.*?)\s*$", line)
+        field = re.match(r"^\s+(language|build):\s*(\S.*?)\s*$", line)
+        if start:
+            if current:
+                entries.append(PlatformEntry(**current))
+            current = {"platform": start[1]}
+        elif field and current:
+            current[field[1]] = field[2]
+        elif current:
+            entries.append(PlatformEntry(**current))
+            current = {}
+    return entries
 
 
 def _parse_scope_list(text: str, pattern: re.Pattern, block_head_pattern: re.Pattern) -> list[str]:

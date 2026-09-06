@@ -278,6 +278,7 @@ def generate_phase_plan(
     prior_phases_files: list[str] | None = None,
     target_dir: Path | str = ".",
     escalate_to_council: bool = False,
+    software_design: dict | None = None,
 ) -> Plan:
     """Generate a typed :class:`Plan` for a specific roadmap phase.
 
@@ -410,17 +411,36 @@ Features for this phase:
 Generate the phase body now.
 """
 
+    if software_design is not None:
+        from duplo.software_design import planning_context
+
+        design_text, decision_ids = planning_context(
+            software_design, phase.get("features", []) if phase else [f.name for f in features]
+        )
+        prompt += (
+            "\nReviewed software design; preserve its responsibilities and dependency direction.\n"
+            "Tasks must implement these decisions: " + ", ".join(decision_ids) + "\n" + design_text
+        )
     system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
     if escalate_to_council:
-        return council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
+        plan = council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
+    else:
+        body = run_plan_author(
+            prompt=prompt,
+            system=system,
+            required_phase_id=required_phase_id,
+            project_dir=Path(target_dir),
+        )
+        plan = council.typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
+    if software_design is not None:
+        from duplo.software_design import bind_phase_plan
 
-    body = run_plan_author(
-        prompt=prompt,
-        system=system,
-        required_phase_id=required_phase_id,
-        project_dir=Path(target_dir),
-    )
-    return council.typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
+        plan = bind_phase_plan(
+            plan,
+            software_design,
+            phase.get("features", []) if phase else [f.name for f in features],
+        )
+    return plan
 
 
 _BUGS_HEADING_RE = re.compile(r"^## Bugs\s*$", re.MULTILINE)

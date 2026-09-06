@@ -520,3 +520,6 @@ class TestInitSubcommand:
         with patch("duplo.init.run_init"):
             main()
         assert called == []
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

@@ -76,6 +76,14 @@ from duplo.platforms.scaffold import format_scaffold_notice, write_scaffold
 from duplo.platforms.schema import PlatformProfile
 from duplo.questioner import BuildPreferences
 from duplo.roadmap import format_roadmap, generate_roadmap
+from duplo.software_design import (
+    SoftwareDesignError,
+    design_inputs,
+    ensure_design,
+    planning_context,
+    require_design,
+    roadmap_matches,
+)
 from duplo.scanner import scan_files
 from duplo.frame_describer import describe_frames
 from duplo.verification_extractor import (
@@ -1355,9 +1363,28 @@ def _detect_and_append_gaps(
         print("  All features, examples, and design details are covered by the plan.")
         return 0, 0, 0, 0
 
+    inputs = design_inputs(
+        Path.cwd(),
+        format_spec_for_prompt(spec) if spec else "",
+        features,
+        _load_preferences(data, spec),
+    )
+    reviewed_design = ensure_design(Path.cwd(), inputs)
+    _, decision_ids = planning_context(reviewed_design, [f.name for f in features])
     tasks_appended = 0
     gap_tasks = format_gap_tasks(result)
     if gap_tasks:
+        gap_tasks = [
+            dataclasses.replace(
+                task,
+                text=task.text
+                + " (SOFTWARE_DESIGN.md, "
+                + ", ".join(decision_ids)
+                + f"; sha256:{reviewed_design['design_digest']})",
+            )
+            for task in gap_tasks
+        ]
+        require_design(Path.cwd(), inputs)
         tasks_appended = _append_gap_tasks_to_plan(plan_path, gap_tasks)
         print(f"  Appended {tasks_appended} gap task(s) to PLAN.md.")
 
@@ -1563,6 +1590,7 @@ def _run_phase_generation_loop(
     platform_addendum: str,
     prior_phases_files: list[str],
     project_name: str,
+    software_design: dict | None = None,
 ) -> tuple[int, int]:
     """Generate phase plans for ``roadmap[start_idx:]`` and append each
     to PLAN.md.
@@ -1575,6 +1603,9 @@ def _run_phase_generation_loop(
     """
     from duplo.claude_cli import _TIMEOUT_SECONDS
 
+    inputs = design_inputs(Path.cwd(), spec_prompt, features, preferences)
+    if software_design is None:
+        software_design = require_design(Path.cwd(), inputs)
     total_phases = len(roadmap)
     saved_count = 0
     for idx in range(start_idx, total_phases):
@@ -1589,6 +1620,11 @@ def _run_phase_generation_loop(
         )
         print(f"Generating {phase_label_i} PLAN.md …")
         try:
+            plan_path = Path("PLAN.md")
+            plan_before = plan_path.read_bytes() if plan_path.exists() else None
+            current_design = require_design(Path.cwd(), inputs)
+            if current_design["design_digest"] != software_design["design_digest"]:
+                raise SoftwareDesignError("Reviewed design changed during phase generation.")
             content = generate_phase_plan(
                 source_url,
                 features,
@@ -1599,6 +1635,7 @@ def _run_phase_generation_loop(
                 spec_text=spec_prompt,
                 platform_addendum=platform_addendum,
                 prior_phases_files=list(prior_phases_files),
+                software_design=software_design,
             )
             extra_tasks: list = []
             if idx == total_phases - 1:
@@ -1614,6 +1651,13 @@ def _run_phase_generation_loop(
                     if spec_tasks:
                         extra_tasks.extend(spec_tasks)
                         print(f"  {len(spec.behavior_contracts)} spec verification case(s) added.")
+            current_design = require_design(Path.cwd(), inputs)
+            if current_design["design_digest"] != software_design["design_digest"]:
+                raise SoftwareDesignError("Reviewed design changed during phase generation.")
+            if (plan_path.read_bytes() if plan_path.exists() else None) != plan_before:
+                raise SoftwareDesignError(
+                    "PLAN.md changed during phase generation; edits preserved."
+                )
             saved_plan_path = save_plan(content, extra_tasks=extra_tasks)
             _git_commit_artifact(saved_plan_path, "save_plan")
             prior_phases_files.extend(_extract_created_files_from_plan(content))
@@ -1622,6 +1666,7 @@ def _run_phase_generation_loop(
             PlanAuthorError,
             CouncilError,
             PlanValidationError,
+            SoftwareDesignError,
         ) as exc:
             record_failure(
                 "pipeline:phase_generation",
@@ -1983,6 +2028,14 @@ def _subsequent_run() -> None:
             resume_source_url = _source_url_from_spec(spec) or data.get("source_url", "")
             resume_features = [_feature_from_dict(f) for f in data.get("features", [])]
             resume_preferences = _load_preferences(data, spec)
+            resume_design = require_design(
+                Path.cwd(),
+                design_inputs(Path.cwd(), spec_prompt, resume_features, resume_preferences),
+            )
+            if not roadmap_matches(roadmap, resume_design):
+                raise SoftwareDesignError(
+                    "Interrupted roadmap has no matching design. Preserve PLAN.md and regenerate the roadmap."
+                )
             resume_profiles = _resolve_platform_profiles(resume_preferences)
             _announce_profiles(resume_profiles)
 
@@ -2021,6 +2074,7 @@ def _subsequent_run() -> None:
                 platform_addendum=resume_addendum,
                 prior_phases_files=resume_prior_files,
                 project_name=app_name,
+                software_design=resume_design,
             )
             all_saved = observed + saved_this_call
             if all_saved == total:
@@ -2048,7 +2102,15 @@ def _subsequent_run() -> None:
     # If no roadmap exists or the existing one is fully consumed,
     # regenerate from remaining unimplemented features.
     roadmap = data.get("roadmap", [])
-    if not roadmap or phase_info is None:
+    features = [_feature_from_dict(f) for f in data.get("features", [])]
+    if not features and not roadmap:
+        print("All features implemented. Nothing to do.")
+        return
+    preferences = _load_preferences(data, spec)
+    software_design = ensure_design(
+        Path.cwd(), design_inputs(Path.cwd(), spec_prompt, features, preferences)
+    )
+    if not roadmap or phase_info is None or not roadmap_matches(roadmap, software_design):
         _print_feature_status(data)
         remaining = _unimplemented_features(data)
         if not remaining:
@@ -2067,6 +2129,15 @@ def _subsequent_run() -> None:
         profiles = _resolve_platform_profiles(preferences)
         _announce_profiles(profiles)
         history = _build_completion_history(data)
+        software_design = ensure_design(
+            Path.cwd(),
+            design_inputs(
+                Path.cwd(),
+                spec_prompt,
+                [_feature_from_dict(f) for f in data.get("features", [])],
+                preferences,
+            ),
+        )
         print(f"\nGenerating new roadmap for {len(remaining)} remaining feature(s) \u2026")
         new_roadmap = generate_roadmap(
             source_url,
@@ -2075,6 +2146,7 @@ def _subsequent_run() -> None:
             completion_history=history,
             spec_text=spec_prompt,
             scope_include=spec.scope_include if spec else None,
+            software_design=software_design,
         )
         if not new_roadmap:
             print("Error: failed to generate roadmap.")
@@ -2109,6 +2181,13 @@ def _subsequent_run() -> None:
     source_url = _source_url_from_spec(spec) or data.get("source_url", "")
     features = [_feature_from_dict(f) for f in data.get("features", [])]
     preferences = _load_preferences(data, spec)
+    software_design = ensure_design(
+        Path.cwd(), design_inputs(Path.cwd(), spec_prompt, features, preferences)
+    )
+    if not roadmap_matches(roadmap, software_design):
+        raise SoftwareDesignError(
+            "Roadmap predates the reviewed design. Preserve the old roadmap and regenerate it before planning."
+        )
     profiles = _resolve_platform_profiles(preferences)
     _announce_profiles(profiles)
 
@@ -2172,6 +2251,7 @@ def _subsequent_run() -> None:
         platform_addendum=platform_addendum,
         prior_phases_files=[],
         project_name=app_name,
+        software_design=software_design,
     )
     if saved_this_call == total_phases:
         _enforce_plan_sanity_gate(spec)

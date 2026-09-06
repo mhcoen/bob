@@ -1876,3 +1876,8 @@ class TestPhaseIdAgreementFirstPhase:
                     phase_number=0,
                     target_dir=tmp_path,
                 )
+
+
+@pytest.fixture(autouse=True)
+def isolated_plan_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)

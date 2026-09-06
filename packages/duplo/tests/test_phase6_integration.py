@@ -7,6 +7,8 @@ mocked so tests do not depend on claude -p availability or network.
 
 from __future__ import annotations
 
+import pytest
+
 import argparse
 from pathlib import Path
 from unittest.mock import patch
@@ -1376,3 +1378,6 @@ class TestInitThenDuploRunWorksEndToEnd:
 
         assert select_issues_result == [sentinel_issue]
         mock_select_issues.assert_called_once_with([sentinel_issue])
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

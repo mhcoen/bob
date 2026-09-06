@@ -10235,3 +10235,6 @@ def test_stored_accepted_frames_do_not_cross_sibling_stems(tmp_path, monkeypatch
     lookup = _stored_accepted_frames([demo, demo_scene])
     assert [p.name for p in lookup[demo]] == ["demo_scene_0001.png"]
     assert [p.name for p in lookup[demo_scene]] == ["demo_scene_scene_0001.png"]
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

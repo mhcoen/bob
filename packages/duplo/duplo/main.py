@@ -212,7 +212,15 @@ from duplo.selector import select_features, select_issues  # noqa: F401  # legac
 
 _DUPLO_JSON = ".duplo/duplo.json"
 # Files that are project artifacts, not user-provided reference materials.
-_PROJECT_FILES = {"PLAN.md", "CLAUDE.md", "README.md", "ISSUES.md", "NOTES.md", "SPEC.md"}
+_PROJECT_FILES = {
+    "PLAN.md",
+    "CLAUDE.md",
+    "README.md",
+    "ISSUES.md",
+    "NOTES.md",
+    "SPEC.md",
+    "SOFTWARE_DESIGN.md",
+}
 
 
 def main() -> None:
@@ -242,6 +250,37 @@ def main() -> None:
     # Establish the per-run log directory (.duplo/logs/<run_id>/) at process
     # start so every LLM call this process makes is recorded.
     call_log.start_run()
+
+    if len(sys.argv) > 1 and sys.argv[1] == "design":
+        from duplo.design_command import run_design
+        from duplo.claude_cli import ClaudeCliError
+        from duplo.plan_author_adapter import PlanAuthorError
+        from bob_tools.json_state import StateError
+        from bob_tools.planfile import PlanValidationError
+        from orchestra.errors import OrchestraError
+
+        design_parser = argparse.ArgumentParser(prog="duplo design")
+        design_parser.add_argument(
+            "--refresh", action="store_true", help="Review a new design revision."
+        )
+        design_parser.add_argument(
+            "--plan",
+            action="store_true",
+            help="Generate or resume the phased implementation plan after design review.",
+        )
+        try:
+            run_design(design_parser.parse_args(sys.argv[2:]))
+        except (
+            StateError,
+            OrchestraError,
+            OSError,
+            ClaudeCliError,
+            PlanAuthorError,
+            PlanValidationError,
+        ) as exc:
+            print(f"duplo design: {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
 
     # Check for subcommands before parsing, since the default
     # mode uses a positional 'url' arg that would eat 'fix'/'investigate'/'init'.
@@ -566,7 +605,13 @@ def main() -> None:
             if spec_path.exists():
                 if args.url:
                     print("Project already initialized. URL argument ignored.")
-                _pipeline._subsequent_run()
+                from duplo.software_design import SoftwareDesignError
+
+                try:
+                    _pipeline._subsequent_run()
+                except SoftwareDesignError as exc:
+                    print(f"duplo: {exc}", file=sys.stderr)
+                    sys.exit(1)
             elif not duplo_path.exists():
                 print("No SPEC.md found. Run `duplo init` first to create SPEC.md.")
                 sys.exit(0)

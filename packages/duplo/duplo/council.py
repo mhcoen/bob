@@ -251,31 +251,20 @@ def _phase_id_numeric_suffix(phase_id: str) -> int | None:
 
 
 def compute_required_phase_id(plan_path: Path) -> str:
-    """Compute the next phase_id Duplo will demand for canonical
-    synthesis against ``plan_path``.
+    """Return the next phase ID after the highest explicit ID in PLAN.md.
 
-    Reads the existing PLAN.md (if present), extracts every
-    ``## Phase phase_NNN:`` header, and returns
-    ``f"phase_{(highest_NNN + 1):03d}"``. When PLAN.md is absent or
-    has no recognized phase headers, returns ``"phase_001"``.
-
-    Codex's safe rule (per the directive that landed alongside this
-    helper): use ``highest + 1``, NOT the smallest gap. A PLAN.md
-    containing ``phase_001`` and ``phase_003`` returns
-    ``"phase_004"``, not ``"phase_002"``. This avoids accidentally
-    re-using an id that an earlier failed run wrote and then rolled
-    back; gap-filling would let stale lineage state coexist with
-    new entries under the same identifier.
+    Read both legacy phase headers and canonical ID comments. An absent
+    plan or a plan without recognized IDs starts at ``phase_001``.
+    Preserve gaps so new work does not reuse an earlier phase identity.
     """
     if not plan_path.is_file():
         return "phase_001"
     text = plan_path.read_text(encoding="utf-8")
+    from duplo.reauthor_phase_ids import parse_plan_phases
+
     highest = 0
-    for line in text.splitlines():
-        match = _CANONICAL_PHASE_HEADER_RE.match(line)
-        if match is None:
-            continue
-        suffix = _phase_id_numeric_suffix(match.group("id"))
+    for phase in parse_plan_phases(text):
+        suffix = _phase_id_numeric_suffix(phase.id)
         if suffix is None:
             continue
         if suffix > highest:

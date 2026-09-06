@@ -1,24 +1,23 @@
 # Duplo
 
-Duplo builds software from reference material. Point it at a product
-URL, drop in screenshots or a demo video, write a sentence about
-what you want — and it produces a phased build plan that
-[McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop)
-executes autonomously.
+Duplo develops a software design from a specification and reference material,
+then derives a phased implementation plan for
+[McLoop](https://github.com/mhcoen/bob/tree/main/packages/mcloop).
+The design review examines architectural choices and their consequences for
+maintenance before implementation tasks are generated.
 
-It is a clone-anything tool: give it whatever you have (a website, a
-screenshot, a PDF of docs, a video walkthrough, a prose description)
-and it figures out what features the product has, what it looks like,
-and how to build it. You review a spec, kick off the build, test the
-result, and iterate. Each cycle adds to what exists without
-destroying previous work.
+Reference products supply evidence about desired behavior and appearance. The
+user's specification defines the application to build. A short description can
+start the discussion; unresolved engineering decisions must be addressed before
+the design is accepted for planning. See the
+[software-design workflow](SOFTWARE-DESIGN.md).
 
 Typical workflow:
 
 ```
 duplo init https://numi.app             # one-time: create a spec from a live product
 vim SPEC.md                              # review and customize (architecture, scope, design)
-duplo                                    # extract features, generate all-phases build plan
+duplo                                    # extract features, review design, generate phased plan
 mcloop                                   # build it (runs all phases continuously)
 # ... test the result ...
 duplo fix "colors are wrong"             # known bug: append fix task to PLAN.md
@@ -34,6 +33,14 @@ extracts features, visual design details, and behavioral contracts,
 then hands everything to an AI coding agent.
 
 ## What Duplo produces
+
+`SOFTWARE_DESIGN.md` records the accepted design with stable decision IDs.
+Duplo retains review attempts under `.duplo/`, including failed or interrupted
+attempts. Plan phases refer to the design digest and applicable decisions.
+For a specification with an explicit scope list, `duplo design --plan` runs
+the design and planning stages directly. The
+[local dictation example](../../examples/local-dictation/README.md) supplies
+a complete input specification.
 
 Duplo writes a `PLAN.md` — but not a casual markdown checklist. The
 PLAN.md duplo produces is a formal document with a defined grammar:
@@ -86,7 +93,7 @@ substrate both rely on.
 
 Duplo reads a `SPEC.md` in the project root, analyzes any reference
 material placed under `ref/`, extracts features and visual design
-details, and generates a phased build plan. SPEC.md is the input
+details, reviews the software design, and generates a phased build plan. SPEC.md is the input
 contract — it drives feature extraction, roadmap generation, plan
 generation, and bug investigation. You then run mcloop to build it.
 

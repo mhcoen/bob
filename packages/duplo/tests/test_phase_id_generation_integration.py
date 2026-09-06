@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 import shutil
 import uuid
 from pathlib import Path
@@ -66,3 +68,6 @@ def test_generation_loop_persists_unique_sequential_phase_ids(monkeypatch) -> No
     finally:
         monkeypatch.chdir(Path(__file__).resolve().parents[1])
         shutil.rmtree(project_dir, ignore_errors=True)
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

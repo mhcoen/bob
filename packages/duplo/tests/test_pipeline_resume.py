@@ -269,3 +269,6 @@ class TestResumePath:
 
         plan_after = (tmp_path / "PLAN.md").read_text(encoding="utf-8")
         assert pipeline._observed_phase_count(plan_after) == 3
+
+
+pytestmark = pytest.mark.usefixtures("reviewed_software_design")

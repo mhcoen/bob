@@ -49,6 +49,7 @@ def generate_roadmap(
     completion_history: list[dict] | None = None,
     spec_text: str = "",
     scope_include: list[str] | None = None,
+    software_design: dict | None = None,
 ) -> list[dict]:
     """Generate a phased build roadmap.
 
@@ -113,9 +114,22 @@ Features to include:
 Generate the roadmap now.
 """
 
+    if software_design is not None:
+        from duplo.software_design import planning_context
+
+        design_text, _ = planning_context(software_design, [f.name for f in features])
+        prompt += (
+            "\nReviewed software design; follow its decisions and dependencies:\n" + design_text
+        )
     raw = query(prompt, system=_SYSTEM, call_site="generate_roadmap")
     roadmap = _parse_roadmap(raw)
-    return _reconcile_scope_into_roadmap(roadmap, scope_include)
+    roadmap = _reconcile_scope_into_roadmap(roadmap, scope_include)
+    if software_design is not None:
+        for phase in roadmap:
+            _, ids = planning_context(software_design, phase["features"])
+            phase["design_decisions"] = ids
+            phase["design_digest"] = software_design["design_digest"]
+    return roadmap
 
 
 def _parse_roadmap(raw: str) -> list[dict]:

@@ -1076,3 +1076,8 @@ class TestDuploProgressCallbackActorProgress:
         cb(self._event("state_enter", elapsed_seconds=None))
         err = capsys.readouterr().err
         assert "[duplo] state=produce model=opus status=running" in err
+
+
+@pytest.fixture(autouse=True)
+def isolated_plan_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)

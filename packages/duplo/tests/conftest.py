@@ -38,6 +38,36 @@ _original_subprocess_run = subprocess.run
 _original_subprocess_popen = subprocess.Popen
 
 
+@pytest.fixture
+def reviewed_software_design(monkeypatch):
+    """Keep older pipeline tests focused on their existing model-call boundaries.
+
+    Design workflow and publication failures run through the real executor in
+    test_software_design.py. Pipeline tests opt into this fixture explicitly.
+    """
+    from duplo import pipeline
+    from duplo.software_design import _digest
+    from test_software_design import sample_design
+
+    def reviewed(root, inputs, **kwargs):
+        design = sample_design(tuple(f["name"] for f in inputs["requirements"]))
+        return {
+            "id": "fixture-design",
+            "accepted": True,
+            "inputs": inputs,
+            "input_digest": _digest(inputs),
+            "design_digest": _digest(design),
+            "design": design,
+            "review": "Fixture review",
+            "verdict": {"feedback": "Fixture judgment"},
+            "log_path": ".duplo/fixture-log.jsonl",
+        }
+
+    monkeypatch.setattr(pipeline, "ensure_design", reviewed)
+    monkeypatch.setattr(pipeline, "require_design", reviewed)
+    monkeypatch.setattr(pipeline, "roadmap_matches", lambda *args: True)
+
+
 def _is_claude_cmd(cmd) -> bool:
     """True if ``cmd`` is a claude/codex invocation (real LLM call)."""
     if isinstance(cmd, (list, tuple)) and cmd:

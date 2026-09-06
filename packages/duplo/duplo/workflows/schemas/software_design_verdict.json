@@ -1,0 +1,24 @@
+{
+  "type": "object",
+  "required": ["decision", "feedback", "checks"],
+  "additionalProperties": false,
+  "properties": {
+    "decision": {"type": "string", "enum": ["accept", "iterate", "stuck"]},
+    "feedback": {"type": "string", "minLength": 1},
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirements", "architecture", "alternatives", "data_lifecycle", "failures", "maintainability", "verification", "unresolved_decisions"],
+      "properties": {
+        "requirements": {"type": "boolean"},
+        "architecture": {"type": "boolean"},
+        "alternatives": {"type": "boolean"},
+        "data_lifecycle": {"type": "boolean"},
+        "failures": {"type": "boolean"},
+        "maintainability": {"type": "boolean"},
+        "verification": {"type": "boolean"},
+        "unresolved_decisions": {"type": "boolean"}
+      }
+    }
+  }
+}
