@@ -9,7 +9,9 @@
 </video>
 </p>
 
-Bob is a tool that autonomously builds non-slop software. You describe what you want; Bob builds it. Here's how.
+Bob puts deliberate software design before autonomous implementation.
+It is built for projects that must remain understandable and maintainable
+as their requirements change.
 
 Software engineering used to have a guy named Bob. Bob's job was to
 look at what you were doing, ask why, and tell you to slow the hell
@@ -18,6 +20,13 @@ commit. Bob read the commit before the deploy. Bob was annoying. Bob
 was correct. I miss Bob.
 
 Vibe coding does not have Bob.
+
+Working code is only part of software engineering. A system can meet
+immediate requirements while its structure makes later changes expensive.
+Designing for maintainability and longevity requires examining assumptions
+and dependencies before they become embedded in the implementation.
+An agent's ability to generate code or an architecture document does not
+establish that this work has been done.
 
 ## What Bob actually believes
 
@@ -139,7 +148,15 @@ it says out loud which one it did not.
 
 Each is the rule above applied at a different scale. They interact: McLoop runs against plans Duplo authored, Orchestra wraps McLoop's per-task edits, and McLoop calls Duplo back to re-author the plan when the ledger says the current approach is not working.
 
-[Duplo](packages/duplo/) is Bob creating the spec. Tell Duplo what you want, point it at a
+[Duplo](packages/duplo/) is Bob developing the design. The design document
+should explain why the system has its proposed structure and how that
+structure supports anticipated changes. Developing it requires clarifying
+requirements and examining alternatives. Responsibilities and interfaces
+need explicit boundaries. Assumptions must be exposed, and the consequences
+of important tradeoffs considered before implementation begins. The phased
+build plan follows from that reasoning.
+
+Tell Duplo what you want, point it at a
 product URL, drop in screenshots, PDFs, or a demo video, whatever you
 have. Duplo produces a phased build plan. The quality of the output is
 a direct function of the quality of the plan, and that is on purpose.
@@ -206,6 +223,12 @@ hallucinate APIs, repeat bad approaches, and commit plausible
 nonsense, cheerfully. The problem is not that the model is weak. It
 is that nothing deterministic stands between the model's output and
 your repository.
+
+A passing test establishes that an implementation met the test's assertions
+under the tested conditions. The assertions themselves may encode incorrect
+expectations. Tests also leave questions about decomposition and the cost
+of future changes unanswered. Bob treats those questions as design work
+that continues through implementation and audit.
 
 Bob is the missing process layer:
 
