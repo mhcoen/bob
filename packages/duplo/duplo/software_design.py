@@ -10,7 +10,6 @@ from typing import Any
 from uuid import uuid4
 
 import jsonschema
-import orchestra
 from bob_tools.json_state import StateError, atomic_write_json, read_json_object
 from bob_tools.planfile.fileio import _atomic_write_text
 from orchestra.api.dispatch import _resolve_compound_model_identifiers
@@ -50,20 +49,28 @@ def _schema(name: str) -> dict:
 
 
 def _policy_digest() -> str:
-    return _digest(
-        {
-            str(p.relative_to(ASSETS)): p.read_text()
-            for pattern in (
-                "software_design.orc",
-                "templates/software_design_*.md",
-                "schemas/software_design*.json",
-            )
-            for p in ASSETS.glob(pattern)
-        }
-    )
+    assets = {
+        str(p.relative_to(ASSETS)): p.read_text()
+        for pattern in (
+            "software_design.orc",
+            "bounded_call.orc",
+            "templates/bounded_call.md",
+            "templates/software_design_*.md",
+            "schemas/software_design*.json",
+        )
+        for p in ASSETS.glob(pattern)
+    }
+    assets["bounded_review.py"] = (Path(__file__).parent / "bounded_review.py").read_text()
+    return _digest(assets)
 
 
-def validate_design(value: dict, requirements: list[str]) -> None:
+def validate_design(
+    value: dict,
+    requirements: list[str],
+    *,
+    allow_blocking: bool = False,
+    allow_incomplete_coverage: bool = False,
+) -> None:
     """Check structure and references; the model review assesses the reasoning."""
     try:
         jsonschema.validate(value, _schema("software_design.json"))
@@ -73,14 +80,14 @@ def validate_design(value: dict, requirements: list[str]) -> None:
     covered = [c["requirement"] for c in value["coverage"]]
     if len(ids) != len(set(ids)) or len(covered) != len(set(covered)):
         raise SoftwareDesignError("Duplicate decision or requirement identity in software design.")
-    if set(requirements) != set(covered):
+    if not allow_incomplete_coverage and set(requirements) != set(covered):
         raise SoftwareDesignError(
             "Design coverage must name every input requirement exactly once."
         )
     for row in value["coverage"]:
         if not set(row["decision_ids"]) <= set(ids):
             raise SoftwareDesignError(f"Unknown decision in coverage for {row['requirement']}.")
-    if any(q["blocking"] for q in value["open_questions"]):
+    if not allow_blocking and any(q["blocking"] for q in value["open_questions"]):
         raise SoftwareDesignError("Software design has unresolved blocking questions.")
 
 
@@ -146,6 +153,8 @@ def _configuration(root: Path) -> tuple[OrchestraConfig, int]:
 def _deploy(root: Path) -> None:
     for pattern in (
         "software_design.orc",
+        "bounded_call.orc",
+        "templates/bounded_call.md",
         "templates/software_design_*.md",
         "schemas/software_design*.json",
     ):
@@ -339,7 +348,7 @@ def require_design(root: Path, inputs: dict) -> dict:
     return dict(record)
 
 
-def ensure_design(root: Path, inputs: dict, *, refresh: bool = False) -> dict:
+def ensure_design(root: Path, inputs: dict, *, refresh: bool = False, session=None) -> dict:
     """Reuse current evidence or run the review workflow under project ownership."""
     root = root.resolve()
     with project_owner(root):
@@ -367,77 +376,42 @@ def ensure_design(root: Path, inputs: dict, *, refresh: bool = False) -> dict:
             raise SoftwareDesignError(
                 "Software design requires a specification and named requirements."
             )
-        config, rounds = _configuration(root)
-        if rounds < 1 or rounds > 6:
-            raise SoftwareDesignError("software_design max_rounds must be between 1 and 6.")
+        from duplo.bounded_review import ReviewSession, review_design
+
+        config, _ = _configuration(root)
         _deploy(root)
-        policy_digest = _policy_digest()
-        requirements = [f["name"] for f in inputs["requirements"]]
-        query = (
-            "Software-design review inputs. The proposal must cover every named requirement exactly once.\n"
-            + json.dumps(inputs, indent=2)
-            + "\nProposal schema, for the author only. Other roles use their own output contracts:\n"
-            + json.dumps(_schema("software_design.json"))
-            + "\nKeep prose specific. Record assumptions with their basis and reconsideration conditions.\n"
-        )
+        session = session or ReviewSession(root)
         prior = next(
-            (
-                r
-                for r in reversed(state["attempts"])
-                if isinstance(r.get("proposal"), str) and r["proposal"].strip()
-            ),
+            (r for r in reversed(state["attempts"]) if r.get("proposal") or r.get("design")),
             None,
         )
-        if prior is not None:
-            query += (
-                "\nPrevious attempt for revision. It does not authorize publication. "
-                "Current inputs take precedence; resolve applicable objections and "
-                "explain any that no longer apply:\n"
-                + json.dumps(
-                    {k: prior.get(k) for k in ("proposal", "review", "verdict", "accepted")}
-                )
-            )
-        print("Authoring software design and reviewing engineering decisions …", flush=True)
-        pending = {
+        record = {
             "id": uuid4().hex,
             "accepted": False,
+            "policy_digest": _policy_digest(),
             "inputs": inputs,
             "input_digest": _digest(inputs),
+            "log_path": str(session.path.relative_to(root)),
+            "budget_id": session.current["id"],
+            "review": "",
+            "verdict": {},
             "error": "Review did not finish.",
-        }
-        state["attempts"].append(pending)
-        atomic_write_json(root / STATE_FILE, state)
-        result = orchestra.run_workflow(
-            "software_design",
-            {"query": query, "max_rounds": rounds},
-            config,
-            project_dir=root,
-            data_root=root / ".duplo/design-runs",
-            registry_customizer=_register_validation(requirements),
-        )
-        values = {name: item.value for name, item in result.artifacts.items()}
-        record = {
-            "id": result.run_id,
-            "accepted": False,
-            "policy_digest": policy_digest,
-            "inputs": inputs,
-            "input_digest": _digest(inputs),
-            "log_path": str(result.log_path.relative_to(root)),
-            "review": values.get("review_output", ""),
-            "verdict": values.get("verdict", {}),
-            "proposal": values.get("proposal", ""),
             "actors": {
                 name: {"adapter": role.adapter, "model": role.model}
                 for name, role in config.roles.items()
             },
         }
+        state["attempts"].append(record)
+
+        def checkpoint(evidence):
+            record.update(evidence)
+            atomic_write_json(root / STATE_FILE, state)
+
+        checkpoint({})
         try:
-            if result.terminal != "done" or values.get("accepted") is not True:
-                raise SoftwareDesignError(
-                    f"Software design was not accepted. Evidence: {result.log_path}"
-                )
-            design = json.loads(extract_json(record["proposal"]))
-            validate_design(design, requirements)
+            review_design(root, inputs, config, prior, session, checkpoint)
+            design = json.loads(record["proposal"])
+            validate_design(design, [f["name"] for f in inputs["requirements"]])
             _validate_verdict(record["verdict"])
             if inputs["files"] != _files(root):
                 raise SoftwareDesignError(
@@ -448,12 +422,11 @@ def ensure_design(root: Path, inputs: dict, *, refresh: bool = False) -> dict:
                     "Software design document changed during review; edits preserved."
                 )
             record.update(accepted=True, design=design, design_digest=_digest(design))
-        except (ValueError, SoftwareDesignError) as exc:
-            record["error"] = str(exc)
-        state["attempts"][-1] = record
-        atomic_write_json(root / STATE_FILE, state)
-        if not record["accepted"]:
-            raise SoftwareDesignError(record["error"])
+            record.pop("error", None)
+        except BaseException as exc:
+            checkpoint({"error": str(exc) or type(exc).__name__})
+            raise
+        checkpoint({})
         _atomic_write_text(document, render_design(record))
         return record
 
@@ -475,7 +448,7 @@ def bind_phase_plan(plan, record: dict, feature_names: list[str]):
     return dataclasses.replace(
         plan,
         phases=tuple(
-            dataclasses.replace(phase, prose=binding + "\n\n" + phase.prose)
+            dataclasses.replace(phase, prose=(binding + " " + phase.prose).strip())
             for phase in plan.phases
         ),
     )

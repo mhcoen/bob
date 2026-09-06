@@ -11,28 +11,32 @@ detects new files and appends tasks for anything missing.
 
 ### duplo/ (package)
 
-- `software_design.py`: Owns the software-design review stage. Uses Orchestra's
-  `software_design.orc` workflow with different author and reviewer actors.
-  Requires an accepting judgment and valid requirement-to-decision references;
-  unresolved blocking questions prevent publication. Saves versioned attempts
-  and input digests in `.duplo/software-design.json`, with workflow evidence in
-  `.duplo/design-runs/` and a readable `SOFTWARE_DESIGN.md` projection. Checks
-  observed input changes before publication, preserves edited projections, and
-  records a pending attempt before provider execution. Phase binding records
-  the design digest and applicable decision IDs. Retries carry the last available
-  proposal and its objections into a fresh review, including rejected attempts.
-  The shared proposal schema applies only to the author; review and judgment
-  retain their own output contracts. See `SOFTWARE-DESIGN.md`.
-  The author prompt requires one definition per protocol or schema and asks
-  revisions to reconcile dependent recovery rules and verification assertions.
-  The judge prompt specifies a string for feedback; structured feedback is rejected
-  by the judgment schema.
+- `software_design.py`: Owns accepted design evidence and input freshness.
+  Retains versioned attempts in `.duplo/software-design.json` and projects an
+  accepted design into `SOFTWARE_DESIGN.md`. Requires complete requirement
+  coverage and an accepting judgment. Records attempts before model execution
+  and preserves observed document edits. Phase bindings name the design digest.
+  See `SOFTWARE-DESIGN.md`.
+
+- `bounded_review.py`: Runs the finite software-design review sequence through
+  `bounded_call.orc`. Reuses existing drafts, adjudicates identified findings,
+  and permits one patch followed by review. Patches name their base digest.
+  Focused context retains global contracts and explicitly connected decisions;
+  the final judge receives the full candidate. Persistent call reservations and
+  prompt-byte limits live in `.duplo/review-budget.json`. Limits are configured
+  in `.duplo/review-limits.json`. Unsupported token caps fail before execution.
+  See `REVIEW-COSTS.md`.
+
+- `design_plan.py`: Authors the complete phase sequence in one call and obtains
+  one independent review. Uses effective project plan criteria alongside required
+  engineering checks. Validates canonical structure and scope before review.
+  Saves the candidate and judgment in `.duplo/design-plan.json`. Shares the design
+  call allowance, checks freshness before publication, and preserves plan edits.
 
 - `design_command.py`: Implements `duplo design` and `duplo design --plan` for
-  specifications with an explicit scope list. Reviews design before generating
-  a roadmap. Uses `.duplo/design-roadmap.json` to resume unsaved phases against
-  the same design. Refuses unrelated existing plans and validates final scope
-  coverage. Makes no artifact commits or pushes.
+  specifications with an explicit scope list. `--new-review-budget` starts an
+  explicit new allowance while preserving earlier receipts. Makes no artifact
+  commits or pushes.
 
 - `main.py`: CLI entry point. Runs from the current directory with
   no required arguments. On first run (no `.duplo/duplo.json`):
@@ -613,9 +617,11 @@ Video extraction unit tests mock ffmpeg availability; real ffmpeg tests cover
 scene detection and interval fallback with generated videos. They skip when
 the executable is absent and fail if video generation fails.
 
-`test_software_design.py` runs the review state machine with scripted model
+`test_software_design.py` runs design review with scripted model
 responses, covering rejection and stale inputs, interrupted refreshes, and
-decision references in canonical plans. Older pipeline tests explicitly use
+decision references in canonical plans. `test_bounded_review.py` covers call
+reservations, digest-bound patches, and finding dispositions. `test_design_plan.py`
+covers whole-plan publication and interruption recovery. Older pipeline tests explicitly use
 the `reviewed_software_design` fixture to isolate their existing stages.
 
 ## Keeping this file current

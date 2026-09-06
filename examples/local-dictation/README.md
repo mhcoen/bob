@@ -28,9 +28,10 @@ The example configuration uses Astra (`gpt-6-astra`) through Codex to author
 and judge, with Fable reviewing through Claude. The Astra model ID is explicit;
 Bob's general `codex` alias still selects GPT-5.6 Sol.
 The plan criteria require preservation of the accepted design and review of task
-dependencies. The judge must assess substantive objections as well as task format.
+dependencies. Whole-plan review assesses substantive objections as well as task format.
 It does not build the application. Re-running it reuses a current accepted design
-and resumes planning from the first unsaved phase.
+and can recover a saved whole-plan candidate. Call allowances persist across
+invocations; the workflow documentation explains explicit renewal.
 
 Inspect `SOFTWARE_DESIGN.md` alongside the review attempts in
 `.duplo/software-design.json`. Each plan phase names the design digest and
@@ -49,7 +50,7 @@ another invocation. [Review notes](ref/REVIEW_NOTES.md) accompany the new inputs
 
 The third attempt exposed contradictory definitions retained across revisions.
 The authoring instructions now require each protocol to have one definition.
-Review continues with the completed judgments and additional model-lease findings.
+The third review recorded additional model-lease findings.
 The fourth attempt exposed JSON restarts after output limits. Orchestra now
 recovers the complete replacement document. Its review also identified a staging
 lease that could not be acquired during installation and overlapping delivery
@@ -60,14 +61,16 @@ retain their wording.
 
 The first Astra call reached the stream-inactivity limit without a final response.
 The Codex text adapter now uses the total call limit for that timer too. Its
-diagnostic output is excluded from proposals. Review continues from the last
-complete design with Astra authoring and Fable reviewing.
+diagnostic output is excluded from proposals. The following attempt used the last complete design as its starting point.
 
 The next invocation completed two Astra/Fable review rounds. Its second judgment
 requested revision but failed schema validation because feedback was an array.
 The prompt now specifies a string. [Attempt 6](evidence/README.md#attempt-6)
-preserves the response and the remaining findings. Design review is continuing;
-the implementation plan remains unfinished.
+preserves the response and the remaining findings. The live review was stopped
+after further rounds consumed too many tokens. The design remains unaccepted,
+and the implementation plan remains unfinished. Bob now provides a finite review
+sequence with persistent call limits; it has been exercised with scripted responses.
+The live example has not been restarted to evaluate that change.
 
 The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
 service can deny network access independently of its containing app's sandbox

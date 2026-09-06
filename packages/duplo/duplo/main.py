@@ -268,6 +268,11 @@ def main() -> None:
             action="store_true",
             help="Generate or resume the phased implementation plan after design review.",
         )
+        design_parser.add_argument(
+            "--new-review-budget",
+            action="store_true",
+            help="Start a new call allowance while retaining previous review receipts.",
+        )
         try:
             run_design(design_parser.parse_args(sys.argv[2:]))
         except (
