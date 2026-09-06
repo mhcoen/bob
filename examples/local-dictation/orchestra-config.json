@@ -44,6 +44,16 @@
           "id": "feat_fix_annotations_present",
           "description": "Every task implementing a feature from the input list ends with a [feat: \"...\"] annotation; tasks that fix a bug or issue end with a [fix: \"...\"] annotation; scaffolding or structural tasks that map to no feature carry no annotation.",
           "required": true
+        },
+        {
+          "id": "design_and_phase_scope",
+          "required": true,
+          "description": "The tasks implement the assigned phase scope and preserve the accepted software design. Check the relevant decision contracts, including ownership and failure behavior. Reject an implementation shortcut that contradicts a design decision or leaves a consequential decision to coding. A later feature may remain unimplemented when the phase defines its boundary and supplies the prerequisites needed now. Resolve substantive reviewer objections against the current proposal."
+        },
+        {
+          "id": "dependencies_and_verification",
+          "required": true,
+          "description": "Read the existing PLAN.md when present. Each task builds on work assigned earlier in this phase or a preceding phase. Preserve existing interfaces and file ownership; avoid duplicate implementation. Establish isolation and recovery prerequisites before exposing behavior that depends on them. Include executable checks with justified expected outcomes and identify hardware or human checks that remain unperformed. Do not claim that a test or model judgment establishes software correctness."
         }
       ]
     }

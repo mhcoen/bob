@@ -404,6 +404,8 @@ detects new files and appends tasks for anything missing.
   acceptance followed by structural validation before returning a capped run's
   proposal. A valid phase body cannot override a judge requesting revision.
   Rejected drafts remain attached to `PlanAuthorCappedError` for inspection.
+  Loads project criteria for the judge prompt, using Orchestra's role-level
+  precedence and fallback to project-wide criteria.
 
 - `planner.py`: Generates PLAN.md for a specific roadmap phase.
   `generate_phase_plan()` accepts a roadmap phase dict and produces

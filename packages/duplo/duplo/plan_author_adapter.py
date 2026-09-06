@@ -34,9 +34,8 @@ validate_plan_body>)``:
 - ``criteria_block`` is the rendered configured-criteria list
   (:func:`duplo.plan_author_role.render_criteria_block`) injected into the
   judge prompt so the judge emits a ``criteria_compliance`` entry per
-  configured criterion using those exact ids -- generated from the same
-  ``PLAN_AUTHOR_CRITERIA`` the binding hands the executor, so the prompt's
-  ids and the consistency check cannot drift.
+  configured criterion. Uses the effective project binding, including
+  Orchestra's fallback to top-level criteria when the role has none.
 
 Termination translation
 ------------------------
@@ -61,13 +60,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import orchestra
 from bob_tools.planfile import PlanSyntaxError, PlanValidationError
 from orchestra import ErrorRecord, IterativeDesignResult
 from orchestra.api import WorkflowApiError
+from orchestra.config import load_config
 
 from duplo.acceptance import AcceptanceAuthoringError
 from duplo.council import (
@@ -220,16 +220,17 @@ def run_plan_author(
     history_text = build_history(history or PriorPhaseContext())
 
     try:
+        config = load_config(project_dir=effective_project_dir)
+        binding = config.role_bindings.get(ROLE_NAME)
+        if binding is None:
+            raise WorkflowApiError(f"unknown role {ROLE_NAME!r}")
+        criteria = binding.criteria or config.criteria
         result: IterativeDesignResult = orchestra.run_role(
             ROLE_NAME,
             query=query,
             history=history_text,
             required_phase_id=required_phase_id,
-            # The judge prompt's criterion-id list is rendered from the same
-            # PLAN_AUTHOR_CRITERIA the binding feeds to the executor, so the
-            # ids the judge is asked to emit match the ids the consistency
-            # check enforces (no missing_ids / extra_ids).
-            criteria_block=render_criteria_block(),
+            criteria_block=render_criteria_block([asdict(c) for c in criteria]),
             registry_customizer=register_validate_plan_body(required_phase_id),
             project_dir=effective_project_dir,
             progress_callback=make_duplo_progress_callback(),

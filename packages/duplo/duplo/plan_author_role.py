@@ -56,6 +56,7 @@ prose criteria here.
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 ROLE_NAME = "plan_author"
@@ -108,28 +109,20 @@ PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
 )
 
 
-def render_criteria_block() -> str:
-    """Render :data:`PLAN_AUTHOR_CRITERIA` as the judge-prompt criteria block.
+def render_criteria_block(criteria: Sequence[Mapping[str, Any]] | None = None) -> str:
+    """Render the effective criteria for the judge prompt.
 
-    The block is injected into ``templates/plan_author_judge.md`` through
-    the workflow's ``criteria_block`` input (see ``plan_author.orc`` and
-    :func:`duplo.plan_author_adapter.run_plan_author`). It enumerates the
-    configured criterion ids and descriptions so the judge emits a
-    ``criteria_compliance`` entry per criterion using these EXACT ids and
-    no others -- otherwise
-    ``orchestra.executor.criteria.check_decision_consistency`` fails with
-    ``missing_ids`` / ``extra_ids``.
-
-    Generating the block from the same :data:`PLAN_AUTHOR_CRITERIA` tuple
-    that :func:`plan_author_role_binding` feeds into the executor as the
-    configured criteria keeps the judge prompt and the binding from
-    drifting: there is one source of truth for both the ids the prompt
-    asks for and the ids the consistency check enforces.
+    Omission selects Duplo's defaults. An explicit empty sequence remains
+    empty. Callers executing a project workflow supply its resolved criteria
+    so the prompt agrees with Orchestra's consistency check.
     """
     lines: list[str] = []
-    for index, criterion in enumerate(PLAN_AUTHOR_CRITERIA, start=1):
+    for index, criterion in enumerate(
+        PLAN_AUTHOR_CRITERIA if criteria is None else criteria, start=1
+    ):
         lines.append(f"{index}. id: {criterion['id']}")
         lines.append(f"   {criterion['description']}")
+        lines.append(f"   Required: {str(criterion.get('required', True)).lower()}")
     return "\n".join(lines)
 
 

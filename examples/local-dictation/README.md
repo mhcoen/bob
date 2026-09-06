@@ -27,6 +27,8 @@ reference material for design review, then generates the implementation plan.
 The example configuration uses Astra (`gpt-6-astra`) through Codex to author
 and judge, with Fable reviewing through Claude. The Astra model ID is explicit;
 Bob's general `codex` alias still selects GPT-5.6 Sol.
+The plan criteria require preservation of the accepted design and review of task
+dependencies. The judge must assess substantive objections as well as task format.
 It does not build the application. Re-running it reuses a current accepted design
 and resumes planning from the first unsaved phase.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,7 +40,15 @@ def _make_result(
 
 @pytest.fixture(autouse=True)
 def _run_in_project_tmpdir(tmp_path, monkeypatch):
+    from duplo.plan_author_role import plan_author_role_binding
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("orchestra.config.global_config_path", lambda: tmp_path / "absent.json")
+    config_dir = tmp_path / ".orchestra"
+    config_dir.mkdir()
+    (config_dir / "config.json").write_text(
+        json.dumps({"role_bindings": {"plan_author": plan_author_role_binding()}})
+    )
 
 
 def test_converged_returns_proposal_body():
@@ -84,6 +93,37 @@ def test_passes_criteria_block_rendered_from_binding():
     # Every configured id appears so the judge can emit one entry per id.
     for criterion in PLAN_AUTHOR_CRITERIA:
         assert criterion["id"] in block
+
+
+@pytest.mark.parametrize("scope", ["role", "project", "empty"])
+def test_judge_receives_effective_project_criteria(tmp_path, scope):
+    """Project criteria must reach the judge with the executor's IDs and meaning."""
+    from orchestra.config import load_config
+
+    path = tmp_path / ".orchestra/config.json"
+    config = json.loads(path.read_text())
+    custom = [
+        {"id": "design_preserved", "description": "Preserve capture ownership.", "required": True}
+    ]
+    config["role_bindings"]["plan_author"]["criteria"] = custom if scope == "role" else []
+    config["criteria"] = custom if scope == "project" else []
+    path.write_text(json.dumps(config))
+
+    with patch(
+        "orchestra.run_role", return_value=_make_result("CONVERGED", final_artifact="body")
+    ) as run:
+        run_plan_author(
+            prompt="phase", system="system", required_phase_id="phase_001", project_dir=tmp_path
+        )
+
+    block = run.call_args.kwargs["criteria_block"]
+    loaded = load_config(tmp_path)
+    effective = loaded.role_bindings["plan_author"].criteria or loaded.criteria
+    assert block.count("id: ") == len(effective)
+    for criterion in effective:
+        assert f"id: {criterion.id}" in block
+        assert criterion.description in block
+    assert "task_granularity_5_to_15" not in block
 
 
 def test_capped_raises_and_returns_no_plan():
