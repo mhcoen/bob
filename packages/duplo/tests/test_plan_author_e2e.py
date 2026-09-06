@@ -332,6 +332,42 @@ def test_never_validating_body_caps_fail_closed_without_writing_plan(
     assert final.get("outcome") not in {"error", "stuck", "timeout", "cancelled"}
 
 
+def test_rejected_canonical_body_cannot_be_published_at_round_limit(
+    _isolated_home: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Valid Markdown cannot override the judge's unresolved objections."""
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    _deploy_project(project_dir, max_rounds=2)
+    adapter = _ScriptedModelAdapter(
+        {
+            "propose": [_VALID_BODY, _VALID_BODY],
+            "review": ["required behavior is missing", "required behavior is still missing"],
+            "judge": [_verdict("iterate", compliant=False)] * 2,
+        }
+    )
+    _install_scripted_adapter(monkeypatch, adapter)
+    features, prefs, phase = _build_inputs()
+
+    with pytest.raises(PlanAuthorCappedError) as exc_info:
+        planner.generate_phase_plan(
+            "http://example.com",
+            features,
+            prefs,
+            phase=phase,
+            project_name="App",
+            target_dir=project_dir,
+        )
+
+    assert exc_info.value.best_so_far == _VALID_BODY
+    assert not (project_dir / "PLAN.md").exists()
+    final = _final_transition(exc_info.value.transcript_path)
+    assert final.get("target") == "done"
+    assert final.get("outcome") == "iterate"
+
+
 def test_iterate_verdict_with_configured_ids_survives_without_missing_ids(
     _isolated_home: Path,
     monkeypatch: pytest.MonkeyPatch,

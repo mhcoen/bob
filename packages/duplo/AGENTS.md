@@ -396,6 +396,11 @@ detects new files and appends tasks for anything missing.
   it for terminal display. `_parse_roadmap()` handles JSON parsing
   with fence stripping.
 
+- `plan_author_adapter.py`: Runs the phase-authoring workflow. Requires judge
+  acceptance followed by structural validation before returning a capped run's
+  proposal. A valid phase body cannot override a judge requesting revision.
+  Rejected drafts remain attached to `PlanAuthorCappedError` for inspection.
+
 - `planner.py`: Generates PLAN.md for a specific roadmap phase.
   `generate_phase_plan()` accepts a roadmap phase dict and produces
   a McLoop-compatible checklist scoped to that phase. Heading format:

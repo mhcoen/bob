@@ -47,17 +47,12 @@ Termination translation
   passing validation gate from a cap-exhausted fallthrough -- the
   ``validate`` transform emits the same ``complete`` outcome into
   ``done`` for both, so a run whose final draft DID validate is still
-  labelled ``CAPPED`` (see NOTES [9.9] [T-000791]). So the adapter does
-  not trust the label here: it re-runs the gate's own check
-  (:func:`duplo.council.typed_plan_from_synthesizer_text` against
-  ``required_phase_id``, exactly what ``validate_plan_body`` runs) on
-  the final body. If it passes, that body IS the converged plan and is
-  returned. If it never passed, the adapter fails closed -- raises
-  :class:`PlanAuthorCappedError`, no body for PLAN.md; the best-so-far
-  body rides the exception for audit/postmortem ONLY and must never be
-  used as a plan. ``CAPPED`` is the disposition produced by the
-  ``plan_author.orc`` validation-cap routing (T-000786) when a body
-  never validates within ``max_rounds``.
+  labelled ``CAPPED`` (see NOTES [9.9] [T-000791]). The adapter
+  requires the final transcript to end with an accepting judge followed
+  by validation. It then repeats the structural check on the final body.
+  An unresolved judgment or failed validation raises
+  :class:`PlanAuthorCappedError`; the draft remains available on the
+  exception for inspection.
 - ``ERROR``: raise :class:`PlanAuthorRunError` carrying the orchestra
   ``ErrorRecord`` and the on-disk transcript path for postmortem.
 """
@@ -96,10 +91,9 @@ class PlanAuthorError(RuntimeError):
 class PlanAuthorCappedError(PlanAuthorError):
     """Raised when the ``plan_author`` loop terminates in ``CAPPED``.
 
-    The proposed body never passed canonical validation within
-    ``max_rounds``, so the adapter fails closed: no body is returned
-    for PLAN.md. ``best_so_far`` carries the most recent (still-invalid)
-    body for audit/postmortem only -- it must NEVER be used as a plan.
+    The proposed body did not complete acceptance and canonical validation
+    within ``max_rounds``. No body is returned for PLAN.md. ``best_so_far``
+    carries the latest draft for inspection.
     """
 
     def __init__(
@@ -111,8 +105,8 @@ class PlanAuthorCappedError(PlanAuthorError):
         best_so_far: str,
     ) -> None:
         super().__init__(
-            f"plan_author run {run_id!r} terminated in CAPPED: the body never "
-            f"passed canonical validation within max_rounds "
+            f"plan_author run {run_id!r} terminated in CAPPED: the body did not "
+            f"complete judge acceptance and canonical validation within max_rounds "
             f"(rounds_completed={rounds_completed}, transcript: {transcript_path}). "
             f"No plan was produced; best-so-far retained for audit only."
         )
@@ -268,26 +262,28 @@ def run_plan_author(
             run_id=result.run_id,
         )
 
-    # result.termination == "CAPPED". run_role's generic termination
-    # derivation cannot distinguish a passing validation gate from a
-    # cap-exhausted fallthrough: the plan_author ``validate`` transform
-    # emits the same ``complete`` outcome into ``done`` for both, so a run
-    # whose final draft DID pass canonical validation is still reported as
-    # CAPPED (the two reach ``done`` via an identical (outcome, target)
-    # pair in the run log -- see NOTES [9.9] [T-000791]). Decide fail-closed
-    # from the ground truth instead of the label: re-run the gate's own
-    # check -- ``typed_plan_from_synthesizer_text`` against
-    # ``required_phase_id``, exactly what ``validate_plan_body`` runs -- on
-    # the final body. A body that passes IS the converged plan and is
-    # returned; a body that never passed is a true cap and is never
-    # returned for PLAN.md (the best-so-far rides the exception for audit
-    # only).
+    # Orchestra labels both validation completion and an exhausted judge
+    # round as CAPPED. A canonical body alone cannot establish acceptance.
+    # Require the judge -> validation sequence before repeating the gate.
     capped_body: str = result.final_artifact
-    try:
-        typed_plan_from_synthesizer_text(capped_body, required_phase_id=required_phase_id)
-    except (AcceptanceAuthoringError, PlanSyntaxError, PlanValidationError):
+    tail = result.transcript[-2:]
+    accepted = (
+        len(tail) == 2
+        and tail[0].state == "judge"
+        and tail[0].status == "ok"
+        and tail[0].outcome == "accept"
+        and tail[1].state == "validate"
+        and tail[1].status == "ok"
+        and tail[1].outcome == "complete"
+    )
+    if accepted:
+        try:
+            typed_plan_from_synthesizer_text(capped_body, required_phase_id=required_phase_id)
+        except (AcceptanceAuthoringError, PlanSyntaxError, PlanValidationError):
+            accepted = False
+    if not accepted:
         _LOGGER.warning(
-            "plan_author did not converge to a valid body within max_rounds "
+            "plan_author did not complete acceptance and validation within max_rounds "
             "(run_id=%s, rounds_completed=%d, transcript=%s); failing closed",
             result.run_id,
             result.rounds_completed,

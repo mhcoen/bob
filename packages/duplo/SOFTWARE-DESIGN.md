@@ -31,6 +31,10 @@ Re-running the command resumes an interrupted plan from the first unsaved phase
 when the saved design and roadmap still match. A pre-existing plan without the
 command's roadmap receipt is preserved and refused.
 
+Phase authoring also requires an accepting judgment and structural validation.
+A rejected phase remains unpublished at the round limit even when its Markdown
+is valid. The exception retains the draft and the review's transcript path.
+
 Ordinary `duplo` runs use the same design stage after feature extraction and
 before new roadmap generation. Gap additions also require a reviewed design.
 Existing unfinished implementation tasks retain their execution contract;
