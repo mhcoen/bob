@@ -169,12 +169,12 @@ for a five-model brawl, by changing configuration, not by rewriting
 anything. Multi-model disagreement is a dial Bob can turn, not a
 feature someone soldered on.
 
-Vroom is Bob reading what shipped and asking what he should have done
-differently. Vroom runs parallel auditors over the work, coalesces
-what they find, and proposes a corrected or expanded plan, and it
-does it from the evidence, not from vibes. Every run leaves a typed,
-append-only ledger, so the plan can be re-derived from what actually
-happened instead of hand-patched into looking fine. Eventually Vroom
+Vroom is Bob continually auditing, enhancing, and correcting what
+shipped. Vroom runs parallel auditors over the work, coalesces
+what they find, and proposes enhancements and corrections from the
+evidence. Every run leaves a typed, append-only ledger, so each audit
+can be grounded in what actually happened, including the results of
+earlier corrections. Eventually Vroom
 is Bob running the whole loop himself: proposing changes on branches,
 gating them on verification, merging what survives. You sleep through
 that too. (How done that actually is: see Status, below. Bob does not
@@ -190,12 +190,13 @@ reference material
   -> Duplo: spec and phased plan        (the design becomes the program)
   -> McLoop: implementation, tests, commits   (sealed cells, gated)
   -> Orchestra: multi-model review and judgment  (composed, configurable)
-  -> Vroom: audit, reflection, correction    (re-derived from the ledger)
-  -> next plan
+  -> Vroom: continual audit, enhancement, correction  (ledger-driven)
 ```
 
 Every arrow crosses a check. Nothing stochastic gets across without
-passing something deterministic.
+passing something deterministic. Vroom keeps the loop running: audit
+the work, enhance and correct it, verify the changes, record the results
+in the ledger, and audit again.
 
 ## Why This Exists
 
@@ -212,8 +213,7 @@ Bob is the missing process layer:
 - fresh context per task, state is the repo, not a chat log
 - tests and lint after every change, a real check on every boundary
 - review before trust, independent draws where one gate is not enough
-- audit after shipping, the ledger decides whether to re-plan, not
-  the model
+- continual audit, enhancement, and correction, guided by ledger evidence
 - explicit recovery when something breaks, because the only state is
   on disk and in git, there is always a defined state to recover to
 
@@ -242,8 +242,8 @@ engineering, where it lived before the field stopped writing specs.
 3. Use McLoop to execute the plan task by task.
 4. Show tests, lint, commits, notifications, and crash recovery.
 5. Use Orchestra to route a decision through multi-model disagreement.
-6. Use Vroom to audit an artifact and propose a corrected version.
-7. Close the loop: the corrected output becomes the next plan.
+6. Use Vroom to audit an artifact and identify enhancements and corrections.
+7. Verify those changes, record the results in the ledger, and repeat the audit.
 
 ## Thesis
 
