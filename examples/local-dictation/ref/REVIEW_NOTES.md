@@ -74,3 +74,40 @@ Source: https://raw.githubusercontent.com/argmaxinc/argmax-oss-swift/v1.1.0/Sour
 The code was inspected; no diarization inference experiment was run. The independent
 review's claim that centroid access lacks supplied evidence can be resolved with
 this source. Its other provenance and resource-accounting objections still apply.
+
+## Review of 6287eb71b38e, proposal 3
+
+The third judgment requests revision. Its confirmed findings apply to the next
+proposal. The following additional findings concern that same revision.
+
+D-033 requires an existing, untombstoned recording for every lease. D-040 applies
+that protocol to model caches. Model installation and its smoke test can occur
+before any recording exists. Live preview also uses a model before the recording
+row commits at sealing. Session-directory ownership cannot establish ownership
+of a shared model cache.
+
+Give model use its own eligibility rule, keyed to the installation and the
+physical assets it pins. A recording lease checks the recording generation; a
+model lease must also be usable by installation checks and pre-capture work.
+State how acquisition excludes concurrent archival or removal. An active model
+user must prevent removal of its blob and service cache.
+
+A cache path keyed by service and setHash can be shared by several installations.
+Archiving one installation must not remove a cache or blob still needed by
+another. Retain a shared physical artifact while any qualifying reference or
+active use exists. An in-progress copy needs an owner before its completion
+marker and registered row exist; a sweep must not delete that live copy.
+
+D-023 and D-042 commit segment rows per analysis window. The recovery rule says
+no partial window results are committed. State where unfinished window output
+lives and how it becomes a completed diarization result. A run-owned staging
+artifact can be written incrementally and published in a final transaction;
+cancellation removes it. Output storage may grow with the meeting while
+decoded-audio windows and inference working memory remain bounded. Define the
+cluster state retained across windows and its storage lifetime too.
+
+The repeated definitions are causing contradictory revisions. Give each protocol
+one authoritative location and reference it elsewhere. Keep the complete design
+for this example within roughly 12,000 words by removing repetition and draft
+history. Preserve every required behavior and the reasons for consequential
+choices. A shorter document still needs exact ownership and recovery rules.

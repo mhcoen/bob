@@ -1,0 +1,83 @@
+The proposal is not ready for acceptance. The coverage table names all fourteen requirements exactly once, and the missing implementation phases are not a defect at this stage. Several decisions still contradict their failure, storage, or verification contracts.
+
+## Blocking defects
+
+1. D-009 and D-010 still permit unsafe or stranded delivery states.
+
+D-009 assumes that a non-success `AXError` proves the accessibility write had no effect. Neither RESEARCH nor F4 establishes that guarantee. A communication error after the target applied the write would allow the paste rung to insert the transcript again.
+
+Delivery profiles create another duplicate-delivery risk after application or macOS updates. Evolution claims that an unmaintained profile degrades to an unconfirmed result, but no applicability rule disables a rejection signal when the target version or operating system differs from the tested matrix.
+
+D-010 defines `rejected` as nonterminal, but launch recovery changes only `pending`, `in_progress`, and `unconfirmed` to `needs_review`. A crash after a rung records `rejected` and before the next rung starts leaves an attempt in a nonterminal state with no recovery transition.
+
+Submission revalidates the process, window, and element, but not the confirmed insertion range. A user can move the caret or edit the same element before Return is posted, leaving the element identity unchanged while invalidating the submission target.
+
+Acceptance requires evidence that an accessibility error is pre-effect or classification of that result as unconfirmed. Profiles need explicit version applicability and safe expiry. The attempt table needs a recovery outcome for `rejected`, or an atomic handoff that cannot persist it between rungs. Submission must confirm that the delivered text and post-insertion selection still occupy the expected location.
+
+2. D-028 contradicts its own mandatory no-egress boundary.
+
+D-003 and D-028 state that decoding occurs in a sandboxed service with no fallback outside that boundary. D-028 later says that, if a spawned external decoder does not inherit the restriction, it remains available off by default with a disclosed “trust transfer.” User opt-in cannot waive the specification’s requirement that captured audio stay on the Mac.
+
+F2 must make sandbox inheritance a shipping condition for the command-line decoder. Failure requires an in-process decoder inside `DecodeService`, another enforceably sandboxed process arrangement, or removal of that extension adapter. A warning and an off-by-default setting do not resolve the hard requirement.
+
+3. The materialized-model path has no owner or deletion lifetime.
+
+D-003 permits services to copy model assets into their own containers. Architecture later says service state is not written to disk. The store layout contains no path for those copies, and D-038 archives only `Models/blobs`. A materialized copy can therefore survive model archival, service crashes, and runtime replacement while remaining absent from the model manager’s accounting. That recreates the unbounded-storage problem outside the store designed to prevent it.
+
+The proposal must specify the service-container artifact, its hash validation, lease relationship, size accounting, crash recovery, and deletion on unload, archive, or runtime removal. D-038 cannot claim bounded storage until every selected model-access mechanism participates in that lifecycle.
+
+4. Compatible local model import is conditional on metadata the proposal does not guarantee.
+
+D-022 identifies installations using publisher and revision and records a license identifier plus retained notice for every asset. A compatible local model may supply weights and configuration without publisher metadata or notices. The design does not say whether those fields may be `unknown`, whether the user supplies labels, or whether missing notices reject activation. An implementation could consequently refuse compatible user-supplied models even though runtime compatibility and the smoke test pass.
+
+Notice storage under `Models/notices/<setHash>` also conflates provenance when identical bytes arrive from different publishers or under different notices.
+
+Acceptance requires a local-import identity rule for absent metadata and an explicit statement that missing quality or provenance metadata does not become a compatibility gate. Notices should be associated with the installation or acquisition origin, even when byte-identical assets share a blob.
+
+5. Long-duration resource behavior is specified only for speech recognition.
+
+D-018 bounds decoded windows delivered to the recognizer, and F1 measures the app plus `SpeechService`. The design supplies no streaming contract or duration-slope measurement for `DiarizationService`. F5 uses short two-speaker and four-speaker fixtures, so it can measure model residency while missing a diarizer that loads an entire multi-hour waveform or retains embeddings proportional to segment count.
+
+The external decoder’s process memory is also outside the long-input measurement. Credit on its output queue does not prove that the decoder itself avoids full-file buffering.
+
+D-027 must account separately for model residency and per-job working data. F5 needs long-duration memory measurements or an adapter contract that enforces bounded-window diarization. The long-import protocol must measure every participating process, including the external decoder.
+
+6. D-025 does not define how pause ownership survives later player changes.
+
+The adapter observes an identified player transition to paused, which establishes the initial pause. Automatic resume then depends on the assertion that “no other client has changed it.” The adapter contract contains no event sequence, state-generation token, or other observable that can establish that fact. Polling and finding the player paused cannot detect a user who played and paused it again after the application’s command.
+
+The initial supported player adapters and their ownership evidence must be named. An adapter that can only read current playback state may offer manual resumption, but cannot perform automatic restoration. If a player exposes change notifications, any intervening state transition must revoke the application’s ownership.
+
+7. The package dependency rule is incomplete.
+
+D-002 says `DictationCore` depends only on `DictationPorts`. `TransformationContract` and `ContractChecker` live in `TextValidation`, while core decides the disposition of checker results under D-012. No checker protocol or validation value types appear in `DictationPorts`, and no dependency from core to `TextValidation` is allowed.
+
+Implementation phases cannot be derived from both statements. The proposal must place the contract and result types on an allowed dependency path, either by defining a validation port or by permitting the core to depend on the deterministic validation target.
+
+8. Verification contains an impossible invariant and two unresolved acceptance rules.
+
+The automated state-machine suite says every non-recognition result has a primary input. D-029 expressly gives a diarization result no textual primary input and audio dependencies instead. A correct implementation would fail the stated test or invent a false parent. Expected invariants must be defined per result kind.
+
+The diarization threshold is justified as “roughly one segment in three mislabeled,” but diarization error rate measures erroneous scored time and includes missed speech, false alarm, and speaker confusion. It is not a segment-mislabel percentage. The threshold’s stated basis is therefore incorrect. A default-off decision needs separately reported DER components and a measure related to the claimed user cost, such as correction time or segment-assignment error.
+
+The preview criterion “no change in final word error rate beyond measurement noise” has no statistical definition, sample size, or tolerance. It cannot decide which rung ships as written.
+
+Translation has no explicit evaluation set or acceptance rule. The mode corpus covers mode output per language, but translation is a separate operation rather than one of D-013’s modes. The Languages requirement needs bilingual evaluation comparing the retained source transcript with the English translation, separately from recognition and formatting.
+
+## Improvements that can wait
+
+D-017 uses an unspecified language-detection probability threshold. Record its initial value, basis, and fallback calibration before implementing automatic detection.
+
+D-007 calls sealing bounded because the backlog contains at most 120 seconds of audio. A bound on audio duration is not a wall-clock bound when encoding or storage is stalled. Define cancellation behavior when the sealer cannot make progress.
+
+D-037 says users may split speaker assignments, but the schema maps existing `segment_id` values to identities. It has no representation for an edited segment boundary. Either limit editing to names and assignments or add versioned segment boundaries.
+
+D-016 releases source strings when the prompt is assembled. A run with no generation stage never assembles a prompt, and a long capture may retain raw context for hours before rewriting. Add terminal and no-generation release rules.
+
+F1’s relative WER comparison needs an aggregation rule per language and behavior when the comparison WER is zero or close to zero. The phrase “nearest available quantization” also needs a recorded selection rule to prevent choosing the comparator after seeing results.
+
+F3’s fallback of reducing meeting sample rate conflicts with D-018 and the data lifecycle’s decision to retain native-rate meeting artifacts for later processing. State whether the lower-rate artifact is an additional working copy or an irreversible replacement.
+
+## Earlier objections that no longer apply
+
+D-006, D-007, D-031, and D-037 now give diarization and notes explicit run lifecycles, cancellation, recovery, and immutable assignment provenance. D-023 follows the supplied SpeakerKit evidence and no longer invents per-segment confidence or margins. D-030 now orders audio durability before index durability and records per-packet sizes. Diarization has a named XPC service, and D-036 settles direct distribution. D-014 has one rule-precedence mechanism. D-011 no longer treats waveform-only display as an acceptable fallback. D-012 defines the consequence of unsupported-sentence findings and missing validator packs. D-038 supplies an archival state that preserves provenance after weights are removed, although the service-container copies still bypass it.

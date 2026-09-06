@@ -73,3 +73,36 @@ reported only `Read`, `Glob`, and `Grep`, with no MCP servers loaded.
 The third invocation uses the clarified inputs and preserved review. The local
 XPC probe is retained separately; its findings are excluded from the model inputs
 after automatic approval review rejected transmitting that material.
+
+## Attempt 3
+
+Run `6287eb71b38e`, September 6, 2026. All three judgments requested revision.
+The invocation was stopped during the fourth author pass. No proposal was accepted.
+
+| File | Contents |
+| --- | --- |
+| [Inputs](attempt-003/inputs.json) | Snapshot of the specification and declared references. |
+| [First proposal](attempt-003/proposal-1.json) | Design with 38 decisions. |
+| [First review](attempt-003/review-1.txt) | Findings about delivery and unrepresentable notes dependencies. |
+| [First judgment](attempt-003/judgment-1.json) | Requested revision. |
+| [Second proposal](attempt-003/proposal-2.json) | Design with 39 decisions, including retained-context ownership. |
+| [Second review](attempt-003/review-2.txt) | Remaining delivery and resource-lifetime defects. |
+| [Second judgment](attempt-003/judgment-2.json) | Required corrections for the third author pass. |
+| [Third proposal](attempt-003/proposal-3.json) | Design with 42 decisions. |
+| [Third review](attempt-003/review-3.txt) | Findings about window publication and shared-cache ownership. |
+| [Third judgment](attempt-003/judgment-3.json) | Confirmed contradictions and verification defects. |
+| [Receipt](attempt-003/receipt.json) | Completed stages and file digests. |
+
+The second review found that the revised delivery ladder treats every
+Accessibility error as proof that no write occurred. It also found that model
+copies inside service containers lack a deletion lifetime. The memory protocol
+measures speech recognition while leaving diarization and external decoding
+outside its long-recording measurements.
+
+The third revision added per-window diarization commits while retaining a recovery
+rule that said no partial window output was committed. Its cache path was shared
+by content hash, while deletion was specified per installation. The next author
+instructions require each protocol to have one definition and each changed rule
+to be reconciled with its recovery behavior and verification assertions.
+[Additional review notes](../ref/REVIEW_NOTES.md) explain why model leases need
+eligibility rules that can operate before any recording exists.

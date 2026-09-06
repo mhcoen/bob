@@ -1,0 +1,47 @@
+{
+  "workflow_run": "6287eb71b38e",
+  "status": "interrupted; unaccepted",
+  "author": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "reviewer": {
+    "adapter": "codex_text",
+    "model": "gpt-5.6-sol"
+  },
+  "judge": {
+    "adapter": "claude_code_text",
+    "profile": "opus"
+  },
+  "input_digest": "2534798e2fb965ab46a09dbbf25546b23c1ff506a5252fc5ce4e29957a6dcdae",
+  "interruption": "Stopped after the third judgment to consolidate duplicate protocol definitions and add an independent model-lease finding.",
+  "completed_stages": {
+    "1": [
+      "propose",
+      "review",
+      "judge"
+    ],
+    "2": [
+      "propose",
+      "review",
+      "judge"
+    ],
+    "3": [
+      "propose",
+      "review",
+      "judge"
+    ]
+  },
+  "sha256": {
+    "inputs.json": "0a9c605090e707c26f83e41c9504fc068de605f58bf79acbe52cbb96473b8d46",
+    "judgment-1.json": "f02f3ff7270df1fadf0690e80d86f3c20f7282db7b6f859a8fbbdcaa5769616a",
+    "judgment-2.json": "3ced339bc1d75044641ad4046d7e1396c8d215055fea8fd38e3ca5c64301a602",
+    "judgment-3.json": "ea0cdeb9f63869acaa0dc96ed7acb506d129b40590bec392d106ed3dff3cde6f",
+    "proposal-1.json": "07cba53e315824d167442d47d48bb888fea3940f269507513ef04bc090a1371b",
+    "proposal-2.json": "b8e89191ac697caf03073b7638a2ccbb6d96270999cc0476754042e41c08ac8d",
+    "proposal-3.json": "d0cfa2b65c196a3f297620b8fc6bc8eb91b63e0b0f68cf7deff78057b593d579",
+    "review-1.txt": "ea5a344003fe921827ec39f4cee6369c2c9d6d2da97b806dfc2c9d9fc976df21",
+    "review-2.txt": "41711b3a5218371f76a6276199b05bee59c16c2c55da64b07b4e61eb6ee477de",
+    "review-3.txt": "7ae71c10a2b7692078b7fd6d6388b87d731c6b57670817662ad8e3508e22c8ae"
+  }
+}

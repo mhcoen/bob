@@ -1,0 +1,87 @@
+The proposal is not ready for acceptance. The coverage table contains each named requirement exactly once, but several coverage claims do not follow from the decisions.
+
+## Blocking defects
+
+1. D-012 knowingly permits automatic delivery of output that violates the mode contract.
+
+For a mode with `answersQuestions` false, “Are we meeting Tuesday?” can become “Are we meeting Tuesday? Yes, Tuesday.” That output can preserve the interrogative, reuse supported content words, remain within the expansion limit, and pass the listed checks. The same problem remains for prose context: D-012 admits that an instruction can be followed using words absent from the context, yet allows automatic delivery whenever the available checks pass.
+
+Development-time corpus review cannot enforce the contract for a later utterance. The proposal needs a conservative runtime disposition for the cases it cannot check. Automatic delivery must stop wherever a known counterexample can pass the checks, or the transformation path must be constrained so that the prohibited behavior cannot occur. The Built-in modes and Context coverage entries currently overstate what D-012 establishes.
+
+2. Windowed diarization has contradictory persistence semantics.
+
+D-023 and D-042 say windowed diarization commits segment rows per window. D-007, D-031, and the recovery section say no partial diarization or window results are committed during cancellation or interruption. Both cannot be true.
+
+This affects crash recovery, deletion during diarization, provenance, and the claimed duration-independent working set. The proposal must decide whether window output is durable checkpoint data or job-local scratch. It then needs visibility rules, generation checks, cleanup after cancellation or deletion, and a transaction that publishes the completed diarization result without exposing an incomplete segment set.
+
+D-037 adds a separate attribution problem. It carries `assigned_by_user` states into a new diarization where segments overlap in time. Temporal overlap does not establish that the new segment represents the same speaker, especially after boundary changes or overlapping speech. An inferred carry-forward must remain unverified until confirmed. It cannot inherit the evidentiary status of a direct user assignment.
+
+3. The production meeting-alignment fallback is undefined.
+
+D-023 promises “tone-derived drift correction,” while verification measures drift using injected reference tones. The proposal does not say how a real meeting supplies corresponding reference tones. A correction calculated during a fixture run cannot safely be reused for later devices and sessions.
+
+The design needs a per-recording observable that supports drift estimation, or it must state that host-time alignment is the only production correction and define the failure behavior when it misses the approved range. If actual meetings require injected markers, their generation, capture, audibility, and removal belong in the design.
+
+4. Resource admission does not define priority across all model work, and cancelled sealing can escape its bounds.
+
+D-004 preempts batch speech work for an interactive recording. It does not say what happens when the global 8 GB budget is occupied by batch diarization or notes generation. The separate slots do not resolve a summed-budget conflict. An interactive recognition or rewrite may therefore wait behind batch work despite the decision’s stated reason for centralized admission.
+
+D-007 creates another unbounded path. Cancellation during sealing returns immediately while sealing continues outside normal admission. A user can start another recording and repeat this sequence, leaving several background finalizers on the capture lane. The one-live-session rule does not bound already cancelled sessions that are still sealing.
+
+The scheduler needs an explicit priority and preemption policy for every slot and every cross-slot budget conflict. Background finalization also needs a concurrency bound and ownership rule that preserves capacity for current capture.
+
+5. D-008 omits revalidation before the preferred insertion operation.
+
+The coordinator revalidates immediately before “event-based” rungs and Return. Rung 1 uses `AXSelectedText`, so it is excluded by that wording. Focus can change after target resolution or the settability probe and before the accessibility write. The app would then write into an element the user has left, even though the focus-change policy says that outcome should be held or redirected.
+
+Revalidation must occur immediately before every external write, including `AXSelectedText`, as well as before every posted event. The behavior table should cover a focus change between the probe and the accessibility write.
+
+6. D-030 still lacks all durable information needed to reconstruct the CAF packet table.
+
+The revised ordering correctly fsyncs encoded bytes before the index record and records per-packet byte sizes. The specified record still omits the packet-table header information needed to recover the exact valid duration, including valid-frame, priming-frame, and remainder-frame counts. Apple’s CAF definition requires those fields and explains their relationship to the encoded packet frames. [Apple Core Audio Format Specification](https://developer.apple.com/library/archive/documentation/MusicAudio/Reference/CAFSpec/CAF_spec/CAF_spec.html)
+
+The source PCM chunks may already have been deleted when recovery needs that information. The proposal must state how these values are obtained from the encoder and durably recorded or derived before chunk deletion. F3 should verify decoded frame count and trimming, not only decodability and packet count.
+
+7. Materialized model caches have conflicting ownership and deletion rules.
+
+D-022 and D-041 permit two installations with identical content to share one blob while retaining different notices. D-040 stores the materialized copy at `materialized/<setHash>/`, so those installations also share one physical cache. The registry is keyed by installation, however, and D-040 says archiving an installation deletes its copy. Archiving one installation can therefore remove the cache used by the other.
+
+The adapter-removal behavior also conflicts. D-040 says copies are deleted on adapter removal, while its verification case expects the copy to survive in `orphaned_runtime`; Evolution says adapter removal deletes nothing by itself.
+
+The design must choose whether a physical materialized cache belongs to a content hash or to one installation. Deletion must account for every installation using the path and every live lease. Adapter removal needs one consistent rule across D-038, D-040, Evolution, and verification.
+
+8. The verification rules can approve inappropriate behavior.
+
+F1 recognition compares WhisperKit only with whisper.cpp. Both can produce unusable transcripts and still satisfy the relative margin. The proposal needs an absolute usability criterion, based on product-approved error limits or review of representative transcripts, in addition to the comparison used to select an adapter.
+
+The mode rubric has a scoring defect. It forbids a score of zero on three criteria and limits the percentage of scores equal to one. A mode can score zero on vocabulary preservation or formatting for every item and still pass because those zeroes are not counted as ones. The translation rule has the same defect for “no added content.” The pass rule must treat lower scores monotonically and state the permitted failures for every criterion.
+
+The latency action also permits the target to be dropped after failure. A range approved before measurement is not a gate if engineering can discard it after seeing the result. Missing the range must reject the default, invoke a stated alternative, or return the target to the product owner for an explicit revised approval.
+
+Finally, the document says every range is currently unapproved. Design acceptance must either approve them or leave them as blocking questions. Otherwise the behavior tables and gates still have no normative pass conditions.
+
+9. The long-input contract lacks a shipping criterion for decoders.
+
+D-042 requires duration-independent working data in every participating process. The automated protocol measures DecodeService and an external decoder child, but the measurement section supplies ranges and failure actions only for speech and diarization. Requiring a decoder to consume a stream does not prevent the decoder from buffering that stream internally.
+
+The proposal needs a decoder-specific memory range and a failure action. An extension that retains memory proportional to file duration must be rejected or replaced before it can ship. Terminating a job only after it crosses a declared ceiling detects the failure during user work and does not establish compatibility with long files.
+
+10. D-025 assumes a completeness property its player adapters do not provide.
+
+Automatic resume depends on observing every intervening playback transition. The design revokes ownership on an observed transition or a detected stream gap, but it never defines how a missed distributed notification becomes a detectable gap. A manual matrix showing that one play-and-repause sequence was observed does not establish continuity of the notification stream.
+
+An observing adapter must supply evidence that its event stream is ordered and gap-detectable, or another state token that proves no intervening change occurred. Any adapter without that property must remain controlling-only and must not resume automatically.
+
+## Improvements that can wait
+
+The pre-roll ring in D-006 needs a capacity and overflow policy. The 200 ms arming budget does not guarantee that model resolution, target probing, manifest persistence, and context work all finish within 200 ms. The leading-audio test should include delayed arming and state what happens when the ring fills.
+
+Failed model staging has inconsistent lifetime rules. Failure behavior says a failed user import remains in staging with its error, while launch recovery removes staged model directories. Specify whether failed imports survive relaunch and where their diagnostic state lives.
+
+The notice-file commit order is incomplete. D-022 describes a transaction that inserts paths to notices without saying when those files are written and fsynced. Recovery needs a rule for an installation row whose notice file was not durable.
+
+Run provenance records runtime and adapter revisions, but not the checker-pack content revision, PromptAssembler version, or core pipeline version. A later application update can change validation disposition or prompt construction while the recorded model identity stays the same. Recording an application pipeline revision would make comparisons between old and new results interpretable.
+
+Archiving now provides the missing state in which attribution survives after weights are released. Runtime replacement still leaves every orphaned installation resident until the user acts. The model manager should define when it prompts for archival and how much new storage a replacement will retain, so the requirement’s “bounded effect” is visible before the replacement.
+
+Several earlier objections are resolved in this revision. D-036 settles direct distribution. D-009 removes length-based rejection and timer-based clipboard restoration. D-010 now has a complete attempt-state set. D-037 represents note dependencies and assignment revisions. D-003 gives diarization a sandboxed service. D-038 separates installation provenance from retained weights. D-014 makes list order the complete rule precedence. D-016 defines ephemeral context lifetimes. D-011 no longer treats waveform-only display as an acceptable fallback. Those corrections do not resolve the blocking defects above.

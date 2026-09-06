@@ -23,6 +23,8 @@ detects new files and appends tasks for anything missing.
   proposal and its objections into a fresh review, including rejected attempts.
   The shared proposal schema applies only to the author; review and judgment
   retain their own output contracts. See `SOFTWARE-DESIGN.md`.
+  The author prompt requires one definition per protocol or schema and asks
+  revisions to reconcile dependent recovery rules and verification assertions.
 
 - `design_command.py`: Implements `duplo design` and `duplo design --plan` for
   specifications with an explicit scope list. Reviews design before generating

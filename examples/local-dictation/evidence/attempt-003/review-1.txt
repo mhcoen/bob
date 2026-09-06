@@ -1,0 +1,93 @@
+The proposal is not ready for acceptance. The coverage table names all fourteen requirements exactly once, but several entries claim behavior that the decisions and data model do not establish.
+
+## Blocking defects
+
+1. D-009 still permits duplicate delivery after a delayed paste.
+
+An unchanged readable value is called an “explicit negative” and permits the next rung. Readability does not acknowledge consumption of Command-V. A delayed consumer can apply the paste after the readback, followed by rung 3 typing the same text. The rule therefore retains the race identified in `ref/REVIEW_NOTES.md`.
+
+D-008 also determines the target once, although Command-V, synthesized typing, and Return act on the focus present when each event is posted. Focus can change after target selection or after insertion but before submission.
+
+Resolve this with rung-specific failure rules. An accessibility write may fall through only on an API result known to precede any effect. A paste may fall through only when a target-specific integration acknowledges rejection; unchanged readback alone is unconfirmed. Revalidate the target immediately before every event-based rung and before Return. Define focus changes during an event sequence as unconfirmed, with no retry or submission. The attempt record should identify each rung whose external effect began.
+
+2. Meeting-note provenance cannot be represented by the stated schema.
+
+Under “Provenance graph,” `result_inputs` accepts an `input_result_id` and roles from `{transcript, diarization, prior_notes}`. A `speaker_assignment_revision` is not a result and has no permitted role. D-037 nevertheless says the transcript, diarization result, and assignment revision are recorded in `result_inputs`. The verification invariant requiring an assignment revision there is impossible under the schema.
+
+The initial meeting run creates a second conflict. Architecture says one `meeting` run continues through noting. Its manifest is written at arming, before the diarization result and assignment revision exist. D-037 says the notes run pins those future values. No append-only stage snapshot or separate notes run is defined.
+
+Resolve this by choosing one representable dependency scheme. Assignment revisions need a typed foreign key or a dependency table capable of naming different entity kinds. Initial note generation must either become a separate run created after its inputs commit, or receive an immutable manifest extension committed before the noting stage. Cancellation and recovery must use the selected boundary.
+
+3. D-012 cannot uphold question behavior when a validator pack is absent.
+
+Interrogative detection is classified as language-dependent. When the pack is missing, delivery falls back only if the transcript “contains an interrogative marker.” The design has removed the mechanism that decides whether the utterance is a question, then makes safety depend on that decision. A question without recognized punctuation can be rewritten into an answer and delivered.
+
+The per-mode partial-check override also permits generated text to be delivered while the mode still declares `answersQuestions=false`. An override does not make answering an explicit part of the selected mode.
+
+Resolve this by making the fallback independent of an unavailable question detector. For a generative mode that declares `answersQuestions=false`, missing question-detection capability should prevent automatic use of the rewrite for that run. Changing that behavior requires a new mode revision whose contract explicitly permits answers. Compatible models remain installable and usable; the restriction belongs to the selected mode’s behavior.
+
+4. Raw prose context still has an instruction path that the proposal admits it cannot check.
+
+D-012 distills screen and clipboard context by default, but focused-element context is always supplied as prose. Screen and clipboard prose can also be enabled per mode. The proposal states that its checks can miss an instruction followed in different words. A prose context instruction can therefore alter automatically delivered output while every listed check passes. Opting into prose does not waive the Context requirement.
+
+Resolve this by defining a conservative disposition for every raw-prose context path. Automatic delivery needs either a representation whose effect is constrained outside the generator, or a hold-for-review outcome when instruction compliance cannot be established. The design cannot cite term-list distillation as the control while leaving another context source untransformed.
+
+5. D-028’s fallback violates the local-only boundary.
+
+If sandboxed loading fails, D-028 moves the runtime into an unsandboxed service and relies on dependency inspection, symbol scanning, and one network-denied exercise. `ref/RESEARCH.md` explicitly says a symbol scan cannot establish that a process lacks network access. A changed product claim does not ensure that captured audio, transcripts, and context remain on the Mac during routine operation.
+
+F2 is therefore blocking for any selected runtime. Resolve the objection by retaining an enforced no-egress boundary, changing the model-access arrangement, or choosing a runtime that works within that boundary. An unsandboxed fallback requires a specification change; it is not a pre-decided implementation fallback satisfying the current requirement.
+
+6. Resource scheduling leaves both ingest concurrency and live preview unresolved.
+
+D-004 says imports are batch work, while also saying capture work is outside admission. Imports enter the `capturing` stage, so the proposal does not determine whether their decoding, conversion, writing, and sealing are admitted. Credit bounds each job’s queue, but no limit exists on the number of imports or captures. Several runs can therefore allocate several 30-second windows, journals, service buffers, and RunActors outside the stated model budget.
+
+A quality-of-service level does not guarantee that the sealer maintains a 30-second journal window under CPU or disk contention. Cancellation during sealing is described as bounded on the strength of that unestablished window.
+
+The preview ladder has a related contradiction. D-027 permits one speech model. D-004 may allow a batch speech job to finish. Both fallback preview strategies in D-011 still require speech inference, so neither can run while that slot remains occupied.
+
+Resolve this with admission limits for non-model work, an explicit number of simultaneous live and seekable ingest sessions, and a sealer deadline or backpressure policy. Reserve preview capacity or require batch speech preemption. D-011 also needs minimum update-latency and capture-integrity criteria for each preview rung.
+
+7. D-030 does not establish idempotent finalization and recovery.
+
+The recovery description rebuilds the packet table from accepted index records and then re-encodes surviving chunks. A finalized packet table must describe the surviving packets too; the stated order cannot be used as written. Recovery after a crash during packet-table writing, data-size patching, hashing, or the final fsync is also undefined. F3 injects failures around the two per-chunk fsync points, but not throughout finalization.
+
+Resolve this by specifying the recovery transaction through all finalization writes. Surviving chunks must be incorporated before the final packet table is committed. Recovery needs a way to detect and discard a partially written table or header patch. Fault injection must cover every write boundary in finalization, including repeated recovery after another crash.
+
+8. Model identity does not cover everything that determines output.
+
+D-022 identifies an installation by publisher, revision string, and a hash over an ordered “weight file set.” The same decision lists tokenizers and other companion assets as required, without saying they participate in the identity hash. Runtime and adapter revisions are also absent from the pinned provenance. A tokenizer, prompt template, model configuration, or runtime update can change output while History reports the same installation identity.
+
+Resolve this with a content-addressed installation manifest covering relative paths and hashes for every behavior-affecting asset. Runs also need the exact runtime and adapter revision, including the capability descriptor version. Compatibility ranges alone do not identify the code that produced a saved result.
+
+9. Opt-in context retention has no persistent representation.
+
+D-016 promises retained context text, yet the schema lists only `context_digests`. No table or file owns the retained value, links it to a run and source, or gives deletion and migration rules. The transient lifetime is also incomplete: source strings are said to die when the prompt is assembled, although the assembled prompt still contains them in the app, the XPC request, and generation state.
+
+Resolve this with an explicit retained-context record or artifact and its foreign keys, encryption or access assumptions, deletion behavior, and migration ownership. State the lifetime of the assembled prompt in both processes through success, cancellation, service failure, and crash recovery.
+
+10. D-025 can start playback while claiming to pause it.
+
+For an unsupported player, the application may post a play-pause key when any client keeps the output device active. A paused media player can receive that toggle while another application accounts for device activity, causing playback to start. The rationale’s claimed worst case, that nothing happens, is false.
+
+Resolve this by limiting automatic pause to adapters that issue a one-way pause command to an identified player. Unsupported players may receive an explicit user action, but an automatic toggle cannot be represented as a pause.
+
+11. The verification gates still do not provide a defensible acceptance basis.
+
+Several numerical expectations have no recorded basis: the 15 percent relative WER margin, the latency limits, the 500 MB memory allowance, the four-second capture-loss limit, corpus sizes, and the 1.8 rubric mean. D-035 says they will be approved later, while D-034 already treats them as the ranges governing design decisions.
+
+F1 is circular. WhisperKit is retained by comparison with the fallback adapter, but D-020 says the fallback is built after F1 fails. The comparison cannot decide failure until both adapters exist. “Equivalent model” is also undefined across Core ML and GGML installations.
+
+Other boundary-changing measurements have no range or failure action. Two-stream alignment can force the macOS baseline to change, yet no acceptable drift is stated. Preview asks which rung “meets the bars,” but no bars exist. Diarization quality is never a ship decision; even a useless measured result would ship because manual assignment exists. Manual correction does not establish that the selected speaker-separation runtime is appropriate.
+
+Resolve this before design acceptance by recording the basis and approval status of each range. Build the comparison harnesses required to make F1 executable, or use an independently justified absolute criterion. Add decisions for unacceptable alignment, preview behavior, and diarization quality. Compatible imported models must remain ungated; these criteria govern the application’s shipped defaults.
+
+## Improvements that can wait
+
+D-038 makes archiving possible but does not say what happens during runtime removal if the user ignores the offer. Define whether removal requires an archive choice or may leave old weights indefinitely. The retained license notices also need a location outside a blob that archiving deletes.
+
+D-033 reclaims “stale” leases without defining staleness. A delayed heartbeat from a suspended app or busy worker must not permit retention to delete an artifact still in use. Tie reclamation to process or connection death, or define an expiry protocol with a safe renewal margin.
+
+D-015 combines “ordered rules” with “longest match first.” State whether list order applies only among equal-length matches. Otherwise two implementations can produce different normalized transcripts while satisfying the prose.
+
+The previous objections concerning missing diarization stages, cancellation during sealing, the absent diarization service, undefined rule priority, waveform-only preview fallback, unconfirmed automatic resume, and the unresolved distribution question no longer apply to this revision. D-030 also fixes the earlier audio-before-index ordering and records per-packet sizes, although finalization recovery remains incomplete as described above.

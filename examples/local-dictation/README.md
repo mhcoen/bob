@@ -40,8 +40,11 @@ meeting provenance and unsafe delivery confirmation. Its judge also waived the
 specification's media-ownership condition, so the condition was clarified before
 another invocation. [Review notes](ref/REVIEW_NOTES.md) accompany the new inputs.
 
-The current invocation is revising the last proposal. No implementation plan has
-been generated. Model outputs in the evidence directory retain their wording.
+The third attempt exposed contradictory definitions retained across revisions.
+The authoring instructions now require each protocol to have one definition.
+Review continues with the completed judgments and additional model-lease findings.
+No implementation plan has been generated. Model outputs in the evidence directory
+retain their wording.
 
 The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
 service can deny network access independently of its containing app's sandbox

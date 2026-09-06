@@ -85,3 +85,24 @@ The result declaration does not establish per-segment confidence or margin outpu
 Keep unavailable evidence distinct from measured values. No diarization experiment
 was run during this inspection.
 [Versioned API source](https://raw.githubusercontent.com/argmaxinc/argmax-oss-swift/v1.1.0/Sources/SpeakerKit/DiarizationResult.swift).
+
+## Evidence from the third review
+
+`AXUIElementSetAttributeValue` can return `kAXErrorCannotComplete` for a messaging
+failure. The header documentation includes an unresponsive application among the
+causes. Such a result does not supply a guarantee that no write occurred. Treating
+it as an uncertain outcome is an engineering consequence of the missing guarantee.
+[Setter documentation](https://developer.apple.com/documentation/applicationservices/1460434-axuielementsetattributevalue?changes=_5&language=objc),
+[AXUIElement header](https://developer.apple.com/documentation/applicationservices/axuielement_h).
+
+A CAF packet table includes the number of packets and valid frames, with counts
+for priming and remainder frames. Packet byte sizes alone do not describe the
+exact valid duration. A recovery journal that deletes the source PCM must retain
+enough information to reconstruct the table and trim decoded output correctly.
+[Apple CAF specification](https://developer.apple.com/library/archive/documentation/MusicAudio/Reference/CAFSpec/CAF_spec/CAF_spec.html).
+
+The existence of playback-change callbacks does not establish that every
+transition reaches an observer. For example, mpv documents that property changes
+can be coalesced so only the last change invokes the callback. The proposed Music
+and Spotify adapters need separate evidence about their notification semantics.
+[mpv property observation](https://mpv.io/manual/stable/#lua-scripting-mp-observe-property).
