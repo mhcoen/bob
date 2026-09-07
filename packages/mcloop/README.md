@@ -1202,8 +1202,10 @@ Missing configuration stops the run before an editing session starts.
 McLoop asks the editor to write `.mcloop/task-evidence.json`. Its `requirements`
 array maps each task obligation to `design`, `implementation`, and `verification`
 references, each written as `relative/path:START-END`. Bob checks those references
-and sends their contents with the full task and changed files. Declaration-only
-work may cite declarations for inspection. Behavioral claims need supporting
+and sends their contents with the full task and changed files. Bob assigns each
+requirement an ID and requires one assessment per ID. The reviewer need not
+repeat the requirement wording; missing, duplicate or unknown IDs block completion.
+Declaration-only work may cite declarations for inspection. Behavioral claims need supporting
 assertions or observations. A module-name smoke test cannot establish that port
 signatures implement an accepted contract.
 

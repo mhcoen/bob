@@ -165,7 +165,7 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
     requirements = evidence.get("requirements") if isinstance(evidence, dict) else None
     if not isinstance(requirements, list) or not 1 <= len(requirements) <= 32:
         raise ValueError("Task evidence requires 1 to 32 requirement entries")
-    entries = []
+    entries: list[dict] = []
     reference_ids: dict[str, str] = {}
     for item in requirements:
         if (
@@ -174,7 +174,10 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
             or not item["requirement"].strip()
         ):
             raise ValueError("Each evidence entry needs requirement text")
-        entry: dict = {"requirement": item["requirement"]}
+        entry: dict = {
+            "requirement_id": f"Q{len(entries) + 1}",
+            "requirement": item["requirement"],
+        }
         for field in ("design", "implementation", "verification"):
             refs = item.get(field)
             if (
@@ -247,9 +250,10 @@ The editor selected the design excerpts. Reject for insufficient evidence when t
 context needed to decide. You have no tools. Do not assume unseen code or tests exist.
 Return only a JSON object:
 {"verdict":"accept" or "reject", "requirements":[
-{"requirement":"...", "satisfied":true or false, "evidence":["R1"],
+{"requirement_id":"Q1", "satisfied":true or false, "evidence":["R1"],
 "reason":"..."}], "findings":["concrete defect or missing evidence, with references"]}.
-Use the supplied requirement text exactly in each assessment. Accept only when every supplied
+Return exactly one assessment for each supplied requirement_id. Use those IDs without
+copying or paraphrasing the requirement text into the response. Accept only when every
 requirement is assessed as satisfied, no task obligation is missing, and findings is empty.
 In evidence arrays, cite the supplied evidence_id values (such as R1). Each ID identifies
 one exact file and line range in the packet's evidence dictionary. An evidence entry contains
@@ -313,7 +317,7 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
         raise ValueError("Task reviewer returned invalid findings")
     if not isinstance(assessments, list) or not assessments:
         raise ValueError("Task reviewer returned no requirement assessments")
-    expected = {item["requirement"] for item in packet["requirements"]}
+    expected = {item["requirement_id"]: item["requirement"] for item in packet["requirements"]}
     seen = set()
     references = {
         ref["reference"]
@@ -328,9 +332,17 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
         for ref in item[field]
     )
     for item in assessments:
-        if not isinstance(item, dict) or not isinstance(item.get("requirement"), str):
+        if not isinstance(item, dict) or not isinstance(item.get("requirement_id"), str):
             raise ValueError("Invalid requirement assessment")
-        seen.add(item["requirement"])
+        identity = item["requirement_id"]
+        if identity not in expected:
+            raise ValueError(f"Requirement assessment cites unknown requirement ID: {identity}")
+        if identity in seen:
+            raise ValueError(f"Duplicate requirement assessment: {identity}")
+        seen.add(identity)
+        # Preserve canonical wording in the receipt without asking the model
+        # to reproduce it. Identity and coverage depend only on supplied IDs.
+        item["requirement"] = expected[identity]
         if (
             type(item.get("satisfied")) is not bool
             or not isinstance(item.get("reason"), str)
@@ -344,8 +356,11 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
             or not all(isinstance(ref, str) and ref in references for ref in evidence)
         ):
             raise ValueError("Requirement assessment cites unprovided evidence")
-    if not expected <= seen:
-        raise ValueError("Task review did not assess every supplied requirement")
+    missing = expected.keys() - seen
+    if missing:
+        raise ValueError(
+            "Task review did not assess every supplied requirement: " + ", ".join(sorted(missing))
+        )
     if result["verdict"] == "accept" and (
         findings or any(not item["satisfied"] for item in assessments)
     ):

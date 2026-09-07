@@ -73,7 +73,7 @@ def verdict(packet, *, accepted=True):
             "verdict": "accept" if accepted else "reject",
             "requirements": [
                 {
-                    "requirement": packet["requirements"][0]["requirement"],
+                    "requirement_id": packet["requirements"][0]["requirement_id"],
                     "satisfied": accepted,
                     "evidence": ["DESIGN.md:1-1", "ports.swift:1-1", "smoke.swift:1-1"],
                     "reason": (
@@ -111,6 +111,42 @@ def test_valid_review_is_bound_to_packet(project):
         result = review_task(root, policy, "Task", baseline, "editor-model")
     assert result.passed
     assert json.loads(Path(result.receipt).read_text())["input_sha256"]
+
+
+@pytest.mark.parametrize("damage", [None, "missing", "duplicate", "unknown", "no_id"])
+def test_requirement_ids_preserve_complete_unambiguous_coverage(project, damage):
+    root, policy, baseline = project
+    path = root / EVIDENCE_PATH
+    evidence = json.loads(path.read_text())
+    # Identical wording must still represent two distinct supplied obligations.
+    evidence["requirements"] *= 2
+    path.write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Task", baseline)
+    assert [item["requirement_id"] for item in packet["requirements"]] == ["Q1", "Q2"]
+    response = json.loads(verdict(packet))
+    assessment = response["requirements"][0]
+    assessment["requirement"] = "A shortened description the reviewer volunteered"
+    response["requirements"].append({**assessment, "requirement_id": "Q2"})
+    if damage == "missing":
+        response["requirements"].pop()
+    elif damage == "duplicate":
+        response["requirements"][1]["requirement_id"] = "Q1"
+    elif damage == "unknown":
+        response["requirements"][1]["requirement_id"] = "Q3"
+    elif damage == "no_id":
+        del response["requirements"][1]["requirement_id"]
+    with patch("mcloop.task_review._request_review", return_value=json.dumps(response)) as call:
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    call.assert_called_once()
+    assert result.passed is (damage is None)
+    if damage is None:
+        receipt = json.loads(Path(result.receipt).read_text())
+        assert all(
+            item["requirement"] == packet["requirements"][0]["requirement"]
+            for item in receipt["review"]["requirements"]
+        )
+    elif damage == "missing":
+        assert "Q2" in result.output
 
 
 def test_changed_file_and_repeated_citations_share_one_copy(project):
@@ -317,7 +353,7 @@ def test_incomplete_or_contradictory_acceptance_is_rejected(project, damage):
     elif damage == "unknown_reference":
         assessment["evidence"] = ["nonexistent.swift:1-2"]
     else:
-        assessment["requirement"] = "A different task"
+        assessment["requirement_id"] = "Q999"
     with patch("mcloop.task_review._request_review", return_value=json.dumps(response)):
         assert not review_task(root, policy, "Task", baseline, "editor-model").passed
 

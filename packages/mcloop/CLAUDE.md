@@ -112,6 +112,8 @@ silent and busy sessions, command completion, duplicate events and approvals.
 Captures configuration and accepted design text before editing. Validates cited
 line ranges, includes changed files, and requires an explicit reviewer verdict.
 Packet evidence IDs let the reviewer cite exact ranges without reproducing paths.
+Requirement IDs bind assessments to obligations without requiring verbatim text.
+Missing, duplicate and unknown requirement IDs block completion.
 Repeated references share one excerpt. Citations into changed files use their
 line ranges in the full file already included in the packet.
 OpenRouter calls request low reasoning effort and JSON output within the shared
