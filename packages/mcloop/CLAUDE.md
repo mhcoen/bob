@@ -85,6 +85,10 @@ and wheel installs. Top-level hook and settings paths are compatibility symlinks
 
 **mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 3600s = 60 minutes) and returns TIMEOUT_EXIT_CODE (-102, outside the signal range) on timeout.
 
+The runner routes `z-ai/` model names through OpenRouter using
+`OPENROUTER_API_KEY`. `test_runner.py` checks GLM 5.3 routing and verifies
+that their sessions use provider authentication without native subscription preflight.
+
 **mcloop/run_summary.py** - RunSummary / TaskEntry / CheckEntry schema and JSON writer. Produces dated summaries plus `latest.json` on every run_loop exit.
 
 **mcloop/session_context.py** - Rolling session context shared between task sessions.

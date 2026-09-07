@@ -27,6 +27,25 @@ import pytest
 from orchestra.adapters import _subprocess
 
 
+def test_glm_session_uses_openrouter_credentials(monkeypatch):
+    model = "z-ai/glm-5.3"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-glm-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
+    monkeypatch.setattr(_subprocess, "_load_mcloop_config", lambda: {})
+    env = _subprocess.build_session_env(cli="claude", model=model)
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "test-glm-key"
+    assert env["ANTHROPIC_API_KEY"] == ""
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert env[key] == "z-ai/glm-5.3"
+
+
 @pytest.mark.skipif(os.name != "posix", reason="Process groups require POSIX")
 def test_interrupt_stops_child_and_descendants(tmp_path, monkeypatch):
     import json

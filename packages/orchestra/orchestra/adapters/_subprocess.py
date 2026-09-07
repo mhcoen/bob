@@ -97,7 +97,7 @@ MODEL_PROVIDERS: dict[str, str] = {
 
 # Provider prefixes recognized in fully-qualified model slugs. Lifted
 # from mcloop's ``_THIRD_PARTY_PREFIXES``.
-THIRD_PARTY_PREFIXES: tuple[str, ...] = ("deepseek/", "moonshotai/", "openai/")
+THIRD_PARTY_PREFIXES: tuple[str, ...] = ("deepseek/", "moonshotai/", "openai/", "z-ai/")
 
 DEFAULT_PROVIDER_BASE_URL: str = "https://openrouter.ai/api"
 

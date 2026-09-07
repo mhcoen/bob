@@ -152,6 +152,7 @@ _KNOWN_MODELS = {
             "kimi-k2.7-code",
             "kimi-k2.7-code-highspeed",
             "kimi-k2.6",
+            "z-ai/glm-5.3",
         }
     ),
     "codex": frozenset(
@@ -186,7 +187,7 @@ _MODEL_PROVIDERS = {
     "kimi-k2.6": "moonshotai",
 }
 
-_THIRD_PARTY_PREFIXES = ("deepseek/", "moonshotai/", "openai/")
+_THIRD_PARTY_PREFIXES = ("deepseek/", "moonshotai/", "openai/", "z-ai/")
 _SUBSCRIPTION_PREFLIGHT_OK = False
 _SUBSCRIPTION_PREFLIGHT_OK_KEYS: set[tuple[str, str | None]] = set()
 

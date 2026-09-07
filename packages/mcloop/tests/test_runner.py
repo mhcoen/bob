@@ -92,6 +92,28 @@ def test_run_session_rejects_missing_env(tmp_path):
         _run_session(["echo", "hi"], cwd=tmp_path)
 
 
+def test_prepare_session_routes_glm_through_openrouter(monkeypatch):
+    model = "z-ai/glm-5.3"
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-glm-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
+    with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
+        cmd, env = _prepare_session("claude", "task", model=model, executor_override={})
+
+    assert cmd[cmd.index("--model") + 1] == model
+    assert env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
+    assert env["ANTHROPIC_AUTH_TOKEN"] == "test-glm-key"
+    assert env["ANTHROPIC_API_KEY"] == ""
+    for key in (
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "CLAUDE_CODE_SUBAGENT_MODEL",
+    ):
+        assert env[key] == "z-ai/glm-5.3"
+    assert not runner._subscription_preflight_required(cli="claude", model=model, env=env)
+
+
 def test_investigation_tools_includes_web():
     assert "WebFetch" in INVESTIGATION_TOOLS
     assert "WebSearch" in INVESTIGATION_TOOLS

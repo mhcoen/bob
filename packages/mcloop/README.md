@@ -1760,6 +1760,15 @@ but execution continues. Both short aliases (`opus`, `sonnet`,
 
 ### Model fallover chain
 
+GLM 5.3 is available through Claude Code with `--cli claude --model z-ai/glm-5.3`
+and `OPENROUTER_API_KEY`.
+It can also be used as a chain entry with `"cli": "claude"` and
+`"model": "z-ai/glm-5.3"`. Provider API usage is billed separately from a Claude
+subscription.
+
+The [GLM coding trial](GLM-TRIAL.md) records a Swift task completed through the
+Orchestra backend, including the fixed tests and provider-reported usage.
+
 For unattended runs, configure a model fallover chain in
 `~/.mcloop/config.json`. McLoop starts each task on the first enabled
 tier. If that tier hits a 5-hour cap, a 7-day cap, a session limit, or
