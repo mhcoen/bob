@@ -30,6 +30,7 @@ from bob_tools.planfile import Task as PlanTask
 from bob_tools.planfile import (
     reset_task as _reset_task_op,
 )
+from bob_tools.planfile.validation import AcceptParseError, parse_accept_value
 
 
 @dataclass
@@ -406,6 +407,16 @@ def parse_auto_task(task: Task) -> tuple[str, str]:
         return ("", "")
     action, args = task.action_tag
     if action == "run_cli":
+        values = [value for key, value in task.annotations if key == "accept"]
+        if len(values) > 1:
+            return ("error", "run_cli task has multiple accept annotations")
+        if values:
+            acceptance = parse_accept_value(values[0])
+            if isinstance(acceptance, AcceptParseError):
+                return ("error", f"run_cli task has invalid acceptance: {acceptance.message}")
+            if acceptance.kind == "command-exit":
+                # The structured command is authoritative; prose may quote file paths.
+                return ("run_cli", acceptance.command or "")
         return _parse_run_cli_action(args)
     return task.action_tag
 

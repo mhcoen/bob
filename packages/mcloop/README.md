@@ -386,6 +386,11 @@ The deterministic API behind McLoop refuses to manually check off a parent whose
 
 Markers must appear at the beginning of the task description, immediately after the task ID. Inline mentions in prose are not interpreted as markers; the grammar is strictly leading-position. You can manually edit the checkbox state. To retry a failed task, change `[!]` back to `[ ]` and re-run, or use `mcloop --retry` to reset all failed tasks at once.
 
+An `[AUTO:run_cli]` task with `[accept: command-exit: ...]` executes that
+annotation's command. Backticks in its description can name files without
+changing the command. Tasks without a command-exit annotation retain the
+backtick-command and bare-command forms.
+
 ## How McLoop works
 
 ```

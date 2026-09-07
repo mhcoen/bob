@@ -491,3 +491,43 @@ def test_purge_completed_bugs_strips_magic_line_from_idless_queue(
     # And the rewritten file now parses cleanly as a loose queue.
     tasks = shim.parse(path)
     assert any(not t.checked and t.task_id is None for t in tasks)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "Run the foundation suite. Expect successful compilation.",
+        "Inspect `Package.swift` and `Sources/Core` with the foundation suite.",
+        "Run `obsolete-command` with the updated acceptance command.",
+    ],
+)
+def test_auto_run_cli_uses_declared_command(tmp_path, description):
+    path = tmp_path / "PLAN.md"
+    path.write_text(
+        canonical_plan_text(
+            f"- [ ] [AUTO:run_cli] {description} "
+            "[accept: command-exit: python3 scripts/acceptance.py foundation]\n"
+        )
+    )
+    task = shim.parse(path)[0]
+    assert shim.parse_auto_task(task) == ("run_cli", "python3 scripts/acceptance.py foundation")
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        ("command-exit: first", "command-exit: second"),
+        ("command-exit: ",),
+    ],
+)
+def test_auto_run_cli_rejects_invalid_acceptance_without_falling_back(values):
+    task = shim.Task(
+        text="Run `fallback`",
+        checked=False,
+        failed=False,
+        line_number=0,
+        indent_level=0,
+        action_tag=("run_cli", "Run `fallback`"),
+        annotations=tuple(("accept", value) for value in values),
+    )
+    assert shim.parse_auto_task(task)[0] == "error"
