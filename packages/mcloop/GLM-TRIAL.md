@@ -1,4 +1,6 @@
-# GLM 5.3 coding trial
+# GLM and Luna coding trials
+
+## GLM 5.3
 
 On September 6, 2026, GLM 5.3 completed a Swift implementation task through
 McLoop's Orchestra editing backend. The requested model was `z-ai/glm-5.3`.
@@ -37,3 +39,48 @@ The trial establishes that GLM can perform this task through McLoop and meet
 these assertions. It does not establish performance on the dictation application
 or a ranking against other coding models. The configured fallback order was
 unchanged by this trial.
+
+## GLM 5.3 Flash and GPT-5.6 Luna
+
+Later on September 6, 2026, both models completed the same Swift task through
+Claude Code and McLoop's Orchestra editing backend. Each started from the
+original stub in a separate temporary repository with identical fixed tests.
+Each received one coding session, a 180-second timeout and a $0.50 CLI budget.
+The sessions ran concurrently. No model retries or manual code corrections
+were used.
+
+| Requested model | Served model recorded by OpenRouter | Session time | API requests | Actual charge |
+| --- | --- | ---: | ---: | ---: |
+| `z-ai/glm-5.3-flash` | `z-ai/glm-5.3-flash-20260826` | 138.271 s | 8 | $0.003535205 |
+| `openai/gpt-5.6-luna` | `openai/gpt-5.6-luna-20260709` | 43.823 s | 7 | $0.006589460 |
+
+Charges are the sums of OpenRouter's generation records. The CLI reported
+$0.247381 for Flash and $0.1525915 for Luna; those estimates were not used as
+billing results. Flash used 80,395 input tokens, including 63,232 cached tokens,
+and 5,198 output tokens, including 3,437 reasoning tokens. Luna used 53,479 input
+tokens, including 42,148 cached tokens, and 2,429 output tokens, including 264
+reasoning tokens. These charges reflect the providers and rates at trial time.
+
+Both implementations passed the eight fixed tests, including independent reruns.
+File hashes confirmed that neither model changed the specification, package
+manifest or fixed tests. McLoop committed Flash's implementation as `2b2139b`
+and Luna's as `24abdb6` in their respective temporary repositories. Both CLI
+sessions reported success with no permission denials. Luna expanded the source
+manifest to 146 lines, which was excessive for this function. Flash kept it to
+three lines.
+
+Before either model was invoked, McLoop's preflight push failed because the
+temporary repositories lacked tracking branches. The local upstreams were
+configured and the completion receipts reconciled before the coding sessions
+started. All pushes remained within local temporary bare repositories.
+
+The results establish that both models can complete this task through Claude
+Code and McLoop. The tested assertions cover particular behaviors and do not
+establish general implementation quality. Luna was faster in this run, but a
+single task does not establish a performance ranking. The trial made no changes
+to the configured fallback order.
+
+Local evidence is under `/private/tmp/bob-low-cost-trials`: `results.json`, the
+per-model `*-usage.json` billing records and `*-verified.log` test results, plus
+the `glm-flash` and `luna` trial repositories. These temporary files are not
+part of Bob's repository and may be removed by the operating system.

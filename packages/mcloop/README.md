@@ -1766,8 +1766,11 @@ It can also be used as a chain entry with `"cli": "claude"` and
 `"model": "z-ai/glm-5.3"`. Provider API usage is billed separately from a Claude
 subscription.
 
-The [GLM coding trial](GLM-TRIAL.md) records a Swift task completed through the
-Orchestra backend, including the fixed tests and provider-reported usage.
+GLM 5.3 Flash (`z-ai/glm-5.3-flash`) and GPT-5.6 Luna
+(`openai/gpt-5.6-luna`) also completed a Swift task through this Claude Code
+route. Use the full model identifier with `--cli claude` or in a chain entry.
+The [GLM and Luna coding trials](GLM-TRIAL.md) record the fixed tests, session
+times and actual provider charges. The trials did not change the default chain.
 
 For unattended runs, configure a model fallover chain in
 `~/.mcloop/config.json`. McLoop starts each task on the first enabled
