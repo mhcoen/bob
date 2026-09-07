@@ -159,6 +159,7 @@ _KNOWN_MODELS = {
     ),
     "codex": frozenset(
         {
+            "gpt-6-astra",
             "gpt-5.6-sol",
             "gpt-5.5",
             "gpt-5.4",

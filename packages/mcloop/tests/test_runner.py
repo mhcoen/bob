@@ -2039,16 +2039,13 @@ def test_warn_unknown_model_known_codex(capsys):
 
 
 def test_warn_unknown_model_known_codex_production_models(capsys):
-    """gpt-5.6-sol is the model this account's Codex CLI serves and is
-    bound to proposer_codex in duplo's _FALLBACK_ROLE_BINDINGS; gpt-5.5
-    is the prior binding and is still servable. Neither may trigger a
-    spurious 'model not recognized' warning when invoked directly via
-    mcloop's codex runner. Pinned so a future _KNOWN_MODELS edit cannot
-    silently drop either from the codex set."""
+    """Configured Codex models must not produce an unknown-model warning."""
     from mcloop.runner import _KNOWN_MODELS, warn_unknown_model
 
+    assert "gpt-6-astra" in _KNOWN_MODELS["codex"]
     assert "gpt-5.6-sol" in _KNOWN_MODELS["codex"]
     assert "gpt-5.5" in _KNOWN_MODELS["codex"]
+    warn_unknown_model("codex", "gpt-6-astra")
     warn_unknown_model("codex", "gpt-5.6-sol")
     warn_unknown_model("codex", "gpt-5.5")
     assert capsys.readouterr().out == ""

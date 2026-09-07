@@ -87,6 +87,7 @@ and wheel installs. Top-level hook and settings paths are compatibility symlinks
 Codex commands use explicit sandbox and approval flags before `exec`. The auth
 probe is read-only; direct coding sessions retain workspace-write with approval
 on request. Preflight warnings include CLI error details when available.
+The known Codex model names include `gpt-6-astra`.
 
 The runner routes `z-ai/` model names through OpenRouter using
 `OPENROUTER_API_KEY`. `test_runner.py` checks GLM 5.3 routing and verifies
