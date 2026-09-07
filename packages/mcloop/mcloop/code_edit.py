@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +185,7 @@ def invoke_code_edit(
     timeout: int = DEFAULT_TASK_TIMEOUT,
     task_id: str = "",
     executor_override: dict | None = None,
+    cli: str = "claude",
 ) -> CodeEditResult:
     """Perform one code-edit attempt and return a structured result.
 
@@ -214,6 +215,7 @@ def invoke_code_edit(
             model=model,
             timeout=timeout,
             task_id=task_id,
+            cli=cli,
         )
     return _invoke_direct(
         instruction=instruction,
@@ -229,6 +231,7 @@ def invoke_code_edit(
         model=model,
         timeout=timeout,
         task_id=task_id,
+        cli=cli,
         executor_override=executor_override,
     )
 
@@ -295,6 +298,7 @@ def _invoke_direct(
     timeout: int,
     task_id: str = "",
     executor_override: dict | None = None,
+    cli: str = "claude",
 ) -> CodeEditResult:
     if prior_errors:
         prompt = _runner._build_bug_prompt(
@@ -328,14 +332,14 @@ def _invoke_direct(
             task_id=task_id,
         )
     cmd, session_env = _runner._prepare_session(
-        "claude",
+        cli,
         prompt,
         task_label=task_label,
         model=model,
         executor_override=executor_override,
     )
     _runner.ensure_subscription_preflight(
-        cli="claude",
+        cli=cli,
         model=model,
         env=session_env,
         cwd=project_dir,
@@ -457,14 +461,15 @@ def _invoke_orchestra(
     model: str | None,
     timeout: int,
     task_id: str = "",
+    cli: str = "claude",
 ) -> CodeEditResult:
     from orchestra import run_workflow
     from orchestra.config import load_config
 
-    cfg = load_config(project_dir)
+    cfg = _editor_config(load_config(project_dir), cli=cli, model=model)
     _ensure_orchestra_subscription_preflight(
         cfg=cfg,
-        model=model,
+        cli=cli,
         task_label=task_label,
         project_dir=project_dir,
     )
@@ -485,8 +490,6 @@ def _invoke_orchestra(
         "timeout": timeout,
         "project_dir": str(project_dir),
     }
-    if model is not None:
-        invocation_options["model"] = model
     result = run_workflow(
         "code_edit",
         inputs,
@@ -498,39 +501,48 @@ def _invoke_orchestra(
     return _orchestra_to_code_edit_result(result, fallback_log=log_dir)
 
 
+def _editor_config(cfg: Any, *, cli: str, model: str | None) -> Any:
+    """Apply the coding chain selection to this invocation's editor role."""
+    from orchestra.api.bindings import _resolve_role_binding
+
+    adapter = {"claude": "claude_code_agent", "codex": "codex_agent"}[cli]
+    editor = _resolve_role_binding("code_edit", "editor", cfg)
+    overrides: dict[str, Any] = {"adapter": adapter}
+    if editor.adapter != adapter:
+        # Tool names and constructor parameters belong to the original adapter.
+        overrides.update(model=model, tools="default", parameters={})
+    elif model is not None:
+        overrides["model"] = model
+        overrides["parameters"] = {
+            key: value for key, value in editor.parameters.items() if key != "default_model"
+        }
+    workflow = cfg.workflow("code_edit")
+    workflow = replace(
+        workflow,
+        role_overrides={
+            **workflow.role_overrides,
+            "editor": {**workflow.role_overrides.get("editor", {}), **overrides},
+        },
+    )
+    return replace(cfg, workflows={**cfg.workflows, "code_edit": workflow})
+
+
 def _ensure_orchestra_subscription_preflight(
     *,
     cfg: Any,
-    model: str | None,
+    cli: str,
     task_label: str,
     project_dir: Path,
 ) -> None:
-    """Run the Claude subscription preflight for orchestra-backed code edits.
+    """Check the selected editor's subscription using its subprocess environment."""
+    from orchestra.adapters._subprocess import build_session_env
+    from orchestra.api.bindings import _resolve_role_binding
 
-    Orchestra owns the subprocess env for this backend, so use its env
-    builder instead of approximating the direct runner path. If mcloop
-    supplied a model override, orchestra applies that model to every
-    state; otherwise use the configured editor role when present.
-    """
-    try:
-        from orchestra.adapters._subprocess import build_session_env
-    except ImportError:
-        return
-
-    preflight_model = model
-    if preflight_model is None:
-        binding = getattr(cfg, "roles", {}).get("editor")
-        adapter = getattr(binding, "adapter", "") if binding is not None else ""
-        if adapter.startswith("claude_code"):
-            preflight_model = getattr(binding, "model", None)
-    env = build_session_env(
-        task_label=task_label,
-        cli="claude",
-        model=preflight_model,
-    )
+    model = _resolve_role_binding("code_edit", "editor", cfg).model
+    env = build_session_env(task_label=task_label, cli=cli, model=model)
     _runner.ensure_subscription_preflight(
-        cli="claude",
-        model=preflight_model,
+        cli=cli,
+        model=model,
         env=env,
         cwd=project_dir,
     )

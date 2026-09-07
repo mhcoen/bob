@@ -1400,6 +1400,12 @@ absent or set to `direct`, McLoop uses the direct backend. Any error
 loading the config falls back to direct with a stderr warning so a
 misconfigured environment still makes progress.
 
+Both Claude Code and Codex coding sessions use this dispatch. The selected
+coding chain tier supplies the editor's adapter and model for that attempt.
+Other workflow roles retain their configured models. Switching adapters resets
+adapter-specific tools and parameters to their defaults. An explicit custom
+`allowed_tools` list uses the direct backend and prints a bypass warning.
+
 A project-local `<project>/.orchestra/config.json` is supported as an
 advanced override for individual projects that genuinely need
 different bindings, but most setups should not use one. When McLoop

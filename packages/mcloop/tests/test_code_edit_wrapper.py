@@ -8,8 +8,8 @@ Two tests prove the wrapper interface works on both backends:
    (including invoke_code_edit) sees the patches.
 2. The orchestra path mocks orchestra.run_workflow itself, the only
    public boundary the wrapper crosses. The test asserts that the
-   model, timeout, log_dir, and project_dir the caller passed all
-   arrive in invocation_options, and that the WorkflowRunResult the
+   editor model arrives in the workflow binding and the remaining
+   session options arrive in invocation_options, and that the WorkflowRunResult the
    stub returns is converted into the expected CodeEditResult shape.
 
 Both backends produce a CodeEditResult; the assertions confirm the
@@ -179,8 +179,8 @@ def test_orchestra_backend_returns_code_edit_result(
     """When .orchestra/config.json maps code_edit to single, the
     orchestra backend fires. The wrapper crosses one public boundary
     (``orchestra.run_workflow``); patch only that symbol and assert
-    the wrapper threads ``model``, ``timeout``, ``log_dir``, and
-    ``project_dir`` through ``invocation_options``, and converts the
+    the wrapper applies ``model`` to the editor binding and passes
+    ``timeout``, ``log_dir``, and ``project_dir`` through invocation options, and converts the
     returned ``WorkflowRunResult`` into the expected ``CodeEditResult``.
     """
     project_dir = tmp_path / "project"
@@ -230,6 +230,7 @@ def test_orchestra_backend_returns_code_edit_result(
     ) -> Any:
         captured["workflow_name"] = workflow_name
         captured["inputs"] = inputs_arg
+        captured["config"] = config
         captured["invocation_options"] = invocation_options
         captured["project_dir"] = project_dir
         captured["data_root"] = data_root
@@ -252,7 +253,8 @@ def test_orchestra_backend_returns_code_edit_result(
     assert captured["workflow_name"] == "code_edit"
     assert captured["invocation_options"] is not None
     invo = captured["invocation_options"]
-    assert invo["model"] == "opus"
+    assert "model" not in invo
+    assert captured["config"].workflow("code_edit").role_overrides["editor"]["model"] == "opus"
     assert invo["timeout"] == 1234
     assert invo["log_dir"] == str(log_dir)
     assert invo["project_dir"] == str(project_dir)

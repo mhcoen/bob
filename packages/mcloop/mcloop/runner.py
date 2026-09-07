@@ -743,14 +743,7 @@ def _build_bug_prompt(
 
 
 def _warn_if_orchestra_bypassed(project_dir: Path, *, cli: str, allowed_tools: str | None) -> None:
-    """Warn when a custom tool list or non-claude cli routes around
-    orchestra even though the project configured a non-direct backend.
-
-    Slice 1 orchestra adapters use a fixed tool set, so the legacy path
-    is the right answer here. Surfacing the bypass tells the user that
-    their orchestra config did not apply to this call and prevents a
-    silent regression once orchestra adapters learn custom tool lists.
-    """
+    """Warn when custom tools or an unsupported CLI bypass Orchestra."""
     import sys as _sys
 
     try:
@@ -800,19 +793,9 @@ def run_task(
     log_dir = Path(log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # The single inner edit attempt now flows through the code_edit
-    # wrapper, which dispatches to either the direct backend (the
-    # original prompt-build + run-session + write-log sequence below
-    # was lifted into mcloop.code_edit) or to orchestra when the
-    # project's .orchestra/config.json selects it. The outer loop in
-    # the caller (retry, rate-limit, success classification, Telegram
-    # approval, watchdog) is unchanged.
-    #
-    # The wrapper is the dispatch path only when ``cli == "claude"``
-    # and ``allowed_tools`` is left at the default. Codex sessions and
-    # custom tool overrides keep the legacy inline path so callers
-    # that pin those parameters get bit-for-bit prior behavior.
-    if cli == "claude" and not allowed_tools:
+    # Both coding CLIs use the configured workflow. Custom tool lists
+    # retain the direct path until Orchestra can preserve their semantics.
+    if cli in {"claude", "codex"} and not allowed_tools:
         from mcloop.code_edit import invoke_code_edit
 
         ce = invoke_code_edit(
@@ -830,6 +813,7 @@ def run_task(
             timeout=timeout,
             task_id=task_id,
             executor_override=executor_override,
+            cli=cli,
         )
         return RunResult(
             success=ce.success,
@@ -839,7 +823,7 @@ def run_task(
         )
 
     # Legacy path. If the project has opted in to orchestra for
-    # code_edit but a custom allowed_tools list (or codex cli) routed
+    # code_edit but a custom allowed_tools list or unsupported CLI routed
     # us here, warn so the user does not silently lose orchestra
     # routing on a single call.
     _warn_if_orchestra_bypassed(project_dir, cli=cli, allowed_tools=allowed_tools)

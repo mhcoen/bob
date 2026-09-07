@@ -274,6 +274,19 @@ def _record_activity_from_line(line: str) -> None:
         return
     if not isinstance(data, dict):
         return
+    if data.get("type") in (
+        "item.started",
+        "item.updated",
+        "item.completed",
+        "error",
+        "turn.failed",
+    ):
+        from orchestra.adapters.activity import activity
+
+        action = activity(line)
+        if action is not None:
+            _set_current_activity(action[1])
+        return
     # Two shapes Claude Code emits for the same event:
     # - top-level ``{"type": "assistant", "message": {"content": [...]}}``
     # - ``{"type": "stream_event", "event": {"type": "content_block_start",

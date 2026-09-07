@@ -3,9 +3,9 @@
 Used for the workspace-mutating invocation in code-edit workflows when
 the user has bound the agent role to Codex. Mirrors
 ``ClaudeCodeAgentAdapter`` in shape but invokes Codex with
-``--ask-for-approval never --sandbox workspace-write`` so the
-subprocess can edit files inside the project directory without
-prompting. The default sandbox value is ``workspace-write``; the
+``--ask-for-approval on-request --sandbox workspace-write`` so
+the subprocess can request approval when it needs additional access.
+The default sandbox value is ``workspace-write``; the
 analogue of Claude Code's ``--allowedTools`` override flows through the
 ``default_sandbox`` constructor argument and ``backing_options.sandbox``
 per call.
@@ -25,6 +25,7 @@ backing per the project config.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ from orchestra.adapters.claude_code_agent import _detect_changed_files
 from orchestra.spine import InvocationRequest, PreparedInvocation
 
 DEFAULT_SANDBOX: str = "workspace-write"
-"""Codex sandbox mode that permits in-tree edits without prompting.
+"""Codex sandbox mode that permits in-tree edits.
 
 Maps to the ``--sandbox`` flag and is the closest analogue of
 ``ClaudeCodeAgentAdapter``'s ``DEFAULT_ALLOWED_TOOLS``. Other valid
@@ -158,12 +159,10 @@ class CodexAgentAdapter:
             attempt=prepared.request.attempt,
         )
         changed = _detect_changed_files(inner["project_dir"])
-        # Codex emits the final assistant text on stdout (not
-        # stream-json), so the captured output is the answer. Pass it
-        # through unchanged.
+        # Keep the event stream in the log and pass assistant text to the workflow.
         verdict = verdict_for_exit_code(exit_code)
         return {
-            "output": output,
+            "output": _final_text(output) if exit_code == 0 else output,
             "verdict": verdict,
             "fields": {
                 "exit_code": exit_code,
@@ -205,10 +204,11 @@ class CodexAgentAdapter:
         cmd: list[str] = [
             self._cli,
             "--ask-for-approval",
-            "never",
+            "on-request",
             "--sandbox",
             sandbox,
             "exec",
+            "--json",
             "--skip-git-repo-check",
         ]
         if model:
@@ -218,6 +218,26 @@ class CodexAgentAdapter:
         # .mcloop/active-pid file, transcript logs, or the prepare()
         # summary.
         return cmd
+
+
+def _final_text(output: str) -> str:
+    messages: list[str] = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        item = event.get("item")
+        if (
+            event.get("type") == "item.completed"
+            and isinstance(item, dict)
+            and item.get("type") == "agent_message"
+            and isinstance(item.get("text"), str)
+        ):
+            messages.append(item["text"])
+    return "\n\n".join(messages) if messages else output
 
 
 def register(registry: Any, *, default_model: str | None = None) -> None:

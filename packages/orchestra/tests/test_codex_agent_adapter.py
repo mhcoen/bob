@@ -57,10 +57,11 @@ def test_build_command_default_sandbox_no_model() -> None:
     assert cmd == [
         "codex",
         "--ask-for-approval",
-        "never",
+        "on-request",
         "--sandbox",
         "workspace-write",
         "exec",
+        "--json",
         "--skip-git-repo-check",
     ]
 
@@ -71,10 +72,11 @@ def test_build_command_with_model() -> None:
     assert cmd == [
         "codex",
         "--ask-for-approval",
-        "never",
+        "on-request",
         "--sandbox",
         "workspace-write",
         "exec",
+        "--json",
         "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
@@ -148,10 +150,11 @@ def test_prepare_summary_kind_agent_and_full_command(tmp_path: Path) -> None:
     assert prepared.summary["command"] == [
         "codex",
         "--ask-for-approval",
-        "never",
+        "on-request",
         "--sandbox",
         "workspace-write",
         "exec",
+        "--json",
         "--skip-git-repo-check",
         "--model",
         "gpt-5-codex",
@@ -375,3 +378,53 @@ def test_live_codex_agent_smoke(tmp_path: Path) -> None:
     assert payload["output"]
     assert Path(payload["fields"]["log_path"]).exists()
     assert isinstance(payload["fields"]["changed_files"], list)
+
+
+def test_codex_events_reach_activity_and_preserve_transcript(tmp_path, monkeypatch):
+    import json
+
+    from orchestra.adapters import _subprocess
+
+    events = [
+        {
+            "type": "item.started",
+            "item": {
+                "id": "cmd",
+                "type": "command_execution",
+                "command": "swift test",
+            },
+        },
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "cmd",
+                "type": "command_execution",
+                "command": "swift test",
+                "exit_code": 0,
+            },
+        },
+        {"type": "item.completed", "item": {"type": "reasoning", "text": "private"}},
+        {"type": "item.completed", "item": {"type": "agent_message", "text": "Implemented."}},
+    ]
+    transcript = "\n".join(json.dumps(event) for event in events)
+    observed = []
+
+    def session(*args, **kwargs):
+        for line in transcript.splitlines():
+            _subprocess._record_activity_from_line(line)
+            observed.append(_subprocess.get_current_activity())
+        return transcript, 0
+
+    monkeypatch.setattr(codex_agent_mod, "run_session", session)
+    monkeypatch.setattr(codex_agent_mod, "_detect_changed_files", lambda _: [])
+    adapter = CodexAgentAdapter()
+    try:
+        prepared = adapter.prepare(_request(external_inputs={"project_dir": str(tmp_path)}))
+        payload = adapter.invoke(prepared)
+        assert observed[0] == "Command running: swift test"
+        assert observed[1] == observed[2] == "Command completed (exit 0): swift test"
+        assert observed[3] == "Agent message: Implemented."
+        assert payload["output"] == "Implemented."
+        assert transcript in Path(payload["transcript_ref"]).read_text()
+    finally:
+        _subprocess._clear_current_activity()
