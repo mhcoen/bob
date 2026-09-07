@@ -1241,6 +1241,13 @@ transport errors leave the task pending. Run `mcloop` again after resolving a pa
 problem or to retry the provider. Bob reuses completed editing and reruns acceptance
 and review; it does not restart coding merely because packet preparation failed.
 
+The reviewer receives McLoop's check command and result after editing, alongside
+the implementation evidence. Editor notes about tests left unrun in that session
+therefore do not erase subsequent check results. The packet includes up to 4,000
+bytes from the end of check output and states any omitted byte count. The review
+receipt retains the full output. Waivers keep their waiver designation; a passing
+command does not establish that its assertions match the accepted design.
+
 The `.mcloop/review-resume/` checkpoint retains the original baseline, editor model
 and a fingerprint of project files and review policy. It survives a startup Git
 checkpoint and permits edits to `.mcloop/task-evidence.json`. Changes to code, tests,

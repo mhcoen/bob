@@ -14,6 +14,7 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from mcloop.checks import CheckResult
 from mcloop.evidence_refs import filename, resolve
 from mcloop.git_ops import run_git_bounded
 from mcloop.timing import timed
@@ -164,7 +165,13 @@ def _reference(root: Path, reference: str, documents: dict[str, str], design: bo
 
 
 @timed("evidence")
-def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> dict:
+def build_packet(
+    root: Path,
+    policy: ReviewPolicy,
+    task: str,
+    baseline: str,
+    checks: CheckResult | None = None,
+) -> dict:
     for path, digest in policy.configuration:
         if _config_digest(path) != digest:
             raise ValueError("Review configuration changed during this run")
@@ -268,6 +275,17 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
         "evidence": excerpts,
         "changed_files": changed,
     }
+    if checks is not None:
+        output = checks.output.encode("utf-8")
+        packet["mcloop_checks"] = {
+            "source": "McLoop checks after editor completion",
+            "command": checks.command,
+            "passed": checks.passed,
+            "output_sha256": hashlib.sha256(output).hexdigest(),
+            "output_bytes": len(output),
+            "output_tail": output[-4000:].decode("utf-8", errors="replace"),
+            "output_omitted_bytes": max(0, len(output) - 4000),
+        }
     encoded = packet_text(packet).encode()
     if len(encoded) > MAX_INPUT_BYTES:
         largest = sorted(
@@ -294,6 +312,14 @@ Passing a smoke test or compilation does not establish requirement conformance. 
 suffice for declarations when they encode the required contract. Deferred work is acceptable
 only when the current task does not require it. Report substantive defects with references.
 Ignore formatting preferences.
+
+When present, mcloop_checks records the orchestrator's check result after the editor
+finished. Use it to determine whether the recorded command passed; editor notes about
+checks not run during its session predate this observation. A waiver, an empty command,
+or a check reporting no tests is not evidence that tests executed. The output_tail may
+omit earlier output; output_omitted_bytes states how much. Full output is retained in
+McLoop's review receipt. Do not infer individual test outcomes from omitted output.
+Continue assessing the supplied assertions against the design even when checks passed.
 
 The editor selected the design excerpts. Reject for insufficient evidence when they omit
 context needed to decide. You have no tools. Do not assume unseen code or tests exist.
@@ -419,7 +445,12 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
 
 
 def review_task(
-    root: Path, policy: ReviewPolicy, task: str, baseline: str, editor_model: str | None
+    root: Path,
+    policy: ReviewPolicy,
+    task: str,
+    baseline: str,
+    editor_model: str | None,
+    checks: CheckResult | None = None,
 ) -> TaskReview:
     if not policy.enabled:
         return TaskReview(True, "Requirement review disabled")
@@ -428,10 +459,18 @@ def review_task(
     phase = "evidence"
     timings = {}
     record: dict = {"task": task, "baseline": baseline, "model": policy.model, "passed": False}
+    if checks is not None:
+        record["mcloop_checks"] = {
+            "command": checks.command,
+            "passed": checks.passed,
+            "output": checks.output,
+        }
     try:
+        if checks is not None and not checks.passed:
+            raise ValueError("McLoop checks did not pass; requirement review was not requested")
         if editor_model and editor_model.rsplit("/", 1)[-1] == policy.model.rsplit("/", 1)[-1]:
             raise ValueError("Task reviewer must use a different model from the editor")
-        packet = build_packet(root, policy, task, baseline)
+        packet = build_packet(root, policy, task, baseline, checks)
         digest = hashlib.sha256(json.dumps(packet, sort_keys=True).encode()).hexdigest()
         record["input"] = packet
         record["input_sha256"] = digest
@@ -451,7 +490,7 @@ def review_task(
         record["raw_response"] = raw
         verdict = _validate_verdict(raw, packet)
         # Check source and evidence again after the network call.
-        if build_packet(root, policy, task, baseline) != packet:
+        if build_packet(root, policy, task, baseline, checks) != packet:
             raise ValueError("Task review input changed during review")
         record["review"] = verdict
         record["passed"] = verdict["verdict"] == "accept"

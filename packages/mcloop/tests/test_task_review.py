@@ -506,6 +506,9 @@ def test_blocked_review_resume_never_calls_editor_again(project, monkeypatch):
         run_loop(plan, no_audit=True)
     assert editor.call_count == 1
     assert reviewer.call_count == 2
+    for call in reviewer.call_args_list:
+        assert call.kwargs["checks"].command == "true"
+        assert call.kwargs["checks"].passed
     assert not parse(plan)[0].checked
 
 
@@ -533,7 +536,7 @@ def test_batch_blocked_review_preserves_editor_work(project, monkeypatch):
         patch(
             "mcloop.main.review_task",
             return_value=TaskReview(False, "Transport failed", blocked=True),
-        ),
+        ) as reviewer,
         patch("mcloop.main._commit") as commit,
     ):
         checks.return_value.passed = True
@@ -541,6 +544,7 @@ def test_batch_blocked_review_preserves_editor_work(project, monkeypatch):
         assert _run_batch(**args) == ("review_pending", "Transport failed")
     assert editor.call_count == 1
     assert checks.call_count == 2
+    assert reviewer.call_args.kwargs["checks"] is checks.return_value
     commit.assert_not_called()
     assert (root / "ports.swift").read_text() == "struct Plan { let operations: [String] }\n"
 
@@ -555,3 +559,57 @@ def test_ambiguous_python_symbol_refuses_to_guess(project):
     (root / EVIDENCE_PATH).write_text(json.dumps(data))
     with pytest.raises(ValueError, match="one declaration"):
         build_packet(root, policy, "Task", baseline)
+
+
+def test_review_retains_orchestrator_check_after_editor_notes(project):
+    import hashlib
+
+    from mcloop.checks import CheckResult
+
+    root, policy, baseline = project
+    (root / "editor-notes.md").write_text("swift test was not run in the editor session.\n")
+    output = "setup output\n" * 1000 + "Executed 24 tests, with 0 failures.\n"
+    check = CheckResult(True, output, "swift test")
+    packet = build_packet(root, policy, "Task", baseline, check)
+    with patch("mcloop.task_review._request_review", return_value=verdict(packet)) as request:
+        result = review_task(root, policy, "Task", baseline, "editor", checks=check)
+    assert result.passed
+    supplied = request.call_args.args[1]
+    observation = supplied["mcloop_checks"]
+    assert observation["passed"] is True
+    assert observation["command"] == "swift test"
+    assert observation["output_tail"].endswith("Executed 24 tests, with 0 failures.\n")
+    assert observation["output_omitted_bytes"] == len(output.encode()) - 4000
+    assert observation["output_sha256"] == hashlib.sha256(output.encode()).hexdigest()
+    assert "not run" in supplied["changed_files"]["editor-notes.md"]
+    receipt = json.loads(Path(result.receipt).read_text())
+    assert receipt["mcloop_checks"]["output"] == output
+
+
+@pytest.mark.parametrize("output", ["assertion failed", "TIMEOUT after 300s", "Command not found"])
+def test_failed_checks_never_request_review(project, output):
+    from mcloop.checks import CheckResult
+
+    root, policy, baseline = project
+    with patch("mcloop.task_review._request_review") as request:
+        result = review_task(
+            root, policy, "Task", baseline, "editor", CheckResult(False, output, "swift test")
+        )
+    assert result.blocked and not result.passed
+    request.assert_not_called()
+
+
+def test_absent_and_waived_checks_do_not_claim_test_execution(project):
+    from mcloop.checks import CheckResult
+
+    root, policy, baseline = project
+    assert "mcloop_checks" not in build_packet(root, policy, "Task", baseline)
+    packet = build_packet(
+        root,
+        policy,
+        "Task",
+        baseline,
+        CheckResult(True, "Covered by later hardware acceptance", "accept:waived:T-2"),
+    )
+    assert packet["mcloop_checks"]["command"] == "accept:waived:T-2"
+    assert "exit_code" not in packet["mcloop_checks"]

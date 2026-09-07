@@ -1129,7 +1129,12 @@ def _run_batch(
                 project_dir, review_policy, combined_text, batch_baseline, current_model, result
             )
         review = review_task(
-            project_dir, review_policy, combined_text, batch_baseline, current_model
+            project_dir,
+            review_policy,
+            combined_text,
+            batch_baseline,
+            current_model,
+            checks=check_result,
         )
         if not review.passed:
             print(formatting.error_msg(review.output + "\n" + review.receipt), flush=True)
@@ -2296,14 +2301,19 @@ def run_loop(
         terminal_task_failure = False
         review_blocked = False
 
-        def review_completion() -> bool:
+        def review_completion(checks: CheckResult | None = None) -> bool:
             nonlocal last_error, terminal_task_failure, review_blocked
             if result is not None and task_review_policy.enabled:
                 review_resume.save(
                     project_dir, task_review_policy, review_key, task_start_sha, task_model, result
                 )
             review = review_task(
-                project_dir, task_review_policy, task.text, task_start_sha, task_model
+                project_dir,
+                task_review_policy,
+                task.text,
+                task_start_sha,
+                task_model,
+                checks=checks,
             )
             if review.passed:
                 if task_review_policy.enabled:
@@ -2659,7 +2669,7 @@ def run_loop(
                             )
                             continue
 
-                    if not review_completion():
+                    if not review_completion(acceptance_check):
                         break
                     completion = None
                     if changed_files:
@@ -2789,7 +2799,7 @@ def run_loop(
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
-                            if not review_completion():
+                            if not review_completion(cumulative_check):
                                 break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
@@ -2878,7 +2888,7 @@ def run_loop(
                         _lifecycle._current_phase = "checks"
                         zero_diff_check = run_checks(project_dir)
                         if zero_diff_check.passed:
-                            if not review_completion():
+                            if not review_completion(zero_diff_check):
                                 break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
@@ -2938,7 +2948,7 @@ def run_loop(
                         terminal_task_failure = True
                         break
                     if _is_readonly_task(task.text):
-                        if not review_completion():
+                        if not review_completion(None):
                             break
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
@@ -2967,7 +2977,7 @@ def run_loop(
                     _lifecycle._current_phase = "checks"
                     no_diff_check = run_checks(project_dir)
                     if no_diff_check.passed:
-                        if not review_completion():
+                        if not review_completion(no_diff_check):
                             break
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
@@ -3045,7 +3055,7 @@ def run_loop(
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
-                            if not review_completion():
+                            if not review_completion(cumulative_check):
                                 break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
@@ -3161,7 +3171,7 @@ def run_loop(
                             flush=True,
                         )
                         continue
-                    if not review_completion():
+                    if not review_completion(check_result):
                         break
                     completion = Completion.begin(
                         project_dir,
