@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from mcloop.progress import SessionProgress
 from mcloop.prompts import (
     build_audit_prompt,
     build_bug_fix_prompt,
@@ -976,6 +977,7 @@ def _build_command(
             "--sandbox",
             "workspace-write",
             "exec",
+            "--json",
         ]
         if model:
             cmd.extend(["--model", model])
@@ -986,7 +988,7 @@ def _build_command(
         raise ValueError(f"Unknown CLI: {cli}")
 
 
-PROGRESS_DOT_INTERVAL = 3  # seconds between progress dots
+SESSION_POLL_INTERVAL = 1  # seconds between timeout and approval checks
 _SENTINEL = object()
 _active_process = None  # type: subprocess.Popen | None
 _interrupted = False
@@ -1105,6 +1107,7 @@ def _run_session(
     t.start()
 
     session_start = time.monotonic()
+    progress = SessionProgress(Path(cmd[0]).name, session_start)
 
     # Cap output buffer to prevent unbounded memory growth.
     # A stuck claude session running checks in a loop can produce
@@ -1156,7 +1159,7 @@ def _run_session(
 
     pending_dir = cwd / ".mcloop" / "pending"
     shown_waiting = False
-    last_dot = time.monotonic()
+    waiting_description = ""
     # Stall guard: abort if the agent repeats the identical tool call K times
     # in a row (a no-progress loop that still emits stream bytes, so the
     # wall-clock timeout would otherwise let it burn the full hour).
@@ -1177,9 +1180,12 @@ def _run_session(
             )
             _kill_session_and_cleanup()
             return _assemble_output(), TIMEOUT_EXIT_CODE
+        report = progress.report(time.monotonic(), waiting=waiting_description)
+        if report:
+            print(report, flush=True)
         try:
             line = line_q.get(
-                timeout=PROGRESS_DOT_INTERVAL,
+                timeout=SESSION_POLL_INTERVAL,
             )
         except queue.Empty:
             if _interrupted:
@@ -1216,35 +1222,36 @@ def _run_session(
                     except OSError:
                         pass
                     return _assemble_output(), 1
-                if not shown_waiting:
+                try:
+                    pending = list(pending_dir.iterdir())
+                except OSError:
+                    pending = []
+                waiting_description = ""
+                if pending:
                     try:
-                        pending = list(pending_dir.iterdir())
+                        waiting_description = pending[0].read_text()[:80]
                     except OSError:
-                        pending = []
-                    if pending:
+                        waiting_description = "unknown"
+                    if not shown_waiting:
                         count = len(pending)
-                        try:
-                            desc = pending[0].read_text()[:80]
-                        except OSError:
-                            desc = "unknown"
                         extra = f" ({count} pending)" if count > 1 else ""
                         print(
-                            f"\n>>> Waiting for Telegram approval{extra}\n    {desc}",
+                            f"\n>>> Waiting for Telegram approval{extra}\n"
+                            f"    {waiting_description}",
                             flush=True,
                         )
                         shown_waiting = True
                         continue
+                else:
+                    shown_waiting = False
+            else:
+                waiting_description = ""
             # Parity with orchestra's run_session: if the reader thread
             # died AND nothing is buffered AND the process has exited,
-            # stop now instead of dotting until the wall-clock kill --
+            # stop now instead of waiting until the wall-clock kill --
             # covers a reader that crashed without queueing a SENTINEL.
             if not t.is_alive() and line_q.empty() and process.poll() is not None:
                 break
-            # Print a progress dot
-            now = time.monotonic()
-            if now - last_dot >= PROGRESS_DOT_INTERVAL:
-                print(".", end="", flush=True)
-                last_dot = now
             continue
         if line is _SENTINEL:
             break
@@ -1255,6 +1262,7 @@ def _run_session(
                 dropped_count += 1
             tail_lines.append(line)
         _last_output_lines.append(line.rstrip("\n"))
+        progress.observe(line, time.monotonic())
         # Stall detection: parse tool-call signatures straight from the raw
         # line (independent of _print_stream_event's display suppression) and
         # feed each to the tracker. Only parsed tool_use signatures are fed --
@@ -1269,14 +1277,8 @@ def _run_session(
                 )
                 _kill_session_and_cleanup()
                 return _assemble_output(), STALL_EXIT_CODE
-        printed_visible = _print_stream_event(line)
+        _print_stream_event(line)
         shown_waiting = False
-        now = time.monotonic()
-        if printed_visible:
-            last_dot = now
-        elif now - last_dot >= PROGRESS_DOT_INTERVAL:
-            print(".", end="", flush=True)
-            last_dot = now
 
     t.join(timeout=5)
     process.wait()
@@ -1294,16 +1296,15 @@ def _run_session(
     return _assemble_output(), process.returncode
 
 
-# Suppress ALL tool names from stream output. Only the task
-# label (">>> Task N)") and progress dots are shown.
+# Per-event tool output stays suppressed. SessionProgress reports the latest
+# activity at regular intervals without flooding the terminal.
 _SUPPRESS_ALL_TOOLS = True
 
 
 def _print_stream_event(line: str) -> bool:
     """Parse a stream-json line and print relevant activity.
 
-    Returns True iff something user-visible was printed. Callers use
-    this to decide whether to suppress the next progress dot.
+    Returns True iff something user-visible was printed.
     """
     import json as _json
 

@@ -1981,6 +1981,7 @@ def test_build_command_codex_with_model():
         "--sandbox",
         "workspace-write",
         "exec",
+        "--json",
         "--model",
         "gpt-5.4",
         "test prompt",

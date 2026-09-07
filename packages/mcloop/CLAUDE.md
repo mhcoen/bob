@@ -88,6 +88,8 @@ Codex commands use explicit sandbox and approval flags before `exec`. The auth
 probe is read-only; direct coding sessions retain workspace-write with approval
 on request. Preflight warnings include CLI error details when available.
 The known Codex model names include `gpt-6-astra`.
+Direct Codex sessions request JSON events. All direct sessions use
+`SessionProgress` for 30-second reports, including during silence.
 
 The runner routes `z-ai/` model names through OpenRouter using
 `OPENROUTER_API_KEY`. `test_runner.py` checks GLM 5.3 routing and verifies
@@ -100,6 +102,11 @@ Luna and GLM Flash, including the environment passed to the editing subprocess.
 **mcloop/session_context.py** - Rolling session context shared between task sessions.
 
 **mcloop/sync_cmd.py** - `sync` subcommand: update PLAN.md to match the codebase.
+
+**mcloop/progress.py** - Parses public Codex and Claude activity events and
+reports elapsed time, output age and activity age. Reasoning text and command
+output are excluded from the status display. `tests/test_progress.py` covers
+silent and busy sessions, command completion, duplicate events and approvals.
 
 **mcloop/task_review.py** - Requirement evidence and a bounded completion review.
 Captures configuration and accepted design text before editing. Validates cited

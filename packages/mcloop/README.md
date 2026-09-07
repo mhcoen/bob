@@ -422,9 +422,13 @@ carrying over the full conversation history. This rolling summary
 resets when you restart McLoop, though McLoop does remember what it
 was doing if interrupted (see [Interrupting and resuming](#interrupting-and-resuming)).
 
-Each task is numbered (e.g., "Task 3.2)") and shows progress dots as the
-session works. Tool output is suppressed to keep the terminal clean. Elapsed
-time is shown for each completed task and in the final summary.
+Each task is numbered (e.g., "Task 3.2)"). Direct CLI sessions report every
+30 seconds with elapsed time, the age of the latest output, and the latest
+reported action with its age. Codex uses JSON events to distinguish running
+commands from completed commands and file changes. Pending Telegram approvals
+remain visible. If no action has been reported, the update says so. Raw tool
+output stays in the session log. Elapsed time is also shown for each completed
+task and in the final summary.
 
 When a task or check fails, McLoop prints the error output directly in the
 terminal and includes it in the prompt for the next retry so Claude can fix
