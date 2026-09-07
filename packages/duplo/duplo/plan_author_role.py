@@ -92,7 +92,11 @@ PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
             "or [AUTO] subtask. [USER] is reserved for genuinely "
             "human-only checks with no scriptable form; any scriptable "
             "verification uses a helper-script task plus an [AUTO:run_cli] "
-            "task instead of a [USER] task."
+            "task instead of a [USER] task. Document and test-expectation reviews "
+            "are ordinary model tasks unless accepted criteria explicitly require a "
+            "human reviewer. Review tasks name their inputs, report path and conditions "
+            "for escalating unresolved disagreements; they do not require the user to "
+            "reapprove an accepted design during implementation."
         ),
         "required": True,
     },

@@ -30,6 +30,10 @@ detects new files and appends tasks for anything missing.
 - `design_plan.py`: Authors the complete phase sequence in one call and obtains
   one independent review. Uses effective project plan criteria alongside required
   engineering checks. Validates canonical structure and scope before review.
+  Document and test-expectation reviews use ordinary model tasks unless accepted
+  criteria require human review. Review instructions name inputs, report paths
+  and unresolved disagreements requiring escalation. The phase-author prompt
+  and criteria in `planner.py` and `plan_author_role.py` share this rule.
   Saves the candidate and judgment in `.duplo/design-plan.json`. Shares the design
   call allowance, checks freshness before publication, and preserves plan edits.
 

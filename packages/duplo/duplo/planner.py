@@ -62,6 +62,11 @@ Rules for the plan:
   [AUTO:run_cli] task that invokes that helper with an absolute
   command path. McLoop will pause only on true [USER] tasks and
   wait for the human to perform and confirm them.
+- Document and test-expectation reviews are ordinary model tasks unless
+  the accepted criteria explicitly require a human reviewer. Name the
+  review inputs, report path and conditions for escalating unresolved
+  disagreements. Do not ask the user to reapprove an accepted design
+  during implementation.
 - Do NOT include a platform, language, prerequisites, or
   build-system description paragraph at the top of the phase.
   That information is written once in the PLAN.md project

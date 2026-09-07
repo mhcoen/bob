@@ -135,7 +135,12 @@ def generate_design_plan(root, inputs, record, spec, session):
             "contracts. Include integration work and failure-path verification with explicit "
             'expected outcomes. Use [feat: "Requirement name"] annotations for feature '
             "tasks and [accept: command-exit: COMMAND] for executable acceptance checks. "
-            "Reserve [USER] for checks requiring human participation. Describe a complete "
+            "Reserve [USER] for checks requiring human participation or an explicit "
+            "product decision. Document and test-expectation reviews are ordinary model "
+            "tasks unless the accepted criteria explicitly require a human reviewer. "
+            "Name the review inputs, report path and conditions for escalating unresolved "
+            "disagreements. Do not ask the user to reapprove an accepted design during "
+            "implementation. Describe a complete "
             "plan without implementing it. Supplied criteria also apply to each phase. "
             "Return the plan within 50000 characters.",
             {"inputs": inputs, "design": record["design"], "criteria": criteria},
