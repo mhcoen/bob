@@ -203,6 +203,8 @@ def test_request_has_no_tools_and_fixed_output_bound(project, monkeypatch):
         assert _request_review(policy, {"task": "Check"}) == "{}"
     payload = json.loads(call.call_args.args[0].data)
     assert payload["max_tokens"] == 3000
+    assert payload["reasoning"] == {"effort": "low"}
+    assert payload["response_format"] == {"type": "json_object"}
     assert "tools" not in payload
     assert call.call_args.kwargs["timeout"] == 90
 

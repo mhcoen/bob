@@ -10,6 +10,7 @@ import urllib.request
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from mcloop.git_ops import run_git_bounded
 
@@ -240,6 +241,11 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
         ],
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
+    if urlsplit(policy.base_url).hostname == "openrouter.ai":
+        # OpenRouter includes reasoning in max_tokens. Its default effort can
+        # consume almost the whole budget before the JSON verdict begins.
+        payload["reasoning"] = {"effort": "low"}
+        payload["response_format"] = {"type": "json_object"}
     request = urllib.request.Request(
         policy.base_url + "/chat/completions",
         data=json.dumps(payload).encode(),
@@ -257,7 +263,9 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
     body = json.loads(raw)
     choice = body["choices"][0]
     if choice.get("finish_reason") != "stop":
-        raise ValueError("Task reviewer did not finish its response")
+        raise ValueError(
+            f"Task reviewer did not finish its response: {choice.get('finish_reason')}"
+        )
     return choice["message"]["content"]
 
 
