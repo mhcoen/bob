@@ -228,6 +228,10 @@ Return only a JSON object:
 "reason":"..."}], "findings":["concrete defect or missing evidence, with references"]}.
 Use the supplied requirement text exactly in each assessment. Accept only when every supplied
 requirement is assessed as satisfied, no task obligation is missing, and findings is empty.
+Every evidence entry must exactly copy a supplied reference string, including the complete
+filename and line range. Choose only the references needed to support the assessment.
+Do not invent narrower ranges or abbreviate filenames; unprovided references invalidate
+the verdict.
 Acceptance is a review judgment with the stated evidence.
 """
 
