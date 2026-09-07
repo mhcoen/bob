@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from bob_tools.json_state import atomic_write_json
 
+from mcloop.timing import snapshot
+
 
 @dataclass
 class TaskEntry:
@@ -27,7 +29,7 @@ class TaskEntry:
 
     label: str
     text: str
-    outcome: str  # "success", "failed", "skipped"
+    outcome: str  # "success", "failed", "blocked", "skipped"
     elapsed: float  # seconds
     model: str = ""
     attempts: int = 1
@@ -37,6 +39,7 @@ class TaskEntry:
     log_path: str = ""
     changed_files: list[str] = field(default_factory=list)
     task_id: str = ""
+    timings: dict[str, float] = field(default_factory=snapshot)
 
 
 @dataclass

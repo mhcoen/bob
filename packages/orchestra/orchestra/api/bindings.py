@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from orchestra.adapters._subprocess import get_current_activity
+from orchestra.adapters._subprocess import get_activity_with_age
 from orchestra.adapters.base import WORKSPACE_MUTATION_VALUES
 from orchestra.api.registry import _ADAPTER_CLASSES
 from orchestra.config import ConfigError, OrchestraConfig, RoleBinding
@@ -136,7 +136,7 @@ def _resolve_progress_callback(
         return silent_reporter()
     if user_callback is not None:
         return user_callback
-    return stderr_reporter(activity_getter=get_current_activity)
+    return stderr_reporter(activity_getter=get_activity_with_age)
 
 
 def _resolve_role_binding(

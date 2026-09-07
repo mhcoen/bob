@@ -38,6 +38,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from bob_tools.timing import approval_waiting, observe_approvals
+
 # Minimal environment passed to CLI subprocesses. Matches mcloop's
 # _PASSTHROUGH_VARS exactly so behavior is identical at the parity
 # layer. RTK_* are kept because mcloop's tee tooling looks for them.
@@ -193,12 +195,14 @@ _MCLOOP_CONFIG_PATH: Path = Path.home() / ".mcloop" / "config.json"
 
 _activity_lock: threading.Lock = threading.Lock()
 _current_activity: str = ""
+_activity_at: float | None = None
 
 
 def _clear_current_activity() -> None:
-    global _current_activity
+    global _current_activity, _activity_at
     with _activity_lock:
         _current_activity = ""
+        _activity_at = None
 
 
 def get_current_activity() -> str:
@@ -214,10 +218,17 @@ def get_current_activity() -> str:
         return _current_activity
 
 
+def get_activity_with_age() -> tuple[str, float]:
+    with _activity_lock:
+        age = max(0.0, time.perf_counter() - _activity_at) if _activity_at is not None else 0.0
+        return _current_activity, age
+
+
 def _set_current_activity(summary: str) -> None:
-    global _current_activity
+    global _current_activity, _activity_at
     with _activity_lock:
         _current_activity = summary
+        _activity_at = time.perf_counter()
 
 
 def _format_tool_use_summary(block: dict[str, Any]) -> str:
@@ -927,6 +938,7 @@ def set_interrupted(value: bool = True, *, session: SessionState | None = None) 
     target.interrupted = bool(value)
 
 
+@observe_approvals
 def run_session(
     cmd: list[str],
     cwd: Path,
@@ -1158,6 +1170,7 @@ def run_session(
                         process.wait()
                         return _assemble(head_lines, tail_lines, dropped), 1
                     pending = _live_pending_approvals(pending_dir)
+                    approval_waiting(bool(pending))
                     if pending and process.poll() is None:
                         # A human approval is in flight AND the child is
                         # still alive. This is a wait, not idleness:
@@ -1240,6 +1253,7 @@ def run_session(
             _last_output_lines.append(line.rstrip("\n"))
             _record_activity_from_line(line)
             shown_waiting = False
+            approval_waiting(False)
             now = time.monotonic()
             if now - last_dot >= PROGRESS_DOT_INTERVAL:
                 if not silent:

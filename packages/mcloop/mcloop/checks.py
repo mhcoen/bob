@@ -18,6 +18,7 @@ from mcloop.test_runner import (
     NoTestRunnerAvailableError,
     resolve_test_command,
 )
+from mcloop.timing import timed
 
 # Ruff codes we consider safely salvageable by appending `# noqa: CODE`
 # to the offending line. These are purely stylistic or cosmetic checks
@@ -112,6 +113,7 @@ def _timeout_output(exc: subprocess.TimeoutExpired, timeout: int) -> str:
     return f"{captured}\nTIMEOUT after {timeout}s" if captured else f"TIMEOUT after {timeout}s"
 
 
+@timed("checks")
 def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult:
     """Run a declared ``command-exit`` acceptance command without a shell."""
     project_path = Path(project_dir)
@@ -215,6 +217,7 @@ def get_check_commands(project_dir: str | Path) -> list[str]:
     return _detect_commands(project_dir, config)
 
 
+@timed("checks")
 def run_autofix(
     project_dir: str | Path,
     changed_files: list[str] | None = None,
@@ -489,6 +492,7 @@ def _resolve_flagged(
     return unresolved
 
 
+@timed("checks")
 def run_checks(
     project_dir: str | Path,
     changed_files: list[str] | None = None,

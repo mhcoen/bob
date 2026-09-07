@@ -678,3 +678,12 @@ def test_stale_denied_file_is_cleared_at_session_start(
     assert exit_code == 0
     assert "survived" in output
     assert not (pending / "denied").exists()
+
+
+def test_activity_age_uses_event_time(monkeypatch, _isolate_activity):
+    monkeypatch.setattr(_subprocess.time, "perf_counter", lambda: 100.0)
+    _subprocess._set_current_activity("Command completed")
+    monkeypatch.setattr(_subprocess.time, "perf_counter", lambda: 142.0)
+    assert _subprocess.get_activity_with_age() == ("Command completed", 42.0)
+    _subprocess._clear_current_activity()
+    assert _subprocess.get_activity_with_age() == ("", 0.0)

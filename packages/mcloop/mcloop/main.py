@@ -20,7 +20,7 @@ from bob_tools.planfile import (
 )
 
 import mcloop.lifecycle as _lifecycle
-from mcloop import formatting
+from mcloop import formatting, review_resume, timing
 from mcloop._planfile_compat import (
     PlanCorruptionError,
     Task,
@@ -940,8 +940,12 @@ def _run_batch(
     )
     pre_batch_modified, pre_batch_untracked = _snapshot_worktree(project_dir)
     review_policy = task_review_policy or load_policy(project_dir)
-    batch_baseline = _get_git_hash(project_dir)
-    evidence_instruction = prepare_evidence(project_dir, review_policy, combined_text)
+    saved_review = review_resume.load(project_dir, review_policy, combined_text)
+    resumed_review = saved_review is not None
+    batch_baseline = saved_review[0] if saved_review else _get_git_hash(project_dir)
+    evidence_instruction = (
+        "" if saved_review else prepare_evidence(project_dir, review_policy, combined_text)
+    )
     print(
         formatting.task_header(
             label_range,
@@ -980,22 +984,30 @@ def _run_batch(
         "batch_attempt_started",
         task_ids=[child.task_id or "" for child in batch_children],
     )
-    result = run_task(
-        combined_text,
-        active_cli,
-        project_dir,
-        log_dir,
-        description,
-        task_label=label_range,
-        model=current_model,
-        prior_errors=prior_errors,
-        session_context=ctx.text() + evidence_instruction,
-        check_commands=project_checks,
-        allowed_tools=allowed_tools,
-        eliminated=eliminated,
-        timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
-    )
-
+    if saved_review is not None:
+        _, current_model, result = saved_review
+        print(
+            formatting.system_msg(
+                "Resuming batch requirement review; completed editing is preserved."
+            ),
+            flush=True,
+        )
+    else:
+        result = run_task(
+            combined_text,
+            active_cli,
+            project_dir,
+            log_dir,
+            description,
+            task_label=label_range,
+            model=current_model,
+            prior_errors=prior_errors,
+            session_context=ctx.text() + evidence_instruction,
+            check_commands=project_checks,
+            allowed_tools=allowed_tools,
+            eliminated=eliminated,
+            timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
+        )
     # A rate/session limit mid-batch must not read as an ordinary failure.
     # Mark the CLI limited and surface the event; returning "limited" tells
     # the batch retry loop this was noise, not a merit failure, so it must
@@ -1046,7 +1058,7 @@ def _run_batch(
         _rollback_batch_changes(project_dir, pre_batch_modified, pre_batch_untracked)
         return "failed", _tail(result.output, 50)
 
-    if not _has_meaningful_changes(project_dir):
+    if not resumed_review and not _has_meaningful_changes(project_dir):
         # A batch is implementation work. A globally green suite is not
         # acceptance evidence that the batch's required work or tests
         # came into existence.
@@ -1062,6 +1074,10 @@ def _run_batch(
     # commit.
     run_autofix(project_dir, changed_files=_changed_files(project_dir))
     changed_files = _changed_files(project_dir)
+    if resumed_review:
+        changed_files = sorted(
+            set(changed_files) | set(_committed_files_since(project_dir, batch_baseline))
+        )
     if not changed_files and _has_uncommitted_changes(project_dir):
         print(
             formatting.error_msg("Batch: autofix modified metadata-only files"),
@@ -1108,18 +1124,31 @@ def _run_batch(
                 flush=True,
             )
             return "failed", "Checker introduced uncommitted changes"
+        if review_policy.enabled:
+            review_resume.save(
+                project_dir, review_policy, combined_text, batch_baseline, current_model, result
+            )
         review = review_task(
             project_dir, review_policy, combined_text, batch_baseline, current_model
         )
         if not review.passed:
             print(formatting.error_msg(review.output + "\n" + review.receipt), flush=True)
+            timing.report()
+            if review.blocked:
+                return "review_pending", review.output
+            if review_policy.enabled:
+                review_resume.clear(project_dir, combined_text)
             return "review_blocked", review.output
+        if review_policy.enabled:
+            review_resume.clear(project_dir, combined_text)
+        timing.report()
         completion = Completion.begin(
             project_dir,
             checklist_path,
             batch_children,
             command=str(check_result.command),
             output=str(check_result.output),
+            baseline=batch_baseline,
         )
         try:
             batch_hash = _commit(
@@ -1171,6 +1200,8 @@ def _run_batch(
     _batch_error = f"Command: {check_result.command}\n{_check_tail}"
     # Discard uncommitted changes from the failed batch, preserving
     # files that were dirty before the batch started.
+    if review_policy.enabled:
+        review_resume.clear(project_dir, combined_text)
     _rollback_batch_changes(project_dir, pre_batch_modified, pre_batch_untracked)
     return "failed", _batch_error
 
@@ -2024,6 +2055,8 @@ def run_loop(
                 batch_prior_errors = ""
                 batch_model = current_model
                 batch_attempt = 0
+                batch_started = time.monotonic()
+                timing.start_task()
                 # Runaway backstop for the limited path. A genuine limit
                 # legitimately cycles many times (a 5-hour cap at 10-min
                 # cooldowns is ~30 cycles), so the bound is generous --
@@ -2065,7 +2098,7 @@ def run_loop(
                         task_timeout=task_timeout,
                         task_review_policy=task_review_policy,
                     )
-                    if batch_handled in {"success", "review_blocked"}:
+                    if batch_handled in {"success", "review_blocked", "review_pending"}:
                         batch_prior_errors = batch_detail
                         break
                     if batch_handled == "limited":
@@ -2106,9 +2139,43 @@ def run_loop(
                     batch_limited_cycles = 0
                     batch_prior_errors = batch_detail
                 if batch_handled == "success":
+                    task_entries.append(
+                        TaskEntry(
+                            label=parent_label,
+                            text=parent.text,
+                            outcome="success",
+                            elapsed=round(time.monotonic() - batch_started, 2),
+                            model=batch_model or "",
+                            attempts=batch_attempt,
+                            success=True,
+                            task_id=parent.task_id or "",
+                        )
+                    )
                     if active_file == plan_path and active_phase_name:
                         acceptance_evidence_phases.add(active_phase_name)
                     continue
+                if batch_handled == "review_pending":
+                    failed_task = f"{parent_label}) {format_task_id(parent)}{parent.text}"
+                    failed_reason = batch_detail
+                    terminal_failure = "Batch requirement review blocked; tasks remain pending."
+                    print(
+                        formatting.system_msg(
+                            "Run mcloop again to resume batch review without repeating editing."
+                        ),
+                        flush=True,
+                    )
+                    task_entries.append(
+                        TaskEntry(
+                            label=parent_label,
+                            text=parent.text,
+                            outcome="blocked",
+                            elapsed=round(time.monotonic() - batch_started, 2),
+                            model=batch_model or "",
+                            success=False,
+                            task_id=parent.task_id or "",
+                        )
+                    )
+                    break
                 # Batch exhausted its retries. Mark the parent and every
                 # child as failed, record the failure, and stop the run.
                 # Falling through to per-subtask execution is wrong: a
@@ -2201,13 +2268,16 @@ def run_loop(
 
         eliminated = get_eliminated(tasks, task)
         task_start = time.monotonic()
+        timing.start_task()
+        review_key = f"{task.task_id or label}\n{task.text}"
+        saved_review = review_resume.load(project_dir, task_review_policy, review_key)
         # Capture HEAD after the pre-task checkpoint above so the
         # task-execution window starts at a clean baseline. The
         # rate-limit handler inside the attempt loop also calls
         # _checkpoint, which can commit work the editor produced
         # before being session-limited; that's the cumulative work
         # the no-op verdict must consider (see T-000001 in BUGS.md).
-        task_start_sha = _get_git_hash(project_dir)
+        task_start_sha = saved_review[0] if saved_review else _get_git_hash(project_dir)
         # Persist the pre-edit baseline so the in-session test adapter
         # (`mcloop verify`) can diff the agent's edits against the exact
         # tree the loop scopes against, producing an identical scoped
@@ -2224,17 +2294,27 @@ def run_loop(
         active_model_for_summary = active_entry.model
         last_error = ""
         terminal_task_failure = False
+        review_blocked = False
 
         def review_completion() -> bool:
-            nonlocal last_error, terminal_task_failure
+            nonlocal last_error, terminal_task_failure, review_blocked
+            if result is not None and task_review_policy.enabled:
+                review_resume.save(
+                    project_dir, task_review_policy, review_key, task_start_sha, task_model, result
+                )
             review = review_task(
                 project_dir, task_review_policy, task.text, task_start_sha, task_model
             )
             if review.passed:
                 if task_review_policy.enabled:
+                    review_resume.clear(project_dir, review_key)
+                if task_review_policy.enabled:
                     print(formatting.system_msg(review.output + "\n" + review.receipt), flush=True)
                 return True
             last_error = review.output + "\n" + review.receipt
+            review_blocked = review.blocked
+            if not review.blocked and task_review_policy.enabled:
+                review_resume.clear(project_dir, review_key)
             terminal_task_failure = True
             print(formatting.error_msg(last_error), flush=True)
             return False
@@ -2316,25 +2396,38 @@ def run_loop(
                     model=task_model,
                     baseline=task_start_sha,
                 )
-                evidence_instruction = prepare_evidence(project_dir, task_review_policy, task.text)
-                result = run_task(
-                    task.text,
-                    active_cli,
-                    project_dir,
-                    log_dir,
-                    description,
-                    task_label=label,
-                    model=task_model,
-                    prior_errors=last_error,
-                    session_context=ctx.text() + evidence_instruction,
-                    check_commands=project_checks,
-                    allowed_tools=allowed_tools,
-                    eliminated=eliminated,
-                    timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
-                    is_bug_task=(active_file == bugs_path),
-                    task_id=task.task_id or "",
-                    executor_override=active_entry.executor,
-                )
+                if saved_review is not None:
+                    _, task_model, result = saved_review
+                    active_model_for_summary = task_model
+                    saved_review = None
+                    print(
+                        formatting.system_msg(
+                            "Resuming requirement review; completed editing is preserved."
+                        ),
+                        flush=True,
+                    )
+                else:
+                    evidence_instruction = prepare_evidence(
+                        project_dir, task_review_policy, task.text
+                    )
+                    result = run_task(
+                        task.text,
+                        active_cli,
+                        project_dir,
+                        log_dir,
+                        description,
+                        task_label=label,
+                        model=task_model,
+                        prior_errors=last_error,
+                        session_context=ctx.text() + evidence_instruction,
+                        check_commands=project_checks,
+                        allowed_tools=allowed_tools,
+                        eliminated=eliminated,
+                        timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
+                        is_bug_task=(active_file == bugs_path),
+                        task_id=task.task_id or "",
+                        executor_override=active_entry.executor,
+                    )
 
                 # Same narrowing as the batch path (_run_batch): a
                 # kill-sentinel exit is never a limit, and only the
@@ -3235,6 +3328,7 @@ def run_loop(
         if terminal_failure:
             break
 
+        timing.report()
         if not success:
             elapsed = _format_elapsed(time.monotonic() - task_start)
             # Use the per-iteration sentinels (result, changed_files)
@@ -3245,7 +3339,7 @@ def run_loop(
                 TaskEntry(
                     label=label,
                     text=task.text,
-                    outcome="failed",
+                    outcome="blocked" if review_blocked else "failed",
                     elapsed=round(time.monotonic() - task_start, 2),
                     model=active_model_for_summary or "",
                     attempts=max_retries,
@@ -3258,6 +3352,19 @@ def run_loop(
                     task_id=task.task_id or "",
                 )
             )
+            if review_blocked:
+                failed_task = f"{label}) {format_task_id(task)}{task.text} [{elapsed}]"
+                failed_reason = last_error
+                terminal_failure = "Requirement review blocked; task remains pending."
+                print(
+                    formatting.system_msg(
+                        "Run mcloop again to retry evidence and review without repeating editing."
+                    ),
+                    flush=True,
+                )
+                break
+            if task_review_policy.enabled:
+                review_resume.clear(project_dir, review_key)
             mark_failed(active_file, task)
             failed_task = f"{label}) {format_task_id(task)}{task.text} [{elapsed}]"
             failed_reason = last_error

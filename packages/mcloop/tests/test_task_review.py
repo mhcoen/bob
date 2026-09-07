@@ -390,3 +390,168 @@ def test_editor_cannot_disable_frozen_review_policy(project, monkeypatch):
     assert not result.passed
     assert "configuration changed" in result.output
     call.assert_not_called()
+
+
+def test_file_heading_and_python_symbol_refs_are_resolved(project):
+    root, policy, baseline = project
+    design = "# Design\n\n## D-005: Storage\nKeep committed rows.\n\n## Other\nOther contract.\n"
+    (root / "DESIGN.md").write_text(design)
+    (root / "store.py").write_text("def migrate():\n    return 1\n\ndef unrelated():\n    pass\n")
+    policy = ReviewPolicy(True, "review-model", documents=(("DESIGN.md", design),))
+    evidence = {
+        "requirements": [
+            {
+                "requirement": "Preserve rows",
+                "design": ["DESIGN.md#D-005"],
+                "implementation": ["store.py#migrate"],
+                "verification": ["smoke.swift"],
+            }
+        ]
+    }
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Migrate", baseline)
+    item = packet["requirements"][0]
+    assert item["design"][0]["reference"] == "DESIGN.md:3-5"
+    assert item["implementation"][0]["reference"] == "store.py:1-2"
+    assert item["verification"][0]["reference"] == "smoke.swift:1-1"
+
+
+def test_overlapping_references_preserve_all_cited_lines(project):
+    root, policy, baseline = project
+    (root / "ports.swift").write_text("one\ntwo\nthree\nfour\n")
+    data = json.loads((root / EVIDENCE_PATH).read_text())
+    data["requirements"][0]["implementation"] = ["ports.swift:1-3", "ports.swift:2-4"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(data))
+    packet = build_packet(root, policy, "Task", baseline)
+    refs = packet["requirements"][0]["implementation"]
+    assert refs[0]["evidence_id"] == refs[1]["evidence_id"]
+    assert refs[0]["reference"] == "ports.swift:1-4"
+    assert packet["changed_files"]["ports.swift"] == "one\ntwo\nthree\nfour\n"
+
+
+@pytest.mark.parametrize("reference", ["../outside.py", "ports.swift#missing", "ports.swift:9-10"])
+def test_bad_references_block_before_provider_request(project, reference):
+    root, policy, baseline = project
+    data = json.loads((root / EVIDENCE_PATH).read_text())
+    data["requirements"][0]["implementation"] = [reference]
+    (root / EVIDENCE_PATH).write_text(json.dumps(data))
+    with patch("mcloop.task_review._request_review") as provider:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked and not result.passed
+    provider.assert_not_called()
+    record = json.loads(Path(result.receipt).read_text())
+    assert record["status"] == "blocked"
+    assert record["timings"]["evidence"] >= 0
+
+
+def test_resume_survives_checkpoint_and_evidence_repair_but_not_code_changes(project):
+    from mcloop import review_resume
+    from mcloop.runner import RunResult
+
+    root, policy, baseline = project
+    result = RunResult(True, "done", 0, root / "logs/editor.log")
+    review_resume.save(root, policy, "Task", baseline, "editor-model", result)
+    (root / EVIDENCE_PATH).write_text('{"requirements": []}')
+    subprocess.run(["git", "add", "ports.swift"], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "Checkpoint editor work",
+        ],
+        cwd=root,
+        check=True,
+    )
+    restored = review_resume.load(root, policy, "Task")
+    assert restored is not None and restored[0] == baseline
+    assert restored[1] == "editor-model"
+    assert review_resume.load(root, ReviewPolicy(True, "other-model"), "Task") is None
+    (root / "ports.swift").write_text("changed implementation\n")
+    assert review_resume.load(root, policy, "Task") is None
+
+
+def test_blocked_review_resume_never_calls_editor_again(project, monkeypatch):
+    from plan_fixtures import canonical_plan_text
+
+    from mcloop._planfile_compat import parse
+    from mcloop.main import run_loop
+    from mcloop.runner import RunResult
+    from mcloop.task_review import TaskReview
+
+    root, policy, baseline = project
+    plan = root / "PLAN.md"
+    plan.write_text(canonical_plan_text("- [ ] Preserve rows [accept: command-exit: true]\n"))
+    monkeypatch.setattr("mcloop.main.load_policy", lambda root: policy)
+    monkeypatch.setattr("mcloop.main._ensure_git", lambda *args: None)
+    monkeypatch.setattr("mcloop.main._kill_orphan_sessions", lambda *args: None)
+    monkeypatch.setattr("mcloop.main.run_autofix", lambda *args, **kwargs: None)
+    monkeypatch.setattr("mcloop.main._get_git_hash", lambda *args: baseline)
+    with (
+        patch(
+            "mcloop.main.run_task",
+            return_value=RunResult(True, "done", 0, root / "logs/editor.log"),
+        ) as editor,
+        patch(
+            "mcloop.main.review_task",
+            return_value=TaskReview(False, "Provider unavailable", blocked=True),
+        ) as reviewer,
+    ):
+        run_loop(plan, no_audit=True)
+        assert not parse(plan)[0].failed and not parse(plan)[0].checked
+        run_loop(plan, no_audit=True)
+    assert editor.call_count == 1
+    assert reviewer.call_count == 2
+    assert not parse(plan)[0].checked
+
+
+def test_batch_blocked_review_preserves_editor_work(project, monkeypatch):
+    from test_args import _make_batch_args
+
+    from mcloop.main import _run_batch
+    from mcloop.runner import RunResult
+    from mcloop.task_review import TaskReview
+
+    root, policy, baseline = project
+    args = _make_batch_args(root)
+    args.update(project_dir=root, task_review_policy=policy)
+    monkeypatch.setattr("mcloop.main._get_git_hash", lambda *args: baseline)
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch(
+            "mcloop.main.run_task",
+            return_value=RunResult(True, "done", 0, root / "logs/editor.log"),
+        ) as editor,
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=["ports.swift"]),
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main.run_checks") as checks,
+        patch(
+            "mcloop.main.review_task",
+            return_value=TaskReview(False, "Transport failed", blocked=True),
+        ),
+        patch("mcloop.main._commit") as commit,
+    ):
+        checks.return_value.passed = True
+        assert _run_batch(**args) == ("review_pending", "Transport failed")
+        assert _run_batch(**args) == ("review_pending", "Transport failed")
+    assert editor.call_count == 1
+    assert checks.call_count == 2
+    commit.assert_not_called()
+    assert (root / "ports.swift").read_text() == "struct Plan { let operations: [String] }\n"
+
+
+def test_ambiguous_python_symbol_refuses_to_guess(project):
+    root, policy, baseline = project
+    (root / "duplicate.py").write_text(
+        "class A:\n    def run(self): pass\nclass B:\n    def run(self): pass\n"
+    )
+    data = json.loads((root / EVIDENCE_PATH).read_text())
+    data["requirements"][0]["implementation"] = ["duplicate.py#run"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="one declaration"):
+        build_packet(root, policy, "Task", baseline)

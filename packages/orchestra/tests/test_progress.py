@@ -1548,7 +1548,7 @@ def test_actor_progress_surfaces_activity_line_when_getter_returns_summary() -> 
     lines = buf.getvalue().splitlines()
     assert lines == [
         "[1/1] editor (claude_code_agent:opus) ... still running, 360.0s elapsed",
-        "    running: Read /Users/mhcoen/proj/bob/PLAN.md",
+        "    Last activity: Read /Users/mhcoen/proj/bob/PLAN.md",
     ]
 
 
@@ -1602,7 +1602,7 @@ def test_actor_progress_activity_line_truncates_to_terminal_width(
     # must end with the ellipsis sentinel since the content overflowed.
     assert len(activity_line) <= 40
     assert activity_line.endswith("…")
-    assert activity_line.startswith("    running: ")
+    assert activity_line.startswith("    Last activity: ")
 
 
 def test_actor_progress_activity_getter_exception_does_not_abort_reporter() -> None:
@@ -1630,7 +1630,7 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     get the two-line ticker without the caller threading it in. T-000001
     regression check.
     """
-    from orchestra.adapters._subprocess import get_current_activity
+    from orchestra.adapters._subprocess import get_activity_with_age
     from orchestra.api import bindings as api_module
 
     captured: dict[str, Any] = {}
@@ -1649,4 +1649,18 @@ def test_resolve_progress_callback_default_wires_live_activity_getter(
     # The api wires its module-level get_current_activity reference as
     # the default activity_getter. Identity check confirms the live
     # subprocess tracker is the one that will fire under actor_progress.
-    assert captured["activity_getter"] is get_current_activity
+    assert captured["activity_getter"] is get_activity_with_age
+
+
+def test_activity_age_changes_without_claiming_completed_command_is_running():
+    import io
+
+    from orchestra.progress import stderr_reporter
+
+    buffer = io.StringIO()
+    reporter = stderr_reporter(
+        stream=buffer, activity_getter=lambda: ("Command completed (exit 0): read design", 91.0)
+    )
+    reporter._emit_activity_line()
+    assert "Last activity (91s ago): Command completed" in buffer.getvalue()
+    assert "running: Command completed" not in buffer.getvalue()

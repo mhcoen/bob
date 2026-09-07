@@ -1213,8 +1213,15 @@ Missing configuration stops the run before an editing session starts.
 
 McLoop asks the editor to write `.mcloop/task-evidence.json`. Its `requirements`
 array maps each task obligation to `design`, `implementation`, and `verification`
-references, each written as `relative/path:START-END`. Bob checks those references
-and sends their contents with the full task and changed files. Bob assigns each
+references. Use a file path, `relative/path#symbol`, or a Markdown heading such
+as `SOFTWARE_DESIGN.md#D-005`. Bob resolves line ranges and assembles the packet.
+Python symbols select the complete declaration; other supported declaration
+anchors include the whole file to avoid guessing language-specific boundaries.
+Legacy `relative/path:START-END` references remain supported. Missing or ambiguous
+anchors stop assembly with a diagnostic. The editor need not count lines or bytes,
+inspect Bob's implementation or write packet-assembly scripts.
+
+Bob sends the resolved contents with the full task and complete changed files. Bob assigns each
 requirement an ID and requires one assessment per ID. The reviewer need not
 repeat the requirement wording; missing, duplicate or unknown IDs block completion.
 Declaration-only work may cite declarations for inspection. Behavioral claims need supporting
@@ -1226,10 +1233,20 @@ packet is capped at 96,000 UTF-8 bytes, output at 3,000 tokens, and the network
 operation has a 90-second timeout. OpenRouter requests use low reasoning effort
 and JSON output so reasoning leaves room for the verdict within that budget.
 Oversized input is refused without truncation.
-Repeated references share one excerpt. A citation into a changed file points to
+Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a changed file points to
 the full file already supplied, so its text is not sent again as an excerpt.
-Rejection, missing evidence, invalid output or a transport error leaves the task
-incomplete and stops automatic retries. Batch edits remain available for repair.
+An explicit reviewer rejection fails the task and leaves the implementation available
+for correction. Missing evidence, oversized input, invalid reviewer output and
+transport errors leave the task pending. Run `mcloop` again after resolving a packet
+problem or to retry the provider. Bob reuses completed editing and reruns acceptance
+and review; it does not restart coding merely because packet preparation failed.
+
+The `.mcloop/review-resume/` checkpoint retains the original baseline, editor model
+and a fingerprint of project files and review policy. It survives a startup Git
+checkpoint and permits edits to `.mcloop/task-evidence.json`. Changes to code, tests,
+accepted documents or review policy require a fresh editor attempt. A checkpoint
+is never evidence of acceptance. Existing `mcloop recover` handling still applies
+after an unclean interruption.
 Results and the reviewed packet are saved under `.mcloop/task-reviews/`.
 
 The reviewer assesses evidence selected by the editor and can miss an omitted
@@ -2295,3 +2312,18 @@ MIT. See [LICENSE](LICENSE).
 **Michael H. Coen**  
 mhcoen@gmail.com | mhcoen@alum.mit.edu  
 [@mhcoen](https://github.com/mhcoen)
+
+
+### Task timing
+
+Each coding-task summary records `timings` in seconds for editing, evidence
+assembly, independent review and checks. The terminal prints the same breakdown.
+`editor` includes tool execution and provider waits; it is not model inference
+time. `approval_wait` measures observed Telegram waits within that editor interval,
+so it must not be added to the editor total. Unobserved provider-side approval or
+queue delays cannot be separated by these records. Review receipts also retain
+assembly, request and validation timings.
+
+Orchestra progress reports show `Last activity (Ns ago)` with the most recent
+stream event. A completed command remains labeled completed while its age grows.
+A repeated heartbeat does not mean the command is running again.

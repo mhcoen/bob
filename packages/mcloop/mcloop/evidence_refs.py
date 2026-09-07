@@ -1,0 +1,79 @@
+"""Resolve evidence files, headings and symbols without model-generated line numbers."""
+
+from __future__ import annotations
+
+import ast
+import re
+
+
+def resolve(reference: str, text: str) -> tuple[str, int, int]:
+    """Return a complete file, section or declaration range; refuse ambiguous anchors."""
+    lines = text.splitlines()
+    legacy = re.fullmatch(r"(.+):(\d+)-(\d+)", reference)
+    if legacy:
+        name, first, last = legacy.groups()
+        start, end = int(first), int(last)
+    else:
+        name, separator, anchor = reference.partition("#")
+        start, end = 1, len(lines)
+        if separator:
+            if not anchor:
+                raise ValueError(f"Empty evidence anchor: {reference}")
+            headings = [
+                i
+                for i, line in enumerate(lines)
+                if re.match(r"^#{1,6}\s", line)
+                and (
+                    line.lstrip("#").strip() == anchor
+                    or line.lstrip("#").strip().startswith(anchor + ":")
+                )
+            ]
+            if len(headings) == 1:
+                index = headings[0]
+                level = len(lines[index]) - len(lines[index].lstrip("#"))
+                end = next(
+                    (
+                        i
+                        for i in range(index + 1, len(lines))
+                        if re.match(rf"^#{{1,{level}}}\s", lines[i])
+                    ),
+                    len(lines),
+                )
+                start = index + 1
+            elif name.endswith(".py"):
+                try:
+                    tree = ast.parse(text)
+                except SyntaxError as exc:
+                    raise ValueError(f"Cannot resolve Python symbol: {reference}") from exc
+                matches = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                    and node.name == anchor
+                ]
+                if len(matches) != 1:
+                    raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
+                node = matches[0]
+                start = min([node.lineno] + [d.lineno for d in node.decorator_list])
+                end = node.end_lineno or node.lineno
+            else:
+                # For other languages select the complete file once the declaration is
+                # identified. This preserves contracts without guessing brace/string syntax.
+                pattern = re.compile(
+                    r"\b(?:class|struct|enum|protocol|actor|func|function|interface|type|def|let|var|const)\s+"
+                    + re.escape(anchor)
+                    + r"\b"
+                )
+                declarations = [line for line in lines if pattern.search(line)]
+                if len(declarations) != 1:
+                    raise ValueError(
+                        f"Evidence anchor must identify one heading or declaration: {reference}"
+                    )
+    if not 1 <= start <= end <= len(lines):
+        raise ValueError(f"Evidence line range does not exist: {reference}")
+    return name, start, end
+
+
+def filename(reference: str) -> str:
+    legacy = re.fullmatch(r"(.+):\d+-\d+", reference)
+    return legacy.group(1) if legacy else reference.partition("#")[0]

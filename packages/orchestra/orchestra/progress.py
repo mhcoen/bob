@@ -52,15 +52,15 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import IO
 
-ActivityGetter = Callable[[], str]
+ActivityGetter = Callable[[], str | tuple[str, float]]
 """Signature for the optional live-activity fetcher. Returns the most
 recent agent-tool activity summary (e.g. ``"Read /path/to/file"``), or
 ``""`` when no session is running or no activity has been observed
 yet."""
 
-_ACTIVITY_LINE_PREFIX: str = "    running: "
+_ACTIVITY_LINE_PREFIX: str = "    Last activity: "
 """The two-line ``actor_progress`` format indents the activity line by
-four spaces and prefixes it with ``running: `` so it visually attaches
+four spaces and prefixes it with ``Last activity: `` so it visually attaches
 to the elapsed-time line above it without competing for the same
 visual slot. See T-000001 for the rationale on the two-line shape."""
 
@@ -304,7 +304,7 @@ class _StatefulStderrReporter:
         self._emit_activity_line()
 
     def _emit_activity_line(self) -> None:
-        """Print an indented "running: <tool_use>" line beneath the
+        """Print an indented "Last activity: <tool_use>" line beneath the
         elapsed-time ticker when an activity getter is configured and
         has something to report.
 
@@ -318,13 +318,17 @@ class _StatefulStderrReporter:
             activity = self._activity_getter()
         except Exception:
             return
+        prefix = _ACTIVITY_LINE_PREFIX
+        if isinstance(activity, tuple):
+            activity, age = activity
+            prefix = f"    Last activity ({age:.0f}s ago): "
         if not activity:
             return
         try:
             columns = shutil.get_terminal_size((80, 24)).columns
         except (OSError, ValueError):
             columns = 80
-        line = _ACTIVITY_LINE_PREFIX + activity
+        line = prefix + activity
         if columns > 1 and len(line) > columns:
             line = line[: max(columns - 1, len(_ACTIVITY_LINE_PREFIX))] + "…"
         self._print(line)
@@ -350,10 +354,10 @@ def stderr_reporter(
     ``activity_getter``, when supplied, is invoked once per
     ``actor_progress`` event after the elapsed-time line is printed.
     A non-empty return value is rendered as an indented second line so
-    the user sees what the agent is currently doing (e.g.
+    the user sees the latest reported activity (e.g.
     ``Read /path/to/file``) underneath the ticker. Callers wiring this
     in production should pass
-    ``orchestra.adapters._subprocess.get_current_activity`` so the live
+    ``orchestra.adapters._subprocess.get_activity_with_age`` so the live
     inner-CLI tool_use stream surfaces in the ticker.
     """
     target = stream if stream is not None else sys.stderr

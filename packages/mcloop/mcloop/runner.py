@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from bob_tools.timing import approval_waiting, observe_approvals
+
 from mcloop.progress import SessionProgress
 from mcloop.prompts import (
     build_audit_prompt,
@@ -23,6 +25,7 @@ from mcloop.prompts import (
     build_post_fix_review_prompt,
     build_sync_prompt,
 )
+from mcloop.timing import timed
 
 
 def _decode_subprocess_output(value: bytes | str | None) -> str:
@@ -763,6 +766,7 @@ def _warn_if_orchestra_bypassed(project_dir: Path, *, cli: str, allowed_tools: s
     )
 
 
+@timed("editor")
 def run_task(
     task_text: str,
     cli: str,
@@ -979,6 +983,7 @@ _interrupted = False
 _last_output_lines: collections.deque[str] = collections.deque(maxlen=20)
 
 
+@observe_approvals
 def _run_session(
     cmd: list[str],
     cwd: Path,
@@ -1211,6 +1216,7 @@ def _run_session(
                 except OSError:
                     pending = []
                 waiting_description = ""
+                approval_waiting(bool(pending))
                 if pending:
                     try:
                         waiting_description = pending[0].read_text()[:80]
@@ -1263,6 +1269,7 @@ def _run_session(
                 return _assemble_output(), STALL_EXIT_CODE
         _print_stream_event(line)
         shown_waiting = False
+        approval_waiting(False)
 
     t.join(timeout=5)
     process.wait()

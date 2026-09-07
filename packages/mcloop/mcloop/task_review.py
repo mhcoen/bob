@@ -6,13 +6,17 @@ import hashlib
 import json
 import os
 import re
+import time
 import urllib.request
 import uuid
 from dataclasses import dataclass
+from dataclasses import field as dataclass_field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from mcloop.evidence_refs import filename, resolve
 from mcloop.git_ops import run_git_bounded
+from mcloop.timing import timed
 
 EVIDENCE_PATH = ".mcloop/task-evidence.json"
 MAX_INPUT_BYTES = 96_000
@@ -35,6 +39,8 @@ class TaskReview:
     passed: bool
     output: str
     receipt: str = ""
+    blocked: bool = False
+    timings: dict[str, float] = dataclass_field(default_factory=dict)
 
 
 def load_policy(project_dir: Path) -> ReviewPolicy:
@@ -115,7 +121,11 @@ def prepare_evidence(project_dir: Path, policy: ReviewPolicy, task: str) -> str:
         "\n\nCompletion requires an independent requirement review. Read the accepted design "
         "before implementation. Write " + str(path.resolve()) + " as JSON with a nonempty "
         "requirements array. Each entry has requirement (text), design, implementation, "
-        "and verification (arrays of file:START-END references, using 1-based line numbers). "
+        "and verification (arrays of file paths, file#symbol or file#Markdown heading "
+        "references). "
+        "Bob resolves references, gathers changed files, merges overlapping excerpts and checks "
+        "the packet size. Do not count lines or bytes, inspect Bob source code, or write packet "
+        "assembly scripts. Existing file:START-END references are also accepted. "
         "Cover every obligation of the task, including preserved interfaces and failure behavior. "
         "Cite relevant complete design paragraphs and actual assertions or recorded observations. "
         "For declarations or other work needing inspection, cite the declaration as verification "
@@ -123,12 +133,15 @@ def prepare_evidence(project_dir: Path, policy: ReviewPolicy, task: str) -> str:
         "does not verify port signatures. Do not claim unperformed checks ran. Tests can encode "
         "incorrect expectations. The reviewer checks their assertions against the design. "
         "Do not edit the accepted design or review configuration to satisfy this gate. "
-        "Keep evidence concise. The review packet, including changed files, is limited to "
-        f"{MAX_INPUT_BYTES} UTF-8 bytes. Accepted design files: "
+        "List concise requirements and relevant references. Accepted design files: "
         + ", ".join(name for name, _ in policy.documents)
         + "\nTask to cover: "
         + task
     )
+
+
+def packet_text(packet: dict) -> str:
+    return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
 def _git(root: Path, *args: str) -> str:
@@ -139,20 +152,18 @@ def _git(root: Path, *args: str) -> str:
 
 
 def _reference(root: Path, reference: str, documents: dict[str, str], design: bool) -> dict:
-    match = re.fullmatch(r"(.+):(\d+)-(\d+)", reference)
-    if not match:
-        raise ValueError(f"Invalid evidence reference: {reference}")
-    name, start_text, end_text = match.groups()
+    name = filename(reference)
     if design and name not in documents:
         raise ValueError(f"Design reference is outside accepted documents: {name}")
     text = documents[name] if design else _read_file(root, name)
-    lines = text.splitlines()
-    start, end = int(start_text), int(end_text)
-    if not 1 <= start <= end <= len(lines):
-        raise ValueError(f"Evidence line range does not exist: {reference}")
-    return {"reference": reference, "text": "\n".join(lines[start - 1 : end])}
+    name, start, end = resolve(reference, text)
+    return {
+        "reference": f"{name}:{start}-{end}",
+        "text": "\n".join(text.splitlines()[start - 1 : end]),
+    }
 
 
+@timed("evidence")
 def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> dict:
     for path, digest in policy.configuration:
         if _config_digest(path) != digest:
@@ -202,6 +213,37 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
             continue
         path = _safe_path(root, name)
         changed[name] = _read_file(root, name) if path.exists() else "[deleted]"
+    # Merge overlapping ranges in unchanged files. Every cited line remains present.
+    ranges: dict[str, list[tuple[int, int]]] = {}
+    for entry in entries:
+        for field in ("design", "implementation", "verification"):
+            for ref in entry[field]:
+                name, extent = ref["reference"].rsplit(":", 1)
+                first, last = map(int, extent.split("-"))
+                ranges.setdefault(name, []).append((first, last))
+    merged: dict[str, list[tuple[int, int]]] = {}
+    for name, spans in ranges.items():
+        blocks: list[tuple[int, int]] = []
+        for first, last in sorted(set(spans)):
+            if blocks and first <= blocks[-1][1] + 1:
+                blocks[-1] = (blocks[-1][0], max(last, blocks[-1][1]))
+            else:
+                blocks.append((first, last))
+        merged[name] = blocks
+    reference_ids = {}
+    for entry in entries:
+        for field in ("design", "implementation", "verification"):
+            for ref in entry[field]:
+                name, extent = ref["reference"].rsplit(":", 1)
+                first, last = map(int, extent.split("-"))
+                first, last = next((a, b) for a, b in merged[name] if a <= first <= last <= b)
+                canonical = f"{name}:{first}-{last}"
+                ref["reference"] = canonical
+                ref["evidence_id"] = reference_ids.setdefault(
+                    canonical, f"R{len(reference_ids) + 1}"
+                )
+                content = documents[name] if name in documents else _read_file(root, name)
+                ref["text"] = "\n".join(content.splitlines()[first - 1 : last])
     excerpts = {}
     for entry in entries:
         for field in ("design", "implementation", "verification"):
@@ -226,10 +268,17 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
         "evidence": excerpts,
         "changed_files": changed,
     }
-    encoded = json.dumps(packet, ensure_ascii=False).encode()
+    encoded = packet_text(packet).encode()
     if len(encoded) > MAX_INPUT_BYTES:
+        largest = sorted(
+            ((name, len(text.encode())) for name, text in changed.items()),
+            key=lambda item: item[1],
+            reverse=True,
+        )[:5]
+        sizes = ", ".join(f"{name}: {size} bytes" for name, size in largest)
         raise ValueError(
             f"Task review input exceeds 96000 bytes ({len(encoded)} bytes after deduplication). "
+            f"Largest changed files: {sizes}. "
             "Narrow the task or evidence; input was not truncated."
         )
     return packet
@@ -264,6 +313,7 @@ Acceptance is a review judgment with the stated evidence.
 """
 
 
+@timed("review")
 def _request_review(policy: ReviewPolicy, packet: dict) -> str:
     payload = {
         "model": policy.model,
@@ -373,6 +423,10 @@ def review_task(
 ) -> TaskReview:
     if not policy.enabled:
         return TaskReview(True, "Requirement review disabled")
+    started = time.monotonic()
+    stage_started = started
+    phase = "evidence"
+    timings = {}
     record: dict = {"task": task, "baseline": baseline, "model": policy.model, "passed": False}
     try:
         if editor_model and editor_model.rsplit("/", 1)[-1] == policy.model.rsplit("/", 1)[-1]:
@@ -381,13 +435,19 @@ def review_task(
         digest = hashlib.sha256(json.dumps(packet, sort_keys=True).encode()).hexdigest()
         record["input"] = packet
         record["input_sha256"] = digest
-        record["input_bytes"] = len(json.dumps(packet, ensure_ascii=False).encode())
+        record["input_bytes"] = len(packet_text(packet).encode())
         print(
             f"\n>>> Reviewing task requirements ({policy.model}, "
             f"{record['input_bytes']} input bytes)",
             flush=True,
         )
+        timings["evidence"] = time.monotonic() - stage_started
+        phase = "review"
+        stage_started = time.monotonic()
         raw = _request_review(policy, packet)
+        timings["review"] = time.monotonic() - stage_started
+        phase = "validation"
+        stage_started = time.monotonic()
         record["raw_response"] = raw
         verdict = _validate_verdict(raw, packet)
         # Check source and evidence again after the network call.
@@ -395,6 +455,7 @@ def review_task(
             raise ValueError("Task review input changed during review")
         record["review"] = verdict
         record["passed"] = verdict["verdict"] == "accept"
+        record["status"] = "accepted" if record["passed"] else "rejected"
         output = (
             "Requirement review accepted"
             if record["passed"]
@@ -405,15 +466,21 @@ def review_task(
             )
         )
     except Exception as exc:
+        record["status"] = "blocked"
         # Exception messages from network clients can contain URLs or credentials.
         output = (
             f"Requirement review blocked: {exc}"
             if isinstance(exc, (ValueError, FileNotFoundError))
             else f"Requirement review blocked ({type(exc).__name__})"
         )
+    timings[phase] = time.monotonic() - stage_started
+    record["timings"] = {k: round(v, 3) for k, v in timings.items()}
+    record["elapsed_seconds"] = round(time.monotonic() - started, 3)
     record["output"] = output
     directory = _safe_path(root, ".mcloop/task-reviews")
     directory.mkdir(parents=True, exist_ok=True)
     receipt = directory / f"{uuid.uuid4().hex}.json"
     receipt.write_text(json.dumps(record, indent=2) + "\n")
-    return TaskReview(record["passed"], output, str(receipt))
+    return TaskReview(
+        record["passed"], output, str(receipt), record["status"] == "blocked", record["timings"]
+    )
