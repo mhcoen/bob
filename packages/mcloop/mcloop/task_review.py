@@ -20,7 +20,8 @@ from mcloop.git_ops import run_git_bounded
 from mcloop.timing import timed
 
 EVIDENCE_PATH = ".mcloop/task-evidence.json"
-MAX_INPUT_BYTES = 96_000
+MAX_INPUT_BYTES = 256_000
+MAX_CONFIGURED_INPUT_BYTES = 1_024_000
 MAX_OUTPUT_TOKENS = 3000
 MAX_RESPONSE_BYTES = 48_000
 
@@ -33,6 +34,14 @@ class ReviewPolicy:
     api_key_env: str = "OPENROUTER_API_KEY"
     documents: tuple[tuple[str, str], ...] = ()
     configuration: tuple[tuple[Path, str | None], ...] = ()
+    max_input_bytes: int = MAX_INPUT_BYTES
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.max_input_bytes) is not int
+            or not 1 <= self.max_input_bytes <= MAX_CONFIGURED_INPUT_BYTES
+        ):
+            raise ValueError("task_review.max_input_bytes must be an integer from 1 to 1024000")
 
 
 @dataclass(frozen=True)
@@ -78,7 +87,13 @@ def load_policy(project_dir: Path) -> ReviewPolicy:
     if not isinstance(key_env, str) or not os.environ.get(key_env):
         raise ValueError(f"Task review requires the environment variable {key_env}")
     return ReviewPolicy(
-        True, model, base_url.rstrip("/"), key_env, documents, tuple(configuration)
+        True,
+        model,
+        base_url.rstrip("/"),
+        key_env,
+        documents,
+        tuple(configuration),
+        settings.get("max_input_bytes", MAX_INPUT_BYTES),
     )
 
 
@@ -143,6 +158,10 @@ def prepare_evidence(project_dir: Path, policy: ReviewPolicy, task: str) -> str:
 
 def packet_text(packet: dict) -> str:
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
+
+
+def packet_sizes(packet: dict) -> dict[str, int]:
+    return {name: len(packet_text(value).encode("utf-8")) for name, value in packet.items()}
 
 
 def _git(root: Path, *args: str) -> str:
@@ -287,7 +306,7 @@ def build_packet(
             "output_omitted_bytes": max(0, len(output) - 4000),
         }
     encoded = packet_text(packet).encode()
-    if len(encoded) > MAX_INPUT_BYTES:
+    if len(encoded) > policy.max_input_bytes:
         largest = sorted(
             ((name, len(text.encode())) for name, text in changed.items()),
             key=lambda item: item[1],
@@ -295,9 +314,12 @@ def build_packet(
         )[:5]
         sizes = ", ".join(f"{name}: {size} bytes" for name, size in largest)
         raise ValueError(
-            f"Task review input exceeds 96000 bytes ({len(encoded)} bytes after deduplication). "
+            f"Task review input exceeds {policy.max_input_bytes} bytes "
+            f"({len(encoded)} bytes after deduplication). "
+            f"Sections: {packet_sizes(packet)}. "
             f"Largest changed files: {sizes}. "
-            "Narrow the task or evidence; input was not truncated."
+            "Set task_review.max_input_bytes to an appropriate review budget or narrow the task. "
+            "Input was not truncated; completed editing can resume at review."
         )
     return packet
 
@@ -345,7 +367,7 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
         "model": policy.model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": json.dumps(packet, ensure_ascii=False)},
+            {"role": "user", "content": packet_text(packet)},
         ],
         "max_tokens": MAX_OUTPUT_TOKENS,
     }
@@ -475,9 +497,11 @@ def review_task(
         record["input"] = packet
         record["input_sha256"] = digest
         record["input_bytes"] = len(packet_text(packet).encode())
+        record["input_limit_bytes"] = policy.max_input_bytes
+        record["input_sections_bytes"] = packet_sizes(packet)
         print(
             f"\n>>> Reviewing task requirements ({policy.model}, "
-            f"{record['input_bytes']} input bytes)",
+            f"{record['input_bytes']}/{policy.max_input_bytes} input bytes)",
             flush=True,
         )
         timings["evidence"] = time.monotonic() - stage_started

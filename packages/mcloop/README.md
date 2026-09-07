@@ -1229,10 +1229,16 @@ assertions or observations. A module-name smoke test cannot establish that port
 signatures implement an accepted contract.
 
 Each review makes one request without tools or automatic retries. The evidence
-packet is capped at 96,000 UTF-8 bytes, output at 3,000 tokens, and the network
+packet defaults to a 256,000 UTF-8 byte budget, output to 3,000 tokens, and the network
 operation has a 90-second timeout. OpenRouter requests use low reasoning effort
 and JSON output so reasoning leaves room for the verdict within that budget.
-Oversized input is refused without truncation.
+Set `task_review.max_input_bytes` in `.mcloop/config.json` to change the input
+budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
+configured provider can impose a lower context limit. Larger packets still use
+one request, without a model loop. Receipts record the budget and section sizes.
+Oversized input is refused without truncation and reports its size breakdown.
+Changed files are supplied in full. For languages other than Python, a symbol
+reference currently supplies its whole file to avoid guessing declaration bounds.
 Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a changed file points to
 the full file already supplied, so its text is not sent again as an excerpt.
 An explicit reviewer rejection fails the task and leaves the implementation available
@@ -1251,7 +1257,8 @@ command does not establish that its assertions match the accepted design.
 The `.mcloop/review-resume/` checkpoint retains the original baseline, editor model
 and a fingerprint of project files and review policy. It survives a startup Git
 checkpoint and permits edits to `.mcloop/task-evidence.json`. Changes to code, tests,
-accepted documents or review policy require a fresh editor attempt. A checkpoint
+accepted documents or review policy require a fresh editor attempt. For new
+checkpoints, changing only `max_input_bytes` preserves completed editing. A checkpoint
 is never evidence of acceptance. Existing `mcloop recover` handling still applies
 after an unclean interruption.
 Results and the reviewed packet are saved under `.mcloop/task-reviews/`.

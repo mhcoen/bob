@@ -31,6 +31,24 @@ def _policy_digest(policy: ReviewPolicy) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
+def _policy_without_budget(policy: ReviewPolicy) -> str:
+    configuration = []
+    for path, _ in policy.configuration:
+        value = json.loads(path.read_text()) if path.exists() else None
+        if isinstance(value, dict) and isinstance(value.get("task_review"), dict):
+            value["task_review"].pop("max_input_bytes", None)
+        configuration.append((str(path), value))
+    data = [
+        policy.enabled,
+        policy.model,
+        policy.base_url,
+        policy.api_key_env,
+        policy.documents,
+        configuration,
+    ]
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
+
+
 def _tree_digest(root: Path) -> str:
     names = set(
         _git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split("\0")
@@ -74,6 +92,7 @@ def save(
             "task": task,
             "baseline": baseline,
             "policy": _policy_digest(policy),
+            "policy_without_budget": _policy_without_budget(policy),
             "tree": _tree_digest(root),
             "model": model,
             "log_path": str(result.log_path),
@@ -95,7 +114,10 @@ def load(root: Path, policy: ReviewPolicy, task: str) -> tuple[str, str | None, 
         raise ValueError("Invalid review-resume baseline")
     if (
         data.get("task") != task
-        or data.get("policy") != _policy_digest(policy)
+        or (
+            data.get("policy") != _policy_digest(policy)
+            and data.get("policy_without_budget") != _policy_without_budget(policy)
+        )
         or data.get("tree") != _tree_digest(root)
     ):
         print("\n>>> Saved review inputs changed; a new editor attempt is required.", flush=True)

@@ -315,6 +315,7 @@ def test_request_has_no_tools_and_fixed_output_bound(project, monkeypatch):
         ).encode()
         assert _request_review(policy, {"task": "Check"}) == "{}"
     payload = json.loads(call.call_args.args[0].data)
+    assert payload["messages"][1]["content"] == '{"task":"Check"}'
     assert payload["max_tokens"] == 3000
     assert payload["reasoning"] == {"effort": "low"}
     assert payload["response_format"] == {"type": "json_object"}
@@ -613,3 +614,84 @@ def test_absent_and_waived_checks_do_not_claim_test_execution(project):
     )
     assert packet["mcloop_checks"]["command"] == "accept:waived:T-2"
     assert "exit_code" not in packet["mcloop_checks"]
+
+
+def test_large_review_uses_one_complete_request(project):
+    root, policy, baseline = project
+    content = "// Start\n" + "x" * 150_000 + "\n// End\n"
+    (root / "ports.swift").write_text(content)
+    packet = build_packet(root, policy, "Task", baseline)
+    with patch("mcloop.task_review._request_review", return_value=verdict(packet)) as request:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.passed
+    request.assert_called_once()
+    assert request.call_args.args[1]["changed_files"]["ports.swift"] == content
+    receipt = json.loads(Path(result.receipt).read_text())
+    assert receipt["input_bytes"] > 96000
+    assert receipt["input_limit_bytes"] == 256000
+    assert receipt["input_sections_bytes"]["changed_files"] > 150000
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, "256000", 1024001])
+def test_invalid_input_budget_is_rejected(limit):
+    with pytest.raises(ValueError, match="max_input_bytes"):
+        ReviewPolicy(max_input_bytes=limit)
+
+
+def test_budget_refusal_reports_context_and_preserves_no_request(project):
+    from dataclasses import replace
+
+    root, policy, baseline = project
+    policy = replace(policy, max_input_bytes=500)
+    with patch("mcloop.task_review._request_review") as request:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert "Sections:" in result.output and "evidence" in result.output
+    assert "max_input_bytes" in result.output
+    request.assert_not_called()
+
+
+def test_budget_only_configuration_change_preserves_editor_checkpoint(project):
+    import hashlib
+    from dataclasses import replace
+
+    from mcloop import review_resume
+    from mcloop.runner import RunResult
+
+    root, policy, baseline = project
+    config = root / ".mcloop/config.json"
+
+    def configure(budget, model="review-model"):
+        config.write_text(json.dumps({"task_review": {"max_input_bytes": budget, "model": model}}))
+        return replace(
+            policy,
+            model=model,
+            max_input_bytes=budget,
+            configuration=((config, hashlib.sha256(config.read_bytes()).hexdigest()),),
+        )
+
+    first = configure(96000)
+    review_resume.save(
+        root, first, "Task", baseline, "editor", RunResult(True, "done", 0, Path("editor.log"))
+    )
+    assert review_resume.load(root, configure(256000), "Task") is not None
+    assert review_resume.load(root, configure(256000, "changed-reviewer"), "Task") is None
+
+
+def test_load_policy_uses_configured_input_budget(project, monkeypatch):
+    root, _, _ = project
+    monkeypatch.setattr(Path, "home", lambda: root / "home")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    (root / ".mcloop/config.json").write_text(
+        json.dumps(
+            {
+                "task_review": {
+                    "enabled": True,
+                    "model": "review-model",
+                    "documents": ["DESIGN.md"],
+                    "max_input_bytes": 180000,
+                }
+            }
+        )
+    )
+    assert load_policy(root).max_input_bytes == 180000
