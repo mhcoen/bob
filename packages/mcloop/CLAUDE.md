@@ -104,6 +104,8 @@ Luna and GLM Flash, including the environment passed to the editing subprocess.
 Captures configuration and accepted design text before editing. Validates cited
 line ranges, includes changed files, and requires an explicit reviewer verdict.
 Packet evidence IDs let the reviewer cite exact ranges without reproducing paths.
+Repeated references share one excerpt. Citations into changed files use their
+line ranges in the full file already included in the packet.
 OpenRouter calls request low reasoning effort and JSON output within the shared
 output budget. Missing evidence and provider failures block completion. Receipts retain the
 review packet and its hash. `tests/test_task_review.py` covers packet validation

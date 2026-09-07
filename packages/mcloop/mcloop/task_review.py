@@ -199,16 +199,34 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
             continue
         path = _safe_path(root, name)
         changed[name] = _read_file(root, name) if path.exists() else "[deleted]"
+    excerpts = {}
+    for entry in entries:
+        for field in ("design", "implementation", "verification"):
+            for reference in entry[field]:
+                text = reference.pop("text")
+                identity = reference["evidence_id"]
+                if identity in excerpts:
+                    continue
+                name, line_range = reference["reference"].rsplit(":", 1)
+                start, end = (int(value) for value in line_range.split("-"))
+                excerpt = {"reference": reference["reference"]}
+                if name in changed:
+                    # The complete changed file is already in the packet.
+                    excerpt.update(changed_file=name, start_line=start, end_line=end)
+                else:
+                    excerpt["text"] = text
+                excerpts[identity] = excerpt
     packet = {
         "task": task,
         "baseline": baseline,
         "requirements": entries,
+        "evidence": excerpts,
         "changed_files": changed,
     }
     encoded = json.dumps(packet, ensure_ascii=False).encode()
     if len(encoded) > MAX_INPUT_BYTES:
         raise ValueError(
-            "Task review input exceeds 96000 bytes. "
+            f"Task review input exceeds 96000 bytes ({len(encoded)} bytes after deduplication). "
             "Narrow the task or evidence; input was not truncated."
         )
     return packet
@@ -234,7 +252,9 @@ Return only a JSON object:
 Use the supplied requirement text exactly in each assessment. Accept only when every supplied
 requirement is assessed as satisfied, no task obligation is missing, and findings is empty.
 In evidence arrays, cite the supplied evidence_id values (such as R1). Each ID identifies
-one exact file and line range in this packet. Choose the IDs needed to support the assessment.
+one exact file and line range in the packet's evidence dictionary. An evidence entry contains
+either its text or a changed_file with 1-based start_line and end_line into changed_files.
+Those changed files are supplied in full. Choose the IDs needed to support the assessment.
 Unknown IDs invalidate the verdict. Use file references in finding explanations when helpful.
 Acceptance is a review judgment with the stated evidence.
 """

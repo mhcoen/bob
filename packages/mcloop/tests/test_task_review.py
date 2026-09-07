@@ -91,7 +91,9 @@ def test_packet_includes_offending_code_and_actual_smoke_assertion(project):
     root, policy, baseline = project
     packet = build_packet(root, policy, "Define bounded delivery ports", baseline)
     assert "[String]" in packet["changed_files"]["ports.swift"]
-    assert "PortsModule.name" in packet["requirements"][0]["verification"][0]["text"]
+    ref = packet["requirements"][0]["verification"][0]
+    location = packet["evidence"][ref["evidence_id"]]
+    assert "PortsModule.name" in packet["changed_files"][location["changed_file"]]
     with patch(
         "mcloop.task_review._request_review", return_value=verdict(packet, accepted=False)
     ) as call:
@@ -109,6 +111,57 @@ def test_valid_review_is_bound_to_packet(project):
         result = review_task(root, policy, "Task", baseline, "editor-model")
     assert result.passed
     assert json.loads(Path(result.receipt).read_text())["input_sha256"]
+
+
+def test_changed_file_and_repeated_citations_share_one_copy(project):
+    root, policy, baseline = project
+    content = "// whole-file-start\n" + "x" * 60_000 + "\n// whole-file-end\n"
+    (root / "ports.swift").write_text(content)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["implementation"] = ["ports.swift:1-3"] * 3
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Task", baseline)
+    encoded = json.dumps(packet).encode()
+    assert len(encoded) < MAX_INPUT_BYTES
+    assert packet["changed_files"]["ports.swift"] == content
+    assert encoded.count(b"whole-file-start") == 1
+    refs = packet["requirements"][0]["implementation"]
+    assert len({ref["evidence_id"] for ref in refs}) == 1
+    location = packet["evidence"][refs[0]["evidence_id"]]
+    assert (location["changed_file"], location["start_line"], location["end_line"]) == (
+        "ports.swift",
+        1,
+        3,
+    )
+
+
+def test_unchanged_cited_passage_is_included_once(project):
+    root, policy, _ = project
+    subprocess.run(["git", "add", "DESIGN.md"], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "Accept design",
+        ],
+        cwd=root,
+        check=True,
+    )
+    baseline = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["design"] *= 3
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Task", baseline)
+    refs = packet["requirements"][0]["design"]
+    assert len({ref["evidence_id"] for ref in refs}) == 1
+    passage = packet["evidence"][refs[0]["evidence_id"]]
+    assert passage["text"] == (root / "DESIGN.md").read_text().rstrip("\n")
+    assert json.dumps(packet).count("Delivery operations must use a disk-backed sequence.") == 1
 
 
 @pytest.mark.parametrize("unknown", [False, True])

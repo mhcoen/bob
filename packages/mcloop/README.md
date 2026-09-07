@@ -1208,6 +1208,8 @@ packet is capped at 96,000 UTF-8 bytes, output at 3,000 tokens, and the network
 operation has a 90-second timeout. OpenRouter requests use low reasoning effort
 and JSON output so reasoning leaves room for the verdict within that budget.
 Oversized input is refused without truncation.
+Repeated references share one excerpt. A citation into a changed file points to
+the full file already supplied, so its text is not sent again as an excerpt.
 Rejection, missing evidence, invalid output or a transport error leaves the task
 incomplete and stops automatic retries. Batch edits remain available for repair.
 Results and the reviewed packet are saved under `.mcloop/task-reviews/`.
