@@ -1,0 +1,78 @@
+{
+  "verdict": {
+    "decision": "accept",
+    "feedback": "The corrections resolve F011 and F012 without contradicting their dependent contracts. All required design checks are true. Earlier resolutions and dismissals remain supported, and no required correction remains open. Acceptance permits phased implementation planning. The specified experiments remain unperformed and are still required before accepting dependent integrations or making release claims.",
+    "checks": {
+      "requirements": true,
+      "architecture": true,
+      "alternatives": true,
+      "data_lifecycle": true,
+      "failures": true,
+      "maintainability": true,
+      "verification": true,
+      "unresolved_decisions": true
+    }
+  },
+  "dispositions": [
+    {
+      "id": "F001",
+      "status": "resolved",
+      "reason": "Preserve the resolution. F1 includes repeated dictation on model B alongside meeting recognition on model A, with residency changes and loading costs included in latency and fairness evaluation. The corrections introduce no scheduling change. Additional batching or switch limits still lack supporting measurements."
+    },
+    {
+      "id": "F002",
+      "status": "resolved",
+      "reason": "Preserve the resolution. D-031 holds checkpointed diarization until explicit Resume, with eligibility validation and normal resource admission. Recognition retains its explicit recomputation policy after crashes or pressure termination. Neither correction changes those policies or supplies grounds to require recognition checkpoint reuse."
+    },
+    {
+      "id": "F003",
+      "status": "dismissed",
+      "reason": "Preserve the dismissal. D-010 permits independent eligible delivery while an unconfirmed Unicode outcome remains available for inspection. It imposes no mandatory dismissal per Unicode attempt. F4 measures failures and resolution actions, and the corrections do not alter delivery."
+    },
+    {
+      "id": "F004",
+      "status": "dismissed",
+      "reason": "Preserve the dismissal. Enabled clipboard context samples current text under D-016's subordinate-authority contract and D-039's retention policy. The specification does not require excluding app-written transcripts. The corrections provide no evidence of a defective sampling contract."
+    },
+    {
+      "id": "F005",
+      "status": "resolved",
+      "reason": "Preserve the resolution. Cancellation remains configurable and defaults to no global binding. D-026 defines gesture consumption and pass-through. Its new foreground eligibility rule further limits cancellation of selected processing operations while preserving explicitly configured global cancellation of live dictation. Confirmation or undo is not required by the specification."
+    },
+    {
+      "id": "F006",
+      "status": "resolved",
+      "reason": "Preserve the resolution. D-030 retains post-gain PCM after saturation and quantization, discloses permanent clipping, and prohibits gain reapplication during playback or reprocessing. The admission-time clarification strengthens that representation contract without changing stored-sample semantics."
+    },
+    {
+      "id": "F007",
+      "status": "resolved",
+      "reason": "Preserve the resolution. D-016 specifies isolated capture of the foreground application's focused window, scale normalization across displays, and typed omissions without display fallback. D-039 retains only the supplied representation and metadata. Neither correction changes screen collection."
+    },
+    {
+      "id": "F008",
+      "status": "dismissed",
+      "reason": "Preserve the dismissal. D-028 restricts acquisition networking to explicit user requests and requires routine offline operation. D-041 authorizes no automatic catalog refresh. The corrections create no additional network path."
+    },
+    {
+      "id": "F009",
+      "status": "dismissed",
+      "reason": "Preserve the earlier source-backed dismissal. D-001 states initial arm64 packaging as an engineering choice and identifies the complete-stack evaluation required for Intel support. The gain and cancellation corrections supply no contrary hardware evidence."
+    },
+    {
+      "id": "F010",
+      "status": "dismissed",
+      "reason": "Preserve the dismissal. D-007 specifies Discard recording as the visible label. D-026 references D-007 for the cancellation action's label and semantics, and verification uses that label. The added eligibility rule creates no conflicting label requirement."
+    },
+    {
+      "id": "F011",
+      "status": "resolved",
+      "reason": "D-030 now fixes chunk boundaries by admitted native-frame indices and latches gain when each chunk's first frame enters capture storage. Gain is applied once into the bounded Float32 ring. The writer only saturates and quantizes, preserving the latched metadata through retries. Frame ranges explicitly identify whole chunks. This fits D-006's backlog ownership and D-027's existing buffers without another audio queue. F3 now changes gain during injected stalls, including a thirty-second backlog, and checks old versus newly admitted chunks, preview samples, saved samples and retry behavior. The permitted pre-quantization preview difference is explicit. The requested design clarification and verification cases are complete."
+    },
+    {
+      "id": "F012",
+      "status": "resolved",
+      "reason": "D-026 now makes a selected processing operation eligible only when this application is frontmost at the binding's key-down. A retained History selection cannot intercept cancellation in another application when no live dictation exists. Explicitly configured live-dictation cancellation remains global, and an already-owned gesture retains paired-key-up consumption after focus changes. D-007's stage-specific cancellation effects remain intact. Verification now covers a selected running operation followed by switching applications, foreground and live-dictation cases, disabled cancellation, and focus changes between key-down and key-up."
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "verdict": {
+    "decision": "iterate",
+    "feedback": "Resolve F011's gain-latching timing and F012's cancellation eligibility across application focus changes, then add their verification cases. The earlier required revisions are addressed, including the blocking mixed-model workload. Preserve the existing dismissals. Unperformed feasibility experiments remain integration prerequisites and do not independently prevent design approval. This judgment concerns the design stage; the complete phased implementation plan follows design acceptance.",
+    "checks": {
+      "requirements": false,
+      "architecture": true,
+      "alternatives": true,
+      "data_lifecycle": false,
+      "failures": false,
+      "maintainability": true,
+      "verification": false,
+      "unresolved_decisions": false
+    }
+  },
+  "dispositions": [
+    {
+      "id": "F001",
+      "status": "resolved",
+      "reason": "F1 now explicitly exercises repeated dictation on model B while a two-hour meeting uses model A. It records residency switches and includes loading costs in latency and fairness evaluation. Consecutive B windows reuse B, and switching releases prior residency before loading. The earlier required verification change is complete. No measurements justify requiring additional batching or a switch limit."
+    },
+    {
+      "id": "F002",
+      "status": "resolved",
+      "reason": "D-031 now leaves checkpointed diarization in interrupted_resumable across launches without inference admission or model loading. Explicit Resume validates inputs and queues continuation under normal admission with a new epoch. D-020 and D-031 retain the stated recognition recomputation policy after crashes or pressure termination. The earlier judgment did not require recognition checkpoint reuse."
+    },
+    {
+      "id": "F003",
+      "status": "dismissed",
+      "reason": "Preserve the earlier dismissal. D-010 allows independent eligible attempts to proceed while an unconfirmed Unicode outcome remains available for inspection. Only clipboard-dependent operations face the paste barrier. Neither mandatory dismissal for every Unicode attempt nor silent removal of uncertain outcomes follows from the design. F4 measures delivery failures and resolution actions."
+    },
+    {
+      "id": "F004",
+      "status": "dismissed",
+      "reason": "Preserve the earlier dismissal. Enabled clipboard context samples current clipboard text, which may include an earlier transcript. D-016 defines its subordinate authority, and D-039 defines retention. The specification does not require excluding app-written text. The scenario identifies a fidelity risk for evaluation without demonstrating a defective sampling contract."
+    },
+    {
+      "id": "F005",
+      "status": "resolved",
+      "reason": "D-026 now makes cancellation configurable, permits disabling or rebinding it, and defaults to no global binding. It specifies consumption of eligible gestures and pass-through for unmatched or ineligible gestures. F5 covers Escape in foreground transient controls. Confirmation and undo remain optional product choices. F012 concerns the separate eligibility question for background processing."
+    },
+    {
+      "id": "F006",
+      "status": "resolved",
+      "reason": "D-030 explicitly selects post-gain storage after saturation and quantization. It records effective gain and clipping, discloses permanent clipping, and requires playback and reprocessing to use saved samples without reapplying gain or consulting the current slider. The representation decision is complete. F011 identifies a further timing ambiguity under storage backlog."
+    },
+    {
+      "id": "F007",
+      "status": "resolved",
+      "reason": "D-016 selects the foreground application's focused window identified at the trigger, excludes surrounding windows and desktop, and defines scale normalization for spanning displays. Missing or changed identity produces an omission without display fallback. Pixels are released after OCR, and retained context contains only the supplied representation and source metadata. Verification includes neighboring content and multiple displays."
+    },
+    {
+      "id": "F008",
+      "status": "dismissed",
+      "reason": "Preserve the earlier dismissal. D-028 confines acquisition networking to explicit user requests and requires routine offline operation. D-041 creates no exception for automatic catalog refresh or remote catalog availability. A launch-time fetch would violate the existing contract. No new evidence supports reopening the network-boundary objection."
+    },
+    {
+      "id": "F009",
+      "status": "dismissed",
+      "reason": "Preserve the earlier source-backed dismissal. The prior judgment identified versioned SpeakerKit documentation supporting the Apple Silicon focus. D-001 treats initial arm64 packaging as an engineering choice and states the complete-stack evaluation needed before advertising Intel support. The repeated finding supplies no new contrary evidence."
+    },
+    {
+      "id": "F010",
+      "status": "dismissed",
+      "reason": "Preserve the earlier dismissal. D-007 explicitly specifies Discard recording as the visible label. D-026 names the cancellation action and references D-007 for that label and its semantics. The fixtures use the specified label. No conflicting UI requirement is demonstrated."
+    },
+    {
+      "id": "F011",
+      "status": "fix",
+      "reason": "D-030 requires one effective gain per chunk and consistent live display, but does not explicitly bind that gain to admitted frame ranges independently of the delayed storage writer. With post-gain storage, choosing the value during a later write could permanently alter earlier audio. Define chunk boundaries on the capture timeline and latch gain when the chunk's first frame is admitted. Preserve that value through writing and retries. Clarify that frame ranges identify whole chunks, and add an F3 stall case proving that a slider change affects only subsequently admitted chunks while saved samples agree with the effective live gain."
+    },
+    {
+      "id": "F012",
+      "status": "fix",
+      "reason": "D-026 does not define whether an explicitly selected processing operation remains eligible for global cancellation after the app loses focus. That omission determines whether Escape cancels background work and is consumed. Define the selection's eligibility lifetime. Restrict selected-operation cancellation to when the app is frontmost, or specify a distinct explicit authorization for background cancellation. Add a fixture that selects a running operation, switches to another application, and verifies cancellation and event propagation under the chosen rule. The finding's assumed user expectation alone does not mandate one particular policy."
+    }
+  ]
+}

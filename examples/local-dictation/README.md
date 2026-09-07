@@ -1,16 +1,31 @@
 # Local macOS dictation design example
 
-The example develops a software design and phased implementation plan for the
-local dictation application described in [SPEC.md](SPEC.md). Its scope was
-recovered from the user's historical Superwhisper experiments and constrained
-by the user's current requirement for unrestricted local use on macOS.
+[SOFTWARE_DESIGN.md](SOFTWARE_DESIGN.md) records the accepted design for the
+application specified in [SPEC.md](SPEC.md). [PLAN.md](PLAN.md) contains the
+complete implementation sequence, with 18 phases and 191 unchecked tasks.
+Each phase carries the accepted design's digest and decision references.
 
-The historical generated plans are not treated as current Duplo results.
-[Research notes](ref/RESEARCH.md) identify candidate runtimes and the limits of
-the available evidence. Hardware assumptions remain explicit in the specification.
+The application has not been implemented. Recognition quality, resource use and
+practical text delivery still require the experiments specified in the plan.
+Model acceptance records the reviewers' conclusions. Passing future tests will
+establish their assertions under the tested conditions. The assertions themselves
+require engineering review against the intended behavior.
 
-Run the example in a separate project directory so generated state is kept with
-its own inputs. From the Bob repository root, after activating its environment:
+The scope comes from the user's historical Superwhisper experiments and current
+requirement for unrestricted local use on macOS. [Research notes](ref/RESEARCH.md)
+identify candidate runtimes and their documented limits. The historical generated
+plans remain reference material.
+
+[Review evidence](evidence/README.md) preserves the rejected proposals and the
+corrections leading to acceptance. The final continuation used eight model calls,
+including one timed-out author call whose completed patch was recovered from
+saved construction data. Local corrections and validation preceded the final
+judgments. The run required operator intervention; it does not demonstrate an
+unattended invocation completing successfully. The receipt records both call
+allowances and the prompt-size adjustment for the complete plan review.
+
+To run a new design exercise, create a separate project directory. From the Bob
+repository root, after activating its environment:
 
 ```sh
 mkdir -p local/local-dictation/ref
@@ -22,56 +37,18 @@ cd local/local-dictation
 duplo design --plan
 ```
 
-The command invokes configured model services. It sends the specification and
-reference material for design review, then generates the implementation plan.
-The example configuration uses Astra (`gpt-6-astra`) through Codex to author
-and judge, with Fable reviewing through Claude. The Astra model ID is explicit;
-Bob's general `codex` alias still selects GPT-5.6 Sol.
-The plan criteria require preservation of the accepted design and review of task
-dependencies. Whole-plan review assesses substantive objections as well as task format.
-It does not build the application. Re-running it reuses a current accepted design
-and can recover a saved whole-plan candidate. Call allowances persist across
-invocations; the workflow documentation explains explicit renewal.
+The command sends the specification and declared references to the configured
+model services. Astra (`gpt-6-astra`) authors and judges the design through Codex;
+Fable reviews through Claude. Astra authors the whole implementation plan and
+Fable reviews it once. The command does not build the application.
 
-Inspect `SOFTWARE_DESIGN.md` alongside the review attempts in
-`.duplo/software-design.json`. Each plan phase names the design digest and
-decisions it implements. Keep `.duplo/design-runs/` to inspect the review rounds.
+Keep `.duplo/software-design.json`, `.duplo/design-plan.json` and the review-run
+artifacts with the working project. Re-running the command reuses a current
+accepted design and can recover a saved plan candidate. Call allowances persist
+across invocations. [Workflow documentation](../../packages/duplo/SOFTWARE-DESIGN.md)
+and [review limits](../../packages/duplo/REVIEW-COSTS.md) describe recovery and the
+limits of the available cost controls. CLI call counts and submitted prompt bytes
+do not bound internal model activity or establish a token total.
 
-The [workflow documentation](../../packages/duplo/SOFTWARE-DESIGN.md) describes
-rejection and recovery behavior. Scripted regressions exercise the state machine;
-they do not establish the quality of a model-generated design.
-
-The [recorded attempts](evidence/README.md) preserve rejected proposals with their
-reviews. The first attempt exposed a truncated-response bug in Orchestra and
-conflicting role instructions. Both have been corrected. The second found missing
-meeting provenance and unsafe delivery confirmation. Its judge also waived the
-specification's media-ownership condition, so the condition was clarified before
-another invocation. [Review notes](ref/REVIEW_NOTES.md) accompany the new inputs.
-
-The third attempt exposed contradictory definitions retained across revisions.
-The authoring instructions now require each protocol to have one definition.
-The third review recorded additional model-lease findings.
-The fourth attempt exposed JSON restarts after output limits. Orchestra now
-recovers the complete replacement document. Its review also identified a staging
-lease that could not be acquired during installation and overlapping delivery
-attempts without a shared executor. The next invocation uses Astra as author
-with Fable reviewing, and retains the findings as revision inputs.
-No implementation plan has been generated. Model outputs in the evidence directory
-retain their wording.
-
-The first Astra call reached the stream-inactivity limit without a final response.
-The Codex text adapter now uses the total call limit for that timer too. Its
-diagnostic output is excluded from proposals. The following attempt used the last complete design as its starting point.
-
-The next invocation completed two Astra/Fable review rounds. Its second judgment
-requested revision but failed schema validation because feedback was an array.
-The prompt now specifies a string. [Attempt 6](evidence/README.md#attempt-6)
-preserves the response and the remaining findings. The live review was stopped
-after further rounds consumed too many tokens. The design remains unaccepted,
-and the implementation plan remains unfinished. Bob now provides a finite review
-sequence with persistent call limits; it has been exercised with scripted responses.
-The live example has not been restarted to evaluate that change.
-
-The [XPC probe](probes/xpc-isolation/README.md) checks whether a bundled inference
-service can deny network access independently of its containing app's sandbox
-status. Its recorded results state the tested OS and the limits of the check.
+The separate [XPC probe](probes/xpc-isolation/README.md) records its tested OS and
+observed isolation behavior. Its findings were excluded from the model inputs.

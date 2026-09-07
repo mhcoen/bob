@@ -1,0 +1,53 @@
+Not ready for acceptance. The four blocking items from the previous review are resolved, and two new defects remain that implementation phases would otherwise settle on their own.
+
+I checked each earlier item against the current text. D-009 now names the evidence for confirmed insertion, a synchronous success on a settable selected-text attribute inside a fixture-qualified profile, with assumption 3 recording the basis. D-010 weighs the snapshot-chain and next-trigger retirement alternatives, D-009 adds remembered Unicode routes, and F4 carries an actions-per-dictation threshold with a return-to-owner consequence. D-017 assigns translation to the generation service and lists Whisper translate as the alternative. D-006 defines backlog as admitted audio past the last journal commit, D-027 charges the ring, the stalled-crash loss window is stated, and D-004 no longer defines its own thresholds. The earlier improvements are also addressed. Durability scope is stated, echo has a consequence, the memory protocol fixes sampling density and derives its tolerance from pilot variance, whole-input diarization has a reconsideration path, and the manifest has a storage location.
+
+## Blocking
+
+**Recognition has no preemption unit, so a meeting's recognition can starve.** D-004 orders the latest stopped live recognition ahead of older interactive jobs and preempts lower-priority inference at checkpoints. It also says a stage without a checkpoint restarts from committed inputs. Only diarization has a checkpoint contract, in D-043. D-031 confirms the gap by failing interrupted recognition outright. Under that text, a long meeting's final recognition restarts from its first window every time the user stops a dictation, because the dictation becomes the latest stopped live session and both jobs need the single final speech service. A user who dictates every few minutes never gets meeting results. D-004 lists starvation as a reconsideration trigger, but the current rules guarantee it for this case. The resolution is a decision that needs no measurement. Either state that final recognition checkpoints at window boundaries and that completed-window output stays in run staging across preemption, in which case D-031 can resume it too, or exempt an in-progress recognition from preemption and let the dictation wait for the current window, with that wait added to the F1 latency cases. D-004 must then agree with D-020 and D-031.
+
+**The meeting window parameters have no stated basis, and F5 has no acceptance criterion for what they cost.** D-023 calls its thresholds heuristics but gives no reason for the window length against the diarization charge in D-027. Every window starts new cluster IDs, and D-037 makes cross-window identity a proposal only, so each speaker on each stream needs one link confirmation per window boundary. The design never works that count out.
+
+| D-023 parameter | Value |
+|---|---|
+| Window length | 600 s |
+| Step | 570 s |
+| Windows for a two-hour meeting, per stream | 13 |
+| Link confirmations, four remote speakers plus one local | 60 |
+
+F1 and F4 both carry proposed numeric criteria with a consequence on failure. F5 carries only the timestamp criterion. Confirmation actions per speaker-hour, diarization error and proposal precision are measured with no threshold and no consequence. The whole-input alternative is deferred to "flat measurements" without saying flat relative to what. D-035 says design acceptance fixes the criteria, so accepting this text leaves meetings with no basis for acceptance. Resolve by recording the reason for the window length against the audio residency it implies. Add a worked confirmation count for a representative meeting. Add proposed F5 thresholds for confirmation effort and diarization error with the same return-to-owner consequence F4 has.
+
+## Improvements that can wait
+
+- **Cancel and interruption share one preference.** D-007 applies the seed's keep_interrupted or discard preference to an explicit cancel during capture, and the meeting-control fixture asserts that behavior. A crash and an Escape key are different intents. A user who wants a crashed meeting preserved probably still wants a cancelled dictation discarded. The fixture will pass while encoding the wrong expectation. Record a separate cancel disposition, or justify the shared preference per session kind.
+
+- **Held attempts and returning focus.** D-008 requires the latched element to remain focused, and D-010 keeps held attempts visible without blocking others. Neither says whether a held attempt dispatches automatically when the element regains focus minutes later or waits for an explicit action. Automatic dispatch into a field the user has since started typing in is a surprise. State the rule.
+
+- **Deletion with an outstanding paste barrier.** D-024 keeps detached barrier metadata without deleted text, yet the deleted transcript remains on the system clipboard, and D-010 forbids restoration until retirement. The two decisions disagree about whether deletion clears the clipboard. Choose one and state the consequence for the delayed consumer the barrier protects.
+
+- **Trigger-to-first-sample latency is undecided.** D-006 starts input at the trigger. Nothing says whether the audio engine stays running while controls are enabled or starts on demand. A cold start loses leading speech, and a warm engine shows the microphone-in-use indicator permanently. F1 measures trigger-to-first-text only after speech reaches a warm model. Record the choice with its indicator consequence and add trigger-to-first-captured-sample to F1.
+
+- **System audio scope.** D-023 captures system audio with no content filter, so notification sounds and every other application's playback enter the meeting stream. ScreenCaptureKit supports per-application filters. Decide whether meeting setup selects the application to capture, which would also identify the echo source for F5.
+
+- **LZFSE for audio is a choice without evidence.** General-purpose byte compression on 24-bit PCM typically yields little. Per-chunk ALAC through AudioToolbox has the chunk independence D-030 wants and needs none of the live-encoding recovery the earlier rounds rejected. The design disclaims savings, and it should also say why LZFSE was picked first. Dictation storage also gets no visibility. Meeting setup shows a storage rate while History shows none, and native-rate PCM with manual retention grows fastest for the most common workflow.
+
+- **Compilation caches the app does not own.** D-040 claims complete accounting and D-038 reports service caches, yet Core ML and Metal compile models into OS-managed caches inside each service container. Those caches can be large and are unregistered. They can only be cleared by removing the container's cache directory. Acknowledge them as estimated and state the purge action.
+
+- **Packaging is unnamed.** D-036 says packaging supplies bundle metadata and the signing order, and SPM alone produces no app or XPC bundles. F2 depends entirely on the sandbox entitlements those bundles carry. Name the mechanism, whether a script assembles bundles from SPM products or an Xcode project wraps the package, so F2 tests the shipped arrangement.
+
+- **The specification asked for a comparison of alternative designs.** Its notes ask how alternative designs handle model replacement and new input sources. Evolution describes only how the chosen design does. D-002's alternatives list a single target and separate repositories without comparing them on those two changes. A short comparison closes the gap.
+
+- **Document length.** REVIEW_NOTES set a target of 8,000 to 12,000 words. I did not count, and the consequences fields alone appear to exceed it. Run a count and trim repetition before the next round if the target still applies.
+
+## Smaller gaps
+
+- **Worker crash retry.** failure_behavior fences the epoch and marks repeated crashes suspect, and never says how many automatic retries a single crash gets before the run fails.
+- **Refining is undefined.** D-006, D-007 and D-031 use a refining state that no decision defines. It appears to be D-015's cleanup pass. Name it once.
+- **D-001 cites an Apple Silicon focus** that the supplied research text does not contain. The research records only the macOS 14 and Xcode 16 prerequisites. Cite or drop the claim.
+- **fsync against the claimed scope.** D-030 pays three fsyncs per chunk while claiming durability only across application interruption, which needs none. Either claim kernel-panic durability and evaluate it, or record why the cost is spent.
+- **Gain and stored audio.** D-025 applies application-local gain and D-030 records gain and clipping. Whether stored samples are pre-gain or post-gain is unstated, and post-gain storage makes clipping permanent.
+- **Model catalog source.** D-041 mentions download catalogs. Whether the catalog is bundled and stale or fetched on an explicit user action is unstated, and D-028 authorizes the downloader only for acquisition.
+- **Screen context scope.** D-016 captures the screen for OCR without saying whether it takes the focused window or the full display. The full display collects other applications' content.
+- **Translation choice lacks a stated reason.** D-017 chooses the generation model over Whisper translate. The alternative's tradeoff is recorded, and the chosen route's own risk, quality from a small local model on languages outside the evaluated pair, is never weighed against it.
+
+Resolving the two blocking items needs decisions from the material at hand and no new measurement. No project files were changed.

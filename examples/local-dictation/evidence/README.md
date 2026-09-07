@@ -1,5 +1,57 @@
 # Recorded design attempts
 
+## Accepted design and complete plan
+
+The [design](../SOFTWARE_DESIGN.md) was accepted as
+`bounded-clarified-8f41241ede15`. The [implementation plan](../PLAN.md) has
+18 phases. Application implementation and the planned hardware experiments have
+not been performed.
+
+The continuation started from the last saved proposal of run `ae36a3130bd9`.
+It used eight model calls across two recorded allowances. The second allowance
+reserved the five calls remaining after the first three. Its total prompt budget
+was increased for the inherited design. The final plan review needed a 250,000-byte
+per-call limit within that unchanged second allowance's 1,000,000-byte total.
+No ninth call was authorized or made.
+
+The author timed out while repeatedly trimming a completed patch to a character
+target. Replaying its saved construction data recovered that patch without a
+replacement author request. The receipt identifies the source session and patch
+digests. Subsequent review required explicit capture-time gain latching and
+foreground eligibility for cancelling a selected processing operation. Local
+clarifications addressed both findings before the accepting judgment.
+
+Astra authored the whole plan in one call. Local validation found missing
+per-task acceptance annotations. The corrected candidate adds those annotations,
+focused-test obligations and unittest coverage for the Python acceptance tools.
+Fable reviewed the corrected complete plan. All tasks remain unchecked.
+
+The accepting review requested local refinements. The exported plan scopes each
+phase's decision references and removes duplicate bindings. Five task edits
+clarify the early mocked cancellation boundary, defer capture-permission loss
+checks to their implementation phase, add meeting storage estimates, name the
+candidate media players, and correct the scoring task's label. The plan receipt
+retains the exact reviewed candidate alongside the exported digest and edits.
+
+| File | Contents |
+| --- | --- |
+| [Receipt](bounded-001/receipt.json) | Call accounting, design judgment, finding dispositions and exported file digests. |
+| [Input snapshot](bounded-001/inputs.json) | Specification and declared references supplied to the models. |
+| [Source proposal](bounded-001/source-proposal.json) | Last saved proposal before the bounded continuation. |
+| [Source review](bounded-001/source-review.txt) and [judgment](bounded-001/source-judgment.json) | Outstanding findings inherited from the stopped run. |
+| [Initial correction](bounded-001/author-correction.json) | Local changes before independent review. |
+| [Recovered patch](bounded-001/recovered-author-patch.json) | Completed author patch recovered after timeout. |
+| [Final clarification](bounded-001/final-clarification.json) | Local resolution of findings F011 and F012. |
+| [Final proposal](bounded-001/final-proposal.json) | Accepted design data used to render the design document. |
+| [Plan receipt](bounded-001/plan-receipt.json) | Canonical candidate, local corrections and independent plan review. |
+
+Files named `call-NN-<stage>.txt` preserve returned model responses. Call 03 has
+no final response because it timed out. Raw CLI logs remain local. Recorded model
+wording is retained as evidence. Acceptance reports the review outcome and does
+not establish design correctness or successful implementation. Prompt bytes
+exclude provider overhead and internal model work; a complete token total was
+not obtained.
+
 ## Attempt 1
 
 Run `16561ebc722c`, September 6, 2026. The judge requested revision of the first

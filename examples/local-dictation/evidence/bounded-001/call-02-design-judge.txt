@@ -1,0 +1,68 @@
+{
+  "verdict": {
+    "decision": "iterate",
+    "feedback": "The architecture supports the intended scope, with defined ownership and substantial recovery detail. Changes remain necessary for capture scope, gain persistence, cancellation controls and the diarization restart transition. Extend verification to competing runs using different speech models without assuming that model switching has already demonstrated unacceptable performance. Unperformed experiments may remain development dependencies at design review. Complete the phased implementation plan after resolving these design findings.",
+    "checks": {
+      "requirements": false,
+      "architecture": true,
+      "alternatives": true,
+      "data_lifecycle": false,
+      "failures": false,
+      "maintainability": true,
+      "verification": false,
+      "unresolved_decisions": false
+    }
+  },
+  "dispositions": [
+    {
+      "id": "F001",
+      "status": "fix",
+      "reason": "Require the mixed-model verification case. D-004 and D-011 already imply switching residency when the selected run needs another model, and F1 already measures loading and unloading. However, F1 does not explicitly combine repeated dictation on model B with an older meeting run on model A. Add that workload and measure switching cost against both latency and fairness criteria. No measurements establish unacceptable performance, and the proposed B, B, A sequence does not require a reload between consecutive B windows. Residency batching or a switch limit is therefore not yet a required scheduler change."
+    },
+    {
+      "id": "F002",
+      "status": "fix",
+      "reason": "Require an explicit restart transition for interrupted_resumable diarization: identify whether launch leaves it awaiting Resume or requeues it under resource admission. D-031 identifies eligibility and epoch handling without selecting that trigger. D-020 and D-031 explicitly choose recomputation after recognition crashes, including pressure termination under D-004. Losing completed work is a stated cost, but differing recognition and diarization policies do not themselves violate the specification. Reusing recognition checkpoints is not mandatory, and automatic diarization admission would not itself bypass D-027."
+    },
+    {
+      "id": "F003",
+      "status": "dismissed",
+      "reason": "D-010 permits independent eligible attempts to continue and restricts the consumption barrier to clipboard-dependent operations. An unconfirmed Unicode outcome can remain recorded with optional inspection or dismissal without blocking subsequent dictations. The design neither requires one dismissal per attempt nor requires silently removing uncertain outcomes. F4 already measures silent delivery failures and resolution actions. The finding's two proposed outcomes omit this permitted behavior."
+    },
+    {
+      "id": "F004",
+      "status": "dismissed",
+      "reason": "Enabled clipboard context samples the clipboard's current text, which can include an earlier transcript. D-016 defines that sampling, and D-039 requires opt-in retention of the supplied representation. The specification does not require excluding app-written text. Possible repetition by a generator is a fidelity risk already subject to mode instructions and evaluation, not evidence that this sampling policy is defective. An ownership-based exclusion would be an optional behavior change."
+    },
+    {
+      "id": "F005",
+      "status": "fix",
+      "reason": "D-026 explicitly makes toggle and push-to-talk configurable but specifies global Escape separately, leaving cancellation configurability and event propagation undefined. Extend the configurable shortcut contract to cancellation, permit disabling or rebinding it, and state whether a matched event reaches the foreground application. Verify Escape use in another application's transient controls. The specification does not require duration-based confirmation or undo, and explicit discard may retain D-007's existing deletion semantics."
+    },
+    {
+      "id": "F006",
+      "status": "fix",
+      "reason": "D-025 and D-030 do not locate gain application relative to persisted samples. Choose the stored representation and define how playback and reprocessing use it. If gain can change during capture and must later be reconstructed, retain its timing as well as its value. Either pre-gain or post-gain storage can satisfy the specification. Permanent clipping under a disclosed post-gain choice is not independently a defect."
+    },
+    {
+      "id": "F007",
+      "status": "fix",
+      "reason": "D-016 specifies a deadline, image-size cap and OCR retention behavior without identifying the captured region. Define the selected window or display region, multi-display handling and the outcome when the intended region becomes unavailable. The specification requires defining what each context source samples. The finding demonstrates missing scope; it does not establish that full-display capture is already selected or prohibited."
+    },
+    {
+      "id": "F008",
+      "status": "dismissed",
+      "reason": "D-028 already confines ModelDownloader to explicit user-requested acquisition, and routine operation must work offline. An automatic launch-time catalog fetch would contradict that contract. Nothing in D-041 authorizes such a fetch or makes remote catalog availability necessary for local model management. Choosing bundled catalog delivery or an explicit acquisition-time update does not require reopening the network boundary."
+    },
+    {
+      "id": "F009",
+      "status": "dismissed",
+      "reason": "The versioned repository documentation explicitly describes SpeakerKit running on Apple silicon, supporting the claimed runtime focus. D-001 also treats initial arm64 packaging as an engineering choice and requires complete-stack evaluation before advertising Intel support. That does not assert that Intel execution is impossible or that the user excluded Intel. See the [Argmax v1.1.0 README, SpeakerKit section](https://github.com/argmaxinc/argmax-oss-swift/blob/v1.1.0/README.md#speakerkit)."
+    },
+    {
+      "id": "F010",
+      "status": "dismissed",
+      "reason": "D-007 explicitly assigns the visible label Discard recording. D-026 uses Cancel Meeting as an action name and expressly delegates its semantics to D-007. The fixtures use the specified visible label. The text does not require two different UI labels, so the finding demonstrates a terminology difference without a conflicting control contract."
+    }
+  ]
+}
