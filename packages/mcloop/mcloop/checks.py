@@ -101,6 +101,17 @@ def acceptance_kind(task: Task) -> AcceptanceKind | None:
     )
 
 
+def _timeout_output(exc: subprocess.TimeoutExpired, timeout: int) -> str:
+    parts = []
+    for output in (exc.stdout, exc.stderr):
+        if isinstance(output, bytes):
+            parts.append(output.decode("utf-8", errors="replace"))
+        elif output:
+            parts.append(output)
+    captured = "".join(parts).rstrip()
+    return f"{captured}\nTIMEOUT after {timeout}s" if captured else f"TIMEOUT after {timeout}s"
+
+
 def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult:
     """Run a declared ``command-exit`` acceptance command without a shell."""
     project_path = Path(project_dir)
@@ -125,10 +136,10 @@ def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult
             text=True,
             timeout=timeout,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
         return CheckResult(
             passed=False,
-            output=f"TIMEOUT after {timeout}s",
+            output=_timeout_output(exc, timeout),
             command=command,
         )
     except FileNotFoundError:
@@ -599,8 +610,8 @@ def run_checks(
                 text=True,
                 timeout=timeout_seconds,
             )
-        except subprocess.TimeoutExpired:
-            return False, f"TIMEOUT after {timeout_seconds}s"
+        except subprocess.TimeoutExpired as exc:
+            return False, _timeout_output(exc, timeout_seconds)
         except FileNotFoundError:
             return False, f"Command not found: {parts[0]}"
         output = f"{result.stdout}{result.stderr}"

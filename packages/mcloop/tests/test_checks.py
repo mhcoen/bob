@@ -4,6 +4,8 @@ import json
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from mcloop.checks import (
     _classify_run_command,
     _detect_commands,
@@ -982,3 +984,28 @@ def test_scoped_autofix_honors_ruff_exclude(tmp_path, monkeypatch):
 
     assert excluded.read_text() == ugly, "excluded file was reformatted"
     assert included.read_text() != "z=3;w=4\n", "included file untouched"
+
+
+@pytest.mark.parametrize("declared", [True, False])
+@pytest.mark.parametrize("binary", [True, False])
+def test_timeout_preserves_captured_diagnostics(tmp_path, monkeypatch, declared, binary):
+    from mcloop.checks import run_command_acceptance
+
+    (tmp_path / "pyproject.toml").write_text("[tool.ruff]\n")
+    stdout = "Test started\n"
+    stderr = "Waiting for package lock\n"
+    error = subprocess.TimeoutExpired(
+        cmd="tool",
+        timeout=300,
+        output=stdout.encode() if binary else stdout,
+        stderr=stderr.encode() if binary else stderr,
+    )
+
+    def timed_out(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr("mcloop.checks.subprocess.run", timed_out)
+    result = run_command_acceptance(tmp_path, "swift test") if declared else run_checks(tmp_path)
+    assert not result.passed
+    prefix = "" if declared else "$ ruff check .\n"
+    assert result.output == prefix + stdout + stderr + "TIMEOUT after 300s"
