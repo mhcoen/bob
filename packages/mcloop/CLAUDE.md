@@ -88,6 +88,8 @@ and wheel installs. Top-level hook and settings paths are compatibility symlinks
 The runner routes `z-ai/` model names through OpenRouter using
 `OPENROUTER_API_KEY`. `test_runner.py` checks GLM 5.3 routing and verifies
 that their sessions use provider authentication without native subscription preflight.
+Third-party sessions disable deferred tool search by default. Routing tests cover
+Luna and GLM Flash, including the environment passed to the editing subprocess.
 
 **mcloop/run_summary.py** - RunSummary / TaskEntry / CheckEntry schema and JSON writer. Produces dated summaries plus `latest.json` on every run_loop exit.
 

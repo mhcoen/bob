@@ -153,6 +153,8 @@ _KNOWN_MODELS = {
             "kimi-k2.7-code-highspeed",
             "kimi-k2.6",
             "z-ai/glm-5.3",
+            "z-ai/glm-5.3-flash",
+            "openai/gpt-5.6-luna",
         }
     ),
     "codex": frozenset(
@@ -269,7 +271,8 @@ def _apply_provider_env(
     env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = slug
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    env["ENABLE_TOOL_SEARCH"] = "1"
+    # Load tool definitions upfront for endpoints without deferred-tool support.
+    env["ENABLE_TOOL_SEARCH"] = "false"
     # Parity with orchestra's apply_provider_env: an isolated
     # CLAUDE_CONFIG_DIR per provider prevents cross-contamination of
     # conversation history, MCP configs, and permission state across

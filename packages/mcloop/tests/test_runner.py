@@ -92,8 +92,8 @@ def test_run_session_rejects_missing_env(tmp_path):
         _run_session(["echo", "hi"], cwd=tmp_path)
 
 
-def test_prepare_session_routes_glm_through_openrouter(monkeypatch):
-    model = "z-ai/glm-5.3"
+@pytest.mark.parametrize("model", ["z-ai/glm-5.3", "z-ai/glm-5.3-flash", "openai/gpt-5.6-luna"])
+def test_prepare_session_routes_model_through_openrouter(monkeypatch, model):
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-glm-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "unrelated-anthropic-key")
     with patch("mcloop.install_cmd._load_mcloop_config", return_value={}):
@@ -110,7 +110,8 @@ def test_prepare_session_routes_glm_through_openrouter(monkeypatch):
         "ANTHROPIC_DEFAULT_HAIKU_MODEL",
         "CLAUDE_CODE_SUBAGENT_MODEL",
     ):
-        assert env[key] == "z-ai/glm-5.3"
+        assert env[key] == model
+    assert env["ENABLE_TOOL_SEARCH"] == "false"
     assert not runner._subscription_preflight_required(cli="claude", model=model, env=env)
 
 

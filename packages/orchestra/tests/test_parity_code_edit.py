@@ -564,15 +564,25 @@ def test_parity_code_edit_failure_propagates(
     assert direct.exit_code == 1
 
 
+@pytest.mark.parametrize(
+    ("model", "slug"),
+    [
+        ("kimi-k2.6", "moonshotai/kimi-k2.6"),
+        ("openai/gpt-5.6-luna", "openai/gpt-5.6-luna"),
+        ("z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"),
+    ],
+)
 def test_parity_code_edit_provider_env(
     tmp_path: Path,
     patched_subprocess: None,
     monkeypatch: pytest.MonkeyPatch,
+    model: str,
+    slug: str,
 ) -> None:
     """Both backends must produce identical provider env when the
     model is a third-party alias.
 
-    Routes the canonical kimi-k2.6 alias through the OpenRouter
+    Routes aliases and full model identifiers through the OpenRouter
     provider config and asserts every env var apply_provider_env
     sets matches between the two backends, including the emptied
     ANTHROPIC_API_KEY. This catches regressions where the orchestra
@@ -604,7 +614,6 @@ def test_parity_code_edit_provider_env(
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     inputs = _representative_inputs(project_dir)
-    model = "kimi-k2.6"
 
     invoke_code_edit_direct(
         inputs,
@@ -657,8 +666,9 @@ def test_parity_code_edit_provider_env(
     # account.
     assert direct_env["ANTHROPIC_BASE_URL"] == "https://openrouter.ai/api"
     assert direct_env["ANTHROPIC_AUTH_TOKEN"] == "test-or-key-1234"
-    assert direct_env["ANTHROPIC_MODEL"] == "moonshotai/kimi-k2.6"
+    assert direct_env["ANTHROPIC_MODEL"] == slug
     assert direct_env["ANTHROPIC_API_KEY"] == ""
+    assert direct_env["ENABLE_TOOL_SEARCH"] == "false"
 
     # Sanity check: the load_role_config patch must have fired at
     # least once on each side (one direct call, one orchestra call).

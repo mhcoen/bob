@@ -425,7 +425,8 @@ def apply_provider_env(
     env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] = slug
     env["CLAUDE_CODE_SUBAGENT_MODEL"] = slug
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-    env["ENABLE_TOOL_SEARCH"] = "1"
+    # Load tool definitions upfront for endpoints without deferred-tool support.
+    env["ENABLE_TOOL_SEARCH"] = "false"
     claude_config_dir = config.get("claude_config_dir")
     if claude_config_dir:
         env["CLAUDE_CONFIG_DIR"] = os.path.expanduser(str(claude_config_dir))

@@ -84,3 +84,31 @@ Local evidence is under `/private/tmp/bob-low-cost-trials`: `results.json`, the
 per-model `*-usage.json` billing records and `*-verified.log` test results, plus
 the `glm-flash` and `luna` trial repositories. These temporary files are not
 part of Bob's repository and may be removed by the operating system.
+
+## Deferred-tool failure in normal runs
+
+On September 7, a normal Luna run in the dictation project failed before editing
+with HTTP 400: the endpoint rejected deferred custom tools. The earlier trials
+explicitly disabled tool search and isolated the CLI configuration. Normal
+McLoop and Orchestra sessions still set `ENABLE_TOOL_SEARCH=1`. The trials
+therefore missed a configuration difference that prevented normal use.
+
+Both provider environment builders now set `ENABLE_TOOL_SEARCH=false` for
+third-party models. Tools are loaded upfront. Native model routing is unchanged,
+and explicit executor environment overrides remain available. The routing
+regressions inspect the environment passed to the subprocess through both
+editing backends. They failed before the fix and passed afterward.
+
+A live Luna session then ran with the normal provider environment and CLI
+configuration. The verification wrapper added only a $0.50 CLI budget and
+disabled session persistence. It asserted the tool-search setting without
+changing it. Luna used tools and edited files without HTTP 400 or permission
+denials, finishing its session in 44.267 seconds.
+
+That coding attempt failed acceptance. Luna reported that its test commands
+were blocked by nested sandbox execution, and McLoop's subsequent `swift test`
+found a Swift closure type-inference error in the implementation. The run was
+limited to one attempt and the task remained failed. This verifies the provider
+connection fix while recording a separate implementation failure. Local logs
+are under `/private/tmp/bob-luna-normal-routing` and in
+`/private/tmp/bob-luna-normal-routing.log`.

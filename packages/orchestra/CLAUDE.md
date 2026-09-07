@@ -59,6 +59,8 @@ For code review, always inspect the current working-tree files from disk immedia
 - The subprocess provider table recognizes `z-ai/` model names.
   Claude-backed editing and text sessions use OpenRouter authentication for them,
   matching McLoop's direct runner.
+  Third-party routes disable deferred tool search by default. Executor environment
+  overrides can enable it for endpoints with verified support.
 
 - Prompt paths in `.orc` files are quoted strings, not bare paths (the lexer treats `/` as an unknown character outside strings).
 - The subprocess session layer (`adapters/_subprocess.py`) owns wall-clock and idle enforcement: kill sentinels are `TIMEOUT_KILL_EXIT = -102` and `IDLE_KILL_EXIT = -103` (outside the POSIX signal range; mirrored byte-for-byte by mcloop's runner), Telegram pending-approval files freeze the idle clock only while the child is alive, a stale `denied` file is cleared at session start, and the liveness bailout group-kills before closing the pipe so a grandchild holding stdout cannot outrun the timeout.
