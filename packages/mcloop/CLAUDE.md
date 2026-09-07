@@ -97,6 +97,13 @@ Luna and GLM Flash, including the environment passed to the editing subprocess.
 
 **mcloop/sync_cmd.py** - `sync` subcommand: update PLAN.md to match the codebase.
 
+**mcloop/task_review.py** - Requirement evidence and a bounded completion review.
+Captures configuration and accepted design text before editing. Validates cited
+line ranges, includes changed files, and requires an explicit reviewer verdict.
+Missing evidence and provider failures block completion. Receipts retain the
+review packet and its hash. `tests/test_task_review.py` covers packet validation
+and failed reviews. Run-loop tests check command, legacy and batch completion.
+
 **mcloop/targeted.py** - Map changed source files to matching test files; `is_scoped_python_linter` and `targeted_linter_command` scope ruff check / ruff format --check to changed .py files.
 
 **mcloop/web_interact.py** - Web app interaction via Playwright (optional dependency).

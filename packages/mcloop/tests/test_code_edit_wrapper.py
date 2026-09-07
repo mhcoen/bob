@@ -496,6 +496,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     from mcloop.runner import _build_session_env as _orig_build_session_env
 
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key-1234")
+    monkeypatch.delenv("ENABLE_TOOL_SEARCH", raising=False)
 
     stub_call_count = 0
 
@@ -604,7 +605,7 @@ def test_bug_verify_direct_routes_third_party_provider_env(
     assert captured_env["ANTHROPIC_DEFAULT_HAIKU_MODEL"] == "moonshotai/kimi-k2.6"
     assert captured_env["CLAUDE_CODE_SUBAGENT_MODEL"] == "moonshotai/kimi-k2.6"
     assert captured_env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] == "1"
-    assert captured_env["ENABLE_TOOL_SEARCH"] == "1"
+    assert captured_env["ENABLE_TOOL_SEARCH"] == "false"
     assert captured_env["ANTHROPIC_API_KEY"] == ""
 
     assert stub_call_count >= 1, (

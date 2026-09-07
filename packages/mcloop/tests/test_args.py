@@ -12098,3 +12098,29 @@ def test_non_utf8_plan_is_a_diagnostic_not_a_traceback(tmp_path, monkeypatch, ca
     err = capsys.readouterr().err
     assert "not valid UTF-8" in err
     assert "Traceback" not in err
+
+
+def test_batch_requirement_rejection_prevents_commit_and_checkoff(tmp_path):
+    from mcloop.task_review import TaskReview
+
+    args = _make_batch_args(tmp_path)
+    with (
+        patch("mcloop.main.get_available_cli", return_value="claude"),
+        patch("mcloop.main.run_task", return_value=MagicMock(success=True, output="done")),
+        patch("mcloop.main._has_meaningful_changes", return_value=True),
+        patch("mcloop.main._changed_files", return_value=[]),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main.run_checks", return_value=MagicMock(passed=True)),
+        patch(
+            "mcloop.main.review_task", return_value=TaskReview(False, "Missing contract")
+        ) as review,
+        patch("mcloop.main._commit") as commit,
+        patch("mcloop.main.check_off") as check_off,
+    ):
+        result = _run_batch(**args)
+    assert result == ("review_blocked", "Missing contract")
+    review.assert_called_once()
+    commit.assert_not_called()
+    check_off.assert_not_called()

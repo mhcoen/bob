@@ -351,3 +351,52 @@ def test_missing_acceptance_falls_back_to_inference_with_warning(capsys) -> None
     assert result.ok
     assert "no declared acceptance" in capsys.readouterr().out
     assert "- [x]" in plan.read_text()
+
+
+@pytest.mark.parametrize("annotation", [" [accept: command-exit: true]", " [accept: pytest]", ""])
+def test_passing_smoke_check_cannot_complete_rejected_requirements(annotation):
+    from mcloop.task_review import TaskReview
+
+    root = _scratch_project("requirement-reject-" + str(len(annotation)))
+    plan = _write_plan(root, "- [ ] Define the authoritative ports" + annotation + "\n")
+    with (
+        _loop_patches(root, changed_files=["Sources/Ports.swift"]),
+        patch("mcloop.main.run_autofix"),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=CheckResult(passed=True, output="1 passed", command="swift test"),
+        ),
+        patch("mcloop.main._commit") as commit,
+        patch(
+            "mcloop.main.review_task",
+            return_value=TaskReview(False, "Disk-backed delivery required", "receipt.json"),
+        ) as review,
+    ):
+        result = _run_one(plan)
+    assert not result.ok
+    assert "- [!]" in plan.read_text()
+    assert "- [x]" not in plan.read_text()
+    commit.assert_not_called()
+    review.assert_called_once()
+
+
+def test_no_diff_smoke_check_cannot_complete_rejected_requirements():
+    from mcloop.task_review import TaskReview
+
+    root = _scratch_project("requirement-no-diff")
+    plan = _write_plan(root, "- [ ] Define the authoritative ports\n")
+    with (
+        _loop_patches(root),
+        patch(
+            "mcloop.main.run_checks",
+            return_value=CheckResult(passed=True, output="1 passed", command="swift test"),
+        ),
+        patch("mcloop.main._committed_files_since", return_value=[]),
+        patch(
+            "mcloop.main.review_task", return_value=TaskReview(False, "No port definitions")
+        ) as review,
+    ):
+        result = _run_one(plan)
+    assert not result.ok
+    assert "- [x]" not in plan.read_text()
+    review.assert_called_once()

@@ -1166,6 +1166,56 @@ otherwise it continues, skipping the stuck one.
 To instrument a project that was NOT built by McLoop, use
 `mcloop wrap` manually from that project's directory.
 
+## Requirement review before completion
+
+Projects with `SOFTWARE_DESIGN.md` require a task review before McLoop commits
+completion or checks off coding tasks. This applies to every source language,
+including declared command acceptance, legacy checks and batches. Other projects
+can enable it explicitly. Automated observations and human acceptance tasks keep
+their existing handling.
+
+Configure the reviewer in `.mcloop/config.json` or `~/.mcloop/config.json`:
+
+```json
+{
+  "task_review": {
+    "enabled": true,
+    "model": "z-ai/glm-5.3-flash",
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key_env": "OPENROUTER_API_KEY",
+    "documents": ["SPEC.md", "SOFTWARE_DESIGN.md"]
+  }
+}
+```
+
+Use a different model from the editor. The endpoint accepts OpenAI-compatible
+chat completions. Credentials come from the named environment variable.
+Configuration and accepted documents are captured before editing begins.
+Missing configuration stops the run before an editing session starts.
+`"enabled": false` explicitly disables this check. Projects without
+`SOFTWARE_DESIGN.md` retain their existing behavior unless review is enabled.
+
+McLoop asks the editor to write `.mcloop/task-evidence.json`. Its `requirements`
+array maps each task obligation to `design`, `implementation`, and `verification`
+references, each written as `relative/path:START-END`. Bob checks those references
+and sends their contents with the full task and changed files. Declaration-only
+work may cite declarations for inspection. Behavioral claims need supporting
+assertions or observations. A module-name smoke test cannot establish that port
+signatures implement an accepted contract.
+
+Each review makes one request without tools or automatic retries. The evidence
+packet is capped at 96,000 UTF-8 bytes, output at 3,000 tokens, and the network
+operation has a 90-second timeout. Oversized input is refused without truncation.
+Rejection, missing evidence, invalid output or a transport error leaves the task
+incomplete and stops automatic retries. Batch edits remain available for repair.
+Results and the reviewed packet are saved under `.mcloop/task-reviews/`.
+
+The reviewer assesses evidence selected by the editor and can miss an omitted
+constraint. Its judgment supplements the executed checks. Neither establishes
+software correctness. Hardware and human checks remain necessary where the
+design requires them. The background reviewer below continues to serve its
+separate role after commits.
+
 ## Continuous code reviewer
 
 McLoop can run a second AI model as a reviewer on every commit. After

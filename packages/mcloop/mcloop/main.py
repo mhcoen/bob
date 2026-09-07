@@ -176,6 +176,7 @@ from mcloop.runner import (
 )
 from mcloop.session_context import SessionContext
 from mcloop.sync_cmd import _cmd_sync
+from mcloop.task_review import ReviewPolicy, load_policy, prepare_evidence, review_task
 from mcloop.waivers import record_waiver
 
 
@@ -888,6 +889,7 @@ def _run_batch(
     commit_hashes: list[str] | None = None,
     prior_errors: str = "",
     task_timeout: int | None = None,
+    task_review_policy: ReviewPolicy | None = None,
 ) -> tuple[str, str]:
     """Run multiple subtasks in a single session.
 
@@ -933,6 +935,9 @@ def _run_batch(
         next_task=f"{label_range}) [BATCH] {n} subtasks",
     )
     pre_batch_modified, pre_batch_untracked = _snapshot_worktree(project_dir)
+    review_policy = task_review_policy or load_policy(project_dir)
+    batch_baseline = _get_git_hash(project_dir)
+    evidence_instruction = prepare_evidence(project_dir, review_policy, combined_text)
     print(
         formatting.task_header(
             label_range,
@@ -980,7 +985,7 @@ def _run_batch(
         task_label=label_range,
         model=current_model,
         prior_errors=prior_errors,
-        session_context=ctx.text(),
+        session_context=ctx.text() + evidence_instruction,
         check_commands=project_checks,
         allowed_tools=allowed_tools,
         eliminated=eliminated,
@@ -1099,6 +1104,12 @@ def _run_batch(
                 flush=True,
             )
             return "failed", "Checker introduced uncommitted changes"
+        review = review_task(
+            project_dir, review_policy, combined_text, batch_baseline, current_model
+        )
+        if not review.passed:
+            print(formatting.error_msg(review.output + "\n" + review.receipt), flush=True)
+            return "review_blocked", review.output
         completion = Completion.begin(
             project_dir,
             checklist_path,
@@ -1290,6 +1301,12 @@ def run_loop(
         chain = list(chain)
 
     project_dir = checklist_path.parent
+    try:
+        task_review_policy = load_policy(project_dir)
+    except (ValueError, OSError) as exc:
+        message = f"Requirement review configuration: {exc}"
+        print(formatting.error_msg(message), flush=True)
+        return RunStatus("failure", detail=message)
     _lifecycle._project_dir = project_dir
     log_dir = project_dir / "logs"
 
@@ -2020,8 +2037,10 @@ def run_loop(
                         commit_hashes=commit_hashes,
                         prior_errors=batch_prior_errors,
                         task_timeout=task_timeout,
+                        task_review_policy=task_review_policy,
                     )
-                    if batch_handled == "success":
+                    if batch_handled in {"success", "review_blocked"}:
+                        batch_prior_errors = batch_detail
                         break
                     if batch_handled == "limited":
                         # A transient rate/session limit is not a failure
@@ -2070,7 +2089,9 @@ def run_loop(
                 # batch body is written as a coherent unit where some
                 # subtasks may be context-only and cannot stand alone.
                 print(
-                    formatting.error_msg(f"Batch failed after {max_retries} attempts"),
+                    formatting.error_msg(
+                        f"Batch failed after {batch_attempt} attempts: {batch_detail}"
+                    ),
                     flush=True,
                 )
                 batch_exhausted.add(parent_label)
@@ -2084,7 +2105,7 @@ def run_loop(
                         outcome="failed",
                         elapsed=round(time.monotonic() - run_start, 2),
                         model=current_model or "",
-                        attempts=max_retries,
+                        attempts=batch_attempt,
                         task_id=parent.task_id or "",
                     )
                 )
@@ -2177,6 +2198,21 @@ def run_loop(
         active_model_for_summary = active_entry.model
         last_error = ""
         terminal_task_failure = False
+
+        def review_completion() -> bool:
+            nonlocal last_error, terminal_task_failure
+            review = review_task(
+                project_dir, task_review_policy, task.text, task_start_sha, task_model
+            )
+            if review.passed:
+                if task_review_policy.enabled:
+                    print(formatting.system_msg(review.output + "\n" + review.receipt), flush=True)
+                return True
+            last_error = review.output + "\n" + review.receipt
+            terminal_task_failure = True
+            print(formatting.error_msg(last_error), flush=True)
+            return False
+
         # Circuit breaker (T-000037): stop a task that keeps failing the
         # SAME WAY instead of thrashing every tier (and its multi-hour
         # limit-waits) on a gate no model can satisfy. The signature is
@@ -2254,6 +2290,7 @@ def run_loop(
                     model=task_model,
                     baseline=task_start_sha,
                 )
+                evidence_instruction = prepare_evidence(project_dir, task_review_policy, task.text)
                 result = run_task(
                     task.text,
                     active_cli,
@@ -2263,7 +2300,7 @@ def run_loop(
                     task_label=label,
                     model=task_model,
                     prior_errors=last_error,
-                    session_context=ctx.text(),
+                    session_context=ctx.text() + evidence_instruction,
                     check_commands=project_checks,
                     allowed_tools=allowed_tools,
                     eliminated=eliminated,
@@ -2503,6 +2540,8 @@ def run_loop(
                             )
                             continue
 
+                    if not review_completion():
+                        break
                     completion = None
                     if changed_files:
                         completion = Completion.begin(
@@ -2631,6 +2670,8 @@ def run_loop(
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
+                            if not review_completion():
+                                break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -2718,6 +2759,8 @@ def run_loop(
                         _lifecycle._current_phase = "checks"
                         zero_diff_check = run_checks(project_dir)
                         if zero_diff_check.passed:
+                            if not review_completion():
+                                break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -2776,6 +2819,8 @@ def run_loop(
                         terminal_task_failure = True
                         break
                     if _is_readonly_task(task.text):
+                        if not review_completion():
+                            break
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
@@ -2797,19 +2842,14 @@ def run_loop(
                         ctx.add(label, task.text, elapsed, result.output)
                         success = True
                         break
-                    # Non-read-only no-op on a NON-BUG (plan) task: the editor
-                    # made no changes. The task's required end-state may already
-                    # exist on disk -- produced and committed by a prior session,
-                    # or a "verify the file matches this spec, correct only if it
-                    # diverges" task that correctly found nothing to fix. Run the
-                    # project checks: a green suite IS acceptance evidence that
-                    # the required end-state exists, whoever created it. This
-                    # generalises the _is_zero_diff_check_task path above (now a
-                    # subset of "non-bug zero-diff + checks pass"). Bug tasks
-                    # never reach here -- they fail on zero diff above.
+                    # A prior session may have produced the requested state.
+                    # Run checks and the configured requirement review before
+                    # completing a task that made no additional changes.
                     _lifecycle._current_phase = "checks"
                     no_diff_check = run_checks(project_dir)
                     if no_diff_check.passed:
+                        if not review_completion():
+                            break
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
@@ -2886,6 +2926,8 @@ def run_loop(
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
+                            if not review_completion():
+                                break
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -3000,6 +3042,8 @@ def run_loop(
                             flush=True,
                         )
                         continue
+                    if not review_completion():
+                        break
                     completion = Completion.begin(
                         project_dir,
                         active_file,
