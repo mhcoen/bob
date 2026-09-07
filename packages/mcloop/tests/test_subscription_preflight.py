@@ -218,8 +218,11 @@ def test_codex_subscription_preflight_accepts_exit_zero_and_caches(
         calls += 1
         assert args[0] == [
             "codex",
+            "--ask-for-approval",
+            "never",
+            "--sandbox",
+            "read-only",
             "exec",
-            "--full-auto",
             "--model",
             "gpt-5.4",
             "ok",

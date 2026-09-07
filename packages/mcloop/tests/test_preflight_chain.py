@@ -11,8 +11,19 @@ from pathlib import Path
 
 import pytest
 
-from mcloop.main import ChainEntry, _preflight_chain
+from mcloop.main import ChainEntry, _preflight_chain, _short_preflight_reason
 from mcloop.runner import SubscriptionPreflightError
+
+
+def test_preflight_warning_preserves_cli_error():
+    output = "Codex startup\nerror: unexpected argument '--full-auto' found\nUsage: codex exec"
+    error = SubscriptionPreflightError("Codex subscription preflight failed.", output)
+    assert _short_preflight_reason(error) == "error: unexpected argument '--full-auto' found"
+
+
+def test_preflight_warning_falls_back_to_exception_message():
+    error = SubscriptionPreflightError("Codex subscription preflight timed out.", "")
+    assert _short_preflight_reason(error) == "Codex subscription preflight timed out."
 
 
 @pytest.fixture(autouse=True)

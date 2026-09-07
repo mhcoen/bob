@@ -488,6 +488,10 @@ def _is_zero_diff_check_task(task_text: str) -> bool:
 
 def _short_preflight_reason(exc: SubscriptionPreflightError) -> str:
     """Condense a preflight error into a single warning-line reason."""
+    for raw_line in exc.output.splitlines():
+        line = raw_line.strip()
+        if line.lower().startswith(("error:", "api error:", "http ")):
+            return line if len(line) <= 200 else line[:197] + "..."
     for raw_line in str(exc).splitlines():
         line = raw_line.strip()
         if line:

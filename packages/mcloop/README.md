@@ -1782,9 +1782,10 @@ mcloop --cli codex
 mcloop --cli codex --model gpt-5.4
 ```
 
-McLoop's direct-path Codex sessions use `codex exec --full-auto`:
-write access to the project directory and `/tmp`, no ability to
-modify files outside the workspace. (The Orchestra `codex_agent`
+McLoop's direct-path Codex sessions use
+`codex --ask-for-approval on-request --sandbox workspace-write exec`.
+The subscription probe uses `--ask-for-approval never --sandbox read-only`.
+Both place approval flags before `exec`. (The Orchestra `codex_agent`
 adapter spells its policy explicitly as `--ask-for-approval never
 --sandbox workspace-write`; `codex_text` deliberately runs
 `--sandbox read-only`.) Claude Code sessions use PreToolUse hooks

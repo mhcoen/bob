@@ -84,6 +84,9 @@ and wheel installs. Top-level hook and settings paths are compatibility symlinks
 **mcloop/reviewer.py** - AI-powered diff reviewer using an OpenAI-compatible API.
 
 **mcloop/runner.py** - Run AI CLI subprocesses and capture output. `_run_session` enforces the per-task timeout (default 3600s = 60 minutes) and returns TIMEOUT_EXIT_CODE (-102, outside the signal range) on timeout.
+Codex commands use explicit sandbox and approval flags before `exec`. The auth
+probe is read-only; direct coding sessions retain workspace-write with approval
+on request. Preflight warnings include CLI error details when available.
 
 The runner routes `z-ai/` model names through OpenRouter using
 `OPENROUTER_API_KEY`. `test_runner.py` checks GLM 5.3 routing and verifies
