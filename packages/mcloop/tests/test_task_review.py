@@ -111,6 +111,30 @@ def test_valid_review_is_bound_to_packet(project):
     assert json.loads(Path(result.receipt).read_text())["input_sha256"]
 
 
+@pytest.mark.parametrize("unknown", [False, True])
+def test_review_cites_packet_evidence_ids(project, unknown):
+    root, policy, baseline = project
+    packet = build_packet(root, policy, "Task", baseline)
+    references = [
+        ref
+        for requirement in packet["requirements"]
+        for field in ("design", "implementation", "verification")
+        for ref in requirement[field]
+    ]
+    assert len({ref["evidence_id"] for ref in references}) == len(references)
+    assert build_packet(root, policy, "Task", baseline) == packet
+    response = json.loads(verdict(packet))
+    response["requirements"][0]["evidence"] = (
+        ["R999"] if unknown else [ref["evidence_id"] for ref in references]
+    )
+    with patch("mcloop.task_review._request_review", return_value=json.dumps(response)):
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    assert result.passed is not unknown
+    if not unknown:
+        receipt = json.loads(Path(result.receipt).read_text())
+        assert receipt["input"]["requirements"] == packet["requirements"]
+
+
 @pytest.mark.parametrize(
     "raw",
     [

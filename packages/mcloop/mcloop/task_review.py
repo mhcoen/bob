@@ -166,6 +166,7 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
     if not isinstance(requirements, list) or not 1 <= len(requirements) <= 32:
         raise ValueError("Task evidence requires 1 to 32 requirement entries")
     entries = []
+    reference_ids: dict[str, str] = {}
     for item in requirements:
         if (
             not isinstance(item, dict)
@@ -183,6 +184,10 @@ def build_packet(root: Path, policy: ReviewPolicy, task: str, baseline: str) -> 
             ):
                 raise ValueError(f"Each requirement needs 1 to 16 {field} references")
             entry[field] = [_reference(root, ref, documents, field == "design") for ref in refs]
+            for reference in entry[field]:
+                reference["evidence_id"] = reference_ids.setdefault(
+                    reference["reference"], f"R{len(reference_ids) + 1}"
+                )
         entries.append(entry)
     if not re.fullmatch(r"[0-9a-fA-F]{40,64}", baseline):
         raise ValueError("Task review requires a full pre-edit commit hash")
@@ -224,14 +229,13 @@ The editor selected the design excerpts. Reject for insufficient evidence when t
 context needed to decide. You have no tools. Do not assume unseen code or tests exist.
 Return only a JSON object:
 {"verdict":"accept" or "reject", "requirements":[
-{"requirement":"...", "satisfied":true or false, "evidence":["file:START-END"],
+{"requirement":"...", "satisfied":true or false, "evidence":["R1"],
 "reason":"..."}], "findings":["concrete defect or missing evidence, with references"]}.
 Use the supplied requirement text exactly in each assessment. Accept only when every supplied
 requirement is assessed as satisfied, no task obligation is missing, and findings is empty.
-Every evidence entry must exactly copy a supplied reference string, including the complete
-filename and line range. Choose only the references needed to support the assessment.
-Do not invent narrower ranges or abbreviate filenames; unprovided references invalidate
-the verdict.
+In evidence arrays, cite the supplied evidence_id values (such as R1). Each ID identifies
+one exact file and line range in this packet. Choose the IDs needed to support the assessment.
+Unknown IDs invalidate the verdict. Use file references in finding explanations when helpful.
 Acceptance is a review judgment with the stated evidence.
 """
 
@@ -270,7 +274,10 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
         raise ValueError(
             f"Task reviewer did not finish its response: {choice.get('finish_reason')}"
         )
-    return choice["message"]["content"]
+    content = choice["message"]["content"]
+    if not isinstance(content, str):
+        raise ValueError("Task reviewer returned no text content")
+    return content
 
 
 def _validate_verdict(raw: str, packet: dict) -> dict:
@@ -294,6 +301,12 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
         for field in ("design", "implementation", "verification")
         for ref in item[field]
     }
+    references.update(
+        ref["evidence_id"]
+        for item in packet["requirements"]
+        for field in ("design", "implementation", "verification")
+        for ref in item[field]
+    )
     for item in assessments:
         if not isinstance(item, dict) or not isinstance(item.get("requirement"), str):
             raise ValueError("Invalid requirement assessment")
