@@ -101,9 +101,12 @@ Luna and GLM Flash, including the environment passed to the editing subprocess.
 
 **mcloop/web_interact.py** - Web app interaction via Playwright (optional dependency).
 
-**mcloop/worktree.py** - Git worktree management for investigation branches.
+**mcloop/wrap.py** - Source instrumentation. Swift types with an explicit
+`static main()` install crash handlers at its start. SwiftUI apps use an
+initializer. Reinjection removes the old call-only initializer when repairing
+an explicit entry method. Tests include a compiled Swift startup check.
 
-**mcloop/wrap.py** - Instrument project source files with error-catching hooks (Swift, Python) using mcloop:wrap markers.
+**mcloop/worktree.py** - Git worktree management for investigation branches.
 
 **mcloop/resources/telegram-permission-hook.py** - Canonical Telegram permission
 hook for interactive sessions; the top-level path links here. Includes session

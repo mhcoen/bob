@@ -708,7 +708,7 @@ def _inject_swift(content: str, project_dir: str | None = None) -> str:
 
     result = lines[:insert_pos] + wrapper_lines + lines[insert_pos:]
 
-    # Add setup call to init() if @main struct exists
+    # Install handlers in the explicit entry method or SwiftUI initializer.
     text = "".join(result)
     if re.search(r"@main\b", text):
         text = _add_swift_init_call(text)
@@ -716,10 +716,85 @@ def _inject_swift(content: str, project_dir: str | None = None) -> str:
     return text
 
 
-def _add_swift_init_call(content: str) -> str:
-    """Add _mcloopSetupCrashHandlers() call to the app's init().
+def _add_swift_static_main_call(content: str) -> str | None:
+    """Instrument a direct static main member of the annotated entry type."""
+    # Preserve offsets while excluding comments and string contents from scanning.
+    masked = re.sub(
+        r'//[^\n]*|/\*.*?\*/|""".*?"""|"(?:\\.|[^"\\])*"',
+        lambda match: re.sub(r"[^\n]", " ", match.group()),
+        content,
+        flags=re.DOTALL,
+    )
+    entry = re.search(r"@main\b[^{}]*\b(?:struct|enum|class)\s+\w+[^{}]*\{", masked)
+    if entry is None:
+        return None
 
-    Inserts the call into an existing init() inside the @main struct.
+    start = entry.end()
+    depth = 1
+    depths: dict[int, int] = {}
+    end = start
+    for end in range(start, len(masked)):
+        depths[end] = depth
+        depth += (masked[end] == "{") - (masked[end] == "}")
+        if depth == 0:
+            break
+    if depth != 0:
+        return None
+
+    main = next(
+        (
+            match
+            for match in re.compile(r"\bstatic\s+func\s+main\s*\(\s*\)[^{};]*\{").finditer(
+                masked, start, end
+            )
+            if depths.get(match.start()) == 1
+        ),
+        None,
+    )
+    if main is None:
+        return None
+
+    # Remove only the call-only initializer emitted by the old injector.
+    old_initializers = [
+        match
+        for match in re.compile(
+            r"\binit\s*\(\s*\)\s*\{\s*_mcloopSetupCrashHandlers\(\)\s*\}"
+        ).finditer(masked, start, end)
+        if depths.get(match.start()) == 1
+    ]
+    if old_initializers:
+        for match in reversed(old_initializers):
+            cut_start, cut_end = match.span()
+            line_start = content.rfind("\n", 0, cut_start) + 1
+            if not content[line_start:cut_start].strip():
+                cut_start = line_start
+                if content[cut_end : cut_end + 1] == "\n":
+                    cut_end += 1
+            content = content[:cut_start] + content[cut_end:]
+        return _add_swift_static_main_call(content)
+
+    body_end = next(i for i in range(main.end(), end) if depths[i] == 2 and masked[i] == "}")
+    if re.search(r"\b_mcloopSetupCrashHandlers\s*\(\s*\)", masked[main.end() : body_end]):
+        return content
+    line_start = content.rfind("\n", 0, main.start()) + 1
+    line = content[line_start:]
+    indent = line[: len(line) - len(line.lstrip(" \t"))] + "    "
+    rest = content[main.end() :]
+    return (
+        content[: main.end()]
+        + "\n"
+        + indent
+        + "_mcloopSetupCrashHandlers()"
+        + ("" if rest.startswith("\n") else "\n")
+        + rest
+    )
+
+
+def _add_swift_init_call(content: str) -> str:
+    """Install handlers in static main(), falling back to a SwiftUI initializer.
+
+    An explicit static main() takes priority over any initializer.
+    Otherwise inserts the call into an existing init() inside the @main struct.
     If the @main struct has no init(), a minimal init() is synthesized
     right after the struct's opening brace so the crash handler is
     actually installed at app launch.
@@ -728,6 +803,10 @@ def _add_swift_init_call(content: str) -> str:
     the @main struct or for an existing call site, since the wrapper
     itself contains the function definition.
     """
+    explicit_main = _add_swift_static_main_call(content)
+    if explicit_main is not None:
+        return explicit_main
+
     call = "_mcloopSetupCrashHandlers()"
 
     lines = content.splitlines(keepends=True)

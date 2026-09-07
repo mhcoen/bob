@@ -1,5 +1,10 @@
 """Tests for mcloop.wrap — source file instrumentation."""
 
+import shutil
+import subprocess
+
+import pytest
+
 from mcloop.wrap import (
     PYTHON_BEGIN,
     PYTHON_END,
@@ -224,6 +229,82 @@ def test_inject_swift_main_without_init_synthesizes_one():
     # The body line is between the init { and its closing brace.
     closing = next(k for k in range(init_idx + 1, len(lines)) if lines[k].strip() == "}")
     assert init_idx < body_idx < closing
+
+
+@pytest.mark.parametrize("kind", ["enum", "struct", "class"])
+@pytest.mark.parametrize(
+    "signature", ["static func main() {", "static func main() async throws\n    {"]
+)
+def test_swift_explicit_main_installs_handlers_before_work(kind, signature):
+    content = f'@main\n{kind} Service {{\n    {signature}\n        print("work")\n    }}\n}}\n'
+    result = strip_markers(inject(content, "swift"), "swift")
+    assert result.index("static func main") < result.index("_mcloopSetupCrashHandlers()")
+    assert result.index("_mcloopSetupCrashHandlers()") < result.index('print("work")')
+    assert "init()" not in result
+    assert (
+        strip_markers(inject(result, "swift"), "swift").count("_mcloopSetupCrashHandlers()") == 1
+    )
+
+
+def test_swift_explicit_main_repairs_old_synthesized_init():
+    content = (
+        "@main\nenum Service {\n"
+        "    init() {\n        _mcloopSetupCrashHandlers()\n    }\n"
+        '    static func main() { print("work") }\n}\n'
+    )
+    result = strip_markers(inject(content, "swift"), "swift")
+    assert "init()" not in result
+    assert result.index("static func main") < result.index("_mcloopSetupCrashHandlers()")
+    assert result.count("_mcloopSetupCrashHandlers()") == 1
+
+
+def test_swift_main_ignores_helpers_and_preserves_user_initializer():
+    content = (
+        'struct Helper { static func main() { print("helper") } }\n'
+        "@main struct Service {\n"
+        '    init() { print("initializer") }\n'
+        '    struct Nested { static func main() { print("nested") } }\n'
+        "    // static func main() {\n"
+        '    static func main() { print("work") }\n}\n'
+    )
+    result = strip_markers(inject(content, "swift"), "swift")
+    assert 'init() { print("initializer") }' in result
+    assert 'static func main() { print("helper") }' in result
+    assert 'static func main() { print("nested") }' in result
+    assert result.index('print("nested")') < result.index("_mcloopSetupCrashHandlers()")
+    assert result.index("_mcloopSetupCrashHandlers()") < result.index('print("work")')
+
+
+@pytest.mark.skipif(shutil.which("swiftc") is None, reason="Swift compiler unavailable")
+def test_swift_generated_entry_executes_setup(tmp_path, monkeypatch):
+    """Compile and run the repaired entry with an observable setup function."""
+    import mcloop.wrap as wrap
+
+    monkeypatch.setattr(
+        wrap,
+        "SWIFT_WRAPPER",
+        SWIFT_BEGIN
+        + '\nprivate func _mcloopSetupCrashHandlers() { print("installed") }\n'
+        + SWIFT_END
+        + "\n",
+    )
+    content = (
+        "@main\nenum Service {\n"
+        "    init() {\n        _mcloopSetupCrashHandlers()\n    }\n"
+        '    static func main() { print("work") }\n}\n'
+    )
+    source = tmp_path / "Service.swift"
+    source.write_text(inject(content, "swift"))
+    binary = tmp_path / "service"
+    subprocess.run(
+        ["swiftc", "-parse-as-library", str(source), "-o", str(binary)],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    result = subprocess.run([str(binary)], check=True, capture_output=True, text=True, timeout=10)
+    assert result.stdout.splitlines() == ["installed", "work"]
 
 
 def test_inject_swift_no_main():
