@@ -558,12 +558,12 @@ def _build_shared_parts(
         " app programmatically testable."
     )
     parts.append(
-        "Never install tools or dependencies via brew,"
-        " cargo, pip, npm, apt, or any other package"
-        " manager. If a required tool is not found,"
-        " report what is missing and stop. Do not"
-        " search for alternative ways to obtain it."
-        " The user will install it and re-run."
+        "You may add and resolve project dependencies required by the task"
+        " or accepted design using the project's existing package manager."
+        " Update its manifest and lockfile and keep installation within the"
+        " project environment or normal package cache. Do not install or"
+        " upgrade system tools, use sudo, or install global packages. If the"
+        " required package manager or compiler is missing, report it and stop."
     )
     return parts
 

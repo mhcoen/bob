@@ -2290,3 +2290,18 @@ def test_kill_sentinels_mirror_orchestra_and_avoid_signal_range():
     assert IDLE_EXIT_CODE == IDLE_KILL_EXIT
     for sentinel in (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE):
         assert sentinel < -64, f"{sentinel} is inside the signal range"
+
+
+def test_both_edit_backends_allow_required_project_dependencies():
+    from orchestra.prompts import _build_shared_parts as orchestra_parts
+
+    from mcloop.runner import _build_shared_parts as direct_parts
+
+    for builder in (direct_parts, orchestra_parts):
+        prompt = "\n".join(builder("Implement GRDB migrations", "2.1", ["swift test"]))
+        assert "You may add and resolve project dependencies required by the task" in prompt
+        assert "or accepted design" in prompt
+        assert "manifest and lockfile" in prompt
+        assert "Do not install or upgrade system tools" in prompt
+        assert "install global packages" in prompt
+        assert "Do NOT install" not in prompt

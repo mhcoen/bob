@@ -895,7 +895,14 @@ Code cannot perform: testing Ctrl-C in a terminal, observing a GUI,
 confirming behavior on a physical device. When McLoop reaches a
 `[USER]` task, it pauses, prints instructions in the terminal, and
 sends a Telegram notification so you know to check in. You type your
-observation at the terminal and McLoop records it and continues.
+observation at the terminal, finish it with an empty line, and answer `yes`
+to approve completion. An empty observation, missing verdict or interrupted
+prompt leaves the task pending and stops the run before dependent work. An
+explicit `no` records the observation in BUGS.md and leaves the task pending.
+
+Include the files to examine, the expected outcomes and where to record
+disagreements in the task instructions. For a review, name the specification,
+design and review report; state what the reviewer is being asked to approve.
 
 This is not limited to the investigation system. Any task in any
 PLAN.md can use `[USER]`:

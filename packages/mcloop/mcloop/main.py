@@ -1941,15 +1941,37 @@ def run_loop(
             ctx.update_group(label, has_subtasks)
             instructions = user_task_instructions(task)
             response = _handle_user_task(label, instructions)
+            if not response.strip():
+                failed_task = f"{label}) {format_task_id(task)}{task.text}"
+                failed_reason = "User observation and explicit approval are still required."
+                terminal_failure = failed_reason
+                print(
+                    formatting.system_msg(
+                        "USER task remains pending. Stopping before dependent work."
+                    ),
+                    flush=True,
+                )
+                break
             # Ask user whether the task passed
-            if response:
-                try:
-                    verdict = input("Did this task pass? [y/N] ").strip().lower()
-                except (EOFError, KeyboardInterrupt):
-                    verdict = ""
-                passed = verdict in ("y", "yes")
-            else:
-                passed = True  # No observation = user skipped
+            try:
+                verdict = (
+                    input("Did this task pass? [yes/no; Enter leaves pending] ").strip().lower()
+                )
+            except (EOFError, KeyboardInterrupt):
+                verdict = ""
+            if verdict not in ("y", "yes", "n", "no"):
+                failed_task = f"{label}) {format_task_id(task)}{task.text}"
+                failed_reason = "User observation recorded; explicit approval is still required."
+                terminal_failure = failed_reason
+                ctx.add(label, task.text, "0s", response)
+                print(
+                    formatting.system_msg(
+                        "USER task remains pending. Stopping before dependent work."
+                    ),
+                    flush=True,
+                )
+                break
+            passed = verdict in ("y", "yes")
             if passed:
                 check_off(active_file, task)
                 if active_file == plan_path and active_phase_name:

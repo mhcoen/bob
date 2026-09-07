@@ -438,7 +438,7 @@ def _handle_user_task(label: str, instructions: str) -> str:
     try:
         while True:
             line = input()
-            if line == "" and lines:
+            if line == "":
                 break
             lines.append(line)
     except (EOFError, KeyboardInterrupt):
@@ -447,7 +447,7 @@ def _handle_user_task(label: str, instructions: str) -> str:
     if response:
         print(formatting.system_msg(f"User observation recorded ({len(response)} chars)"))
     else:
-        print(formatting.system_msg("No observation provided, continuing."))
+        print(formatting.system_msg("No observation provided. The task remains pending."))
     return response
 
 

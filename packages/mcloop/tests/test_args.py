@@ -4146,6 +4146,53 @@ def test_run_loop_user_task_skips_claude(tmp_path):
     assert tasks[0].checked
 
 
+@pytest.mark.parametrize(
+    "answers",
+    [
+        [""],
+        ["   ", ""],
+        [EOFError()],
+        [KeyboardInterrupt()],
+        ["Reviewed the report", "", ""],
+        ["Reviewed the report", "", EOFError()],
+        ["Reviewed the report", "", KeyboardInterrupt()],
+        ["Reviewed the report", "", "maybe"],
+    ],
+)
+@pytest.mark.parametrize("phase_boundary", [False, True])
+def test_user_gate_without_approval_stops_before_dependent_work(tmp_path, answers, phase_boundary):
+    plan = tmp_path / "PLAN.md"
+    plan.write_text(
+        canonical_plan_text(
+            "## Phase 1: Review\n- [ ] [USER] Approve the design\n"
+            + ("## Phase 2: Implement\n" if phase_boundary else "")
+            + "- [ ] Implement the dependent feature\n"
+        )
+    )
+    (tmp_path / ".git").mkdir()
+    with (
+        patch("builtins.input", side_effect=answers),
+        patch("mcloop.main.run_task") as coding,
+        patch("mcloop.main.run_checks") as checks,
+        patch("mcloop.main.notify"),
+        patch("mcloop.main._checkpoint"),
+        patch("mcloop.main._ensure_git"),
+        patch("mcloop.main._kill_orphan_sessions"),
+        patch("mcloop.main._has_meaningful_changes", return_value=False),
+        patch("mcloop.main._has_uncommitted_changes", return_value=False),
+        patch("mcloop.main._worktree_status", return_value=""),
+    ):
+        run_loop(plan, no_audit=True)
+    from mcloop._planfile_compat import parse
+
+    tasks = parse(plan)
+    assert not tasks[0].checked
+    assert not tasks[1].checked
+    assert parse(tmp_path / "BUGS.md") == []
+    coding.assert_not_called()
+    checks.assert_not_called()
+
+
 def test_run_loop_user_task_failure_files_full_observation_to_bugs(tmp_path):
     """Failed [USER] observations file to BUGS.md untruncated and unflattened."""
     plan = tmp_path / "PLAN.md"
