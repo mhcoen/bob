@@ -55,6 +55,9 @@ _WRONG_BODY = "## Phase phase_999: Wrong\n\n- [ ] do the thing [accept: command-
 # A canonical body that uses the runtime-supplied phase id and validates.
 _VALID_BODY = (
     "## Phase phase_001: Bring up scaffold\n\n- [ ] do the thing [accept: command-exit: true]\n"
+    "- [ ] [AUTO:run_cli] Check app [milestone: scaffold] "
+    "[demonstrates: visible output] [simulated: none] [replaces: none] "
+    "[accept: command-exit: python3 smoke.py]\n"
 )
 
 # Substring of the gate's wrong-phase-id feedback. It cannot appear in
@@ -184,8 +187,8 @@ def _install_scripted_adapter(
     """
     real_register = plan_author_adapter.register_validate_plan_body
 
-    def patched_register(required_phase_id: str):
-        inner = real_register(required_phase_id)
+    def patched_register(required_phase_id: str, **kwargs):
+        inner = real_register(required_phase_id, **kwargs)
 
         def customizer(registry: Any) -> None:
             inner(registry)
@@ -425,7 +428,7 @@ def test_iterate_verdict_with_configured_ids_survives_without_missing_ids(
     first_verdict = json.loads(_verdict("iterate", compliant=False))
     emitted_ids = [e["criterion_id"] for e in first_verdict["criteria_compliance"]]
     assert emitted_ids == [c["id"] for c in PLAN_AUTHOR_CRITERIA]
-    assert len(emitted_ids) == 3
+    assert len(emitted_ids) == 4
 
     # And the converged body persists as a canonical PLAN.md.
     plan_path = planner.save_plan(plan, target_dir=project_dir)

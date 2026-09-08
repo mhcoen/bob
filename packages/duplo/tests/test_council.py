@@ -880,6 +880,17 @@ class TestConfigResolution:
 # --------------------------------------------------------------------
 
 
+def _milestone_plan():
+    from bob_tools.planfile import parse_plan
+
+    return parse_plan(
+        "## Phase phase_001: Scaffold\n"
+        "- [ ] [AUTO:run_cli] Check app [milestone: scaffold] "
+        "[demonstrates: visible output] [simulated: none] [replaces: none] "
+        "[accept: command-exit: python3 smoke.py]\n"
+    )
+
+
 class TestPlannerCouncilBranch:
     """T-000790: normal authoring routes to the iterative adapter; the
     ``DUPLO_USE_COUNCIL`` env var no longer drives generate_phase_plan.
@@ -933,7 +944,7 @@ class TestPlannerCouncilBranch:
     def test_planner_uses_council_when_escalation_flag_set(self):
         """The council branch is exercised only when the explicit
         ``escalate_to_council`` flag is set."""
-        sentinel = object()
+        sentinel = _milestone_plan()
         with (
             patch("duplo.planner.run_plan_author") as mock_author,
             patch(
@@ -954,7 +965,7 @@ class TestPlannerCouncilBranch:
     def test_planner_council_receives_phase_num(self):
         with patch(
             "duplo.planner.council.author_phase_plan",
-            return_value="# X",
+            return_value=_milestone_plan(),
         ) as mock_council:
             generate_phase_plan(
                 "https://example.com",

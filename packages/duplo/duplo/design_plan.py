@@ -8,6 +8,7 @@ from pathlib import Path
 from bob_tools.json_state import atomic_write_json, read_json_object
 from bob_tools.planfile import render_plan, save, validate_plan
 from bob_tools.planfile.model import TaskStatus
+from bob_tools.planfile.milestones import MILESTONE_INSTRUCTIONS, validate_milestones
 from orchestra.api.dispatch import _resolve_compound_model_identifiers
 from orchestra.config import load_config
 
@@ -58,6 +59,7 @@ def _candidate(text, record, spec):
     report = check_plan_sanity(render_plan(plan), spec=spec)
     if not report.ok:
         raise SoftwareDesignError(f"Plan requires correction: {report.violations}")
+    validate_milestones(plan, required=True)
     return plan
 
 
@@ -93,6 +95,7 @@ def generate_design_plan(root, inputs, record, spec, session):
         "interfaces": True,
         "verification": True,
         "scope": True,
+        "scaffolded_integration": True,
     }
     for criterion in criteria:
         if criterion["id"] in required:
@@ -142,7 +145,7 @@ def generate_design_plan(root, inputs, record, spec, session):
             "disagreements. Do not ask the user to reapprove an accepted design during "
             "implementation. Describe a complete "
             "plan without implementing it. Supplied criteria also apply to each phase. "
-            "Return the plan within 50000 characters.",
+            "Return the plan within 50000 characters. " + MILESTONE_INSTRUCTIONS,
             {"inputs": inputs, "design": record["design"], "criteria": criteria},
         )
         plan = _candidate(text, record, spec)
@@ -157,6 +160,7 @@ def generate_design_plan(root, inputs, record, spec, session):
         atomic_write_json(receipt_path, receipt)
     if not check_plan_sanity(render_plan(plan), spec=spec).ok:
         raise SoftwareDesignError("Saved plan fails scope validation.")
+    validate_milestones(plan, required=True)
     require_design(root, inputs)
     if not receipt.get("accepted"):
         if receipt.get("review_budget_id") == session.current["id"]:
@@ -171,7 +175,10 @@ def generate_design_plan(root, inputs, record, spec, session):
                 reviewer,
                 "Review the complete plan against the accepted design and specification. "
                 "Check requirement coverage, prerequisite ordering, cross-phase interfaces, "
-                "verification outcomes, and scope. Assess whether test expectations describe "
+                "verification outcomes, and scope. Check that the first milestone demonstrates an "
+                "assembled executable path, subsequent milestones extend it, and simulations "
+                "are replaced when implementations become available. Compilation alone is "
+                "insufficient. Assess whether test expectations describe "
                 "the intended behavior. Also assess the configured criteria. Return only JSON "
                 "with decision (accept or reject), checks (every supplied check ID mapped to "
                 "a boolean), and feedback (a nonempty string explaining findings). "

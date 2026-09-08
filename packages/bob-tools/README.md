@@ -492,3 +492,12 @@ aspiration.
 ## License
 
 Copyright 2026 Michael Coen. All rights reserved.
+
+## Executable milestones
+
+`bob_tools.planfile.milestones.validate_milestones` checks the scaffold and
+phase-integration annotations used by Duplo and McLoop. It is an explicit
+validation step, so legacy unmarked plans retain their behavior. See the
+[milestone contract](../../docs/design/scaffolded-plans.md) for adoption rules
+and the distinction between structural validation and review of a command's
+claimed behavior.

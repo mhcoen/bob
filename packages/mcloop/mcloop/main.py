@@ -770,6 +770,12 @@ def _main() -> None:
     args = _parse_args()
     checklist_path = Path(args.file).resolve()
 
+    if args.command == "revise-plan":
+        from mcloop.plan_revision import revision_command
+
+        revision_command(checklist_path, args.candidate, args.apply_revision)
+        return
+
     if args.command == "recover":
         recovery_command(
             checklist_path.parent,
@@ -1358,6 +1364,9 @@ def run_loop(
     # check. Raises PlanNotCanonicalError on non-canonical input; main()'s
     # handler translates that to exit 3.
     _enforce_canonical_inputs(plan_path, bugs_path)
+    from mcloop.plan_revision import enforce_milestones
+
+    enforce_milestones(plan_path)
 
     # Demote (drop) any tier that fails preflight; raises only when no tier is
     # usable. Recompute the chain-derived values from the surviving tiers so a
@@ -1781,6 +1790,8 @@ def run_loop(
         # Check for completed reviews from background reviewer processes
         if reviewer_config:
             _collect_review_findings(project_dir, bugs_path, ctx)
+
+        enforce_milestones(plan_path)
 
         # Parse both active plan-bearing files.
         bug_tasks = parse(bugs_path)
@@ -3906,6 +3917,12 @@ def _parse_args() -> argparse.Namespace:
             "task's edits (in-session adapter; exits non-zero on no-signal)"
         ),
     )
+    revision_parser = subparsers.add_parser(
+        "revise-plan", help="Stage or apply an explicit plan revision"
+    )
+    revision_mode = revision_parser.add_mutually_exclusive_group(required=True)
+    revision_mode.add_argument("--candidate", type=Path)
+    revision_mode.add_argument("--apply", dest="apply_revision", type=Path)
     recover_parser = subparsers.add_parser(
         "recover",
         help="Inspect unresolved completion evidence without replaying work",

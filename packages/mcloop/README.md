@@ -267,6 +267,39 @@ mcloop uninstall          # Remove hooks and credentials installed by mcloop
 mcloop uninstall --dry-run                     # Preview what uninstall would remove
 ```
 
+## Revising a stopped build
+
+New Duplo plans establish an executable application scaffold and end each phase
+with an integration milestone. Each milestone names the outcome it demonstrates,
+any simulated dependencies and the simulations it replaces. McLoop executes its
+acceptance command and stops on failure. Compilation alone does not demonstrate
+an application path. Existing unmarked plans retain their behavior.
+
+For an existing build, prepare a candidate through the typed plan APIs, then run:
+
+```sh
+mcloop revise-plan --candidate /path/to/candidate-PLAN.md
+```
+
+This creates a proposal under `.mcloop/plan-revisions/`, containing `PLAN.md`,
+`changes.diff`, `REVIEW.md` and a receipt. It leaves the active plan unchanged.
+After reviewing the proposal, apply its receipt:
+
+```sh
+mcloop revise-plan --apply .mcloop/plan-revisions/REVISION/receipt.json
+```
+
+Both commands require a stopped project and resolved completion receipts. Apply
+refuses changes to the project since preparation. Completed task content and
+statuses remain intact; existing IDs and phase ownership are preserved. Pending
+tasks can be edited or resequenced within their phases, and new tasks can be
+inserted. Cross-phase moves use Duplo's ledger-aware reauthoring path. If applying
+is interrupted, repeat the apply command to reconcile the receipt before running
+McLoop. The command does not commit or push the revised plan.
+
+The [milestone contract](../../docs/design/scaffolded-plans.md) describes the
+annotations and the point at which an existing plan adopts them.
+
 ## Writing a PLAN.md
 
 A `PLAN.md` has two parts: a **project description**, then a **checklist**.

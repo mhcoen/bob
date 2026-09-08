@@ -140,6 +140,7 @@ def test_criteria_reach_the_executor_via_extension_point_a():
 
     ids = [c.id for c in derived_criteria]
     assert ids == [
+        "executable_integration_milestone",
         "task_granularity_5_to_15",
         "batch_user_auto_discipline",
         "feat_fix_annotations_present",

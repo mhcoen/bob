@@ -42,6 +42,13 @@ the design and planning stages directly. The
 [local dictation example](../../examples/local-dictation/README.md) supplies
 a complete input specification.
 
+New plans establish a runnable path through the assembled program early and
+extend it at each phase boundary. Milestones identify simulated dependencies and
+when real implementations replace them. Authoring validation checks their
+structure; independent review checks that their commands demonstrate the planned
+application behavior. See the [milestone contract](../../docs/design/scaffolded-plans.md)
+and [stopped-build revision procedure](../mcloop/README.md#revising-a-stopped-build).
+
 Duplo writes a `PLAN.md` — but not a casual markdown checklist. The
 PLAN.md duplo produces is a formal document with a defined grammar:
 stable task identifiers (`T-NNNNNN`) on every task, structured

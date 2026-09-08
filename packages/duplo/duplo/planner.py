@@ -20,6 +20,8 @@ from bob_tools.planfile import load as planfile_load
 from bob_tools.planfile import migrate as planfile_migrate
 from bob_tools.planfile import save as planfile_save
 
+from bob_tools.planfile.milestones import MILESTONE_INSTRUCTIONS, validate_milestones
+
 from duplo import council
 from duplo.extractor import Feature
 from duplo.plan_author_adapter import run_plan_author
@@ -39,8 +41,8 @@ Rules for the plan:
 - Each checklist item should be a single, focused unit of work.
 - Items should be ordered so each leaves the project in a building
   and runnable state.
-- Phase 0 (scaffold) should create the project structure, build
-  system, and a minimal window or entry point. Nothing else.
+- The scaffold establishes a runnable input-to-outcome path through the program.
+  Name simulated dependencies and their planned replacement phases.
 - Later phases should build incrementally on existing code.
 - Aim for 5-15 checklist items per phase.
 - Use subtasks (indented items) for complex items.
@@ -132,6 +134,9 @@ _H1_HEADING_RE = re.compile(r"^# \S")
 # Matches the canonical envelope H1: single-hash, em-dash separator,
 # "Phase " (capitalized), digit, colon-space, trailing title.
 _PHASE_H1_VALIDATE_RE = re.compile(r"^# .+? — Phase (\d+): .+$")
+
+
+_PHASE_SYSTEM += MILESTONE_INSTRUCTIONS
 
 
 def _strip_fences(text: str) -> str:
@@ -426,9 +431,10 @@ Generate the phase body now.
             "\nReviewed software design; preserve its responsibilities and dependency direction.\n"
             "Tasks must implement these decisions: " + ", ".join(decision_ids) + "\n" + design_text
         )
-    system = _PHASE_SYSTEM + platform_addendum if platform_addendum else _PHASE_SYSTEM
+    system = _PHASE_SYSTEM + platform_addendum
     if escalate_to_council:
         plan = council.author_phase_plan(prompt=prompt, system=system, phase_num=phase_num)
+        validate_milestones(plan, required=True, continuation=required_phase_id != "phase_001")
     else:
         body = run_plan_author(
             prompt=prompt,
@@ -570,6 +576,7 @@ def save_plan(
         existing_plan = planfile_load(path)
         plan = _merge_existing_plan(existing_plan, plan)
 
+    validate_milestones(plan)
     planfile_save(path, plan, validation="unchecked")
     saved_text = path.read_text(encoding="utf-8")
     stamped_text = stamp_sequential_phase_ids(saved_text)
@@ -703,6 +710,18 @@ def _append_extra_tasks(plan: Plan, extra_tasks: tuple[Task, ...]) -> Plan:
     merged = plan
     for task in extra_tasks:
         merged, _assigned = add_phase_task(merged, target_phase_id, _rebuild_task(task))
+    if (
+        not last_phase.subsections
+        and last_phase.tasks
+        and any(key == "milestone" for key, _ in last_phase.tasks[-1].annotations)
+    ):
+        gate_id = last_phase.tasks[-1].task_id
+        phase = merged.phases[-1]
+        gate = next(task for task in phase.tasks if task.task_id == gate_id)
+        phase = dataclasses.replace(
+            phase, tasks=tuple(t for t in phase.tasks if t.task_id != gate_id) + (gate,)
+        )
+        merged = dataclasses.replace(merged, phases=merged.phases[:-1] + (phase,))
     return merged
 
 

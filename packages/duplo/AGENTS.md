@@ -27,7 +27,10 @@ detects new files and appends tasks for anything missing.
   in `.duplo/review-limits.json`. Unsupported token caps fail before execution.
   See `REVIEW-COSTS.md`.
 
-- `design_plan.py`: Authors the complete phase sequence in one call and obtains
+- `design_plan.py`: Requires executable scaffold and integration milestones through
+  the shared `bob_tools.planfile.milestones` validator. The whole-plan reviewer
+  assesses whether the milestone commands exercise the assembled program.
+  Authors the complete phase sequence in one call and obtains
   one independent review. Uses effective project plan criteria alongside required
   engineering checks. Validates canonical structure and scope before review.
   Document and test-expectation reviews use ordinary model tasks unless accepted
@@ -416,6 +419,10 @@ detects new files and appends tasks for anything missing.
   precedence and fallback to project-wide criteria.
 
 - `planner.py`: Generates PLAN.md for a specific roadmap phase.
+  Phase authoring requires the shared milestone contract, including council
+  escalation. Generated verification tasks precede the final milestone.
+  `plan_validation_transform.py` returns milestone errors to the authoring loop;
+  later phase bodies require integration milestones rather than a new scaffold.
   `generate_phase_plan()` accepts a roadmap phase dict and produces
   a McLoop-compatible checklist scoped to that phase. Heading format:
   `# <AppName> — Phase N: <Title>`. Accepts optional `phase_number`

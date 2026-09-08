@@ -231,7 +231,9 @@ def run_plan_author(
             history=history_text,
             required_phase_id=required_phase_id,
             criteria_block=render_criteria_block([asdict(c) for c in criteria]),
-            registry_customizer=register_validate_plan_body(required_phase_id),
+            registry_customizer=register_validate_plan_body(
+                required_phase_id, milestones_required=True
+            ),
             project_dir=effective_project_dir,
             progress_callback=make_duplo_progress_callback(),
         )

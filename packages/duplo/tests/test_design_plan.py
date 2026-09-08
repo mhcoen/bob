@@ -13,11 +13,23 @@ from duplo import design_plan as dp
 from duplo import software_design as sd
 from test_software_design import sample_design, verdict, install, make_inputs
 
+
+def milestone(kind):
+    return (
+        f"- [ ] [AUTO:run_cli] Demonstrate the application path "
+        f"[milestone: {kind}] [demonstrates: input reaches output] "
+        "[simulated: runtime until phase_002] [replaces: none] "
+        "[accept: command-exit: python3 smoke.py]\n"
+    )
+
+
 BODY = (
     "## Phase phase_001: Foundation\n\n"
     "- [ ] Establish build settings [accept: command-exit: swift build]\n\n"
-    "## Phase phase_002: Dictation\n\n"
+    + milestone("scaffold")
+    + "## Phase phase_002: Dictation\n\n"
     '- [ ] Implement Dictation [feat: "Dictation"] [accept: command-exit: swift test]\n'
+    + milestone("integration")
 )
 
 
@@ -60,6 +72,7 @@ def responses(monkeypatch, *, reject=False, mutate=None, interrupt=False, body=B
                         "interfaces",
                         "verification",
                         "scope",
+                        "scaffolded_integration",
                     )
                 },
                 "feedback": "The feature has a preceding build phase and a verification command.",

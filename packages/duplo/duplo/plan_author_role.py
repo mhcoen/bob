@@ -77,6 +77,14 @@ JUDGE_MODEL = "opus"
 
 PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
     {
+        "id": "executable_integration_milestone",
+        "description": "The phase ends with an executable milestone through the assembled program. "
+        "The first phase establishes an input-to-outcome scaffold. Later phases extend it and "
+        "replace declared simulations when real implementations become available. Compilation "
+        "and isolated unit tests alone cannot satisfy the milestone.",
+        "required": True,
+    },
+    {
         "id": "task_granularity_5_to_15",
         "description": (
             "The phase body has between 5 and 15 top-level checklist items, inclusive."
@@ -106,7 +114,7 @@ PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
             "Every task implementing a feature from the input list ends "
             'with a [feat: "..."] annotation; tasks that fix a bug or '
             'issue end with a [fix: "..."] annotation; scaffolding or '
-            "structural tasks that map to no feature carry no annotation."
+            "structural tasks that map to no feature carry no feat or fix annotation."
         ),
         "required": True,
     },

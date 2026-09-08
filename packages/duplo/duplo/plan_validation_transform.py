@@ -33,6 +33,8 @@ from typing import Any
 
 from bob_tools.planfile import PlanSyntaxError, PlanValidationError
 
+from bob_tools.planfile.milestones import validate_milestones
+
 from duplo.acceptance import AcceptanceAuthoringError
 from duplo.council import typed_plan_from_synthesizer_text
 
@@ -45,7 +47,9 @@ _INPUT_SCHEMA: dict[str, Any] = {"proposal": str}
 _OUTPUT_SCHEMA: dict[str, Any] = {"validation_ok": bool, "validation_feedback": str}
 
 
-def make_validate_plan_body(required_phase_id: str) -> Callable[..., dict[str, Any]]:
+def make_validate_plan_body(
+    required_phase_id: str, *, milestones_required: bool = False
+) -> Callable[..., dict[str, Any]]:
     """Build the ``validate_plan_body`` transform bound to a phase id.
 
     The returned callable matches Orchestra's transform contract
@@ -58,7 +62,11 @@ def make_validate_plan_body(required_phase_id: str) -> Callable[..., dict[str, A
     def validate_plan_body(inputs: dict[str, Any], ctx: Any) -> dict[str, Any]:
         body = inputs["proposal"]
         try:
-            typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
+            plan = typed_plan_from_synthesizer_text(body, required_phase_id=required_phase_id)
+            if milestones_required:
+                validate_milestones(
+                    plan, required=True, continuation=required_phase_id != "phase_001"
+                )
         except (AcceptanceAuthoringError, PlanSyntaxError, PlanValidationError) as exc:
             return {"validation_ok": False, "validation_feedback": str(exc)}
         return {"validation_ok": True, "validation_feedback": ""}
@@ -66,7 +74,9 @@ def make_validate_plan_body(required_phase_id: str) -> Callable[..., dict[str, A
     return validate_plan_body
 
 
-def register_validate_plan_body(required_phase_id: str) -> Callable[[Any], None]:
+def register_validate_plan_body(
+    required_phase_id: str, *, milestones_required: bool = False
+) -> Callable[[Any], None]:
     """Build the ``registry_customizer`` callback duplo hands to Orchestra.
 
     Orchestra invokes the returned callback on both the pre-load and the
@@ -76,7 +86,7 @@ def register_validate_plan_body(required_phase_id: str) -> Callable[[Any], None]
     ``register_transform`` raises on a duplicate name, so the guard keeps
     the callback idempotent per registry.
     """
-    transform = make_validate_plan_body(required_phase_id)
+    transform = make_validate_plan_body(required_phase_id, milestones_required=milestones_required)
 
     def customizer(registry: Any) -> None:
         if TRANSFORM_NAME in registry.transforms:

@@ -452,7 +452,16 @@ class TestGeneratePhasePlanAuthoringRoute:
         assert "<!-- phase_id: phase_001 -->" in text
 
     def test_council_runs_only_when_escalation_flag_set(self, tmp_path):
-        sentinel = object()
+        from bob_tools.planfile import parse_plan
+
+        sentinel = parse_plan(
+            _canonical_body(
+                extra_tasks=(
+                    "- [ ] [AUTO:run_cli] Check app [milestone: scaffold] [demonstrates: visible output] "
+                    "[simulated: none] [replaces: none] [accept: command-exit: python3 smoke.py]",
+                )
+            )
+        )
         with (
             patch("duplo.planner.run_plan_author") as mock_author,
             patch(
@@ -1881,3 +1890,22 @@ class TestPhaseIdAgreementFirstPhase:
 @pytest.fixture(autouse=True)
 def isolated_plan_directory(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+
+
+def test_generated_verification_tasks_precede_final_milestone(tmp_path):
+    from bob_tools.planfile import make_task, parse_plan
+    from bob_tools.planfile.milestones import phase_tasks, validate_milestones
+    from duplo.planner import _append_extra_tasks
+
+    body = _canonical_body(
+        extra_tasks=(
+            "- [ ] [AUTO:run_cli] Check app [milestone: scaffold] [demonstrates: visible output] "
+            "[simulated: none] [replaces: none] [accept: command-exit: python3 smoke.py]",
+        )
+    )
+    extra = make_task("Verify deployment", annotations=(("accept", "command-exit: true"),))
+    plan = _append_extra_tasks(parse_plan(body), (extra,))
+    validate_milestones(plan, required=True)
+    tasks = phase_tasks(plan.phases[-1])
+    assert tasks[-2].text == "Verify deployment"
+    assert dict(tasks[-1].annotations)["milestone"] == "scaffold"

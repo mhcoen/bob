@@ -118,3 +118,22 @@ def test_registered_transform_validates_through_registry() -> None:
     assert transform.output_schema == {"validation_ok": bool, "validation_feedback": str}
     result = transform.callable({"proposal": CANONICAL_BODY}, None)
     assert result == {"validation_ok": True, "validation_feedback": ""}
+
+
+def test_new_authoring_requires_milestones_and_accepts_phase_continuation():
+    first = make_validate_plan_body("phase_001", milestones_required=True)
+    missing = first({"proposal": CANONICAL_BODY}, ctx=None)
+    assert missing["validation_ok"] is False
+    assert "scaffold" in missing["validation_feedback"]
+    continuation = make_validate_plan_body("phase_002", milestones_required=True)
+    body = (
+        "## Phase phase_002: Runtime\n"
+        "- [ ] [AUTO:run_cli] Check app [milestone: integration] "
+        "[demonstrates: visible output] [simulated: none] [replaces: runtime] "
+        "[accept: command-exit: python3 smoke.py]\n"
+    )
+    assert continuation({"proposal": body}, ctx=None)["validation_ok"] is True
+    assert (
+        first({"proposal": body.replace("phase_002", "phase_001")}, ctx=None)["validation_ok"]
+        is False
+    )
