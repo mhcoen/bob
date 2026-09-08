@@ -199,3 +199,18 @@ def _reset_call_log():
     call_log._active = None
     yield
     call_log._active = None
+
+
+@pytest.fixture
+def real_local_git(monkeypatch):
+    """Allow local Git snapshots while retaining model and GitHub guards."""
+    guarded_run = subprocess.run
+
+    def run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and cmd and cmd[0] == "git":
+            if any(part in {"push", "pull", "fetch", "clone"} for part in cmd[1:]):
+                raise AssertionError("Network Git is forbidden in revision tests")
+            return _original_subprocess_run(cmd, *args, **kwargs)
+        return guarded_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)

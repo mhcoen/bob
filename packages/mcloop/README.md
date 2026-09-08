@@ -275,11 +275,21 @@ any simulated dependencies and the simulations it replaces. McLoop executes its
 acceptance command and stops on failure. Compilation alone does not demonstrate
 an application path. Existing unmarked plans retain their behavior.
 
-For an existing build, prepare a candidate through the typed plan APIs, then run:
+For an existing build, let Duplo generate and review the candidate:
 
 ```sh
-mcloop revise-plan --candidate /path/to/candidate-PLAN.md
+duplo revise-plan
 ```
+
+The default objective introduces an executable scaffold and subsequent application
+milestones. `--objective "..."` supplies a different revision objective. Duplo reads
+the accepted design, current plan and completion records, asks the configured plan
+author for task edits, and sends the proposal to GLM through OpenRouter. It applies
+those edits to a candidate through the typed plan APIs, with one correction round.
+No external assistant or project-specific rewrite script is required.
+
+`mcloop revise-plan --candidate /path/to/candidate-PLAN.md` remains available for
+importing an independently authored candidate.
 
 This creates a proposal under `.mcloop/plan-revisions/`, containing `PLAN.md`,
 `changes.diff`, `REVIEW.md` and a receipt. It leaves the active plan unchanged.

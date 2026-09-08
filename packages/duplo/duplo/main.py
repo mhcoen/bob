@@ -251,6 +251,24 @@ def main() -> None:
     # start so every LLM call this process makes is recorded.
     call_log.start_run()
 
+    if len(sys.argv) > 1 and sys.argv[1] == "revise-plan":
+        from duplo.plan_revision import DEFAULT_OBJECTIVE, generate_revision
+        from bob_tools.json_state import StateError
+        from bob_tools.planfile import PlanValidationError
+        from orchestra.errors import OrchestraError
+
+        revision_parser = argparse.ArgumentParser(prog="duplo revise-plan")
+        revision_parser.add_argument("--objective", default=DEFAULT_OBJECTIVE)
+        revision_parser.add_argument("--new-attempt", action="store_true")
+        revision_parser.add_argument("--max-input-bytes", type=int, default=200_000)
+        revision_parser.add_argument("--timeout", type=int, default=300)
+        try:
+            generate_revision(Path.cwd(), **vars(revision_parser.parse_args(sys.argv[2:])))
+        except (StateError, PlanValidationError, OrchestraError, OSError, ValueError) as exc:
+            print(f"duplo revise-plan: {exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "design":
         from duplo.design_command import run_design
         from duplo.claude_cli import ClaudeCliError
@@ -513,6 +531,7 @@ def main() -> None:
                 "  investigate [OBS...]  Diagnose uncertain causes (no crash needed).\n"
                 "                        Flags: --file/-f PATH, --screenshot/-s,\n"
                 "                        --images PATH...\n"
+                "  revise-plan          Generate a reviewed revision of pending work.\n"
                 "  reauthor EVENT_ID     Re-author PLAN.md against the Plan Ledger.\n"
                 "                        EVENT_ID is the threshold_crossed event id.\n"
                 "                        Flags: --plan PATH, --ledger-dir PATH,\n"

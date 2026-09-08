@@ -35,7 +35,17 @@ are preserved; phase splits and cross-phase moves still belong to Duplo's
 ledger-aware reauthoring path. This operation supports insertion and sequencing
 within those boundaries and retains its own before/after revision history.
 
-For the dictation project, adoption will insert a runnable application path
-before further subsystem work and add integration demonstrations to the remaining
-phases. The proposal will retain completed work and every remaining task. It
-will be presented for review before application.
+`duplo revise-plan` generates the candidate. It reads the accepted design and
+current execution checkpoint and asks the configured author for bounded JSON task
+operations. The runtime assigns new IDs and constructs a candidate through the
+typed plan APIs. GLM reviews the proposed operations through OpenRouter. A rejected
+or structurally invalid proposal gets one correction round. The command retains
+call results and can resume without repeating completed calls. A successful
+candidate enters the same stopped-plan staging mechanism described above.
+
+The default objective introduces an application scaffold and phase integration
+milestones. A supplied objective can revise pending work within the accepted
+contracts. This command preserves phase ownership; the ledger-driven reauthoring
+path still owns phase splits and cross-phase moves. Applying a staged proposal is
+an explicit operation. Neither generation nor model approval reapproves the design
+or establishes implementation correctness.

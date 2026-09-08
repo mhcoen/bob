@@ -1030,3 +1030,41 @@ contract is defined; regular non-JSON files are retained. Reference destinations
 require unique simple filenames and regular files. Later external edits remain
 an unsupported concurrent writer, though source/destination hash changes seen
 before publication are refused.
+
+## Revising implementation in progress
+
+From a stopped project, run `duplo revise-plan`. Its default objective establishes
+an early executable scaffold and integration milestones for the remaining phases.
+Use `--objective "..."` for a different revision objective within the accepted design.
+The command generates a proposal itself; a hand-written candidate is unnecessary.
+
+The configured `plan_author.proposer` authors task operations. GLM reviews them
+through OpenRouter, using the project's enabled `task_review` configuration and
+`OPENROUTER_API_KEY`. The author must use a text adapter. No implementation agent
+runs, and the active PLAN.md remains unchanged. The command prints the staged
+proposal and the exact `mcloop revise-plan --apply ...` command.
+
+The author receives the current plan, specification, selected design sections and
+all decision choices, source paths and completion summaries. Full source, raw test
+logs, decision rationale and consequences are not included. This review concerns
+sequencing under those stated limits; it is not implementation acceptance.
+
+An attempt permits at most four model calls: drafting, review and one correction
+with review. Structural failures also consume the correction round. Completed
+responses survive interruption and are reused when the same command is repeated.
+Rejected proposals remain available under `.mcloop/revision-authoring/`. The command
+never applies a rejected candidate. An exhausted attempt requires an explicit
+`--new-attempt`; unchanged retries do not silently purchase more review rounds.
+
+Each prompt defaults to a 200,000-byte limit, each response to 40,000 bytes and each
+call to 300 seconds. `--max-input-bytes` allows at most 256,000 and `--timeout` at
+most 900 seconds. The author CLI has no hard token cap; prompt, call and time
+limits apply. The GLM request has a 3,000-token output cap and retains OpenRouter's
+reported usage and cost. Oversized input is refused before a call, without truncation.
+
+Revisions preserve existing phase ownership and all completed tasks. Operations
+can edit or move pending leaf tasks within their current containers and insert new
+tasks. They cannot remove tasks or change the accepted design. Cross-phase changes
+remain the responsibility of the ledger-aware `duplo reauthor` path. Both Duplo and
+McLoop project locks are held during generation; unresolved completions and project
+changes prevent publication. Replanning does not require routine design reapproval.

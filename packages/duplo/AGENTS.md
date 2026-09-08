@@ -11,6 +11,17 @@ detects new files and appends tasks for anything missing.
 
 ### duplo/ (package)
 
+- `plan_revision.py`: Implements `duplo revise-plan` from a stopped project.
+  Reads accepted design evidence and completion summaries, obtains task edits
+  from the configured plan author, and reviews through GLM on OpenRouter.
+  Holds both project locks and stages only accepted, current candidates through
+  McLoop's revision API. Reuses completed responses after interruption.
+- `revision_edits.py`: Converts bounded JSON operations into a typed candidate.
+  Runtime assigns new task IDs. Existing completed tasks, phase ownership and
+  accepted documents are preserved; only pending leaf tasks can change.
+- `revision_calls.py`: Owns revision transport and durable call limits without
+  changing the fingerprint of the accepted software-design review policy.
+
 - `software_design.py`: Owns accepted design evidence and input freshness.
   Retains versioned attempts in `.duplo/software-design.json` and projects an
   accepted design into `SOFTWARE_DESIGN.md`. Requires complete requirement

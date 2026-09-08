@@ -117,47 +117,71 @@ def prepare_revision(plan_path: Path, candidate: Path) -> Path:
     with project_owner(root):
         if pending_receipts(root):
             raise StateError("Resolve outstanding completions with mcloop recover before revising")
-        _require_reconciled_revision(root)
-        before, after = load(plan_path), load(candidate)
-        validate_revision(before, after)
-        snapshot = _snapshot(root)
-        original = plan_path.read_text()
-        directory = _safe_path(root, ".mcloop/plan-revisions/" + uuid.uuid4().hex)
-        directory.mkdir(parents=True)
-        save(directory / "PLAN.md", after)
-        proposed = (directory / "PLAN.md").read_text()
-        report = "".join(
-            difflib.unified_diff(
-                original.splitlines(True),
-                proposed.splitlines(True),
-                fromfile="Current PLAN.md",
-                tofile="Proposed PLAN.md",
-            )
-        )
-        (directory / "changes.diff").write_text(report)
-        old, new = _tasks(before), _tasks(after)
-        added = [key for key in new if key not in old]
-        (directory / "REVIEW.md").write_text(
-            "# Proposed plan revision\n\n"
-            "PLAN.md has not changed. Review PLAN.md and changes.diff in this directory.\n"
-            "Check that each milestone exercises the assembled program "
-            "and names its simulations.\n"
-            "Existing task IDs, statuses and phase ownership are preserved.\n\n"
-            f"Added tasks: {', '.join(added)}.\n\n"
-            f"Apply only after review: `mcloop revise-plan --apply {directory / 'receipt.json'}`\n"
-        )
-        receipt = directory / "receipt.json"
-        atomic_write_json(
-            receipt,
-            {
-                "schema_version": 1,
-                "status": "prepared",
-                "snapshot": snapshot,
-                "original": original,
-                "candidate_sha256": _hash(proposed.encode()),
-            },
-        )
+        return prepare_revision_owned(plan_path, candidate)
+
+
+def prepare_revision_owned(
+    plan_path: Path, candidate: Path, *, revision_id: str | None = None
+) -> Path:
+    """Stage a candidate while the caller holds McLoop project ownership."""
+    root = plan_path.parent
+    _require_reconciled_revision(root)
+    before, after = load(plan_path), load(candidate)
+    validate_revision(before, after)
+    snapshot = _snapshot(root)
+    original = plan_path.read_text()
+    revision_id = revision_id or uuid.uuid4().hex
+    if uuid.UUID(revision_id).hex != revision_id:
+        raise StateError("Invalid plan revision ID")
+    directory = _safe_path(root, ".mcloop/plan-revisions/" + revision_id)
+    receipt = directory / "receipt.json"
+    if receipt.exists():
+        existing = json.loads(receipt.read_text())
+        proposed = render_plan(after)
+        if (
+            existing.get("status") != "prepared"
+            or existing.get("original") != original
+            or existing.get("snapshot") != snapshot
+            or existing.get("candidate_sha256") != _hash(proposed.encode())
+            or (directory / "PLAN.md").read_text() != proposed
+        ):
+            raise StateError("Existing revision differs from the candidate or checkpoint")
         return receipt
+    directory.mkdir(parents=True, exist_ok=True)
+    save(directory / "PLAN.md", after)
+    proposed = (directory / "PLAN.md").read_text()
+    report = "".join(
+        difflib.unified_diff(
+            original.splitlines(True),
+            proposed.splitlines(True),
+            fromfile="Current PLAN.md",
+            tofile="Proposed PLAN.md",
+        )
+    )
+    (directory / "changes.diff").write_text(report)
+    old, new = _tasks(before), _tasks(after)
+    added = [key for key in new if key not in old]
+    (directory / "REVIEW.md").write_text(
+        "# Proposed plan revision\n\n"
+        "PLAN.md has not changed. Review PLAN.md and changes.diff in this directory.\n"
+        "Check that each milestone exercises the assembled program "
+        "and names its simulations.\n"
+        "Existing task IDs, statuses and phase ownership are preserved.\n\n"
+        f"Added tasks: {', '.join(added)}.\n\n"
+        f"Apply only after review: `mcloop revise-plan --apply {directory / 'receipt.json'}`\n"
+    )
+    receipt = directory / "receipt.json"
+    atomic_write_json(
+        receipt,
+        {
+            "schema_version": 1,
+            "status": "prepared",
+            "snapshot": snapshot,
+            "original": original,
+            "candidate_sha256": _hash(proposed.encode()),
+        },
+    )
+    return receipt
 
 
 def apply_revision(plan_path: Path, receipt_path: Path) -> None:
