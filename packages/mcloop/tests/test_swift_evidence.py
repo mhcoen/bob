@@ -54,9 +54,9 @@ struct After {}
 
 
 @pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
-def test_overload_is_ambiguous():
-    with pytest.raises(ValueError, match="one declaration"):
-        resolve("file.swift#wanted", "func wanted(_ n: Int) {}\nfunc wanted(_ s: String) {}\n")
+def test_top_level_overloads_preserve_both_bodies():
+    source = "func wanted(_ n: Int) {}\nfunc wanted(_ s: String) {}\n"
+    assert resolve("file.swift#wanted", source) == ("file.swift", 1, 2)
 
 
 @pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
@@ -84,8 +84,7 @@ extension Wanted {
     assert resolve("file.swift#Wanted.run", source) == ("file.swift", 4, 9)
     assert resolve("file.swift#Wanted.Nested.run", source) == ("file.swift", 4, 9)
     assert resolve("file.swift#Wanted.additional", source) == ("file.swift", 10, 12)
-    with pytest.raises(ValueError, match="one declaration"):
-        resolve("file.swift#run", source)
+    assert resolve("file.swift#run", source) == ("file.swift", 1, 12)
     with pytest.raises(ValueError, match="one heading or declaration"):
         resolve("file.swift#Missing.run", source)
 

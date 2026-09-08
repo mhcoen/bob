@@ -1279,10 +1279,11 @@ references. Use a file path, `relative/path#symbol`, or a Markdown heading such
 as `SOFTWARE_DESIGN.md#D-005`. Bob resolves line ranges and assembles the packet.
 Python anchors accept a unique bare name or a qualified name such as
 `tests.py#OwnershipChecksTests.test_publication`. Qualified names follow enclosing
-classes and functions. Duplicate declarations at the same scope remain ambiguous.
+classes and functions. When several declarations match, Bob supplies the complete
+file so the reviewer can examine every candidate.
 Python symbols select the complete declaration, including decorators.
-Legacy `relative/path:START-END` references remain supported. Missing or ambiguous
-anchors stop assembly with a diagnostic. The editor need not count lines or bytes,
+Legacy `relative/path:START-END` references remain supported. Missing anchors
+stop assembly with a diagnostic. The editor need not count lines or bytes,
 inspect Bob's implementation or write packet-assembly scripts.
 
 Bob sends the resolved contents with the full task and its changes. Bob assigns each
@@ -1325,10 +1326,10 @@ to select complete declarations, retaining their enclosing type or extension.
 With the compiler available, qualified anchors such as `Checks.test_publication`
 distinguish methods declared in different types. Overloads sharing the same
 enclosing declaration supply that complete declaration once, including every
-overload. Matches requiring different declaration ranges remain ambiguous.
+overload. Matches in different declarations supply the complete file.
 Compiler results are cached within the process. Conditional compilation, missing
-compiler support or unrecognized parse output preserves the whole file; ambiguous
-symbols require a more specific reference. Other languages retain whole-file context.
+compiler support or unrecognized parse output preserves the whole file.
+Qualified symbols keep the packet smaller. Other languages retain whole-file context.
 Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a file supplied in full points to
 that content, so its text is not sent again as an excerpt.
 An explicit reviewer rejection fails the task and leaves the implementation available

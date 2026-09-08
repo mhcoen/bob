@@ -647,7 +647,7 @@ def test_batch_blocked_review_preserves_editor_work(project, monkeypatch):
     assert (root / "ports.swift").read_text() == "struct Plan { let operations: [String] }\n"
 
 
-def test_ambiguous_python_symbol_refuses_to_guess(project):
+def test_ambiguous_symbol_reaches_reviewer_with_all_candidates(project):
     root, policy, baseline = project
     (root / "duplicate.py").write_text(
         "class A:\n    def run(self): pass\nclass B:\n    def run(self): pass\n"
@@ -655,8 +655,23 @@ def test_ambiguous_python_symbol_refuses_to_guess(project):
     data = json.loads((root / EVIDENCE_PATH).read_text())
     data["requirements"][0]["implementation"] = ["duplicate.py#run"]
     (root / EVIDENCE_PATH).write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="one declaration"):
-        build_packet(root, policy, "Task", baseline)
+    packet = build_packet(root, policy, "Task", baseline)
+    ref = packet["requirements"][0]["implementation"][0]
+    excerpt = packet["evidence"][ref["evidence_id"]]
+    assert ref["reference"] == "duplicate.py:1-4"
+    assert packet["changed_files"][excerpt["changed_file"]] == (root / "duplicate.py").read_text()
+    response = json.loads(verdict(packet, accepted=False))
+    response["requirements"][0]["evidence"] = [
+        "DESIGN.md:1-1",
+        "duplicate.py:1-4",
+        "smoke.swift:1-1",
+    ]
+    response["findings"] = ["Neither candidate implements the required behavior."]
+    with patch("mcloop.task_review._request_review", return_value=json.dumps(response)) as call:
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    call.assert_called_once()
+    assert not result.passed
+    assert not result.blocked
 
 
 def test_review_retains_orchestrator_check_after_editor_notes(project):

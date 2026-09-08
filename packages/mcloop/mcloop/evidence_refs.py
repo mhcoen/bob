@@ -24,7 +24,7 @@ def _python_matches(tree: ast.AST, anchor: str) -> list:
 
 
 def resolve(reference: str, text: str) -> tuple[str, int, int]:
-    """Return a complete file, section or declaration range; refuse ambiguous anchors."""
+    """Resolve existing anchors; retain the whole file when several candidates match."""
     lines = text.splitlines()
     legacy = re.fullmatch(r"(.+):(\d+)-(\d+)", reference)
     if legacy:
@@ -45,6 +45,8 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                     or line.lstrip("#").strip().startswith(anchor + ":")
                 )
             ]
+            if len(headings) > 1:
+                return name, 1, len(lines)
             if len(headings) == 1:
                 index = headings[0]
                 level = len(lines[index]) - len(lines[index].lstrip("#"))
@@ -63,8 +65,10 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                 except SyntaxError as exc:
                     raise ValueError(f"Cannot resolve Python symbol: {reference}") from exc
                 matches = _python_matches(tree, anchor)
-                if len(matches) != 1:
+                if not matches:
                     raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
+                if len(matches) > 1:
+                    return name, 1, len(lines)
                 node = matches[0]
                 start = min([node.lineno] + [d.lineno for d in node.decorator_list])
                 end = node.end_lineno or node.lineno
@@ -83,7 +87,7 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                     + r"\b"
                 )
                 declarations = [line for line in lines if pattern.search(line)]
-                if len(declarations) != 1:
+                if not declarations:
                     raise ValueError(
                         f"Evidence anchor must identify one heading or declaration: {reference}"
                     )

@@ -38,18 +38,31 @@ def test_qualified_python_anchor_selects_complete_declaration(anchor, span):
     assert resolve("checks.py#" + anchor, SOURCE) == ("checks.py", *span)
 
 
-@pytest.mark.parametrize("anchor", ["run", "Missing.run", "Nested.run"])
-def test_ambiguous_or_incorrect_scope_is_refused(anchor):
+@pytest.mark.parametrize("anchor", ["Missing.run", "Nested.run"])
+def test_incorrect_scope_is_refused(anchor):
     with pytest.raises(ValueError, match="one declaration"):
         resolve("checks.py#" + anchor, SOURCE)
 
 
-def test_duplicate_qualified_declarations_remain_ambiguous():
+def test_ambiguous_python_anchor_preserves_every_candidate():
+    assert resolve("checks.py#run", SOURCE) == ("checks.py", 1, 17)
+
+
+def test_duplicate_qualified_declarations_preserve_both_branches():
     source = """class Checks:
     if supported:
         def run(self): pass
     else:
         def run(self): pass
 """
-    with pytest.raises(ValueError, match="one declaration"):
-        resolve("checks.py#Checks.run", source)
+    assert resolve("checks.py#Checks.run", source) == ("checks.py", 1, 5)
+
+
+def test_ambiguous_heading_preserves_both_sections():
+    source = "# First\n## Results\nFailure\n# Second\n## Results\nSuccess\n"
+    assert resolve("report.md#Results", source) == ("report.md", 1, 6)
+
+
+def test_ambiguous_generic_symbol_preserves_both_declarations():
+    source = "function snapshot(x) {}\nfunction snapshot(x, y) {}\n"
+    assert resolve("file.js#snapshot", source) == ("file.js", 1, 2)

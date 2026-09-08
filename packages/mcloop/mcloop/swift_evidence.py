@@ -96,7 +96,8 @@ def declaration(reference: str, text: str, anchor: str) -> tuple[int, int] | Non
     # Keep every overload by returning that declaration once.
     matches = sorted({(start, end) for name, start, end in declarations if name == anchor})
     if len(matches) > 1:
-        raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
+        # Preserve every candidate and its context; the reviewer must see all bodies.
+        return 1, len(text.splitlines())
     # Conditional compilation may omit branches from the dump. Keep the file in that case.
     if any(re.match(r"\s*#(?:if|elseif|else|endif)\b", line) for line in text.splitlines()):
         return None
