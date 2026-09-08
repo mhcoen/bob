@@ -143,6 +143,10 @@ def prepare_evidence(
         "requirements array. Each entry has requirement (text), design, implementation, "
         "and verification (arrays of file paths, file#symbol or file#Markdown heading "
         "references). "
+        "The design array may cite only the accepted design files listed below. "
+        "Cite derived acceptance documents, review notes and test expectations in verification, "
+        "even when the task explicitly asks you to consult them. Each requirement must also "
+        "cite its governing accepted design in design. "
         "Bob resolves references, gathers changed files, merges overlapping excerpts and checks "
         "the packet size. Do not count lines or bytes, inspect Bob source code, or write packet "
         "assembly scripts. Existing file:START-END references are also accepted. "
@@ -236,7 +240,11 @@ def _compact_uncited_logs(root: Path, changed: dict, ranges: dict) -> None:
 def _reference(root: Path, reference: str, documents: dict[str, str], design: bool) -> dict:
     name = filename(reference)
     if design and name not in documents:
-        raise ValueError(f"Design reference is outside accepted documents: {name}")
+        raise ValueError(
+            f"Design reference is outside accepted documents: {name}. "
+            "Cite derived acceptance documents in verification and retain the governing "
+            "accepted document in design. Accepted design files: " + ", ".join(documents)
+        )
     text = documents[name] if design else _read_file(root, name)
     name, start, end = resolve(reference, text)
     return {
