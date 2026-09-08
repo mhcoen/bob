@@ -8,7 +8,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -277,7 +276,7 @@ def _check_interrupted(
     if choice == "q":
         state_file.unlink(missing_ok=True)
         print("Exiting.", flush=True)
-        sys.exit(0)
+        return "quit"
 
     if choice == "s":
         # Mark task as failed in the first split-plan file that contains

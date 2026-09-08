@@ -80,6 +80,41 @@ def test_success_preserves_receipt_without_dirtying_git(project):
     assert ".mcloop" not in git(project, "status", "--porcelain")
 
 
+@pytest.mark.parametrize("answer", ["q", EOFError(), KeyboardInterrupt()])
+def test_quit_at_resume_prompt_closes_execution_and_allows_restart(project, answer):
+    plan = project / "PLAN.md"
+    before = plan.read_bytes()
+    head = git(project, "rev-parse", "HEAD")
+    interrupted = project / ".mcloop" / "interrupted.json"
+    interrupted.parent.mkdir(exist_ok=True)
+    interrupted.write_text(json.dumps({"phase": "checks", "task_label": "1.1"}))
+    input_args = {"return_value": answer} if isinstance(answer, str) else {"side_effect": answer}
+
+    def unexpected_work(*args, **kwargs):
+        pytest.fail("Quitting the resume prompt must not start project work")
+
+    with patch("builtins.input", **input_args):
+        status, _ = _run_loop_with_patches(
+            plan,
+            extra_patches={
+                "mcloop.main._checkpoint": unexpected_work,
+                "mcloop.main.run_task": unexpected_work,
+                "mcloop.main._push_or_die": unexpected_work,
+            },
+        )
+    assert status.status == "interrupted"
+    assert not interrupted.exists()
+    assert plan.read_bytes() == before
+    assert git(project, "rev-parse", "HEAD") == head
+    assert pending_receipts(project) == []
+    receipt = next((project / ".mcloop" / "completions").glob("*.json"))
+    assert read_json_object(receipt)["observations"][-1]["outcome"] == "interrupted"
+
+    status, _ = _run_loop_with_patches(plan, no_audit=True, stop_after_one=True)
+    assert status.ok
+    require_reconciled(project)
+
+
 @pytest.mark.parametrize(
     "boundary", ["before_commit", "after_commit", "after_plan", "after_ledger"]
 )
