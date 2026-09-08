@@ -160,7 +160,7 @@ def prepare_evidence(
     )
 
 
-def packet_text(packet: dict) -> str:
+def packet_text(packet: object) -> str:
     return json.dumps(packet, ensure_ascii=False, separators=(",", ":"))
 
 
@@ -173,6 +173,44 @@ def _git(root: Path, *args: str) -> str:
     if proc.returncode:
         raise ValueError(f"Cannot collect task review input: git {args[0]} failed")
     return proc.stdout
+
+
+def _compact_changes(root: Path, baseline: str, changed: dict, ranges: dict) -> None:
+    """Use complete diffs where they and the cited passages cost less than full files."""
+    existing = set(_git(root, "ls-tree", "-r", "--name-only", "-z", baseline).split("\0"))
+    for name, content in changed.items():
+        if name not in existing:
+            continue
+        patch = _git(
+            root,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--no-renames",
+            "--no-color",
+            "--unified=20",
+            baseline,
+            "--",
+            name,
+        )
+        if not patch or "Binary files " in patch or "GIT binary patch" in patch:
+            continue
+        path = _safe_path(root, name)
+        compact = {
+            "format": "unified_diff",
+            "patch": patch,
+            "current_sha256": hashlib.sha256(path.read_bytes()).hexdigest()
+            if path.exists()
+            else None,
+            "current_lines": len(content.splitlines()) if path.exists() else 0,
+        }
+        lines = content.splitlines()
+        citations = ["\n".join(lines[a - 1 : b]) for a, b in ranges.get(name, [])]
+        # Cited passages are supplied separately when a file is represented by a diff.
+        cost = len(packet_text(compact).encode()) + len(packet_text(citations).encode())
+        cost += 100 * len(citations)
+        if not path.exists() or cost < len(packet_text(content).encode()):
+            changed[name] = compact
 
 
 def _reference(root: Path, reference: str, documents: dict[str, str], design: bool) -> dict:
@@ -260,6 +298,7 @@ def build_packet(
             else:
                 blocks.append((first, last))
         merged[name] = blocks
+    _compact_changes(root, baseline, changed, merged)
     reference_ids = {}
     for entry in entries:
         for field in ("design", "implementation", "verification"):
@@ -285,7 +324,7 @@ def build_packet(
                 name, line_range = reference["reference"].rsplit(":", 1)
                 start, end = (int(value) for value in line_range.split("-"))
                 excerpt = {"reference": reference["reference"]}
-                if name in changed:
+                if name in changed and isinstance(changed[name], str):
                     # The complete changed file is already in the packet.
                     excerpt.update(changed_file=name, start_line=start, end_line=end)
                 else:
@@ -312,7 +351,7 @@ def build_packet(
     encoded = packet_text(packet).encode()
     if len(encoded) > policy.max_input_bytes:
         largest = sorted(
-            ((name, len(text.encode())) for name, text in changed.items()),
+            ((name, len(packet_text(value).encode())) for name, value in changed.items()),
             key=lambda item: item[1],
             reverse=True,
         )[:5]
@@ -359,7 +398,15 @@ requirement is assessed as satisfied, no task obligation is missing, and finding
 In evidence arrays, cite the supplied evidence_id values (such as R1). Each ID identifies
 one exact file and line range in the packet's evidence dictionary. An evidence entry contains
 either its text or a changed_file with 1-based start_line and end_line into changed_files.
-Those changed files are supplied in full. Choose the IDs needed to support the assessment.
+String values in changed_files contain complete current files. Objects with format
+unified_diff contain every change from the baseline with 20 surrounding lines per hunk.
+Their current_sha256 binds the complete current file, including omitted unchanged lines;
+null means the file was deleted. Hunk headers distinguish old and current line numbers.
+Citations into these files carry their exact current text separately in evidence.
+Do not assume omitted unchanged code satisfies a requirement. Reject for insufficient
+context when the diff and cited passages cannot support an assessment. Inspect removed
+assertions and weakened expectations as well as added code.
+Choose the IDs needed to support the assessment.
 Unknown IDs invalidate the verdict. Use file references in finding explanations when helpful.
 Acceptance is a review judgment with the stated evidence.
 """

@@ -171,6 +171,102 @@ def test_changed_file_and_repeated_citations_share_one_copy(project):
     )
 
 
+def _commit_file(root, name, text):
+    (root / name).write_text(text)
+    subprocess.run(["git", "add", "--", name], cwd=root, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-qm",
+            "Record existing file",
+        ],
+        cwd=root,
+        check=True,
+    )
+    return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+
+
+def test_small_edit_preserves_diff_and_distant_citations_within_budget(project):
+    from dataclasses import replace
+
+    root, policy, _ = project
+    original = "".join(f"assert value_{i} == {i}\n" for i in range(1000))
+    baseline = _commit_file(root, "checks.py", original)
+    current = original.replace("assert value_500 == 500", "assert value_500 >= 0")
+    (root / "checks.py").write_text(current)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["verification"] = ["checks.py:901-902"] * 2
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, replace(policy, max_input_bytes=8000), "Task", baseline)
+    change = packet["changed_files"]["checks.py"]
+    assert change["format"] == "unified_diff"
+    assert "-assert value_500 == 500" in change["patch"]
+    assert "+assert value_500 >= 0" in change["patch"]
+    assert "assert value_480 == 480" in change["patch"]
+    assert "assert value_520 == 520" in change["patch"]
+    assert "value_900" not in change["patch"]
+    ref = packet["requirements"][0]["verification"][0]
+    assert packet["evidence"][ref["evidence_id"]] == {
+        "reference": "checks.py:901-902",
+        "text": "assert value_900 == 900\nassert value_901 == 901",
+    }
+    assert change["current_lines"] == 1000
+    assert packet["changed_files"]["ports.swift"] == (root / "ports.swift").read_text()
+
+
+def test_whole_file_citation_keeps_full_content(project):
+    root, policy, _ = project
+    original = "".join(f"assert value_{i} == {i}\n" for i in range(1000))
+    baseline = _commit_file(root, "checks.py", original)
+    current = original.replace("assert value_500 == 500", "assert value_500 >= 0")
+    (root / "checks.py").write_text(current)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["verification"] = ["checks.py"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Task", baseline)
+    assert packet["changed_files"]["checks.py"] == current
+
+
+def test_deleted_file_supplies_removed_assertions(project):
+    root, policy, _ = project
+    baseline = _commit_file(root, "deleted.py", "assert owner.generation == expected\n")
+    (root / "deleted.py").unlink()
+    packet = build_packet(root, policy, "Task", baseline)
+    change = packet["changed_files"]["deleted.py"]
+    assert "-assert owner.generation == expected" in change["patch"]
+    assert change["current_sha256"] is None
+    assert change["current_lines"] == 0
+
+
+def test_review_detects_change_to_content_outside_diff_context(project):
+    root, policy, _ = project
+    original = "".join(f"assert value_{i} == {i}\n" for i in range(1000))
+    baseline = _commit_file(root, "checks.py", original)
+    current = original.replace("assert value_500 == 500", "assert value_500 >= 0")
+    path = root / "checks.py"
+    path.write_text(current)
+    packet = build_packet(root, policy, "Task", baseline)
+    assert "value_900" not in packet["changed_files"]["checks.py"]["patch"]
+
+    def change_during_review(*args):
+        path.write_text(current.replace("assert value_900 == 900", "assert True"))
+        return verdict(packet)
+
+    with patch("mcloop.task_review._request_review", side_effect=change_during_review):
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    assert not result.passed
+    updated = build_packet(root, policy, "Task", baseline)
+    assert (
+        packet["changed_files"]["checks.py"]["current_sha256"]
+        != updated["changed_files"]["checks.py"]["current_sha256"]
+    )
+
+
 def test_unchanged_cited_passage_is_included_once(project):
     root, policy, _ = project
     subprocess.run(["git", "add", "DESIGN.md"], cwd=root, check=True)

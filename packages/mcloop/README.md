@@ -1240,7 +1240,7 @@ Legacy `relative/path:START-END` references remain supported. Missing or ambiguo
 anchors stop assembly with a diagnostic. The editor need not count lines or bytes,
 inspect Bob's implementation or write packet-assembly scripts.
 
-Bob sends the resolved contents with the full task and complete changed files. Bob assigns each
+Bob sends the resolved contents with the full task and its changes. Bob assigns each
 requirement an ID and requires one assessment per ID. The reviewer need not
 repeat the requirement wording; missing, duplicate or unknown IDs block completion.
 Declaration-only work may cite declarations for inspection. Behavioral claims need supporting
@@ -1261,13 +1261,21 @@ budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
 configured provider can impose a lower context limit. Larger packets still use
 one request, without a model loop. Receipts record the budget and section sizes.
 Oversized input is refused without truncation and reports its size breakdown.
-Changed files are supplied in full. Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
+New files are supplied in full. For existing files, Bob uses a complete unified
+diff with 20 lines of surrounding context when the diff and every cited passage
+are smaller than the full file. Removed lines remain visible in the diff.
+Cited passages are included in full even when they fall outside its hunks.
+A hash of the complete current file detects changes during review, including
+changes outside the supplied context. The reviewer must reject when the supplied
+context cannot support a judgment. This selection is independent of the input
+budget; exceeding the budget still stops assembly.
+Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
 to select complete declarations, retaining their enclosing type or extension.
 Compiler results are cached within the process. Conditional compilation, missing
 compiler support or unrecognized parse output preserves the whole file; ambiguous
 symbols require a more specific reference. Other languages retain whole-file context.
-Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a changed file points to
-the full file already supplied, so its text is not sent again as an excerpt.
+Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a file supplied in full points to
+that content, so its text is not sent again as an excerpt.
 An explicit reviewer rejection fails the task and leaves the implementation available
 for correction. Missing evidence, oversized input, invalid reviewer output and
 transport errors leave the task pending. Run `mcloop` again after resolving a packet
