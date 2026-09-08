@@ -439,6 +439,11 @@ When a task or check fails, McLoop prints the error output directly in the
 terminal and includes it in the prompt for the next retry so Claude can fix
 the problem rather than repeating the same mistake.
 
+Swift packages declaring `.testTarget(...)` now include `swift test` in their
+default project checks, including checks at phase boundaries. Packages without
+test targets retain the build check. Failed task entries in run summaries retain
+`failure_detail`, containing the check output or review failure that stopped them.
+
 A task's `[accept: command-exit: ...]` command is included in the editor's
 permitted check commands alongside project checks. For example, a Swift task
 requiring `swift test` must not restrict its editor to `swift build` alone.
@@ -1242,7 +1247,12 @@ Declaration-only work may cite declarations for inspection. Behavioral claims ne
 assertions or observations. A module-name smoke test cannot establish that port
 signatures implement an accepted contract.
 
-Each review makes one request without tools or automatic retries. The evidence
+Each review uses no tools. A transient timeout, connection failure or HTTP
+408/429/500/502/503/504 response permits one retry with unchanged inputs.
+`Retry-After` values longer than five seconds stop the attempt. Authentication
+errors, invalid verdicts, output limits and substantive rejections are not retried.
+At most two requests are made; a timeout can leave the first request's provider
+charges unknown. The evidence
 packet defaults to a 256,000 UTF-8 byte budget, output to 3,000 tokens, and the network
 operation has a 90-second timeout. OpenRouter requests use low reasoning effort
 and JSON output so reasoning leaves room for the verdict within that budget.

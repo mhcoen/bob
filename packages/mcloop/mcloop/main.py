@@ -3392,6 +3392,7 @@ def run_loop(
                     label=label,
                     text=task.text,
                     outcome="blocked" if review_blocked else "failed",
+                    failure_detail=last_error,
                     elapsed=round(time.monotonic() - task_start, 2),
                     model=active_model_for_summary or "",
                     attempts=editor_attempts,

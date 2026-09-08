@@ -7,6 +7,7 @@ import json
 import os
 import re
 import time
+import urllib.error
 import urllib.request
 import uuid
 from dataclasses import dataclass
@@ -486,6 +487,25 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
     return result
 
 
+def _review_retry_delay(error: Exception) -> float | None:
+    if isinstance(error, urllib.error.HTTPError):
+        if error.code not in {408, 429, 500, 502, 503, 504}:
+            return None
+        value = error.headers.get("Retry-After", "1") if error.headers is not None else "1"
+        try:
+            delay = float(value)
+        except ValueError:
+            return None
+        return delay if 0 <= delay <= 5 else None
+    if isinstance(error, (TimeoutError, ConnectionError)):
+        return 1
+    if isinstance(error, urllib.error.URLError) and isinstance(
+        error.reason, (TimeoutError, ConnectionError)
+    ):
+        return 1
+    return None
+
+
 def review_task(
     root: Path,
     policy: ReviewPolicy,
@@ -527,7 +547,22 @@ def review_task(
         timings["evidence"] = time.monotonic() - stage_started
         phase = "review"
         stage_started = time.monotonic()
-        raw = _request_review(policy, packet)
+        for request_attempt in range(2):
+            record["request_attempts"] = request_attempt + 1
+            try:
+                raw = _request_review(policy, packet)
+                break
+            except Exception as exc:
+                delay = _review_retry_delay(exc)
+                if request_attempt or delay is None:
+                    raise
+                record["retried_error"] = {"type": type(exc).__name__}
+                if isinstance(exc, urllib.error.HTTPError):
+                    record["retried_error"]["http_status"] = exc.code
+                print("\n>>> Transient review request failure; retrying once.", flush=True)
+                time.sleep(delay)
+                if build_packet(root, policy, task, baseline, checks) != packet:
+                    raise ValueError("Task review input changed before retry") from exc
         timings["review"] = time.monotonic() - stage_started
         phase = "validation"
         stage_started = time.monotonic()
@@ -555,11 +590,12 @@ def review_task(
             record["provider"] = exc.accounting
         record["status"] = "blocked"
         # Exception messages from network clients can contain URLs or credentials.
-        output = (
-            f"Requirement review blocked: {exc}"
-            if isinstance(exc, (ValueError, FileNotFoundError))
-            else f"Requirement review blocked ({type(exc).__name__})"
-        )
+        if isinstance(exc, (ValueError, FileNotFoundError)):
+            output = f"Requirement review blocked: {exc}"
+        elif isinstance(exc, urllib.error.HTTPError):
+            output = f"Requirement review blocked (HTTP {exc.code})"
+        else:
+            output = f"Requirement review blocked ({type(exc).__name__})"
     usage = record.get("provider", {}).get("usage")
     if isinstance(usage, dict) and usage:
         print("\n>>> Review usage: " + json.dumps(usage, separators=(",", ":")), flush=True)

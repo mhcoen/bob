@@ -277,12 +277,13 @@ def test_source_change_during_review_invalidates_verdict(project):
     assert "changed during review" in result.output
 
 
-def test_transport_failure_stops_without_retry(project):
+def test_transport_failure_stops_after_one_retry(project):
     root, policy, baseline = project
     with patch("mcloop.task_review._request_review", side_effect=TimeoutError) as call:
         result = review_task(root, policy, "Task", baseline, "editor-model")
     assert not result.passed
-    call.assert_called_once()
+    assert call.call_count == 2
+    assert json.loads(Path(result.receipt).read_text())["request_attempts"] == 2
 
 
 def test_editor_cannot_review_own_work(project):
@@ -733,3 +734,56 @@ def test_acceptance_repair_preserves_existing_requirement_evidence(project):
     instruction = prepare_evidence(root, policy, "Repair the test", preserve_existing=True)
     assert (root / EVIDENCE_PATH).read_text() == original
     assert "Repair the test" in instruction
+
+
+def test_transient_review_retry_uses_same_packet_without_editing(project):
+    import urllib.error
+
+    root, policy, baseline = project
+    packet = build_packet(root, policy, "Task", baseline)
+    transient = urllib.error.HTTPError("https://provider.invalid", 503, "unavailable", {}, None)
+    with (
+        patch("mcloop.task_review.time.sleep"),
+        patch(
+            "mcloop.task_review._request_review", side_effect=[transient, verdict(packet)]
+        ) as request,
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.passed
+    assert request.call_count == 2
+    assert request.call_args_list[0].args == request.call_args_list[1].args
+    record = json.loads(Path(result.receipt).read_text())
+    assert record["request_attempts"] == 2
+    assert record["retried_error"]["http_status"] == 503
+
+
+@pytest.mark.parametrize(
+    "status, headers", [(400, {}), (401, {}), (403, {}), (429, {"Retry-After": "60"})]
+)
+def test_non_retryable_review_failure_does_not_repeat_request(project, status, headers):
+    import urllib.error
+
+    root, policy, baseline = project
+    failure = urllib.error.HTTPError("https://provider.invalid", status, "failed", headers, None)
+    with patch("mcloop.task_review._request_review", side_effect=failure) as request:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert f"HTTP {status}" in result.output
+    request.assert_called_once()
+
+
+def test_changed_input_prevents_transient_review_retry(project):
+    root, policy, baseline = project
+
+    def interrupted(*args):
+        (root / "ports.swift").write_text("changed implementation\n")
+        raise TimeoutError()
+
+    with (
+        patch("mcloop.task_review.time.sleep"),
+        patch("mcloop.task_review._request_review", side_effect=interrupted) as request,
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert "changed before retry" in result.output
+    request.assert_called_once()

@@ -1009,3 +1009,17 @@ def test_timeout_preserves_captured_diagnostics(tmp_path, monkeypatch, declared,
     assert not result.passed
     prefix = "" if declared else "$ ruff check .\n"
     assert result.output == prefix + stdout + stderr + "TIMEOUT after 300s"
+
+
+def test_swift_test_targets_include_test_execution(tmp_path):
+    (tmp_path / "Package.swift").write_text(
+        'let package = Package(targets: [.testTarget\n(name: "ContractTests", path: "Checks")])\n'
+    )
+    assert _detect_commands(tmp_path, {}) == ["swift build --disable-sandbox", "swift test"]
+
+
+def test_swift_package_without_test_targets_does_not_invent_tests(tmp_path):
+    (tmp_path / "Package.swift").write_text(
+        'let package = Package(targets: [.target(name: "App")])\n'
+    )
+    assert _detect_commands(tmp_path, {}) == ["swift build --disable-sandbox"]

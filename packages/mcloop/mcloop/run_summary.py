@@ -40,6 +40,7 @@ class TaskEntry:
     changed_files: list[str] = field(default_factory=list)
     task_id: str = ""
     timings: dict[str, float] = field(default_factory=snapshot)
+    failure_detail: str = ""
 
 
 @dataclass

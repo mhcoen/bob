@@ -512,6 +512,7 @@ def test_failed_summary_reports_editor_sessions_instead_of_retry_limit():
     assert not result.ok
     task = summary.call_args.kwargs["task_entries"][0]
     assert task.attempts == 2
+    assert "compile failed" in task.failure_detail
 
 
 def test_consecutive_tasks_continue_after_a_repaired_check_failure():

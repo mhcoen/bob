@@ -696,8 +696,11 @@ def _detect_commands(
             commands.append("npm test")
 
     # Swift (--disable-sandbox needed for Claude Code's sandbox)
-    if (project_dir / "Package.swift").exists():
+    manifest = project_dir / "Package.swift"
+    if manifest.exists():
         commands.append("swift build --disable-sandbox")
+        if re.search(r"\.testTarget\s*\(", manifest.read_text()):
+            commands.append("swift test")
 
     # Rust
     if (project_dir / "Cargo.toml").exists():
