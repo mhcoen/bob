@@ -36,7 +36,7 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
         return None
     if result.returncode:
         return None
-    nodes: list[tuple[_Node, _Node]] = []
+    nodes: list[tuple[_Node, _Node, str]] = []
     stack: list[tuple[int, _Node]] = []
     for line in result.stdout.splitlines():
         match = _DECL.match(line)
@@ -51,8 +51,16 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
                 outer = stack[0][1]
             else:
                 outer = node
-            nodes.append((node, outer))
-            if kind in {"struct_decl", "class_decl", "enum_decl", "protocol", "extension_decl"}:
+            qualified = ".".join([parent.name for _, parent in stack] + [node.name])
+            nodes.append((node, outer, qualified))
+            if kind in {
+                "struct_decl",
+                "class_decl",
+                "enum_decl",
+                "protocol",
+                "extension_decl",
+                "func_decl",
+            }:
                 stack.append((depth, node))
         elif re.match(
             r"\s*\((?:struct_decl|class_decl|enum_decl|protocol|extension_decl)\b", line
@@ -64,7 +72,7 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
                 nodes[-1][0].start = min(nodes[-1][0].start, int(attr.group(1)))
     lines = text.splitlines()
     resolved = []
-    for node, outer in nodes:
+    for node, outer, qualified in nodes:
         name = node.name
         start, end = min(node.start, outer.start), max(node.end, outer.end)
         while start > 1 and lines[start - 2].lstrip().startswith("///"):
@@ -72,6 +80,8 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
         if not 1 <= start <= end <= len(lines):
             return None
         resolved.append((name, start, end))
+        if qualified != name:
+            resolved.append((qualified, start, end))
     return tuple(resolved) or None
 
 

@@ -63,3 +63,35 @@ def test_overload_is_ambiguous():
 def test_conditional_compilation_keeps_file():
     source = "struct Before {}\n#if os(macOS)\nstruct Wanted {}\n#endif\n"
     assert resolve("file.swift#Wanted", source) == ("file.swift", 1, 4)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_qualified_methods_distinguish_types_and_keep_enclosing_context():
+    source = """struct Other {
+    func run() {}
+}
+struct Wanted {
+    struct Nested {
+        func run() {}
+    }
+    func run() {}
+}
+extension Wanted {
+    func additional() {}
+}
+"""
+    assert resolve("file.swift#Other.run", source) == ("file.swift", 1, 3)
+    assert resolve("file.swift#Wanted.run", source) == ("file.swift", 4, 9)
+    assert resolve("file.swift#Wanted.Nested.run", source) == ("file.swift", 4, 9)
+    assert resolve("file.swift#Wanted.additional", source) == ("file.swift", 10, 12)
+    with pytest.raises(ValueError, match="one declaration"):
+        resolve("file.swift#run", source)
+    with pytest.raises(ValueError, match="one heading or declaration"):
+        resolve("file.swift#Missing.run", source)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_qualified_overload_remains_ambiguous():
+    source = "struct Wanted {\nfunc run(_ n: Int) {}\nfunc run(_ s: String) {}\n}\n"
+    with pytest.raises(ValueError, match="one declaration"):
+        resolve("file.swift#Wanted.run", source)

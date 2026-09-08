@@ -8,6 +8,21 @@ import re
 from mcloop.swift_evidence import declaration
 
 
+def _python_matches(tree: ast.AST, anchor: str) -> list:
+    matches = []
+
+    def visit(node: ast.AST, scope: tuple[str, ...]) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            scope = (*scope, node.name)
+            if anchor == (".".join(scope) if "." in anchor else node.name):
+                matches.append(node)
+        for child in ast.iter_child_nodes(node):
+            visit(child, scope)
+
+    visit(tree, ())
+    return matches
+
+
 def resolve(reference: str, text: str) -> tuple[str, int, int]:
     """Return a complete file, section or declaration range; refuse ambiguous anchors."""
     lines = text.splitlines()
@@ -47,12 +62,7 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                     tree = ast.parse(text)
                 except SyntaxError as exc:
                     raise ValueError(f"Cannot resolve Python symbol: {reference}") from exc
-                matches = [
-                    node
-                    for node in ast.walk(tree)
-                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                    and node.name == anchor
-                ]
+                matches = _python_matches(tree, anchor)
                 if len(matches) != 1:
                     raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
                 node = matches[0]

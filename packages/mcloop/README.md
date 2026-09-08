@@ -1234,8 +1234,10 @@ McLoop asks the editor to write `.mcloop/task-evidence.json`. Its `requirements`
 array maps each task obligation to `design`, `implementation`, and `verification`
 references. Use a file path, `relative/path#symbol`, or a Markdown heading such
 as `SOFTWARE_DESIGN.md#D-005`. Bob resolves line ranges and assembles the packet.
-Python symbols select the complete declaration; other supported declaration
-anchors include the whole file to avoid guessing language-specific boundaries.
+Python anchors accept a unique bare name or a qualified name such as
+`tests.py#OwnershipChecksTests.test_publication`. Qualified names follow enclosing
+classes and functions. Duplicate declarations at the same scope remain ambiguous.
+Python symbols select the complete declaration, including decorators.
 Legacy `relative/path:START-END` references remain supported. Missing or ambiguous
 anchors stop assembly with a diagnostic. The editor need not count lines or bytes,
 inspect Bob's implementation or write packet-assembly scripts.
@@ -1271,6 +1273,8 @@ context cannot support a judgment. This selection is independent of the input
 budget; exceeding the budget still stops assembly.
 Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
 to select complete declarations, retaining their enclosing type or extension.
+With the compiler available, qualified anchors such as `Checks.test_publication`
+distinguish methods declared in different types. Overloads remain ambiguous.
 Compiler results are cached within the process. Conditional compilation, missing
 compiler support or unrecognized parse output preserves the whole file; ambiguous
 symbols require a more specific reference. Other languages retain whole-file context.
