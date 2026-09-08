@@ -213,6 +213,26 @@ def _compact_changes(root: Path, baseline: str, changed: dict, ranges: dict) -> 
             changed[name] = compact
 
 
+def _compact_uncited_logs(root: Path, changed: dict, ranges: dict) -> None:
+    """Bound uncited diagnostic logs while binding their complete contents to review."""
+    for name, content in changed.items():
+        if not name.startswith("evidence/") or not name.endswith(".log") or name in ranges:
+            continue
+        path = _safe_path(root, name)
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        log = {
+            "format": "output_log",
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+            "output_tail": data[-4000:].decode("utf-8", errors="replace"),
+            "output_omitted_bytes": max(0, len(data) - 4000),
+        }
+        if len(packet_text(log).encode()) < len(packet_text(content).encode()):
+            changed[name] = log
+
+
 def _reference(root: Path, reference: str, documents: dict[str, str], design: bool) -> dict:
     name = filename(reference)
     if design and name not in documents:
@@ -299,6 +319,7 @@ def build_packet(
                 blocks.append((first, last))
         merged[name] = blocks
     _compact_changes(root, baseline, changed, merged)
+    _compact_uncited_logs(root, changed, merged)
     reference_ids = {}
     for entry in entries:
         for field in ("design", "implementation", "verification"):
@@ -398,6 +419,13 @@ requirement is assessed as satisfied, no task obligation is missing, and finding
 In evidence arrays, cite the supplied evidence_id values (such as R1). Each ID identifies
 one exact file and line range in the packet's evidence dictionary. An evidence entry contains
 either its text or a changed_file with 1-based start_line and end_line into changed_files.
+Objects with format output_log represent uncited diagnostic .log files under evidence/.
+Their sha256 and bytes describe the complete file retained in the project. Only the last
+4000 bytes are supplied; output_omitted_bytes reports any omitted content. These are
+editor-provided logs, not McLoop's execution result. Do not infer success or absence of
+errors from omitted output. If a requirement needs that output, reject for insufficient
+evidence and identify the required log passage. Cited logs retain all cited passages.
+
 String values in changed_files contain complete current files. Objects with format
 unified_diff contain every change from the baseline with 20 surrounding lines per hunk.
 Their current_sha256 binds the complete current file, including omitted unchanged lines;

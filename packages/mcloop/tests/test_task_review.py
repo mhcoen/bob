@@ -883,3 +883,70 @@ def test_changed_input_prevents_transient_review_retry(project):
     assert result.blocked
     assert "changed before retry" in result.output
     request.assert_called_once()
+
+
+def test_uncited_output_log_is_bounded_and_bound_to_full_contents(project):
+    import hashlib
+    from dataclasses import replace
+
+    root, policy, baseline = project
+    path = root / "evidence/build.log"
+    path.parent.mkdir()
+    data = ("early diagnostic\n" + "detailed output\n" * 4000 + "final diagnostic\n").encode()
+    path.write_bytes(data)
+    packet = build_packet(root, replace(policy, max_input_bytes=10000), "Task", baseline)
+    assert packet["changed_files"]["evidence/build.log"] == {
+        "format": "output_log",
+        "sha256": hashlib.sha256(data).hexdigest(),
+        "bytes": len(data),
+        "output_tail": data[-4000:].decode(),
+        "output_omitted_bytes": len(data) - 4000,
+    }
+    assert path.read_bytes() == data
+
+
+@pytest.mark.parametrize("reference", ["evidence/build.log", "evidence/build.log:1-1"])
+def test_cited_logs_keep_all_cited_output(project, reference):
+    root, policy, baseline = project
+    path = root / "evidence/build.log"
+    path.parent.mkdir()
+    content = "early diagnostic\n" + "detailed output\n" * 4000
+    path.write_text(content)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["verification"] = [reference]
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    packet = build_packet(root, policy, "Task", baseline)
+    assert packet["changed_files"]["evidence/build.log"] == content
+
+
+@pytest.mark.parametrize("name", ["evidence/check.py", "evidence/results.json", "fixture.log"])
+def test_log_compaction_does_not_apply_to_other_files(project, name):
+    root, policy, baseline = project
+    path = root / name
+    path.parent.mkdir(exist_ok=True)
+    content = "full evidence\n" * 4000
+    path.write_text(content)
+    packet = build_packet(root, policy, "Task", baseline)
+    assert packet["changed_files"][name] == content
+
+
+def test_review_rejects_mutated_log_even_when_supplied_tail_is_unchanged(project):
+    root, policy, baseline = project
+    path = root / "evidence/build.log"
+    path.parent.mkdir()
+    content = "first observation\n" + "unchanged tail\n" * 4000
+    path.write_text(content)
+    packet = build_packet(root, policy, "Task", baseline)
+
+    def mutate(*args):
+        path.write_text(content.replace("first observation", "other observation"))
+        return verdict(packet)
+
+    with patch("mcloop.task_review._request_review", side_effect=mutate):
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    assert not result.passed
+    updated = build_packet(root, policy, "Task", baseline)
+    old_log = packet["changed_files"]["evidence/build.log"]
+    new_log = updated["changed_files"]["evidence/build.log"]
+    assert old_log["output_tail"] == new_log["output_tail"]
+    assert old_log["sha256"] != new_log["sha256"]

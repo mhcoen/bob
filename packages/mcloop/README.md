@@ -1263,7 +1263,13 @@ budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
 configured provider can impose a lower context limit. Larger packets still use
 one request, without a model loop. Receipts record the budget and section sizes.
 Oversized input is refused without truncation and reports its size breakdown.
-New files are supplied in full. For existing files, Bob uses a complete unified
+New source and test files are supplied in full. Uncited `.log` files under
+`evidence/` carry a complete-file hash and byte count, plus their last 4,000 bytes.
+The packet states the omitted byte count. Full logs stay in the project, and any
+change to their contents invalidates the review. Cited logs keep every cited
+passage. A log excerpt does not establish that omitted output contains no errors;
+McLoop's separately recorded check result establishes the command outcome.
+For existing files, Bob uses a complete unified
 diff with 20 lines of surrounding context when the diff and every cited passage
 are smaller than the full file. Removed lines remain visible in the diff.
 Cited passages are included in full even when they fall outside its hunks.
