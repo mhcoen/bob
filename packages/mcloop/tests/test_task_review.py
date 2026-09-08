@@ -725,3 +725,11 @@ def test_provider_accounting_survives_success_and_blocked_output(project, monkey
     }
     assert result.passed is (finish == "stop")
     assert result.blocked is (finish == "length")
+
+
+def test_acceptance_repair_preserves_existing_requirement_evidence(project):
+    root, policy, _ = project
+    original = (root / EVIDENCE_PATH).read_text()
+    instruction = prepare_evidence(root, policy, "Repair the test", preserve_existing=True)
+    assert (root / EVIDENCE_PATH).read_text() == original
+    assert "Repair the test" in instruction

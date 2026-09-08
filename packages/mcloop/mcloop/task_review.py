@@ -126,13 +126,16 @@ def _read_file(root: Path, name: str) -> str:
     return path.read_text()
 
 
-def prepare_evidence(project_dir: Path, policy: ReviewPolicy, task: str) -> str:
+def prepare_evidence(
+    project_dir: Path, policy: ReviewPolicy, task: str, *, preserve_existing: bool = False
+) -> str:
     """Remove stale editor evidence and return instructions for this attempt."""
     if not policy.enabled:
         return ""
     path = _safe_path(project_dir, EVIDENCE_PATH)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.unlink(missing_ok=True)
+    if not preserve_existing:
+        path.unlink(missing_ok=True)
     return (
         "\n\nCompletion requires an independent requirement review. Read the accepted design "
         "before implementation. Write " + str(path.resolve()) + " as JSON with a nonempty "

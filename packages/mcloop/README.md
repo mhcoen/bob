@@ -439,6 +439,13 @@ When a task or check fails, McLoop prints the error output directly in the
 terminal and includes it in the prompt for the next retry so Claude can fix
 the problem rather than repeating the same mistake.
 
+A failed declared acceptance check gets at most one repair attempt when the
+current model tier has an attempt left under `--max-retries`. McLoop supplies
+the error output and preserves the existing requirement evidence. The repair
+must keep completed implementation work and preserve the acceptance criteria.
+If that repair fails, McLoop stops with the task incomplete. `--max-retries 1`
+retains immediate failure without a repair attempt.
+
 McLoop stops when a task fails all retries. It does not continue to the next
 task, since tasks may have implicit dependencies.
 

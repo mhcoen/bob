@@ -400,3 +400,66 @@ def test_no_diff_smoke_check_cannot_complete_rejected_requirements():
     assert not result.ok
     assert "- [x]" not in plan.read_text()
     review.assert_called_once()
+
+
+@pytest.mark.parametrize("repair_passes", [True, False])
+def test_declared_acceptance_gets_one_scoped_repair(repair_passes):
+    root = _scratch_project(f"acceptance-repair-{repair_passes}")
+    plan = _write_plan(root, "- [ ] Implement broker [accept: command-exit: swift test]\n")
+    failure = CheckResult(
+        False, "BrokerTests.swift: expression is async but lacks await", "swift test"
+    )
+    repaired = CheckResult(
+        repair_passes, "passed" if repair_passes else failure.output, "swift test"
+    )
+    with (
+        _loop_patches(root),
+        patch("mcloop.main.run_task", return_value=_ok_result(root)) as editor,
+        patch("mcloop.main.prepare_evidence", return_value="review instructions") as evidence,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main.run_command_acceptance", side_effect=[failure, repaired]) as checks,
+    ):
+        result = run_loop(
+            plan,
+            max_retries=3,
+            no_audit=True,
+            stop_after_one=True,
+            chain=[ChainEntry(cli="test-cli", model=None)],
+        )
+    assert result.ok is repair_passes
+    assert editor.call_count == checks.call_count == 2
+    assert "lacks await" in editor.call_args_list[1].kwargs["prior_errors"]
+    assert "Preserve completed work" in editor.call_args_list[1].kwargs["prior_errors"]
+    assert evidence.call_args_list[0].kwargs["preserve_existing"] is False
+    assert evidence.call_args_list[1].kwargs["preserve_existing"] is True
+    assert ("- [x]" if repair_passes else "- [!]") in plan.read_text()
+
+
+def test_acceptance_repair_editor_failure_stops_without_another_session():
+    root = _scratch_project("acceptance-repair-editor-failure")
+    plan = _write_plan(root, "- [ ] Implement broker [accept: command-exit: swift test]\n")
+    with (
+        _loop_patches(root),
+        patch(
+            "mcloop.main.run_task",
+            side_effect=[
+                _ok_result(root),
+                RunResult(False, "repair failed", 1, root / "logs/agent.log"),
+            ],
+        ) as editor,
+        patch("mcloop.main.run_autofix"),
+        patch(
+            "mcloop.main.run_command_acceptance",
+            return_value=CheckResult(False, "compile failed", "swift test"),
+        ) as checks,
+    ):
+        result = run_loop(
+            plan,
+            max_retries=3,
+            no_audit=True,
+            stop_after_one=True,
+            chain=[ChainEntry(cli="test-cli", model=None)],
+        )
+    assert not result.ok
+    assert editor.call_count == 2
+    assert checks.call_count == 1

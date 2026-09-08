@@ -2300,6 +2300,8 @@ def run_loop(
         last_error = ""
         terminal_task_failure = False
         review_blocked = False
+        acceptance_repairs = 0
+        acceptance_repair_pending = False
 
         def review_completion(checks: CheckResult | None = None) -> bool:
             nonlocal last_error, terminal_task_failure, review_blocked
@@ -2418,8 +2420,12 @@ def run_loop(
                     )
                 else:
                     evidence_instruction = prepare_evidence(
-                        project_dir, task_review_policy, task.text
+                        project_dir,
+                        task_review_policy,
+                        task.text,
+                        preserve_existing=acceptance_repair_pending,
                     )
+                    acceptance_repair_pending = False
                     result = run_task(
                         task.text,
                         active_cli,
@@ -2557,6 +2563,9 @@ def run_loop(
                         flush=True,
                     )
                     _print_error_tail(result.output)
+                    if acceptance_repairs:
+                        terminal_task_failure = True
+                        break
                     continue
 
                 try:
@@ -2652,6 +2661,23 @@ def run_loop(
                             flush=True,
                         )
                         _print_error_tail(acceptance_check.output)
+                        if acceptance_repairs == 0 and attempt < max_retries:
+                            acceptance_repairs += 1
+                            acceptance_repair_pending = True
+                            last_error += (
+                                "\nRepair this acceptance failure in the existing implementation. "
+                                "Preserve completed work and update existing requirement evidence "
+                                "only where the repair changes it. Do not weaken the acceptance "
+                                "command or remove assertions to obtain a pass."
+                            )
+                            print(
+                                formatting.system_msg(
+                                    "One acceptance repair attempt remains; "
+                                    "preserving completed work."
+                                ),
+                                flush=True,
+                            )
+                            continue
                         terminal_task_failure = True
                         break
 
