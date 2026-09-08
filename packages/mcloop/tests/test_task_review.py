@@ -695,3 +695,33 @@ def test_load_policy_uses_configured_input_budget(project, monkeypatch):
         )
     )
     assert load_policy(root).max_input_bytes == 180000
+
+
+@pytest.mark.parametrize("finish", ["stop", "length"])
+def test_provider_accounting_survives_success_and_blocked_output(project, monkeypatch, finish):
+    root, policy, baseline = project
+    packet = build_packet(root, policy, "Task", baseline)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    usage = {
+        "prompt_tokens": 1234,
+        "completion_tokens": 67,
+        "prompt_tokens_details": {"cached_tokens": 1000},
+        "cost": 0.001,
+    }
+    body = {
+        "id": "generation-fixture",
+        "model": "review-model",
+        "usage": usage,
+        "choices": [{"finish_reason": finish, "message": {"content": verdict(packet)}}],
+    }
+    with patch("mcloop.task_review.urllib.request.urlopen") as request:
+        request.return_value.__enter__.return_value.read.return_value = json.dumps(body).encode()
+        result = review_task(root, policy, "Task", baseline, "editor")
+    receipt = json.loads(Path(result.receipt).read_text())
+    assert receipt["provider"] == {
+        "id": "generation-fixture",
+        "model": "review-model",
+        "usage": usage,
+    }
+    assert result.passed is (finish == "stop")
+    assert result.blocked is (finish == "length")

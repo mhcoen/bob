@@ -5,6 +5,8 @@ from __future__ import annotations
 import ast
 import re
 
+from mcloop.swift_evidence import declaration
+
 
 def resolve(reference: str, text: str) -> tuple[str, int, int]:
     """Return a complete file, section or declaration range; refuse ambiguous anchors."""
@@ -57,6 +59,12 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                 start = min([node.lineno] + [d.lineno for d in node.decorator_list])
                 end = node.end_lineno or node.lineno
             else:
+                swift_range = (
+                    declaration(reference, text, anchor) if name.endswith(".swift") else None
+                )
+                if swift_range is not None:
+                    start, end = swift_range
+                    return name, start, end
                 # For other languages select the complete file once the declaration is
                 # identified. This preserves contracts without guessing brace/string syntax.
                 pattern = re.compile(

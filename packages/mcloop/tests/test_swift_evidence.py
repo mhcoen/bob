@@ -1,0 +1,65 @@
+"""Compiler-backed evidence preserves declarations and their enclosing context."""
+
+import shutil
+from unittest.mock import patch
+
+import pytest
+
+from mcloop.evidence_refs import resolve
+from mcloop.swift_evidence import _declarations
+
+
+@pytest.fixture(autouse=True)
+def clear_cache():
+    _declarations.cache_clear()
+    yield
+    _declarations.cache_clear()
+
+
+def test_missing_compiler_preserves_whole_file():
+    source = "struct Other {}\nstruct Wanted {}\nstruct Tail {}\n"
+    with patch("mcloop.swift_evidence.shutil.which", return_value=None):
+        assert resolve("file.swift#Wanted", source) == ("file.swift", 1, 3)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_complete_type_with_documentation_attributes_and_raw_string():
+    source = """struct Before {}
+/// Required contract.
+@available(macOS 14, *)
+public struct Wanted {
+    let value = #"} // not a closing brace"#
+    /* nested /* comment */ remains inside */
+    func render() -> String { value }
+}
+struct After {}
+"""
+    assert resolve("file.swift#Wanted", source) == ("file.swift", 2, 8)
+    assert resolve("file.swift#render", source) == ("file.swift", 2, 8)
+    assert resolve("file.swift", source) == ("file.swift", 1, 9)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_multiline_extension_keeps_generic_constraints():
+    source = """struct Before {}
+extension Array
+where Element: Equatable {
+    func wanted(_ value: Element) -> Bool {
+        contains(value)
+    }
+}
+struct After {}
+"""
+    assert resolve("file.swift#wanted", source) == ("file.swift", 2, 7)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_overload_is_ambiguous():
+    with pytest.raises(ValueError, match="one declaration"):
+        resolve("file.swift#wanted", "func wanted(_ n: Int) {}\nfunc wanted(_ s: String) {}\n")
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_conditional_compilation_keeps_file():
+    source = "struct Before {}\n#if os(macOS)\nstruct Wanted {}\n#endif\n"
+    assert resolve("file.swift#Wanted", source) == ("file.swift", 1, 4)

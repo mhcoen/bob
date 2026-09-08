@@ -361,6 +361,23 @@ Acceptance is a review judgment with the stated evidence.
 """
 
 
+class ReviewResponse(str):
+    """Review text with the provider's accounting fields retained."""
+
+    accounting: dict
+
+    def __new__(cls, text: str, body: dict):
+        response = super().__new__(cls, text)
+        response.accounting = {key: body[key] for key in ("id", "model", "usage") if key in body}
+        return response
+
+
+class ReviewResponseError(ValueError):
+    def __init__(self, message: str, body: dict):
+        super().__init__(message)
+        self.accounting = ReviewResponse("", body).accounting
+
+
 @timed("review")
 def _request_review(policy: ReviewPolicy, packet: dict) -> str:
     payload = {
@@ -393,13 +410,13 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
     body = json.loads(raw)
     choice = body["choices"][0]
     if choice.get("finish_reason") != "stop":
-        raise ValueError(
-            f"Task reviewer did not finish its response: {choice.get('finish_reason')}"
+        raise ReviewResponseError(
+            f"Task reviewer did not finish its response: {choice.get('finish_reason')}", body
         )
     content = choice["message"]["content"]
     if not isinstance(content, str):
-        raise ValueError("Task reviewer returned no text content")
-    return content
+        raise ReviewResponseError("Task reviewer returned no text content", body)
+    return ReviewResponse(content, body)
 
 
 def _validate_verdict(raw: str, packet: dict) -> dict:
@@ -512,6 +529,8 @@ def review_task(
         phase = "validation"
         stage_started = time.monotonic()
         record["raw_response"] = raw
+        if isinstance(raw, ReviewResponse):
+            record["provider"] = raw.accounting
         verdict = _validate_verdict(raw, packet)
         # Check source and evidence again after the network call.
         if build_packet(root, policy, task, baseline, checks) != packet:
@@ -529,6 +548,8 @@ def review_task(
             )
         )
     except Exception as exc:
+        if isinstance(exc, ReviewResponseError):
+            record["provider"] = exc.accounting
         record["status"] = "blocked"
         # Exception messages from network clients can contain URLs or credentials.
         output = (
@@ -536,6 +557,9 @@ def review_task(
             if isinstance(exc, (ValueError, FileNotFoundError))
             else f"Requirement review blocked ({type(exc).__name__})"
         )
+    usage = record.get("provider", {}).get("usage")
+    if isinstance(usage, dict) and usage:
+        print("\n>>> Review usage: " + json.dumps(usage, separators=(",", ":")), flush=True)
     timings[phase] = time.monotonic() - stage_started
     record["timings"] = {k: round(v, 3) for k, v in timings.items()}
     record["elapsed_seconds"] = round(time.monotonic() - started, 3)

@@ -1237,8 +1237,11 @@ budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
 configured provider can impose a lower context limit. Larger packets still use
 one request, without a model loop. Receipts record the budget and section sizes.
 Oversized input is refused without truncation and reports its size breakdown.
-Changed files are supplied in full. For languages other than Python, a symbol
-reference currently supplies its whole file to avoid guessing declaration bounds.
+Changed files are supplied in full. Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
+to select complete declarations, retaining their enclosing type or extension.
+Compiler results are cached within the process. Conditional compilation, missing
+compiler support or unrecognized parse output preserves the whole file; ambiguous
+symbols require a more specific reference. Other languages retain whole-file context.
 Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a changed file points to
 the full file already supplied, so its text is not sent again as an excerpt.
 An explicit reviewer rejection fails the task and leaves the implementation available
@@ -1262,6 +1265,11 @@ checkpoints, changing only `max_input_bytes` preserves completed editing. A chec
 is never evidence of acceptance. Existing `mcloop recover` handling still applies
 after an unclean interruption.
 Results and the reviewed packet are saved under `.mcloop/task-reviews/`.
+Receipts retain provider response IDs, model names and the complete `usage` object
+when supplied. That includes token counts, cache accounting and provider-reported
+cost fields. Usage is also printed after review. Missing accounting is left absent;
+Bob does not estimate token counts from bytes. Accounting survives malformed
+verdicts and responses stopped by the output limit.
 
 The reviewer assesses evidence selected by the editor and can miss an omitted
 constraint. Its judgment supplements the executed checks. Neither establishes
