@@ -439,6 +439,13 @@ When a task or check fails, McLoop prints the error output directly in the
 terminal and includes it in the prompt for the next retry so Claude can fix
 the problem rather than repeating the same mistake.
 
+A task's `[accept: command-exit: ...]` command is included in the editor's
+permitted check commands alongside project checks. For example, a Swift task
+requiring `swift test` must not restrict its editor to `swift build` alone.
+McLoop reruns acceptance independently after editing. Task summaries count
+actual editor sessions, including repairs; resuming checks without editing
+adds no editor attempt.
+
 A failed declared acceptance check gets at most one repair attempt when the
 current model tier has an attempt left under `--max-retries`. McLoop supplies
 the error output and preserves the existing requirement evidence. The repair

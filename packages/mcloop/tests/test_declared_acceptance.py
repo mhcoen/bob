@@ -463,3 +463,83 @@ def test_acceptance_repair_editor_failure_stops_without_another_session():
     assert not result.ok
     assert editor.call_count == 2
     assert checks.call_count == 1
+
+
+@pytest.mark.parametrize("command", ["swift test", "python3 scripts/acceptance.py foundation"])
+@pytest.mark.parametrize("already_configured", [True, False])
+def test_editor_receives_the_tasks_declared_acceptance_command(command, already_configured):
+    root = _scratch_project(f"editor-command-{already_configured}-{command.split()[0]}")
+    plan = _write_plan(root, f"- [ ] Implement contract [accept: command-exit: {command}]\n")
+    project_checks = ["swift build --disable-sandbox"]
+    if already_configured:
+        project_checks.append(command)
+    original = list(project_checks)
+    with (
+        _loop_patches(root),
+        patch("mcloop.main.get_check_commands", return_value=project_checks),
+        patch("mcloop.main.run_task", return_value=_ok_result(root)) as editor,
+        patch("mcloop.main.run_autofix"),
+        patch(
+            "mcloop.main.run_command_acceptance", return_value=CheckResult(True, "passed", command)
+        ),
+    ):
+        result = _run_one(plan)
+    assert result.ok
+    assert editor.call_args.kwargs["check_commands"].count(command) == 1
+    assert "swift build --disable-sandbox" in editor.call_args.kwargs["check_commands"]
+    assert project_checks == original
+
+
+def test_failed_summary_reports_editor_sessions_instead_of_retry_limit():
+    root = _scratch_project("actual-editor-attempts")
+    plan = _write_plan(root, "- [ ] Implement contract [accept: command-exit: swift test]\n")
+    with (
+        _loop_patches(root),
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._build_and_write_summary") as summary,
+        patch(
+            "mcloop.main.run_command_acceptance",
+            return_value=CheckResult(False, "compile failed", "swift test"),
+        ),
+    ):
+        result = run_loop(
+            plan,
+            max_retries=5,
+            no_audit=True,
+            stop_after_one=True,
+            chain=[ChainEntry(cli="test-cli", model=None)],
+        )
+    assert not result.ok
+    task = summary.call_args.kwargs["task_entries"][0]
+    assert task.attempts == 2
+
+
+def test_consecutive_tasks_continue_after_a_repaired_check_failure():
+    root = _scratch_project("consecutive-acceptance")
+    plan = _write_plan(
+        root,
+        "\n".join(
+            f"- [ ] Implement contract {n} [accept: command-exit: verify-{n}]" for n in range(1, 4)
+        )
+        + "\n",
+    )
+    results = [
+        CheckResult(True, "passed", "verify-1"),
+        CheckResult(False, "compile failed", "verify-2"),
+        CheckResult(True, "passed", "verify-2"),
+        CheckResult(True, "passed", "verify-3"),
+    ]
+    with (
+        _loop_patches(root),
+        patch("mcloop.main.run_task", return_value=_ok_result(root)) as editor,
+        patch("mcloop.main.run_autofix"),
+        patch("mcloop.main._build_and_write_summary") as summary,
+        patch("mcloop.main.run_command_acceptance", side_effect=results),
+    ):
+        result = run_loop(
+            plan, max_retries=3, no_audit=True, chain=[ChainEntry(cli="test-cli", model=None)]
+        )
+    assert result.ok
+    assert plan.read_text().count("- [x]") == 3
+    assert editor.call_count == 4
+    assert [t.attempts for t in summary.call_args.kwargs["task_entries"]] == [1, 2, 1]

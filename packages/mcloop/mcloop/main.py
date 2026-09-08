@@ -2300,6 +2300,7 @@ def run_loop(
         last_error = ""
         terminal_task_failure = False
         review_blocked = False
+        editor_attempts = 0
         acceptance_repairs = 0
         acceptance_repair_pending = False
 
@@ -2419,6 +2420,20 @@ def run_loop(
                         flush=True,
                     )
                 else:
+                    try:
+                        editor_acceptance = acceptance_kind(task)
+                    except ValueError as exc:
+                        last_error = f"Invalid accept annotation: {exc}"
+                        print(formatting.error_msg(last_error), flush=True)
+                        terminal_task_failure = True
+                        break
+                    editor_checks = list(project_checks)
+                    if (
+                        editor_acceptance is not None
+                        and editor_acceptance.kind == "command-exit"
+                        and editor_acceptance.command not in editor_checks
+                    ):
+                        editor_checks.append(editor_acceptance.command)
                     evidence_instruction = prepare_evidence(
                         project_dir,
                         task_review_policy,
@@ -2426,6 +2441,7 @@ def run_loop(
                         preserve_existing=acceptance_repair_pending,
                     )
                     acceptance_repair_pending = False
+                    editor_attempts += 1
                     result = run_task(
                         task.text,
                         active_cli,
@@ -2436,7 +2452,7 @@ def run_loop(
                         model=task_model,
                         prior_errors=last_error,
                         session_context=ctx.text() + evidence_instruction,
-                        check_commands=project_checks,
+                        check_commands=editor_checks,
                         allowed_tools=allowed_tools,
                         eliminated=eliminated,
                         timeout=task_timeout or DEFAULT_TASK_TIMEOUT,
@@ -2724,7 +2740,7 @@ def run_loop(
                                     outcome="failed",
                                     elapsed=round(time.monotonic() - task_start, 2),
                                     model=task_model or "",
-                                    attempts=attempt,
+                                    attempts=editor_attempts,
                                     success=False,
                                     exit_code=result.exit_code,
                                     log_path=(str(result.log_path) if result.log_path else ""),
@@ -2762,7 +2778,7 @@ def run_loop(
                             outcome="success",
                             elapsed=round(time.monotonic() - task_start, 2),
                             model=task_model or "",
-                            attempts=attempt,
+                            attempts=editor_attempts,
                             commit_hash=task_hash if changed_files else "",
                             success=True,
                             exit_code=result.exit_code,
@@ -2844,7 +2860,7 @@ def run_loop(
                                         2,
                                     ),
                                     model=task_model or "",
-                                    attempts=attempt,
+                                    attempts=editor_attempts,
                                     success=True,
                                     exit_code=result.exit_code,
                                     log_path=(str(result.log_path) if result.log_path else ""),
@@ -2930,7 +2946,7 @@ def run_loop(
                                     outcome="success",
                                     elapsed=round(time.monotonic() - task_start, 2),
                                     model=task_model or "",
-                                    attempts=attempt,
+                                    attempts=editor_attempts,
                                     success=True,
                                     exit_code=result.exit_code,
                                     log_path=str(result.log_path) if result.log_path else "",
@@ -3019,7 +3035,7 @@ def run_loop(
                                 outcome="success",
                                 elapsed=round(time.monotonic() - task_start, 2),
                                 model=task_model or "",
-                                attempts=attempt,
+                                attempts=editor_attempts,
                                 success=True,
                                 exit_code=result.exit_code,
                                 log_path=str(result.log_path) if result.log_path else "",
@@ -3100,7 +3116,7 @@ def run_loop(
                                         2,
                                     ),
                                     model=task_model or "",
-                                    attempts=attempt,
+                                    attempts=editor_attempts,
                                     success=True,
                                     exit_code=result.exit_code,
                                     log_path=(str(result.log_path) if result.log_path else ""),
@@ -3225,7 +3241,7 @@ def run_loop(
                                 outcome="failed",
                                 elapsed=round(time.monotonic() - task_start, 2),
                                 model=task_model or "",
-                                attempts=attempt,
+                                attempts=editor_attempts,
                                 success=False,
                                 exit_code=result.exit_code,
                                 log_path=str(result.log_path) if result.log_path else "",
@@ -3265,7 +3281,7 @@ def run_loop(
                             outcome="success",
                             elapsed=round(time.monotonic() - task_start, 2),
                             model=task_model or "",
-                            attempts=attempt,
+                            attempts=editor_attempts,
                             commit_hash=task_hash,
                             success=True,
                             exit_code=result.exit_code,
@@ -3378,7 +3394,7 @@ def run_loop(
                     outcome="blocked" if review_blocked else "failed",
                     elapsed=round(time.monotonic() - task_start, 2),
                     model=active_model_for_summary or "",
-                    attempts=max_retries,
+                    attempts=editor_attempts,
                     success=False,
                     exit_code=result.exit_code if result is not None else 0,
                     log_path=(
