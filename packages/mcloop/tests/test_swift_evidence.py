@@ -91,7 +91,22 @@ extension Wanted {
 
 
 @pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
-def test_qualified_overload_remains_ambiguous():
+def test_overloads_with_same_enclosing_declaration_include_both_bodies():
     source = "struct Wanted {\nfunc run(_ n: Int) {}\nfunc run(_ s: String) {}\n}\n"
-    with pytest.raises(ValueError, match="one declaration"):
-        resolve("file.swift#Wanted.run", source)
+    assert resolve("file.swift#Wanted.run", source) == ("file.swift", 1, 4)
+    assert resolve("file.swift#run", source) == ("file.swift", 1, 4)
+
+
+def test_duplicate_ranges_resolve_without_discarding_any_declaration():
+    source = "actor Scheduler {\nfunc admit(_ n: Int) {}\nfunc admit(_ s: String) {}\n}\n"
+    with (
+        patch("mcloop.swift_evidence.shutil.which", return_value="swiftc"),
+        patch(
+            "mcloop.swift_evidence._declarations",
+            return_value=(
+                ("admit", 1, 4),
+                ("admit", 1, 4),
+            ),
+        ),
+    ):
+        assert resolve("file.swift#admit", source) == ("file.swift", 1, 4)

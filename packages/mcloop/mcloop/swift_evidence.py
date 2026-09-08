@@ -92,7 +92,9 @@ def declaration(reference: str, text: str, anchor: str) -> tuple[int, int] | Non
     declarations = _declarations(compiler, text)
     if declarations is None:
         return None
-    matches = [(start, end) for name, start, end in declarations if name == anchor]
+    # Overloads within one enclosing declaration supply exactly the same evidence.
+    # Keep every overload by returning that declaration once.
+    matches = sorted({(start, end) for name, start, end in declarations if name == anchor})
     if len(matches) > 1:
         raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
     # Conditional compilation may omit branches from the dump. Keep the file in that case.

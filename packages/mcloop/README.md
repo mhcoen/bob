@@ -1274,7 +1274,9 @@ budget; exceeding the budget still stops assembly.
 Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
 to select complete declarations, retaining their enclosing type or extension.
 With the compiler available, qualified anchors such as `Checks.test_publication`
-distinguish methods declared in different types. Overloads remain ambiguous.
+distinguish methods declared in different types. Overloads sharing the same
+enclosing declaration supply that complete declaration once, including every
+overload. Matches requiring different declaration ranges remain ambiguous.
 Compiler results are cached within the process. Conditional compilation, missing
 compiler support or unrecognized parse output preserves the whole file; ambiguous
 symbols require a more specific reference. Other languages retain whole-file context.
