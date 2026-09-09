@@ -280,5 +280,6 @@ def test_preflight_timeout_with_bytes_stdout_raises_preflight_error(
         )
 
     assert "timed out" in str(excinfo.value)
+    assert "login" not in str(excinfo.value)
     assert "partial stdout" in excinfo.value.output
     assert "partial stderr" in excinfo.value.output

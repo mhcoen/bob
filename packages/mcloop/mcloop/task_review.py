@@ -15,9 +15,14 @@ from dataclasses import field as dataclass_field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from bob_tools.json_state import atomic_write_json
+
 from mcloop.checks import CheckResult
 from mcloop.evidence_refs import UnresolvedCodeAnchor, filename, resolve
 from mcloop.git_ops import run_git_bounded
+from mcloop.recovery_policy import RECOVERY
+from mcloop.review_http import exchange as _http_response
+from mcloop.review_packets import OversizedPacket, partition
 from mcloop.timing import timed
 
 EVIDENCE_PATH = ".mcloop/task-evidence.json"
@@ -53,6 +58,7 @@ class TaskReview:
     receipt: str = ""
     blocked: bool = False
     timings: dict[str, float] = dataclass_field(default_factory=dict)
+    failure_kind: str = ""
 
 
 def load_policy(project_dir: Path) -> ReviewPolicy:
@@ -290,7 +296,9 @@ def build_packet(
     for name, text in documents.items():
         if _read_file(root, name) != text:
             raise ValueError(f"Accepted design changed during this run: {name}")
-    evidence = json.loads(_read_file(root, EVIDENCE_PATH))
+    evidence_text = _read_file(root, EVIDENCE_PATH)
+    fenced = re.fullmatch(r"\s*```(?:json)?\s*\n(.*?)\n```\s*", evidence_text, re.DOTALL)
+    evidence = json.loads(fenced.group(1) if fenced else evidence_text)
     requirements = evidence.get("requirements") if isinstance(evidence, dict) else None
     if not isinstance(requirements, list) or not 1 <= len(requirements) <= 32:
         raise ValueError("Task evidence requires 1 to 32 requirement entries")
@@ -407,13 +415,14 @@ def build_packet(
             reverse=True,
         )[:5]
         sizes = ", ".join(f"{name}: {size} bytes" for name, size in largest)
-        raise ValueError(
+        raise OversizedPacket(
             f"Task review input exceeds {policy.max_input_bytes} bytes "
             f"({len(encoded)} bytes after deduplication). "
             f"Sections: {packet_sizes(packet)}. "
             f"Largest changed files: {sizes}. "
             "Set task_review.max_input_bytes to an appropriate review budget or narrow the task. "
-            "Input was not truncated; completed editing can resume at review."
+            "Input was not truncated; completed editing can resume at review.",
+            packet,
         )
     return packet
 
@@ -485,7 +494,10 @@ class ReviewResponseError(ValueError):
     def __init__(self, message: str, body: dict):
         super().__init__(message)
         self.accounting = ReviewResponse("", body).accounting
-        self.finish_reason = body.get("choices", [{}])[0].get("finish_reason")
+        choice = body.get("choices", [{}])[0]
+        self.finish_reason = choice.get("finish_reason")
+        error = choice.get("error", {})
+        self.provider_status = error.get("code") if isinstance(error, dict) else None
 
 
 @timed("review")
@@ -518,8 +530,7 @@ def _request_review(
         method="POST",
     )
     # One request, without an SDK retry loop or tool calls.
-    with urllib.request.urlopen(request, timeout=90) as response:
-        raw = response.read(response_limit + 1)
+    raw = _http_response(request, response_limit + 1, timeout=RECOVERY.request_seconds)
     if len(raw) > response_limit:
         raise ValueError("Task review response exceeds the size limit")
     body = json.loads(raw)
@@ -599,6 +610,15 @@ def _validate_verdict(raw: str, packet: dict) -> dict:
 
 
 def _review_retry_delay(error: Exception) -> float | None:
+    if isinstance(error, ReviewResponseError) and error.provider_status in {
+        408,
+        429,
+        500,
+        502,
+        503,
+        504,
+    }:
+        return 1
     if isinstance(error, urllib.error.HTTPError):
         if error.code not in {408, 429, 500, 502, 503, 504}:
             return None
@@ -617,6 +637,99 @@ def _review_retry_delay(error: Exception) -> float | None:
     return None
 
 
+def _assembled_packet(root, policy, task, baseline, checks):
+    try:
+        return build_packet(root, policy, task, baseline, checks)
+    except OversizedPacket as exc:
+        return exc.packet
+
+
+def _review_part(root, policy, packet, record, unchanged, deadline):
+    identity = hashlib.sha256(
+        packet_text(
+            {
+                "packet": packet,
+                "model": policy.model,
+                "endpoint": policy.base_url,
+                "prompt": SYSTEM_PROMPT,
+            }
+        ).encode()
+    ).hexdigest()
+    cache = _safe_path(root, f".mcloop/review-cache/{identity}.json")
+    if cache.exists():
+        try:
+            saved = json.loads(cache.read_text())
+            verdict = _validate_verdict(saved["raw_response"], packet)
+        except (ValueError, KeyError, TypeError):
+            record.setdefault("invalid_cached_parts", []).append(identity)
+        else:
+            unchanged("before cached review reuse")
+            record.setdefault("cached_parts", []).append(identity)
+            return saved["raw_response"], verdict
+    max_output_tokens = MAX_OUTPUT_TOKENS
+    request_packet = packet
+    for request_attempt in range(RECOVERY.requests_per_part):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Review recovery time budget exhausted")
+        unchanged("before retry" if request_attempt else "before request")
+        attempt = {
+            "request": len(record["provider_attempts"]) + 1,
+            "part_sha256": identity,
+            "max_output_tokens": max_output_tokens,
+        }
+        record["provider_attempts"].append(attempt)
+        record["request_attempts"] = len(record["provider_attempts"])
+        # Persist the attempt before sending so interruption leaves an audit trail.
+        atomic_write_json(Path(record["receipt_path"]), record)
+        validation_error = False
+        try:
+            if max_output_tokens == MAX_OUTPUT_TOKENS:
+                raw = _request_review(policy, request_packet)
+            else:
+                raw = _request_review(policy, request_packet, max_output_tokens=max_output_tokens)
+            attempt["status"] = "returned"
+            attempt["raw_response"] = raw
+            if isinstance(raw, ReviewResponse):
+                attempt["provider"] = raw.accounting
+            try:
+                verdict = _validate_verdict(raw, packet)
+            except ValueError:
+                validation_error = True
+                raise
+            unchanged("during review")
+            atomic_write_json(cache, {"raw_response": raw, "input_sha256": identity})
+            return raw, verdict
+        except Exception as exc:
+            attempt.update(status="error", error_type=type(exc).__name__)
+            exhausted = isinstance(exc, ReviewResponseError) and exc.finish_reason == "length"
+            if isinstance(exc, ReviewResponseError):
+                attempt["provider"] = exc.accounting
+                attempt["finish_reason"] = exc.finish_reason
+                attempt["provider_status"] = exc.provider_status
+            validation_error = validation_error or isinstance(exc, json.JSONDecodeError)
+            delay = 0 if exhausted or validation_error else _review_retry_delay(exc)
+            if request_attempt + 1 >= RECOVERY.requests_per_part or delay is None:
+                raise
+            record["retried_error"] = {"type": type(exc).__name__}
+            if isinstance(exc, urllib.error.HTTPError):
+                record["retried_error"]["http_status"] = exc.code
+            if exhausted or validation_error:
+                max_output_tokens = RETRY_OUTPUT_TOKENS
+                if validation_error:
+                    # Supply only the validation diagnostic, never an unvalidated
+                    # previous verdict that could bias the independent assessment.
+                    corrected = dict(packet, response_correction=str(exc)[:512])
+                    if len(packet_text(corrected).encode()) <= policy.max_input_bytes:
+                        request_packet = corrected
+                print("\n>>> Retrying incomplete review with 9000 output tokens.", flush=True)
+            else:
+                print("\n>>> Transient review request failure; retrying once.", flush=True)
+            time.sleep(delay)
+        finally:
+            atomic_write_json(Path(record["receipt_path"]), record)
+    raise RuntimeError("Review attempts exhausted")
+
+
 def review_task(
     root: Path,
     policy: ReviewPolicy,
@@ -632,6 +745,8 @@ def review_task(
     phase = "evidence"
     timings = {}
     record: dict = {"task": task, "baseline": baseline, "model": policy.model, "passed": False}
+    receipt = _safe_path(root, f".mcloop/task-reviews/{uuid.uuid4().hex}.json")
+    record["receipt_path"] = str(receipt)
     if checks is not None:
         record["mcloop_checks"] = {
             "command": checks.command,
@@ -643,7 +758,7 @@ def review_task(
             raise ValueError("McLoop checks did not pass; requirement review was not requested")
         if editor_model and editor_model.rsplit("/", 1)[-1] == policy.model.rsplit("/", 1)[-1]:
             raise ValueError("Task reviewer must use a different model from the editor")
-        packet = build_packet(root, policy, task, baseline, checks)
+        packet = _assembled_packet(root, policy, task, baseline, checks)
         digest = hashlib.sha256(json.dumps(packet, sort_keys=True).encode()).hexdigest()
         record["input"] = packet
         record["input_sha256"] = digest
@@ -656,57 +771,42 @@ def review_task(
             flush=True,
         )
         timings["evidence"] = time.monotonic() - stage_started
+        record["provider_attempts"] = []
+        try:
+            parts = partition(packet, policy.max_input_bytes)
+        except ValueError as exc:
+            raise ValueError(
+                f"{exc}. Sections: {packet_sizes(packet)}. "
+                "Set task_review.max_input_bytes or narrow evidence references."
+            ) from exc
         phase = "review"
         stage_started = time.monotonic()
-        max_output_tokens = MAX_OUTPUT_TOKENS
-        record["provider_attempts"] = []
-        for request_attempt in range(2):
-            record["request_attempts"] = request_attempt + 1
-            attempt = {"request": request_attempt + 1, "max_output_tokens": max_output_tokens}
-            record["provider_attempts"].append(attempt)
-            try:
-                if max_output_tokens == MAX_OUTPUT_TOKENS:
-                    raw = _request_review(policy, packet)
-                else:
-                    raw = _request_review(policy, packet, max_output_tokens=max_output_tokens)
-                attempt["status"] = "returned"
-                if isinstance(raw, ReviewResponse):
-                    attempt["provider"] = raw.accounting
+        record["part_count"] = len(parts)
+        record["parts"] = parts if len(parts) > 1 else []
+        if len(parts) > 1:
+            print(f"\n>>> Reviewing {len(parts)} parts; every part must accept.", flush=True)
+
+        def unchanged(when):
+            if _assembled_packet(root, policy, task, baseline, checks) != packet:
+                raise ValueError(f"Task review input changed {when}")
+
+        verdicts = []
+        for part in parts:
+            raw, verdict = _review_part(
+                root, policy, part, record, unchanged, started + RECOVERY.review_seconds
+            )
+            verdicts.append(verdict)
+            record["raw_response"] = raw
+            if isinstance(raw, ReviewResponse):
+                record["provider"] = raw.accounting
+            if verdict["verdict"] == "reject":
                 break
-            except Exception as exc:
-                attempt.update(status="error", error_type=type(exc).__name__)
-                exhausted = isinstance(exc, ReviewResponseError) and exc.finish_reason == "length"
-                if isinstance(exc, ReviewResponseError):
-                    attempt["provider"] = exc.accounting
-                    attempt["finish_reason"] = exc.finish_reason
-                delay = 0 if exhausted else _review_retry_delay(exc)
-                if request_attempt or delay is None:
-                    raise
-                record["retried_error"] = {"type": type(exc).__name__}
-                if isinstance(exc, urllib.error.HTTPError):
-                    record["retried_error"]["http_status"] = exc.code
-                if exhausted:
-                    max_output_tokens = RETRY_OUTPUT_TOKENS
-                    print(
-                        "\n>>> Reviewer exhausted its response budget; retrying once with "
-                        f"{max_output_tokens} output tokens. Completed editing is preserved.",
-                        flush=True,
-                    )
-                else:
-                    print("\n>>> Transient review request failure; retrying once.", flush=True)
-                time.sleep(delay)
-                if build_packet(root, policy, task, baseline, checks) != packet:
-                    raise ValueError("Task review input changed before retry") from exc
         timings["review"] = time.monotonic() - stage_started
         phase = "validation"
         stage_started = time.monotonic()
-        record["raw_response"] = raw
-        if isinstance(raw, ReviewResponse):
-            record["provider"] = raw.accounting
-        verdict = _validate_verdict(raw, packet)
-        # Check source and evidence again after the network call.
-        if build_packet(root, policy, task, baseline, checks) != packet:
-            raise ValueError("Task review input changed during review")
+        unchanged("during review")
+        record["part_reviews"] = verdicts
+        verdict = next((v for v in verdicts if v["verdict"] == "reject"), verdicts[-1])
         record["review"] = verdict
         record["passed"] = verdict["verdict"] == "accept"
         record["status"] = "accepted" if record["passed"] else "rejected"
@@ -723,6 +823,9 @@ def review_task(
         if isinstance(exc, ReviewResponseError):
             record["provider"] = exc.accounting
         record["status"] = "blocked"
+        record["failure_kind"] = (
+            "evidence" if phase == "evidence" and isinstance(exc, ValueError) else "review"
+        )
         # Exception messages from network clients can contain URLs or credentials.
         if isinstance(exc, (ValueError, FileNotFoundError)):
             output = f"Requirement review blocked: {exc}"
@@ -742,10 +845,12 @@ def review_task(
     record["timings"] = {k: round(v, 3) for k, v in timings.items()}
     record["elapsed_seconds"] = round(time.monotonic() - started, 3)
     record["output"] = output
-    directory = _safe_path(root, ".mcloop/task-reviews")
-    directory.mkdir(parents=True, exist_ok=True)
-    receipt = directory / f"{uuid.uuid4().hex}.json"
-    receipt.write_text(json.dumps(record, indent=2) + "\n")
+    atomic_write_json(receipt, record)
     return TaskReview(
-        record["passed"], output, str(receipt), record["status"] == "blocked", record["timings"]
+        record["passed"],
+        output,
+        str(receipt),
+        record["status"] == "blocked",
+        record["timings"],
+        record.get("failure_kind", ""),
     )

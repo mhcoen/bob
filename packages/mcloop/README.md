@@ -1299,23 +1299,34 @@ signatures implement an accepted contract.
 
 Each review uses no tools. A transient timeout, connection failure or HTTP
 408/429/500/502/503/504 response permits one retry with unchanged inputs.
-`Retry-After` values longer than five seconds stop the attempt. Authentication
-errors, invalid verdicts and substantive rejections are not retried.
-When a response ends with `finish_reason: length`, Bob retries once with a
-9,000-token output allowance. This shares the same two-request limit as transport
-retries. Bob rechecks the evidence before retrying and never accepts partial output.
-At most two requests are made; a timeout can leave the first request's provider
-charges unknown. The evidence
-packet defaults to a 256,000 UTF-8 byte budget, output to 3,000 tokens, and the network
-operation has a 90-second timeout. OpenRouter requests use low reasoning effort
-and JSON output. Reasoning consumes part of the output allowance and can exhaust
-it before a verdict appears. Receipts retain usage for every provider response,
-including the exhausted response when a retry succeeds.
-Set `task_review.max_input_bytes` in `.mcloop/config.json` to change the input
-budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
-configured provider can impose a lower context limit. Larger packets still use
-the same bounded request policy. Receipts record the budget and section sizes.
-Oversized input is refused without truncation and reports its size breakdown.
+`Retry-After` values longer than five seconds and authentication errors stop the
+request stage. Incomplete JSON, missing requirement assessments and responses
+ending with `finish_reason: length` also permit one retry, using 9,000 output
+tokens. All of these conditions share the same two-request allowance per part.
+The initial request allows 3,000 output tokens. Partial responses cannot pass.
+OpenRouter requests use low reasoning effort and JSON output; reasoning consumes
+part of the output allowance.
+
+The default per-request input budget is 256,000 UTF-8 bytes. Set
+`task_review.max_input_bytes` in `.mcloop/config.json` to change it, from 1 through
+1,024,000 bytes. Bob partitions oversized packets into at most four parts. Every
+part receives all requirements and cited passages, plus an inventory identifying
+all changes. Changed files are distributed intact across parts. Every part must
+accept before the task can pass. If cited context plus an individual changed file
+cannot fit, or more than four parts are required, assembly returns a diagnostic
+for evidence repair. It never silently discards a change or a cited passage.
+The provider can impose a lower context limit than the configured byte budget.
+
+A review admits no further requests after ten minutes. Each network operation has
+a 180-second process deadline, including response reads and keepalives. An
+in-flight operation may outlast the ten-minute admission deadline, so request
+time is bounded by thirteen minutes.
+The maximum is eight requests and 48,000 requested output tokens across four
+parts, including retries. Provider charges can be unknown after a timeout.
+Receipts record each attempt before transmission and retain returned usage.
+Completed review parts are cached by packet, reviewer endpoint/model and review
+instructions. An interrupted later part does not require repeating earlier parts
+when their inputs remain unchanged.
 New source and test files are supplied in full. Uncited `.log` files under
 `evidence/` carry a complete-file hash and byte count, plus their last 4,000 bytes.
 The packet states the omitted byte count. Full logs stay in the project, and any
@@ -1329,7 +1340,7 @@ Cited passages are included in full even when they fall outside its hunks.
 A hash of the complete current file detects changes during review, including
 changes outside the supplied context. The reviewer must reject when the supplied
 context cannot support a judgment. This selection is independent of the input
-budget; exceeding the budget still stops assembly.
+budget; partitioning uses the assembled content without weakening its coverage.
 Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
 to select complete declarations, retaining their enclosing type or extension.
 Swift anchors support initializers, destructors, properties, subscripts, enum cases
@@ -1343,11 +1354,21 @@ compiler support or unrecognized parse output preserves the whole file.
 Qualified symbols keep the packet smaller. Other languages retain whole-file context.
 Repeated and overlapping references share one excerpt; all cited lines remain included. A citation into a file supplied in full points to
 that content, so its text is not sent again as an excerpt.
-An explicit reviewer rejection fails the task and leaves the implementation available
-for correction. Missing evidence, oversized input, invalid reviewer output and
-transport errors leave the task pending. Run `mcloop` again after resolving a packet
-problem or to retry the provider. Bob reuses completed editing and reruns acceptance
-and review; it does not restart coding merely because packet preparation failed.
+A substantive rejection or an evidence assembly error receives one editor repair
+attempt when the task's retry allowance permits it. Single tasks and batches use
+the same repair limit. Findings are returned to the editor with instructions to
+preserve accepted contracts and assertions. The repaired work must pass checks
+and independent review. Exhausted provider or response retries leave the task
+pending with completed work preserved.
+
+Successful checks are saved under `.mcloop/checkpoints/checks/` with their command,
+full output and fingerprints of project files, executable metadata, review
+configuration and process environment. Ignored files are fingerprinted too,
+except McLoop state and logs. Their contents are hashed locally and are not
+added to the review packet. Unchanged inputs reuse the observed result without executing checks
+again or generating another set of evidence files. Changes invalidate that result.
+Failed checks are never cached. Review verdicts are retained separately under
+`.mcloop/review-cache/`; a cached verdict must still validate against its packet.
 
 The reviewer receives McLoop's check command and result after editing, alongside
 the implementation evidence. Editor notes about tests left unrun in that session
@@ -1358,7 +1379,8 @@ command does not establish that its assertions match the accepted design.
 
 The `.mcloop/review-resume/` checkpoint retains the original baseline, editor model
 and a fingerprint of project files and review policy. It survives a startup Git
-checkpoint and permits edits to `.mcloop/task-evidence.json`. Changes to code, tests,
+checkpoint and permits edits to `.mcloop/task-evidence.json`. Editing is saved
+before checks, and the checkpoint is refreshed after checks finish. Changes to code, tests,
 accepted documents or review policy require a fresh editor attempt. For new
 checkpoints, changing only `max_input_bytes` preserves completed editing. A checkpoint
 is never evidence of acceptance. Existing `mcloop recover` handling still applies

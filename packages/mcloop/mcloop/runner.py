@@ -407,7 +407,9 @@ def ensure_subscription_preflight(
     except subprocess.TimeoutExpired as exc:
         output = _decode_subprocess_output(exc.stdout) + _decode_subprocess_output(exc.stderr)
         raise SubscriptionPreflightError(
-            f"{display_name} subscription preflight timed out. {login_hint}",
+            f"{display_name} subscription preflight timed out before availability was confirmed. "
+            "Retry later or use another configured tier; "
+            "this timeout does not establish an authentication failure.",
             output,
         ) from exc
     except OSError as exc:

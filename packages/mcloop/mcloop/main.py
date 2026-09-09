@@ -148,6 +148,7 @@ from mcloop.ratelimit import (
     is_session_limited,
     wait_for_reset,
 )
+from mcloop.recovery_policy import RECOVERY
 from mcloop.review_integration import (
     _cleanup_stale_reviews,
     _collect_review_findings,
@@ -1074,6 +1075,9 @@ def _run_batch(
         )
         return "failed", "Batch produced no file changes and no acceptance evidence"
 
+    review_resume.save(
+        project_dir, review_policy, combined_text, batch_baseline, current_model, result
+    )
     _lifecycle._current_phase = "checks"
     # Scope autofix to the session's own edits; an unscoped run would
     # fold pre-existing unrelated formatting drift into this batch's
@@ -1091,9 +1095,12 @@ def _run_batch(
         )
         return "failed", "Autofix modified metadata-only files"
     pre_check_status = _worktree_status(project_dir)
-    check_result = run_checks(
+    check_result = review_resume.checked_stage(
         project_dir,
-        changed_files=changed_files,
+        review_policy,
+        combined_text,
+        "batch-checks:" + repr(project_checks),
+        lambda: run_checks(project_dir, changed_files=changed_files),
     )
     if not check_result.passed:
         # Try salvage: if ruff's only complaints are minor style codes
@@ -1145,13 +1152,11 @@ def _run_batch(
         if not review.passed:
             print(formatting.error_msg(review.output + "\n" + review.receipt), flush=True)
             timing.report()
-            if review.blocked:
+            if review.blocked and review.failure_kind != "evidence":
                 return "review_pending", review.output
             if review_policy.enabled:
                 review_resume.clear(project_dir, combined_text)
             return "review_blocked", review.output
-        if review_policy.enabled:
-            review_resume.clear(project_dir, combined_text)
         timing.report()
         completion = Completion.begin(
             project_dir,
@@ -2114,6 +2119,17 @@ def run_loop(
                         task_timeout=task_timeout,
                         task_review_policy=task_review_policy,
                     )
+                    if (
+                        batch_handled == "review_blocked"
+                        and batch_attempt <= RECOVERY.editor_repairs
+                        and max_retries > 1
+                    ):
+                        batch_prior_errors = batch_detail
+                        print(
+                            formatting.system_msg("Repairing batch review findings once."),
+                            flush=True,
+                        )
+                        continue
                     if batch_handled in {"success", "review_blocked", "review_pending"}:
                         batch_prior_errors = batch_detail
                         break
@@ -2313,10 +2329,21 @@ def run_loop(
         review_blocked = False
         editor_attempts = 0
         acceptance_repairs = 0
+        review_repairs = 0
         acceptance_repair_pending = False
+
+        def task_checks(root, **kwargs):
+            return review_resume.checked_stage(
+                root,
+                task_review_policy,
+                review_key,
+                "checks:" + repr((project_checks, kwargs)),
+                lambda: run_checks(root, **kwargs),
+            )
 
         def review_completion(checks: CheckResult | None = None) -> bool:
             nonlocal last_error, terminal_task_failure, review_blocked
+            nonlocal review_repairs, acceptance_repair_pending
             if result is not None and task_review_policy.enabled:
                 review_resume.save(
                     project_dir, task_review_policy, review_key, task_start_sha, task_model, result
@@ -2331,8 +2358,6 @@ def run_loop(
             )
             if review.passed:
                 if task_review_policy.enabled:
-                    review_resume.clear(project_dir, review_key)
-                if task_review_policy.enabled:
                     print(formatting.system_msg(review.output + "\n" + review.receipt), flush=True)
                 return True
             last_error = review.output + "\n" + review.receipt
@@ -2340,6 +2365,19 @@ def run_loop(
             if not review.blocked and task_review_policy.enabled:
                 review_resume.clear(project_dir, review_key)
             terminal_task_failure = True
+            if RECOVERY.can_repair(review, review_repairs, attempt < max_retries):
+                review_repairs += 1
+                terminal_task_failure = False
+                acceptance_repair_pending = True
+                last_error += (
+                    "\nRepair the independent review findings in the existing work. "
+                    "Preserve accepted contracts and test assertions. "
+                    "Update evidence for the repair."
+                )
+                print(
+                    formatting.system_msg("Repairing requirement review findings once."),
+                    flush=True,
+                )
             print(formatting.error_msg(last_error), flush=True)
             return False
 
@@ -2590,11 +2628,20 @@ def run_loop(
                         flush=True,
                     )
                     _print_error_tail(result.output)
-                    if acceptance_repairs:
+                    if acceptance_repairs or review_repairs:
                         terminal_task_failure = True
                         break
                     continue
 
+                if task_review_policy.enabled:
+                    review_resume.save(
+                        project_dir,
+                        task_review_policy,
+                        review_key,
+                        task_start_sha,
+                        task_model,
+                        result,
+                    )
                 try:
                     declared_acceptance = acceptance_kind(task)
                 except ValueError as exc:
@@ -2631,15 +2678,20 @@ def run_loop(
                     if declared_acceptance.kind in ("pytest", "coverage"):
                         changed_files = _changed_files(project_dir)
                         pre_check_status = _worktree_status(project_dir)
-                        acceptance_check = run_checks(
+                        acceptance_check = task_checks(
                             project_dir,
                             changed_files=changed_files,
                         )
                     elif declared_acceptance.kind == "command-exit":
                         changed_files = _changed_files(project_dir)
-                        acceptance_check = run_command_acceptance(
+                        acceptance_check = review_resume.checked_stage(
                             project_dir,
-                            declared_acceptance.command,
+                            task_review_policy,
+                            review_key,
+                            "command:" + declared_acceptance.command,
+                            lambda: run_command_acceptance(
+                                project_dir, declared_acceptance.command
+                            ),
                         )
                     else:
                         changed_files = _changed_files(project_dir)
@@ -2723,7 +2775,9 @@ def run_loop(
                             continue
 
                     if not review_completion(acceptance_check):
-                        break
+                        if terminal_task_failure:
+                            break
+                        continue
                     completion = None
                     if changed_files:
                         completion = Completion.begin(
@@ -2847,13 +2901,15 @@ def run_loop(
                         # before declaring success; this matches
                         # option (b) in BUGS.md T-000001.
                         _lifecycle._current_phase = "checks"
-                        cumulative_check = run_checks(
+                        cumulative_check = task_checks(
                             project_dir,
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
                             if not review_completion(cumulative_check):
-                                break
+                                if terminal_task_failure:
+                                    break
+                                continue
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -2939,10 +2995,12 @@ def run_loop(
                         break
                     if _is_zero_diff_check_task(task.text):
                         _lifecycle._current_phase = "checks"
-                        zero_diff_check = run_checks(project_dir)
+                        zero_diff_check = task_checks(project_dir)
                         if zero_diff_check.passed:
                             if not review_completion(zero_diff_check):
-                                break
+                                if terminal_task_failure:
+                                    break
+                                continue
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -3002,7 +3060,9 @@ def run_loop(
                         break
                     if _is_readonly_task(task.text):
                         if not review_completion(None):
-                            break
+                            if terminal_task_failure:
+                                break
+                            continue
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
@@ -3028,10 +3088,12 @@ def run_loop(
                     # Run checks and the configured requirement review before
                     # completing a task that made no additional changes.
                     _lifecycle._current_phase = "checks"
-                    no_diff_check = run_checks(project_dir)
+                    no_diff_check = task_checks(project_dir)
                     if no_diff_check.passed:
                         if not review_completion(no_diff_check):
-                            break
+                            if terminal_task_failure:
+                                break
+                            continue
                         elapsed = _format_elapsed(
                             time.monotonic() - task_start,
                         )
@@ -3103,13 +3165,15 @@ def run_loop(
                     )
                     if cumulative_committed:
                         _lifecycle._current_phase = "checks"
-                        cumulative_check = run_checks(
+                        cumulative_check = task_checks(
                             project_dir,
                             changed_files=cumulative_committed,
                         )
                         if cumulative_check.passed:
                             if not review_completion(cumulative_check):
-                                break
+                                if terminal_task_failure:
+                                    break
+                                continue
                             elapsed = _format_elapsed(
                                 time.monotonic() - task_start,
                             )
@@ -3189,7 +3253,7 @@ def run_loop(
                     )
                     continue
                 pre_check_status = _worktree_status(project_dir)
-                check_result = run_checks(
+                check_result = task_checks(
                     project_dir,
                     changed_files=changed_files,
                 )
@@ -3207,7 +3271,7 @@ def run_loop(
                         )
                         changed_files = _changed_files(project_dir)
                         pre_check_status = _worktree_status(project_dir)
-                        check_result = run_checks(
+                        check_result = task_checks(
                             project_dir,
                             changed_files=changed_files,
                         )
@@ -3225,7 +3289,9 @@ def run_loop(
                         )
                         continue
                     if not review_completion(check_result):
-                        break
+                        if terminal_task_failure:
+                            break
+                        continue
                     completion = Completion.begin(
                         project_dir,
                         active_file,
@@ -3448,6 +3514,9 @@ def run_loop(
                 ),
             )
             break
+
+        if success and task_review_policy.enabled:
+            review_resume.clear(project_dir, review_key)
 
         # --stop-after-one: exit after one successful task
         if stop_after_one and success:

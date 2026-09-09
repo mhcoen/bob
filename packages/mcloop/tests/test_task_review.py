@@ -137,7 +137,7 @@ def test_requirement_ids_preserve_complete_unambiguous_coverage(project, damage)
         del response["requirements"][1]["requirement_id"]
     with patch("mcloop.task_review._request_review", return_value=json.dumps(response)) as call:
         result = review_task(root, policy, "Task", baseline, "editor-model")
-    call.assert_called_once()
+    assert call.call_count == (1 if damage is None else 2)
     assert result.passed is (damage is None)
     if damage is None:
         receipt = json.loads(Path(result.receipt).read_text())
@@ -399,8 +399,8 @@ def test_prepare_discards_stale_evidence(project):
 def test_request_has_no_tools_and_fixed_output_bound(project, monkeypatch):
     _, policy, _ = project
     monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
-    with patch("mcloop.task_review.urllib.request.urlopen") as call:
-        call.return_value.__enter__.return_value.read.return_value = json.dumps(
+    with patch("mcloop.task_review._http_response") as call:
+        call.return_value = json.dumps(
             {
                 "choices": [
                     {
@@ -417,7 +417,7 @@ def test_request_has_no_tools_and_fixed_output_bound(project, monkeypatch):
     assert payload["reasoning"] == {"effort": "low"}
     assert payload["response_format"] == {"type": "json_object"}
     assert "tools" not in payload
-    assert call.call_args.kwargs["timeout"] == 90
+    assert call.call_args.kwargs["timeout"] == 180
 
 
 def test_design_project_requires_review_configuration(tmp_path, monkeypatch):
@@ -625,6 +625,7 @@ def test_blocked_review_resume_never_calls_editor_again(project, monkeypatch):
     from plan_fixtures import canonical_plan_text
 
     from mcloop._planfile_compat import parse
+    from mcloop.checks import CheckResult
     from mcloop.main import run_loop
     from mcloop.runner import RunResult
     from mcloop.task_review import TaskReview
@@ -637,7 +638,14 @@ def test_blocked_review_resume_never_calls_editor_again(project, monkeypatch):
     monkeypatch.setattr("mcloop.main._kill_orphan_sessions", lambda *args: None)
     monkeypatch.setattr("mcloop.main.run_autofix", lambda *args, **kwargs: None)
     monkeypatch.setattr("mcloop.main._get_git_hash", lambda *args: baseline)
+
+    def check(*args):
+        artifact = root / "check-observation.txt"
+        artifact.write_text(artifact.read_text() + "run\n" if artifact.exists() else "run\n")
+        return CheckResult(True, "observed", "true")
+
     with (
+        patch("mcloop.main.run_command_acceptance", side_effect=check) as checks,
         patch(
             "mcloop.main.run_task",
             return_value=RunResult(True, "done", 0, root / "logs/editor.log"),
@@ -651,6 +659,8 @@ def test_blocked_review_resume_never_calls_editor_again(project, monkeypatch):
         assert not parse(plan)[0].failed and not parse(plan)[0].checked
         run_loop(plan, no_audit=True)
     assert editor.call_count == 1
+    checks.assert_called_once()
+    assert (root / "check-observation.txt").read_text() == "run\n"
     assert reviewer.call_count == 2
     for call in reviewer.call_args_list:
         assert call.kwargs["checks"].command == "true"
@@ -874,8 +884,8 @@ def test_provider_accounting_survives_success_and_blocked_output(project, monkey
         "usage": usage,
         "choices": [{"finish_reason": finish, "message": {"content": verdict(packet)}}],
     }
-    with patch("mcloop.task_review.urllib.request.urlopen") as request:
-        request.return_value.__enter__.return_value.read.return_value = json.dumps(body).encode()
+    with patch("mcloop.task_review._http_response") as request:
+        request.return_value = json.dumps(body).encode()
         result = review_task(root, policy, "Task", baseline, "editor")
     receipt = json.loads(Path(result.receipt).read_text())
     assert receipt["provider"] == {
@@ -904,10 +914,8 @@ def test_exhausted_reasoning_retries_with_larger_budget_and_keeps_both_costs(pro
             "choices": [{"finish_reason": "stop", "message": {"content": verdict(packet)}}],
         },
     ]
-    with patch("mcloop.task_review.urllib.request.urlopen") as request:
-        request.return_value.__enter__.return_value.read.side_effect = [
-            json.dumps(body).encode() for body in bodies
-        ]
+    with patch("mcloop.task_review._http_response") as request:
+        request.side_effect = [json.dumps(body).encode() for body in bodies]
         result = review_task(root, policy, "Task", baseline, "editor")
     assert result.passed
     payloads = [json.loads(call.args[0].data) for call in request.call_args_list]
