@@ -56,6 +56,7 @@ def test_subscription_preflight_accepts_valid_stream_result_and_caches(
     def _fake_run(*args, **kwargs):
         nonlocal calls
         calls += 1
+        assert args[0][2] == runner.SUBSCRIPTION_PREFLIGHT_PROMPT
         return subprocess.CompletedProcess(
             args[0],
             0,
@@ -225,7 +226,7 @@ def test_codex_subscription_preflight_accepts_exit_zero_and_caches(
             "exec",
             "--model",
             "gpt-5.4",
-            "ok",
+            runner.SUBSCRIPTION_PREFLIGHT_PROMPT,
         ]
         return subprocess.CompletedProcess(args[0], 0, stdout="ok\n", stderr="")
 

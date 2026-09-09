@@ -46,6 +46,10 @@ def _decode_subprocess_output(value: bytes | str | None) -> str:
 DEFAULT_TASK_TIMEOUT = 3600  # 60 minutes; override with --timeout
 SUBSCRIPTION_PREFLIGHT_EXIT_CODE = 7
 SUBSCRIPTION_PREFLIGHT_TIMEOUT = 20
+SUBSCRIPTION_PREFLIGHT_PROMPT = (
+    "This is an availability check only. Reply with exactly OK. "
+    "Do not use tools, inspect files, run commands, or continue any project task."
+)
 # Session exit-code sentinels. Negative values double as "killed by signal N"
 # in Popen.returncode, so a custom sentinel must stay out of the POSIX/RT
 # signal range (-1..-64) to avoid colliding with a signal-killed child. The
@@ -381,7 +385,14 @@ def ensure_subscription_preflight(
     if cli == "claude":
         display_name = "Claude Code"
         login_hint = "Run `claude /login` and retry mcloop."
-        cmd = ["claude", "-p", "ok", "--output-format", "stream-json", "--verbose"]
+        cmd = [
+            "claude",
+            "-p",
+            SUBSCRIPTION_PREFLIGHT_PROMPT,
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
         if model:
             cmd.extend(["--model", model])
     elif cli == "codex":
@@ -390,7 +401,7 @@ def ensure_subscription_preflight(
         cmd = ["codex", "--ask-for-approval", "never", "--sandbox", "read-only", "exec"]
         if model:
             cmd.extend(["--model", model])
-        cmd.append("ok")
+        cmd.append(SUBSCRIPTION_PREFLIGHT_PROMPT)
     else:
         return
     try:
