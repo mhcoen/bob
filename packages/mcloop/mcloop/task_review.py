@@ -473,6 +473,13 @@ Citations into these files carry their exact current text separately in evidence
 Do not assume omitted unchanged code satisfies a requirement. Reject for insufficient
 context when the diff and cited passages cannot support an assessment. Inspect removed
 assertions and weakened expectations as well as added code.
+When report_encoding is present, changed_files uses its documented path tree and
+JSON record tables. Expand shared fields and strings when assessing observations.
+These tables retain report values; they do not certify the reports' claims.
+For a partitioned review, assess only the IDs in requirements. The all_requirements
+inventory identifies obligations assigned across parts; it is not an additional
+assessment list. Also inspect every changed file supplied in this part against
+the governing design, and report defects even outside its assigned requirements.
 Choose the IDs needed to support the assessment.
 Unknown IDs invalidate the verdict. Use file references in finding explanations when helpful.
 Acceptance is a review judgment with the stated evidence.
@@ -766,8 +773,8 @@ def review_task(
         record["input_limit_bytes"] = policy.max_input_bytes
         record["input_sections_bytes"] = packet_sizes(packet)
         print(
-            f"\n>>> Reviewing task requirements ({policy.model}, "
-            f"{record['input_bytes']}/{policy.max_input_bytes} input bytes)",
+            f"\n>>> Assembled requirement review ({policy.model}, "
+            f"{record['input_bytes']} total input bytes)",
             flush=True,
         )
         timings["evidence"] = time.monotonic() - stage_started
@@ -784,7 +791,12 @@ def review_task(
         record["part_count"] = len(parts)
         record["parts"] = parts if len(parts) > 1 else []
         if len(parts) > 1:
-            print(f"\n>>> Reviewing {len(parts)} parts; every part must accept.", flush=True)
+            sizes = ", ".join(str(len(packet_text(part).encode())) for part in parts)
+            print(
+                f"\n>>> Reviewing {len(parts)} parts ({sizes} bytes; "
+                f"{policy.max_input_bytes} per-request limit); every part must accept.",
+                flush=True,
+            )
 
         def unchanged(when):
             if _assembled_packet(root, policy, task, baseline, checks) != packet:
@@ -806,7 +818,23 @@ def review_task(
         stage_started = time.monotonic()
         unchanged("during review")
         record["part_reviews"] = verdicts
-        verdict = next((v for v in verdicts if v["verdict"] == "reject"), verdicts[-1])
+        verdict = next((v for v in verdicts if v["verdict"] == "reject"), None)
+        if verdict is None:
+            assessments = {
+                item["requirement_id"]: item
+                for part_verdict in verdicts
+                for item in part_verdict["requirements"]
+            }
+            verdict = _validate_verdict(
+                json.dumps(
+                    {
+                        "verdict": "accept",
+                        "findings": [],
+                        "requirements": list(assessments.values()),
+                    }
+                ),
+                packet,
+            )
         record["review"] = verdict
         record["passed"] = verdict["verdict"] == "accept"
         record["status"] = "accepted" if record["passed"] else "rejected"

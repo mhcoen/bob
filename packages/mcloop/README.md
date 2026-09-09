@@ -1309,12 +1309,23 @@ part of the output allowance.
 
 The default per-request input budget is 256,000 UTF-8 bytes. Set
 `task_review.max_input_bytes` in `.mcloop/config.json` to change it, from 1 through
-1,024,000 bytes. Bob partitions oversized packets into at most four parts. Every
-part receives all requirements and cited passages, plus an inventory identifying
-all changes. Changed files are distributed intact across parts. Every part must
-accept before the task can pass. If cited context plus an individual changed file
-cannot fit, or more than four parts are required, assembly returns a diagnostic
-for evidence repair. It never silently discards a change or a cited passage.
+1,024,000 bytes. Bob partitions oversized packets into at most four parts. It first
+tries supplying all requirements and cited passages to every part. If that does
+not fit, it assigns requirements to parts, keeping each requirement's complete
+cited context and supplying all cited design passages to every part. Each part
+also receives the complete task and requirement inventory. Changed files are
+distributed across the parts; a count and digest identify the complete change set
+without repeating thousands of paths in every request.
+
+For this second form, paths share directory prefixes, and generated JSON under
+`evidence/` shares repeated field names and string values through decoding tables.
+Every report field and value remains available, including failed observations.
+The original report text remains in the receipt. Source content is unchanged by
+this encoding. Bob checks the reconstructed reports, changed-file coverage and
+requirement coverage before sending the requests. Every part must accept, and
+the combined verdict must assess every requirement. If complete contexts and
+changes still cannot fit, assembly returns a diagnostic for evidence repair.
+It never silently discards a change or a cited passage.
 The provider can impose a lower context limit than the configured byte budget.
 
 A review admits no further requests after ten minutes. Each network operation has
