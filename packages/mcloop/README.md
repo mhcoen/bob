@@ -1282,8 +1282,12 @@ Python anchors accept a unique bare name or a qualified name such as
 classes and functions. When several declarations match, Bob supplies the complete
 file so the reviewer can examine every candidate.
 Python symbols select the complete declaration, including decorators.
-Legacy `relative/path:START-END` references remain supported. Missing anchors
-stop assembly with a diagnostic. The editor need not count lines or bytes,
+Legacy `relative/path:START-END` references remain supported. When the local parser
+cannot resolve a code anchor, Bob supplies the complete file and records the
+requested anchor and diagnostic in `anchor_resolution`. The reviewer must assess
+the requirement from the contents without assuming that symbol exists. Missing
+files, invalid line ranges and unresolved design headings still block assembly.
+The editor need not count lines or bytes,
 inspect Bob's implementation or write packet-assembly scripts.
 
 Bob sends the resolved contents with the full task and its changes. Bob assigns each
@@ -1323,6 +1327,8 @@ context cannot support a judgment. This selection is independent of the input
 budget; exceeding the budget still stops assembly.
 Python symbols use Python's parser. Swift symbols use `swiftc -frontend -dump-parse`
 to select complete declarations, retaining their enclosing type or extension.
+Swift anchors support initializers, destructors, properties, subscripts, enum cases
+and associated types as well as functions and named types.
 With the compiler available, qualified anchors such as `Checks.test_publication`
 distinguish methods declared in different types. Overloads sharing the same
 enclosing declaration supply that complete declaration once, including every

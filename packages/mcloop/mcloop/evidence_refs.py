@@ -8,6 +8,10 @@ import re
 from mcloop.swift_evidence import declaration
 
 
+class UnresolvedCodeAnchor(ValueError):
+    """The local parser cannot establish a requested code symbol's range."""
+
+
 def _python_matches(tree: ast.AST, anchor: str) -> list:
     matches = []
 
@@ -63,10 +67,12 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                 try:
                     tree = ast.parse(text)
                 except SyntaxError as exc:
-                    raise ValueError(f"Cannot resolve Python symbol: {reference}") from exc
+                    raise UnresolvedCodeAnchor(
+                        f"Cannot resolve Python symbol: {reference}"
+                    ) from exc
                 matches = _python_matches(tree, anchor)
                 if not matches:
-                    raise ValueError(f"Evidence symbol must identify one declaration: {reference}")
+                    raise UnresolvedCodeAnchor(f"Evidence symbol not resolved: {reference}")
                 if len(matches) > 1:
                     return name, 1, len(lines)
                 node = matches[0]
@@ -88,7 +94,12 @@ def resolve(reference: str, text: str) -> tuple[str, int, int]:
                 )
                 declarations = [line for line in lines if pattern.search(line)]
                 if not declarations:
-                    raise ValueError(
+                    error = (
+                        ValueError
+                        if name.lower().endswith((".md", ".markdown"))
+                        else UnresolvedCodeAnchor
+                    )
+                    raise error(
                         f"Evidence anchor must identify one heading or declaration: {reference}"
                     )
     if not 1 <= start <= end <= len(lines):

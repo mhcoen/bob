@@ -40,7 +40,7 @@ def test_qualified_python_anchor_selects_complete_declaration(anchor, span):
 
 @pytest.mark.parametrize("anchor", ["Missing.run", "Nested.run"])
 def test_incorrect_scope_is_refused(anchor):
-    with pytest.raises(ValueError, match="one declaration"):
+    with pytest.raises(ValueError, match="not resolved"):
         resolve("checks.py#" + anchor, SOURCE)
 
 

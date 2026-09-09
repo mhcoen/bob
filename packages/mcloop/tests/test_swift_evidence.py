@@ -109,3 +109,40 @@ def test_duplicate_ranges_resolve_without_discarding_any_declaration():
         ),
     ):
         assert resolve("file.swift#admit", source) == ("file.swift", 1, 4)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+@pytest.mark.parametrize(
+    "anchor",
+    [
+        "Ring.init",
+        "Ring.count",
+        "Ring.subscript",
+        "Ring.State.ready",
+        "Ring.State.failed",
+        "Ring.Value",
+    ],
+)
+def test_swift_member_forms_keep_complete_type(anchor):
+    source = """struct Before {}
+struct Ring {
+    var count: Int = 0
+    init(count: Int) { self.count = count }
+    subscript(index: Int) -> Int { count }
+    enum State { case ready, failed(Int) }
+    typealias Value = Int
+}
+struct After {}
+"""
+    assert resolve("file.swift#" + anchor, source) == ("file.swift", 2, 8)
+
+
+@pytest.mark.skipif(not shutil.which("swiftc"), reason="Swift compiler unavailable")
+def test_swift_destructor_and_associated_type():
+    source = (
+        "class Owner { deinit {} }\n"
+        "protocol Port { associatedtype Item; var item: Item { get } }\n"
+    )
+    assert resolve("file.swift#Owner.deinit", source) == ("file.swift", 1, 1)
+    assert resolve("file.swift#Port.Item", source) == ("file.swift", 2, 2)
+    assert resolve("file.swift#Port.item", source) == ("file.swift", 2, 2)

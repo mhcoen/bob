@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 _DECL = re.compile(
-    r"^(\s*)\((struct_decl|class_decl|enum_decl|protocol|extension_decl|func_decl|typealias)"
-    r'.*?range=\[<stdin>:(\d+):\d+ - line:(\d+):\d+\](?: unbound)? "([^"\n]+)"'
+    r"^(\s*)\((struct_decl|class_decl|enum_decl|protocol|extension_decl|func_decl|typealias|"
+    r"constructor_decl|destructor_decl|subscript_decl|var_decl|enum_element_decl|associated_type_decl)"
+    r'.*?range=\[<stdin>:(\d+):\d+ - line:(\d+):\d+\][^"\n]*"([^"\n]+)"'
 )
 _ATTR = re.compile(r"\(\w+_attr range=\[<stdin>:(\d+):")
 
@@ -45,6 +46,9 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
             depth = len(indent)
             while stack and stack[-1][0] >= depth:
                 stack.pop()
+            if kind == "var_decl" and not stack:
+                # A variable's compiler range omits its initializer and accessors.
+                return None
             node = _Node(name.split("(", 1)[0], int(start), int(end))
             # Members need their enclosing type/extension's generic and conformance context.
             if stack:
@@ -60,6 +64,9 @@ def _declarations(compiler: str, text: str) -> tuple[tuple[str, int, int], ...] 
                 "protocol",
                 "extension_decl",
                 "func_decl",
+                "constructor_decl",
+                "destructor_decl",
+                "subscript_decl",
             }:
                 stack.append((depth, node))
         elif re.match(

@@ -527,7 +527,9 @@ def test_overlapping_references_preserve_all_cited_lines(project):
     assert packet["changed_files"]["ports.swift"] == "one\ntwo\nthree\nfour\n"
 
 
-@pytest.mark.parametrize("reference", ["../outside.py", "ports.swift#missing", "ports.swift:9-10"])
+@pytest.mark.parametrize(
+    "reference", ["../outside.py", "ports.swift:9-10", "absent.swift#init", "ports.swift#"]
+)
 def test_bad_references_block_before_provider_request(project, reference):
     root, policy, baseline = project
     data = json.loads((root / EVIDENCE_PATH).read_text())
@@ -540,6 +542,52 @@ def test_bad_references_block_before_provider_request(project, reference):
     record = json.loads(Path(result.receipt).read_text())
     assert record["status"] == "blocked"
     assert record["timings"]["evidence"] >= 0
+
+
+@pytest.mark.parametrize(
+    ("filename", "source", "anchor"),
+    [
+        ("ports.swift", "struct Port {}\n", "Port.init"),
+        ("ports.py", "class Port:\n    pass\n", "Port.missing"),
+        ("ports.rs", "impl Port { fn new() -> Self { Self {} } }\n", "Port.new"),
+    ],
+)
+def test_unresolved_code_anchor_supplies_file_and_warning_to_reviewer(
+    project, filename, source, anchor
+):
+    root, policy, baseline = project
+    (root / filename).write_text(source)
+    data = json.loads((root / EVIDENCE_PATH).read_text())
+    data["requirements"][0]["implementation"] = [f"{filename}#{anchor}"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(data))
+    packet = build_packet(root, policy, "Task", baseline)
+    ref = packet["requirements"][0]["implementation"][0]
+    assert ref["anchor_resolution"]["status"] == "unresolved"
+    assert ref["anchor_resolution"]["requested_reference"] == f"{filename}#{anchor}"
+    assert packet["changed_files"][filename] == source
+    response = json.loads(verdict(packet, accepted=False))
+    response["requirements"][0]["evidence"] = [
+        "DESIGN.md:1-1",
+        ref["reference"],
+        "smoke.swift:1-1",
+    ]
+    with patch(
+        "mcloop.task_review._request_review", return_value=json.dumps(response)
+    ) as provider:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    provider.assert_called_once()
+    assert not result.passed and not result.blocked
+
+
+def test_unresolved_design_anchor_still_blocks(project):
+    root, policy, baseline = project
+    data = json.loads((root / EVIDENCE_PATH).read_text())
+    data["requirements"][0]["design"] = ["DESIGN.md#Missing"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(data))
+    with patch("mcloop.task_review._request_review") as provider:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    provider.assert_not_called()
 
 
 def test_resume_survives_checkpoint_and_evidence_repair_but_not_code_changes(project):

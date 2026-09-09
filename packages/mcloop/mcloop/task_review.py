@@ -16,7 +16,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from mcloop.checks import CheckResult
-from mcloop.evidence_refs import filename, resolve
+from mcloop.evidence_refs import UnresolvedCodeAnchor, filename, resolve
 from mcloop.git_ops import run_git_bounded
 from mcloop.timing import timed
 
@@ -145,7 +145,8 @@ def prepare_evidence(
         "references). "
         "Use qualified symbols such as file.py#Class.method or file.swift#Type.method "
         "to keep evidence focused. Ambiguous existing anchors include the whole file "
-        "so the reviewer sees every candidate; missing anchors are rejected. "
+        "so the reviewer sees every candidate. Unresolved code anchors supply the complete "
+        "file with a warning for the reviewer; they do not establish that the symbol exists. "
         "The design array may cite only the accepted design files listed below. "
         "Cite derived acceptance documents, review notes and test expectations in verification, "
         "even when the task explicitly asks you to consult them. Each requirement must also "
@@ -249,8 +250,25 @@ def _reference(root: Path, reference: str, documents: dict[str, str], design: bo
             "accepted document in design. Accepted design files: " + ", ".join(documents)
         )
     text = documents[name] if design else _read_file(root, name)
-    name, start, end = resolve(reference, text)
+    warning = {}
+    try:
+        name, start, end = resolve(reference, text)
+    except UnresolvedCodeAnchor as exc:
+        if design or not text.splitlines():
+            raise
+        start, end = 1, len(text.splitlines())
+        warning = {
+            "anchor_resolution": {
+                "requested_reference": reference,
+                "status": "unresolved",
+                "diagnostic": str(exc),
+                "instruction": "Complete file supplied. Verify the requirement from its contents; "
+                "do not assume the requested symbol exists. "
+                "Reject if the evidence is insufficient.",
+            }
+        }
     return {
+        **warning,
         "reference": f"{name}:{start}-{end}",
         "text": "\n".join(text.splitlines()[start - 1 : end]),
     }
