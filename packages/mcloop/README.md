@@ -1306,8 +1306,12 @@ Each review uses no tools. A transient timeout, connection failure or HTTP
 `Retry-After` values longer than five seconds and authentication errors stop the
 request stage. Incomplete JSON, missing requirement assessments and responses
 ending with `finish_reason: length` also permit one retry, using 9,000 output
-tokens. All of these conditions share the same two-request allowance per part.
-The initial request allows 3,000 output tokens. Partial responses cannot pass.
+tokens. Transport and verdict retries have separate allowances, with at most
+three requests per part. The initial request allows 3,000 output tokens.
+After an incomplete response, Bob records the 9,000-token allowance for that
+exact part, model, endpoint and review instructions. Resuming unchanged input
+uses that allowance immediately. A response that exhausts 9,000 tokens stops
+the part; Bob does not repeat it with the same limit. Partial responses cannot pass.
 OpenRouter requests use low reasoning effort and JSON output; reasoning consumes
 part of the output allowance.
 
@@ -1336,8 +1340,9 @@ A review admits no further requests after ten minutes. Each network operation ha
 a 180-second process deadline, including response reads and keepalives. An
 in-flight operation may outlast the ten-minute admission deadline, so request
 time is bounded by thirteen minutes.
-The maximum is eight requests and 48,000 requested output tokens across four
-parts, including retries. Provider charges can be unknown after a timeout.
+The maximum is twelve requests and 108,000 requested output tokens across four
+parts, including retries and previously increased allowances. These are request
+ceilings; receipts record actual returned usage. Provider charges can be unknown after a timeout.
 Receipts record each attempt before transmission and retain returned usage.
 Completed review parts are cached by packet, reviewer endpoint/model and review
 instructions. An interrupted later part does not require repeating earlier parts

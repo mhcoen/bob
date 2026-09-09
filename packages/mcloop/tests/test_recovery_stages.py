@@ -98,6 +98,61 @@ def test_malformed_verdict_recovers_and_cached_verdict_survives_restart(project)
     call.assert_called_once()
 
 
+@pytest.mark.parametrize("transport_first", [False, True])
+def test_exhausted_output_budget_survives_resume(project, transport_first):
+    root, policy, baseline = project
+    length = ReviewResponseError("length", {"choices": [{"finish_reason": "length"}]})
+    failures = [length, length]
+    if transport_first:
+        failures.insert(0, TimeoutError())
+    with (
+        patch("mcloop.task_review.time.sleep"),
+        patch("mcloop.task_review._request_review", side_effect=failures) as request,
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert request.call_count == len(failures)
+    packet = build_packet(root, policy, "Task", baseline)
+    with patch("mcloop.task_review._request_review", return_value=accept_all(packet)) as request:
+        assert review_task(root, policy, "Task", baseline, "editor").passed
+    request.assert_called_once()
+    assert request.call_args.kwargs == {"max_output_tokens": 9000}
+    (root / "ports.swift").write_text("struct Changed {}")
+    with patch(
+        "mcloop.task_review._request_review", side_effect=lambda _, p: accept_all(p)
+    ) as request:
+        assert review_task(root, policy, "Task", baseline, "editor").passed
+    assert not request.call_args.kwargs
+
+
+@pytest.mark.parametrize("errors", [("timeout", "invalid"), ("invalid", "timeout")])
+def test_transport_and_invalid_verdict_recover_without_editing(project, errors):
+    root, policy, baseline = project
+    packet = build_packet(root, policy, "Task", baseline)
+    results = [TimeoutError() if error == "timeout" else "{}" for error in errors]
+    with (
+        patch("mcloop.task_review.time.sleep"),
+        patch(
+            "mcloop.task_review._request_review", side_effect=results + [accept_all(packet)]
+        ) as call,
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.passed
+    assert call.call_count == 3
+    assert "response_correction" in call.call_args.args[1]
+
+
+def test_length_at_saved_larger_budget_is_not_repeated(project):
+    root, policy, baseline = project
+    length = ReviewResponseError("length", {"choices": [{"finish_reason": "length"}]})
+    with patch("mcloop.task_review._request_review", side_effect=length):
+        assert review_task(root, policy, "Task", baseline, "editor").blocked
+    with patch("mcloop.task_review._request_review", side_effect=length) as call:
+        assert review_task(root, policy, "Task", baseline, "editor").blocked
+    call.assert_called_once()
+    assert call.call_args.kwargs == {"max_output_tokens": 9000}
+
+
 def test_partition_preserves_every_change_and_every_cited_passage(project):
     root, policy, baseline = project
     for number in range(4):

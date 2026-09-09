@@ -674,6 +674,15 @@ def _review_part(root, policy, packet, record, unchanged, deadline):
             record.setdefault("cached_parts", []).append(identity)
             return saved["raw_response"], verdict
     max_output_tokens = MAX_OUTPUT_TOKENS
+    budget_cache = cache.with_suffix(".budget.json")
+    if budget_cache.exists():
+        try:
+            saved_budget = json.loads(budget_cache.read_text())
+        except (ValueError, OSError):
+            saved_budget = None
+        if saved_budget == {"max_output_tokens": RETRY_OUTPUT_TOKENS}:
+            max_output_tokens = RETRY_OUTPUT_TOKENS
+    transport_retries = verdict_retries = 0
     request_packet = packet
     for request_attempt in range(RECOVERY.requests_per_part):
         if time.monotonic() >= deadline:
@@ -715,6 +724,17 @@ def _review_part(root, policy, packet, record, unchanged, deadline):
                 attempt["provider_status"] = exc.provider_status
             validation_error = validation_error or isinstance(exc, json.JSONDecodeError)
             delay = 0 if exhausted or validation_error else _review_retry_delay(exc)
+            if exhausted or validation_error:
+                atomic_write_json(budget_cache, {"max_output_tokens": RETRY_OUTPUT_TOKENS})
+                if verdict_retries >= RECOVERY.verdict_retries or (
+                    exhausted and max_output_tokens == RETRY_OUTPUT_TOKENS
+                ):
+                    raise
+                verdict_retries += 1
+            else:
+                if transport_retries >= RECOVERY.transport_retries:
+                    raise
+                transport_retries += 1
             if request_attempt + 1 >= RECOVERY.requests_per_part or delay is None:
                 raise
             record["retried_error"] = {"type": type(exc).__name__}

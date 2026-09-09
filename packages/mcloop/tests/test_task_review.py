@@ -947,19 +947,24 @@ def test_changed_evidence_prevents_retry_after_exhausted_output(project):
 
 
 @pytest.mark.parametrize("first_failure", ["timeout", "length"])
-def test_output_retry_and_transport_retry_share_two_request_limit(project, first_failure):
+def test_output_retry_and_transport_retry_have_separate_allowances(project, first_failure):
     from mcloop.task_review import ReviewResponseError
 
     root, policy, baseline = project
     length = ReviewResponseError("length", {"choices": [{"finish_reason": "length"}]})
     errors = [TimeoutError(), length] if first_failure == "timeout" else [length, TimeoutError()]
+    packet = build_packet(root, policy, "Task", baseline)
     with (
         patch("mcloop.task_review.time.sleep"),
-        patch("mcloop.task_review._request_review", side_effect=errors) as request,
+        patch(
+            "mcloop.task_review._request_review", side_effect=errors + [verdict(packet)]
+        ) as request,
     ):
         result = review_task(root, policy, "Task", baseline, "editor")
-    assert result.blocked
-    assert request.call_count == 2
+    assert result.passed
+    assert request.call_count == 3
+    limits = [call.kwargs.get("max_output_tokens", 3000) for call in request.call_args_list]
+    assert limits == ([3000, 3000, 9000] if first_failure == "timeout" else [3000, 9000, 9000])
 
 
 def test_acceptance_repair_preserves_existing_requirement_evidence(project):

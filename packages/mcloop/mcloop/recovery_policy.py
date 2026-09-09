@@ -6,7 +6,9 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class RecoveryPolicy:
     editor_repairs: int = 1
-    requests_per_part: int = 2
+    requests_per_part: int = 3
+    transport_retries: int = 1
+    verdict_retries: int = 1
     review_parts: int = 4
     review_seconds: int = 600
     request_seconds: int = 180
