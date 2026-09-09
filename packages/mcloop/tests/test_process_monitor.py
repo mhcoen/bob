@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import select
 import signal
 import subprocess
 import sys
@@ -990,15 +991,18 @@ class TestSendSignal:
                 proc.wait()
 
     def test_send_sigusr1(self):
+        # The signal can interrupt the ready message's flush. Printing from
+        # the handler would re-enter stdout's buffered writer.
         script = (
-            "import signal, sys, time\n"
+            "import signal, time\n"
             "got = []\n"
             "def handler(s, f):\n"
             "    got.append(1)\n"
-            "    print('caught', flush=True)\n"
             "signal.signal(signal.SIGUSR1, handler)\n"
             "print('ready', flush=True)\n"
-            "time.sleep(5)\n"
+            "while not got:\n"
+            "    time.sleep(0.01)\n"
+            "print('caught', flush=True)\n"
             "print(f'count:{len(got)}', flush=True)\n"
         )
         proc = subprocess.Popen(
@@ -1007,13 +1011,16 @@ class TestSendSignal:
             stderr=subprocess.STDOUT,
         )
         try:
+            assert select.select([proc.stdout], [], [], 5)[0], "Child did not become ready"
             line = proc.stdout.readline()
-            assert b"ready" in line
+            assert line == b"ready\n", line
             assert process_monitor.send_signal(proc.pid, signal.SIGUSR1)
-            line = proc.stdout.readline()
-            assert b"caught" in line
+            output, _ = proc.communicate(timeout=5)
+            assert proc.returncode == 0, output.decode(errors="replace")
+            assert output.splitlines() == [b"caught", b"count:1"]
         finally:
-            proc.kill()
+            if proc.poll() is None:
+                proc.kill()
             proc.wait()
 
     def test_send_to_dead_process(self):
