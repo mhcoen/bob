@@ -44,6 +44,7 @@ from mcloop.install_cmd import (
 from mcloop.investigate_cmd import (
     MAX_VERIFICATION_ROUNDS,
     _append_verification_failure,
+    _auto_cli_progress,
     _bashify_sh_command,
     _copy_project_settings,
     _dispatch_auto_action,
@@ -4454,7 +4455,13 @@ def test_dispatch_run_cli():
     with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
         result = _dispatch_auto_action("run_cli", "./my_app --flag")
 
-    mock.assert_called_once_with("./my_app --flag")
+    mock.assert_called_once_with(
+        "./my_app --flag",
+        cwd=Path.cwd(),
+        timeout_seconds=300,
+        hang_seconds=None,
+        on_progress=_auto_cli_progress,
+    )
     assert "OK" in result
     assert "hello world" in result
 
@@ -4490,7 +4497,13 @@ def test_dispatch_run_cli_sh_via_bash():
     with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
         _dispatch_auto_action("run_cli", "./verify.sh --check")
 
-    mock.assert_called_once_with("bash ./verify.sh --check")
+    mock.assert_called_once_with(
+        "bash ./verify.sh --check",
+        cwd=Path.cwd(),
+        timeout_seconds=300,
+        hang_seconds=None,
+        on_progress=_auto_cli_progress,
+    )
 
 
 def test_dispatch_run_cli_non_sh_unchanged():
@@ -4504,7 +4517,13 @@ def test_dispatch_run_cli_non_sh_unchanged():
     with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
         _dispatch_auto_action("run_cli", "./my_app --flag")
 
-    mock.assert_called_once_with("./my_app --flag")
+    mock.assert_called_once_with(
+        "./my_app --flag",
+        cwd=Path.cwd(),
+        timeout_seconds=300,
+        hang_seconds=None,
+        on_progress=_auto_cli_progress,
+    )
 
 
 def test_dispatch_run_cli_644_sh_runs_via_bash(tmp_path):
@@ -4685,7 +4704,13 @@ def test_run_cli_run_to_confirm_form_executes_only_command(tmp_path):
     with patch("mcloop.process_monitor.run_cli", return_value=mock_result) as mock:
         result = _dispatch_auto_action(action, args)
 
-    mock.assert_called_once_with("pytest -q tests/test_smoke.py")
+    mock.assert_called_once_with(
+        "pytest -q tests/test_smoke.py",
+        cwd=Path.cwd(),
+        timeout_seconds=300,
+        hang_seconds=None,
+        on_progress=_auto_cli_progress,
+    )
     shelled = mock.call_args[0][0]
     for prose_word in ("Run", "confirm", "suite", "passes"):
         assert prose_word not in shelled
@@ -4765,7 +4790,7 @@ def test_run_loop_auto_task_skips_claude(tmp_path):
         run_loop(plan, no_audit=True)
 
     # _dispatch_auto_action called for the AUTO task
-    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test")
+    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test", project_dir=tmp_path)
 
     # run_task only called for the second task
     assert mock_run_task.call_count == 1
@@ -4805,7 +4830,7 @@ def test_run_loop_auto_task_nonzero_fails_and_leaves_task_unchecked(tmp_path):
         result = run_loop(plan, no_audit=True)
 
     assert not result.ok
-    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test")
+    mock_dispatch.assert_called_once_with("run_cli", "./my_app --test", project_dir=tmp_path)
     mock_run_task.assert_not_called()
     mock_checks.assert_not_called()
 
@@ -11343,10 +11368,12 @@ def test_run_loop_retry_task_resets_only_named_marker(tmp_path):
     assert_canonical_checkbox(text, "!", "other failed")
 
 
-def test_stop_after_one_exits_after_single_task(tmp_path):
+@pytest.mark.parametrize("auto", [False, True])
+def test_stop_after_one_exits_after_single_task(tmp_path, auto):
     """--stop-after-one runs one task then exits with success."""
     plan = tmp_path / "PLAN.md"
-    plan.write_text(canonical_plan_text("# Plan\n- [ ] First task\n- [ ] Second task\n"))
+    first = "[AUTO:run_cli] Run `exit 0`" if auto else "First task"
+    plan.write_text(canonical_plan_text(f"# Plan\n- [ ] {first}\n- [ ] Second task\n"))
     (tmp_path / ".git").mkdir()
 
     result_mock = MagicMock()

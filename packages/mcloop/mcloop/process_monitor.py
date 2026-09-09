@@ -7,6 +7,7 @@ import select
 import signal
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,6 +32,7 @@ class CLIResult:
     hung: bool  # True if killed due to no-output timeout
     duration: float  # Wall-clock seconds
     sample_output: str | None = None  # macOS sample if hung
+    timed_out: bool = False
 
 
 @dataclass
@@ -298,8 +300,9 @@ def run_cli(
     command: str,
     cwd: str | Path | None = None,
     timeout_seconds: float = 30.0,
-    hang_seconds: float = 10.0,
+    hang_seconds: float | None = 10.0,
     poll_interval: float = 0.1,
+    on_progress: Callable[[float, float], None] | None = None,
 ) -> CLIResult:
     """Launch a CLI app, capture output, detect crash or hang.
 
@@ -311,8 +314,9 @@ def run_cli(
         command: Shell command to run.
         cwd: Working directory.
         timeout_seconds: Max wall-clock time before killing.
-        hang_seconds: No-output duration that triggers hang detection.
+        hang_seconds: No-output duration that triggers hang detection; None disables it.
         poll_interval: How often to check for output/status.
+        on_progress: Called every thirty seconds with elapsed time and output age.
 
     Returns:
         CLIResult with exit code, output, and hang/crash info.
@@ -320,6 +324,7 @@ def run_cli(
     proc = launch(command, cwd=cwd)
     chunks: list[bytes] = []
     start = time.monotonic()
+    next_progress = start + 30
     stdout_fd = proc.process.stdout.fileno() if proc.process.stdout else -1
 
     while True:
@@ -340,6 +345,7 @@ def run_cli(
                 hung=True,
                 duration=time.monotonic() - start,
                 sample_output=sample_out,
+                timed_out=True,
             )
 
         # Read available output without blocking.
@@ -370,7 +376,10 @@ def run_cli(
 
         # Check for hang (no output for hang_seconds).
         silence = time.monotonic() - proc.last_output_at
-        if silence >= hang_seconds:
+        if on_progress is not None and time.monotonic() >= next_progress:
+            on_progress(time.monotonic() - start, silence)
+            next_progress = time.monotonic() + 30
+        if hang_seconds is not None and silence >= hang_seconds:
             sample_out = sample(proc.pid)
             kill_process_group(proc.pid)
             if proc.process.stdout:

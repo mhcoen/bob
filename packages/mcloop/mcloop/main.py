@@ -677,7 +677,7 @@ def _auto_response_failed(response: str) -> bool:
             return True
         if line.startswith("STATUS:"):
             status = line.removeprefix("STATUS:").strip().upper()
-            if status.startswith("CRASHED") or status.startswith("HUNG"):
+            if status.startswith(("CRASHED", "HUNG", "TIMEOUT")):
                 return True
         if line.startswith("exit_code:"):
             code = line.removeprefix("exit_code:").strip()
@@ -1962,7 +1962,7 @@ def run_loop(
             has_subtasks = find_parent(tasks, task) is not None
             ctx.update_group(label, has_subtasks)
             action, args = parse_auto_task(task)
-            response = _handle_auto_task(label, action, args)
+            response = _handle_auto_task(label, action, args, project_dir=project_dir)
             if _auto_response_failed(response):
                 failed_task = f"{label}) {format_task_id(task)}{task.text}"
                 failed_reason = response
@@ -1980,6 +1980,9 @@ def run_loop(
             completed.append(f"{label}) {format_task_id(task)}{task.text}")
             ctx.add(label, task.text, "0s", response)
             notify(f"[AUTO:{action}] {args[:60]}")
+            if stop_after_one:
+                stopped_early = "one"
+                break
             continue
 
         # Handle [USER] tasks: pause for human observation

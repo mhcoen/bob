@@ -451,7 +451,9 @@ def _handle_user_task(label: str, instructions: str) -> str:
     return response
 
 
-def _handle_auto_task(label: str, action: str, args: str) -> str:
+def _handle_auto_task(
+    label: str, action: str, args: str, *, project_dir: Path | None = None
+) -> str:
     """Execute an [AUTO] task and return the observation result.
 
     Dispatches to process_monitor, app_interact, or web_interact
@@ -473,7 +475,11 @@ def _handle_auto_task(label: str, action: str, args: str) -> str:
     print(formatting.auto_banner(label, action, args), flush=True)
 
     try:
-        result = _dispatch_auto_action(action, args)
+        result = (
+            _dispatch_auto_action(action, args, project_dir=project_dir)
+            if project_dir is not None
+            else _dispatch_auto_action(action, args)
+        )
     except Exception as exc:
         result = f"ERROR: {action} failed: {exc}"
         print(f"  {result}", flush=True)
@@ -504,7 +510,14 @@ def _bashify_sh_command(command: str) -> str:
     return command
 
 
-def _dispatch_auto_action(action: str, args: str) -> str:
+def _auto_cli_progress(elapsed: float, silence: float) -> None:
+    print(
+        f"    run_cli: {elapsed:.0f}s elapsed; last output {silence:.0f}s ago",
+        flush=True,
+    )
+
+
+def _dispatch_auto_action(action: str, args: str, *, project_dir: Path | None = None) -> str:
     """Dispatch an auto task action to the appropriate module.
 
     Returns the observation result as a string.
@@ -515,9 +528,22 @@ def _dispatch_auto_action(action: str, args: str) -> str:
         return f"ERROR: {args}"
 
     if action == "run_cli":
-        cli_result = process_monitor.run_cli(_bashify_sh_command(args))
+        from mcloop.checks import check_timeout
+
+        root = project_dir or Path.cwd()
+        timeout = check_timeout(root)
+        print(f"    Command deadline: {timeout}s", flush=True)
+        cli_result = process_monitor.run_cli(
+            _bashify_sh_command(args),
+            cwd=root,
+            timeout_seconds=timeout,
+            hang_seconds=None,
+            on_progress=_auto_cli_progress,
+        )
         parts = [f"exit_code: {cli_result.exit_code}"]
-        if cli_result.hung:
+        if cli_result.timed_out is True:
+            parts.append(f"STATUS: TIMEOUT (killed after {timeout}s)")
+        elif cli_result.hung:
             parts.append("STATUS: HUNG (killed)")
         elif cli_result.exit_code != 0:
             parts.append("STATUS: CRASHED")

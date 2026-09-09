@@ -866,6 +866,10 @@ order and skips auto-detection entirely:
 
 The `check_timeout` key sets the per-command timeout in seconds
 (default: 300). Increase this for projects with large test suites.
+`[AUTO:run_cli]` commands use this same deadline and run in the plan's
+project directory. Silence does not trigger an early termination. They print
+elapsed time and output age every thirty seconds; expiry reports `TIMEOUT` and
+leaves the task pending. `--stop-after-one` also stops after a successful AUTO task.
 
 Check commands run sequentially in list order and stop at the first
 failure, so a broken lint never buries the test failure that matters
