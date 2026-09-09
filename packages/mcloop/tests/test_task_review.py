@@ -885,6 +885,73 @@ def test_provider_accounting_survives_success_and_blocked_output(project, monkey
     }
     assert result.passed is (finish == "stop")
     assert result.blocked is (finish == "length")
+    assert len(receipt["provider_attempts"]) == (2 if finish == "length" else 1)
+
+
+def test_exhausted_reasoning_retries_with_larger_budget_and_keeps_both_costs(project, monkeypatch):
+    root, policy, baseline = project
+    packet = build_packet(root, policy, "Task", baseline)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    bodies = [
+        {
+            "id": "exhausted",
+            "usage": {"completion_tokens": 3000, "cost": 0.004},
+            "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+        },
+        {
+            "id": "finished",
+            "usage": {"completion_tokens": 4200, "cost": 0.006},
+            "choices": [{"finish_reason": "stop", "message": {"content": verdict(packet)}}],
+        },
+    ]
+    with patch("mcloop.task_review.urllib.request.urlopen") as request:
+        request.return_value.__enter__.return_value.read.side_effect = [
+            json.dumps(body).encode() for body in bodies
+        ]
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.passed
+    payloads = [json.loads(call.args[0].data) for call in request.call_args_list]
+    assert [payload["max_tokens"] for payload in payloads] == [3000, 9000]
+    assert payloads[0]["messages"] == payloads[1]["messages"]
+    assert payloads[1]["reasoning"] == {"effort": "low"}
+    receipt = json.loads(Path(result.receipt).read_text())
+    assert [attempt["provider"]["usage"]["cost"] for attempt in receipt["provider_attempts"]] == [
+        0.004,
+        0.006,
+    ]
+    assert receipt["provider_attempts"][0]["finish_reason"] == "length"
+
+
+def test_changed_evidence_prevents_retry_after_exhausted_output(project):
+    from mcloop.task_review import ReviewResponseError
+
+    root, policy, baseline = project
+
+    def exhausted(*args):
+        (root / "ports.swift").write_text("changed implementation\n")
+        raise ReviewResponseError("length", {"choices": [{"finish_reason": "length"}]})
+
+    with patch("mcloop.task_review._request_review", side_effect=exhausted) as request:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert "changed before retry" in result.output
+    request.assert_called_once()
+
+
+@pytest.mark.parametrize("first_failure", ["timeout", "length"])
+def test_output_retry_and_transport_retry_share_two_request_limit(project, first_failure):
+    from mcloop.task_review import ReviewResponseError
+
+    root, policy, baseline = project
+    length = ReviewResponseError("length", {"choices": [{"finish_reason": "length"}]})
+    errors = [TimeoutError(), length] if first_failure == "timeout" else [length, TimeoutError()]
+    with (
+        patch("mcloop.task_review.time.sleep"),
+        patch("mcloop.task_review._request_review", side_effect=errors) as request,
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert request.call_count == 2
 
 
 def test_acceptance_repair_preserves_existing_requirement_evidence(project):

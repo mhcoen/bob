@@ -24,6 +24,7 @@ EVIDENCE_PATH = ".mcloop/task-evidence.json"
 MAX_INPUT_BYTES = 256_000
 MAX_CONFIGURED_INPUT_BYTES = 1_024_000
 MAX_OUTPUT_TOKENS = 3000
+RETRY_OUTPUT_TOKENS = 9000
 MAX_RESPONSE_BYTES = 48_000
 
 
@@ -484,21 +485,27 @@ class ReviewResponseError(ValueError):
     def __init__(self, message: str, body: dict):
         super().__init__(message)
         self.accounting = ReviewResponse("", body).accounting
+        self.finish_reason = body.get("choices", [{}])[0].get("finish_reason")
 
 
 @timed("review")
-def _request_review(policy: ReviewPolicy, packet: dict) -> str:
+def _request_review(
+    policy: ReviewPolicy, packet: dict, *, max_output_tokens: int = MAX_OUTPUT_TOKENS
+) -> str:
+    if max_output_tokens not in (MAX_OUTPUT_TOKENS, RETRY_OUTPUT_TOKENS):
+        raise ValueError("Unsupported task review response budget")
+    response_limit = MAX_RESPONSE_BYTES * (max_output_tokens // MAX_OUTPUT_TOKENS)
     payload = {
         "model": policy.model,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": packet_text(packet)},
         ],
-        "max_tokens": MAX_OUTPUT_TOKENS,
+        "max_tokens": max_output_tokens,
     }
     if urlsplit(policy.base_url).hostname == "openrouter.ai":
         # OpenRouter includes reasoning in max_tokens. Its default effort can
-        # consume almost the whole budget before the JSON verdict begins.
+        # consume the whole budget before the JSON verdict begins.
         payload["reasoning"] = {"effort": "low"}
         payload["response_format"] = {"type": "json_object"}
     request = urllib.request.Request(
@@ -512,8 +519,8 @@ def _request_review(policy: ReviewPolicy, packet: dict) -> str:
     )
     # One request, without an SDK retry loop or tool calls.
     with urllib.request.urlopen(request, timeout=90) as response:
-        raw = response.read(MAX_RESPONSE_BYTES + 1)
-    if len(raw) > MAX_RESPONSE_BYTES:
+        raw = response.read(response_limit + 1)
+    if len(raw) > response_limit:
         raise ValueError("Task review response exceeds the size limit")
     body = json.loads(raw)
     choice = body["choices"][0]
@@ -651,19 +658,42 @@ def review_task(
         timings["evidence"] = time.monotonic() - stage_started
         phase = "review"
         stage_started = time.monotonic()
+        max_output_tokens = MAX_OUTPUT_TOKENS
+        record["provider_attempts"] = []
         for request_attempt in range(2):
             record["request_attempts"] = request_attempt + 1
+            attempt = {"request": request_attempt + 1, "max_output_tokens": max_output_tokens}
+            record["provider_attempts"].append(attempt)
             try:
-                raw = _request_review(policy, packet)
+                if max_output_tokens == MAX_OUTPUT_TOKENS:
+                    raw = _request_review(policy, packet)
+                else:
+                    raw = _request_review(policy, packet, max_output_tokens=max_output_tokens)
+                attempt["status"] = "returned"
+                if isinstance(raw, ReviewResponse):
+                    attempt["provider"] = raw.accounting
                 break
             except Exception as exc:
-                delay = _review_retry_delay(exc)
+                attempt.update(status="error", error_type=type(exc).__name__)
+                exhausted = isinstance(exc, ReviewResponseError) and exc.finish_reason == "length"
+                if isinstance(exc, ReviewResponseError):
+                    attempt["provider"] = exc.accounting
+                    attempt["finish_reason"] = exc.finish_reason
+                delay = 0 if exhausted else _review_retry_delay(exc)
                 if request_attempt or delay is None:
                     raise
                 record["retried_error"] = {"type": type(exc).__name__}
                 if isinstance(exc, urllib.error.HTTPError):
                     record["retried_error"]["http_status"] = exc.code
-                print("\n>>> Transient review request failure; retrying once.", flush=True)
+                if exhausted:
+                    max_output_tokens = RETRY_OUTPUT_TOKENS
+                    print(
+                        "\n>>> Reviewer exhausted its response budget; retrying once with "
+                        f"{max_output_tokens} output tokens. Completed editing is preserved.",
+                        flush=True,
+                    )
+                else:
+                    print("\n>>> Transient review request failure; retrying once.", flush=True)
                 time.sleep(delay)
                 if build_packet(root, policy, task, baseline, checks) != packet:
                     raise ValueError("Task review input changed before retry") from exc
@@ -700,9 +730,14 @@ def review_task(
             output = f"Requirement review blocked (HTTP {exc.code})"
         else:
             output = f"Requirement review blocked ({type(exc).__name__})"
-    usage = record.get("provider", {}).get("usage")
-    if isinstance(usage, dict) and usage:
-        print("\n>>> Review usage: " + json.dumps(usage, separators=(",", ":")), flush=True)
+    for attempt in record.get("provider_attempts", []):
+        usage = attempt.get("provider", {}).get("usage")
+        if isinstance(usage, dict) and usage:
+            print(
+                f"\n>>> Review usage (request {attempt['request']}): "
+                + json.dumps(usage, separators=(",", ":")),
+                flush=True,
+            )
     timings[phase] = time.monotonic() - stage_started
     record["timings"] = {k: round(v, 3) for k, v in timings.items()}
     record["elapsed_seconds"] = round(time.monotonic() - started, 3)

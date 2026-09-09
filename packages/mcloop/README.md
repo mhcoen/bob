@@ -1300,16 +1300,21 @@ signatures implement an accepted contract.
 Each review uses no tools. A transient timeout, connection failure or HTTP
 408/429/500/502/503/504 response permits one retry with unchanged inputs.
 `Retry-After` values longer than five seconds stop the attempt. Authentication
-errors, invalid verdicts, output limits and substantive rejections are not retried.
+errors, invalid verdicts and substantive rejections are not retried.
+When a response ends with `finish_reason: length`, Bob retries once with a
+9,000-token output allowance. This shares the same two-request limit as transport
+retries. Bob rechecks the evidence before retrying and never accepts partial output.
 At most two requests are made; a timeout can leave the first request's provider
 charges unknown. The evidence
 packet defaults to a 256,000 UTF-8 byte budget, output to 3,000 tokens, and the network
 operation has a 90-second timeout. OpenRouter requests use low reasoning effort
-and JSON output so reasoning leaves room for the verdict within that budget.
+and JSON output. Reasoning consumes part of the output allowance and can exhaust
+it before a verdict appears. Receipts retain usage for every provider response,
+including the exhausted response when a retry succeeds.
 Set `task_review.max_input_bytes` in `.mcloop/config.json` to change the input
 budget (1 through 1,024,000 bytes). This is a cost and request-size control; the
 configured provider can impose a lower context limit. Larger packets still use
-one request, without a model loop. Receipts record the budget and section sizes.
+the same bounded request policy. Receipts record the budget and section sizes.
 Oversized input is refused without truncation and reports its size breakdown.
 New source and test files are supplied in full. Uncited `.log` files under
 `evidence/` carry a complete-file hash and byte count, plus their last 4,000 bytes.
