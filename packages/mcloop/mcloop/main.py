@@ -167,6 +167,7 @@ from mcloop.runner import (
     DEFAULT_TASK_TIMEOUT,
     IDLE_EXIT_CODE,
     INVESTIGATION_TOOLS,
+    PERMISSION_EXIT_CODE,
     STALL_EXIT_CODE,
     TIMEOUT_EXIT_CODE,
     RunResult,
@@ -582,7 +583,7 @@ def _preflight_chain(chain: list[ChainEntry], project_dir: Path) -> list[ChainEn
 # Exit codes meaning "the loop or orchestra killed this session itself"
 # (wall-clock, idle, stall). Never limit-classify these: the session did
 # not end because a provider rejected it, whatever its transcript says.
-_KILL_SENTINELS = (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE)
+_KILL_SENTINELS = (TIMEOUT_EXIT_CODE, IDLE_EXIT_CODE, STALL_EXIT_CODE, PERMISSION_EXIT_CODE)
 
 # Runaway backstop shared by both limited-retry loops (batch and
 # single-chain poll): a genuine 5-hour cap at 10-minute cooldowns is
@@ -2631,7 +2632,19 @@ def run_loop(
                         flush=True,
                     )
                     _print_error_tail(result.output)
-                    if acceptance_repairs or review_repairs:
+                    if result.exit_code in _KILL_SENTINELS:
+                        last_error = (
+                            f"Editor stopped with exit {result.exit_code}; work preserved. "
+                            f"No automatic restart. Session log: {result.log_path}\n" + last_error
+                        )
+                        print(
+                            formatting.system_msg(
+                                "Editor stopped; work preserved. Resolve the reported cause "
+                                "before resuming. No automatic restart."
+                            ),
+                            flush=True,
+                        )
+                    if result.exit_code in _KILL_SENTINELS or acceptance_repairs or review_repairs:
                         terminal_task_failure = True
                         break
                     continue

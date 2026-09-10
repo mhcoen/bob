@@ -343,14 +343,20 @@ def _respond(decision, reason="", tool_name="", tool_input=None):
     json.dump(resp, sys.stdout)
 
 
-def load_allow_rules():
-    """Read permissions.allow from ~/.claude/settings.json."""
+def load_permission_rules(kind="allow"):
+    """Read user-managed permission rules without granting repository-defined access."""
     try:
-        with open(SETTINGS_PATH) as f:
-            settings = json.load(f)
-        return settings.get("permissions", {}).get("allow", [])
-    except (OSError, json.JSONDecodeError):
+        settings = json.loads(SETTINGS_PATH.read_text())
+        values = settings.get("permissions", {}).get(kind, [])
+        return (
+            [rule for rule in values if isinstance(rule, str)] if isinstance(values, list) else []
+        )
+    except (OSError, ValueError, AttributeError):
         return []
+
+
+def load_allow_rules():
+    return load_permission_rules()
 
 
 def match_rule(rule, tool_name, tool_input):
@@ -642,14 +648,28 @@ def main():
         _respond("deny", "MCP tools blocked in mcloop")
         return
 
+    inputs = (tool_input, _unwrap_rtk(tool_input))
+    if any(
+        match_rule(rule, tool_name, candidate)
+        for rule in load_permission_rules("deny")
+        for candidate in inputs
+    ):
+        _respond("deny", "Denied by configured permission rule")
+        return
+    requires_approval = any(
+        match_rule(rule, tool_name, candidate)
+        for rule in load_permission_rules("ask")
+        for candidate in inputs
+    )
+
     # Whitelisted commands pass through instantly
-    if is_allowed(tool_name, tool_input):
+    if not requires_approval and is_allowed(tool_name, tool_input):
         _dbg("EXIT: allowed by rules")
         _respond("allow", tool_name=tool_name, tool_input=tool_input)
         return
 
     # Session-approved patterns pass through
-    if is_session_allowed(tool_name, tool_input):
+    if not requires_approval and is_session_allowed(tool_name, tool_input):
         pattern = _tool_pattern(tool_name, tool_input)
         _dbg(f"EXIT: allowed by session memory ({pattern})")
         _respond(
@@ -729,6 +749,10 @@ def main():
     else:
         update_message(message_id, f"{label_prefix}Timed out: *{tool_name}*\n{desc}")
         _dbg("EXIT: timed out, denying")
+        try:
+            (pending_dir / "denied").write_text("Approval timed out: " + desc[:200])
+        except OSError:
+            pass
         _respond("deny", "Timed out waiting for Telegram approval")
 
 

@@ -687,3 +687,22 @@ def test_activity_age_uses_event_time(monkeypatch, _isolate_activity):
     assert _subprocess.get_activity_with_age() == ("Command completed", 42.0)
     _subprocess._clear_current_activity()
     assert _subprocess.get_activity_with_age() == ("", 0.0)
+
+
+def test_permission_stop_preserves_reason_and_is_not_a_normal_failure(tmp_path, fast_progress):
+    script = tmp_path / "permission.py"
+    script.write_text(
+        "from pathlib import Path\nimport time\n"
+        "p = Path('.mcloop/pending'); p.mkdir(parents=True, exist_ok=True)\n"
+        "(p / 'denied').write_text('Approval timed out: sysctl')\n"
+        "time.sleep(5)\n"
+    )
+    output, code = _subprocess.run_session(
+        [sys.executable, str(script)],
+        tmp_path,
+        env={"PATH": "/usr/bin:/bin"},
+        timeout=10,
+        silent=True,
+    )
+    assert code == _subprocess.PERMISSION_KILL_EXIT
+    assert "Approval timed out: sysctl" in output

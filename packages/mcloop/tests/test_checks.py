@@ -1023,3 +1023,20 @@ def test_swift_package_without_test_targets_does_not_invent_tests(tmp_path):
         'let package = Package(targets: [.target(name: "App")])\n'
     )
     assert _detect_commands(tmp_path, {}) == ["swift build --disable-sandbox"]
+
+
+def test_acceptance_failure_retains_stdout_after_verbose_stderr(tmp_path):
+    import sys
+
+    from mcloop.checks import run_command_acceptance
+    from mcloop.output import _tail
+
+    script = tmp_path / "fail.py"
+    script.write_text(
+        "import sys\nprint('FAILED test_model_activation')\n"
+        "print('build step\\n' * 100, file=sys.stderr)\nsys.exit(1)\n"
+    )
+    result = run_command_acceptance(tmp_path, f"{sys.executable} {script}")
+    assert not result.passed
+    assert "FAILED test_model_activation" in _tail(result.output, 30)
+    assert "build step" in _tail(result.output, 30)

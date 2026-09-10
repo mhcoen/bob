@@ -8,6 +8,8 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 # Load the hook script as a module (it's not a package)
 _hook_path = Path(__file__).resolve().parent.parent / "telegram-permission-hook.py"
 _spec = importlib.util.spec_from_file_location("telegram_hook", _hook_path)
@@ -322,3 +324,67 @@ class TestTestRoutingDeny:
                 {},
             )
         assert result == {}
+
+
+def test_project_file_cannot_grant_hook_permission(tmp_path, monkeypatch):
+    monkeypatch.setattr(_hook, "SETTINGS_PATH", tmp_path / "global.json")
+    monkeypatch.chdir(tmp_path)
+    settings = tmp_path / ".claude"
+    settings.mkdir()
+    (settings / "settings.local.json").write_text(json.dumps({"permissions": {"allow": ["Bash"]}}))
+    assert not _hook.is_allowed("Bash", {"command": "unknown"})
+
+
+def test_approval_timeout_marks_session_stopped(tmp_path, monkeypatch):
+    monkeypatch.setenv("MCLOOP_TASK_LABEL", "test")
+    monkeypatch.setattr(_hook, "BOT_TOKEN", "test")
+    monkeypatch.setattr(_hook, "CHAT_ID", "test")
+    monkeypatch.setattr(_hook, "load_permission_rules", lambda *a, **kw: [])
+    monkeypatch.setattr(_hook, "is_session_allowed", lambda *a: False)
+    monkeypatch.setattr(_hook, "send_approval_request", lambda *a: 1)
+    monkeypatch.setattr(_hook, "poll_for_response", lambda *a: None)
+    monkeypatch.setattr(_hook, "update_message", lambda *a: None)
+    result = _run_main(
+        {"cwd": str(tmp_path), "tool_name": "Bash", "tool_input": {"command": "unknown"}}
+    )
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "Approval timed out" in (tmp_path / ".mcloop/pending/denied").read_text()
+
+
+@pytest.mark.parametrize("command", ["sysctl -n hw.model", "rtk proxy sysctl -n hw.model"])
+def test_global_deny_precedes_global_allow(tmp_path, monkeypatch, command):
+    monkeypatch.setenv("MCLOOP_TASK_LABEL", "test")
+    monkeypatch.setattr(_hook, "BOT_TOKEN", "test")
+    monkeypatch.setattr(_hook, "CHAT_ID", "test")
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps({"permissions": {"allow": ["Bash"], "deny": ["Bash(sysctl:*)"]}})
+    )
+    monkeypatch.setattr(_hook, "SETTINGS_PATH", settings)
+    result = _run_main({"tool_name": "Bash", "tool_input": {"command": command}})
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+def test_global_ask_precedes_allow_and_session(tmp_path, monkeypatch):
+    monkeypatch.setenv("MCLOOP_TASK_LABEL", "test")
+    monkeypatch.setattr(_hook, "BOT_TOKEN", "test")
+    monkeypatch.setattr(_hook, "CHAT_ID", "test")
+    settings = tmp_path / "settings.json"
+    settings.write_text(
+        json.dumps({"permissions": {"allow": ["Bash"], "ask": ["Bash(sysctl:*)"]}})
+    )
+    monkeypatch.setattr(_hook, "SETTINGS_PATH", settings)
+    monkeypatch.setattr(_hook, "is_session_allowed", lambda *a: True)
+    requested = []
+    monkeypatch.setattr(_hook, "send_approval_request", lambda *a: requested.append(a) or 1)
+    monkeypatch.setattr(_hook, "poll_for_response", lambda *a: "deny")
+    monkeypatch.setattr(_hook, "update_message", lambda *a: None)
+    result = _run_main(
+        {
+            "cwd": str(tmp_path),
+            "tool_name": "Bash",
+            "tool_input": {"command": "sysctl -n hw.model"},
+        }
+    )
+    assert requested
+    assert result["hookSpecificOutput"]["permissionDecision"] == "deny"

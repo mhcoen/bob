@@ -1545,8 +1545,8 @@ def test_single_chain_stall_with_limit_vocabulary_is_not_limit_polled(
         )
 
     assert not result.ok
-    # Attempts were CONSUMED (no refund loop): exactly max_retries runs.
-    assert mock_run.call_count == 2
+    # A killed editor stops without another attempt or a rate-limit wait.
+    assert mock_run.call_count == 1
     assert not any("Polling every" in c.args[0] for c in mock_notify.call_args_list if c.args)
 
 
@@ -1602,3 +1602,29 @@ def test_sole_tier_persistent_rate_limit_is_bounded(
         for c in mock_notify.call_args_list
         if c.args
     )
+
+
+@pytest.mark.parametrize("exit_code", [-102, -103, -104, -200])
+@patch("mcloop.main.notify")
+@patch("mcloop.main._checkpoint")
+@patch("mcloop.main._commit", return_value="abc123")
+@patch("mcloop.main._has_meaningful_changes", return_value=True)
+@patch("mcloop.main.run_checks", return_value=_CHECKS_PASS)
+@patch("mcloop.main.run_task")
+def test_killed_editor_is_not_restarted(
+    mock_run,
+    mock_checks,
+    mock_meaningful,
+    mock_commit,
+    mock_checkpoint,
+    mock_notify,
+    tmp_path,
+    exit_code,
+):
+    md = _make_project(tmp_path, "- [ ] Blocked editor\n")
+    mock_run.return_value = _fail_run_result(exit_code=exit_code)
+    with _isolated_git_state():
+        result = run_loop(md, max_retries=3, no_audit=True)
+    assert not result.ok
+    assert mock_run.call_count == 1
+    mock_checks.assert_not_called()

@@ -2490,3 +2490,12 @@ assembly, request and validation timings.
 Orchestra progress reports show `Last activity (Ns ago)` with the most recent
 stream event. A completed command remains labeled completed while its age grows.
 A repeated heartbeat does not mean the command is running again.
+
+
+Editor timeouts, idle kills, repeated-action stops and permission stops preserve
+work and end the invocation without restarting the editor. An unanswered Telegram
+request stops the session after its approval deadline. Resolve the reported cause
+before resuming. Explicit deny and ask rules in the global Claude settings take precedence over
+allow rules and session approvals. Repository files cannot grant hook permissions.
+Failure summaries include the ends of both stdout and stderr when a command emits
+both, so build messages cannot hide the test summary.

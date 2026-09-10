@@ -116,6 +116,7 @@ no progress on that channel is a true "stuck" signal — distinct from
 "working slowly". Prevents the wall-clock cap from punishing
 legitimate long-but-progressing work."""
 
+PERMISSION_KILL_EXIT: int = -104
 TIMEOUT_KILL_EXIT: int = -102
 """Sentinel exit code for a run_session wall-clock kill. Deliberately
 outside the kernel signal range (Popen reports a signal-killed child as
@@ -1168,7 +1169,9 @@ def run_session(
                         except ProcessLookupError:
                             pass
                         process.wait()
-                        return _assemble(head_lines, tail_lines, dropped), 1
+                        return _assemble(
+                            head_lines, tail_lines, dropped
+                        ) + "\nPermission stopped: " + reason, PERMISSION_KILL_EXIT
                     pending = _live_pending_approvals(pending_dir)
                     approval_waiting(bool(pending))
                     if pending and process.poll() is None:

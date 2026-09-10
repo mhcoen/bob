@@ -113,6 +113,23 @@ def _timeout_output(exc: subprocess.TimeoutExpired, timeout: int) -> str:
     return f"{captured}\nTIMEOUT after {timeout}s" if captured else f"TIMEOUT after {timeout}s"
 
 
+def _command_output(result: subprocess.CompletedProcess) -> str:
+    """Keep both streams, including both failure tails after verbose build output."""
+    output = "\n".join(stream.rstrip("\n") for stream in (result.stdout, result.stderr) if stream)
+    if result.returncode and result.stdout and result.stderr:
+        output += "\n--- stdout tail ---\n" + "\n".join(result.stdout.splitlines()[-20:])
+        output += "\n--- stderr tail ---\n" + "\n".join(result.stderr.splitlines()[-8:])
+    if result.returncode:
+        diagnostics = [
+            line
+            for line in output.splitlines()
+            if re.search(r"error:|^FAILED |^FAIL:|^ERROR:|Test Case .+ failed", line)
+        ]
+        if diagnostics:
+            output += "\n--- failure diagnostics ---\n" + "\n".join(diagnostics[-12:])
+    return output
+
+
 @timed("checks")
 def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult:
     """Run a declared ``command-exit`` acceptance command without a shell."""
@@ -152,7 +169,7 @@ def run_command_acceptance(project_dir: str | Path, command: str) -> CheckResult
         )
     return CheckResult(
         passed=result.returncode == 0,
-        output=f"{result.stdout}{result.stderr}",
+        output=_command_output(result),
         command=command,
     )
 
@@ -618,7 +635,7 @@ def run_checks(
             return False, _timeout_output(exc, timeout_seconds)
         except FileNotFoundError:
             return False, f"Command not found: {parts[0]}"
-        output = f"{result.stdout}{result.stderr}"
+        output = _command_output(result)
         # Pytest can exit 0 while producing no real signal (nothing
         # collected, everything skipped/deselected, or a summary we
         # cannot parse). Treat such a run as a failure so untested code

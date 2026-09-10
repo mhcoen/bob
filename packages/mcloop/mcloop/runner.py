@@ -58,6 +58,7 @@ SUBSCRIPTION_PREFLIGHT_PROMPT = (
 # IDLE_KILL_EXIT byte-for-byte so orchestra-routed results flowing through
 # code_edit into RunResult.exit_code hit the same consumer comparisons as
 # direct-path results (the parity-mirrors contract).
+PERMISSION_EXIT_CODE = -104
 TIMEOUT_EXIT_CODE = -102  # wall-clock timeout (== orchestra TIMEOUT_KILL_EXIT)
 IDLE_EXIT_CODE = -103  # orchestra idle-kill (mirror of IDLE_KILL_EXIT; the
 # direct path has no idle kill of its own, but orchestra-routed sessions
@@ -580,6 +581,13 @@ def _build_shared_parts(
         " project environment or normal package cache. Do not install or"
         " upgrade system tools, use sudo, or install global packages. If the"
         " required package manager or compiler is missing, report it and stop."
+    )
+    parts.append(
+        " If a build or test command fails because the editor sandbox denies an OS"
+        " operation, record the command and exact denial, complete independent edits,"
+        " and return for McLoop's host-side checks. Do not spend the session probing"
+        " sandbox internals, changing security settings, or retrying equivalent denied"
+        " commands. A sandbox denial is not evidence of a source defect or a test pass."
     )
     return parts
 
@@ -1223,7 +1231,10 @@ def _run_session(
                         )
                     except OSError:
                         pass
-                    return _assemble_output(), 1
+                    return (
+                        _assemble_output() + "\nPermission stopped: " + reason,
+                        PERMISSION_EXIT_CODE,
+                    )
                 try:
                     pending = list(pending_dir.iterdir())
                 except OSError:
