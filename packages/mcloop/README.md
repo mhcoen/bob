@@ -1403,7 +1403,12 @@ checkpoint and permits edits to `.mcloop/task-evidence.json`. Editing is saved
 before checks, and the checkpoint is refreshed after checks finish. Changes to code, tests,
 accepted documents or review policy require a fresh editor attempt. For new
 checkpoints, changing only `max_input_bytes` preserves completed editing. A checkpoint
-is never evidence of acceptance. Existing `mcloop recover` handling still applies
+is never evidence of acceptance. Review fingerprints cover the `task_review`
+settings, so editor-chain, timeout and formatting changes do not invalidate review.
+Changes to frozen review settings or accepted documents block without launching
+a code-repair attempt. Compatible older editor checkpoints remain resumable. Check-result caches from
+the old fingerprint format are recomputed once.
+Existing `mcloop recover` handling still applies
 after an unclean interruption.
 Results and the reviewed packet are saved under `.mcloop/task-reviews/`.
 Receipts retain provider response IDs, model names and the complete `usage` object

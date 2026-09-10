@@ -16,7 +16,13 @@ from bob_tools.json_state import atomic_write_json
 
 from mcloop.checks import CheckResult
 from mcloop.runner import RunResult
-from mcloop.task_review import ReviewPolicy, _git, _safe_path
+from mcloop.task_review import (
+    ReviewConfigurationChanged,
+    ReviewPolicy,
+    _git,
+    _review_settings,
+    _safe_path,
+)
 from mcloop.timing import snapshot
 
 
@@ -37,12 +43,20 @@ def _policy_digest(policy: ReviewPolicy) -> str:
     return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()
 
 
-def _policy_without_budget(policy: ReviewPolicy) -> str:
+def _policy_without_budget(policy: ReviewPolicy, *, legacy: bool = False) -> str:
     configuration = []
     for path, _ in policy.configuration:
-        value = json.loads(path.read_text()) if path.exists() else None
-        if isinstance(value, dict) and isinstance(value.get("task_review"), dict):
-            value["task_review"].pop("max_input_bytes", None)
+        try:
+            if legacy:
+                # Version 1 checkpoints included unrelated McLoop configuration.
+                value = json.loads(path.read_text()) if path.exists() else None
+                if isinstance(value, dict) and isinstance(value.get("task_review"), dict):
+                    value["task_review"].pop("max_input_bytes", None)
+            else:
+                value = dict(_review_settings(path))
+                value.pop("max_input_bytes", None)
+        except (ValueError, OSError) as exc:
+            raise ReviewConfigurationChanged(f"Cannot read review configuration: {path}") from exc
         configuration.append((str(path), value))
     data = [
         policy.enabled,
@@ -93,7 +107,7 @@ def save(
     atomic_write_json(
         _path(root, task),
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "timings": snapshot(),
             "task": task,
             "baseline": baseline,
@@ -113,7 +127,7 @@ def load(root: Path, policy: ReviewPolicy, task: str) -> tuple[str, str | None, 
     if not path.exists():
         return None
     data = json.loads(path.read_text())
-    if not isinstance(data, dict) or data.get("schema_version") != 1:
+    if not isinstance(data, dict) or data.get("schema_version") not in (1, 2):
         raise ValueError("Invalid review-resume checkpoint; preserve it for inspection")
     baseline = data.get("baseline", "")
     if not isinstance(baseline, str) or not re.fullmatch(r"[0-9a-fA-F]{40,64}", baseline):
@@ -123,6 +137,11 @@ def load(root: Path, policy: ReviewPolicy, task: str) -> tuple[str, str | None, 
         or (
             data.get("policy") != _policy_digest(policy)
             and data.get("policy_without_budget") != _policy_without_budget(policy)
+            and not (
+                data.get("schema_version") == 1
+                and data.get("policy_without_budget")
+                == _policy_without_budget(policy, legacy=True)
+            )
         )
         or data.get("tree") != _tree_digest(root)
     ):

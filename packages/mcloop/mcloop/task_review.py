@@ -33,6 +33,10 @@ RETRY_OUTPUT_TOKENS = 9000
 MAX_RESPONSE_BYTES = 48_000
 
 
+class ReviewConfigurationChanged(ValueError):
+    """Frozen review settings or accepted contracts changed during execution."""
+
+
 @dataclass(frozen=True)
 class ReviewPolicy:
     enabled: bool = False
@@ -66,15 +70,8 @@ def load_policy(project_dir: Path) -> ReviewPolicy:
     settings: dict = {}
     configuration = []
     for path in (Path.home() / ".mcloop/config.json", project_dir / ".mcloop/config.json"):
-        configuration.append((path, _config_digest(path)))
-        if not path.exists():
-            continue
-        data = json.loads(path.read_text())
-        if not isinstance(data, dict):
-            raise ValueError(f"Expected a JSON object in {path}")
-        block = data.get("task_review", {})
-        if not isinstance(block, dict):
-            raise ValueError(f"Expected task_review object in {path}")
+        block = _review_settings(path)
+        configuration.append((path, _settings_digest(block)))
         settings.update(block)
     enabled = settings.get("enabled", (project_dir / "SOFTWARE_DESIGN.md").exists())
     if not isinstance(enabled, bool):
@@ -105,8 +102,24 @@ def load_policy(project_dir: Path) -> ReviewPolicy:
     )
 
 
-def _config_digest(path: Path) -> str | None:
-    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+def _review_settings(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    if not isinstance(data, dict):
+        raise ValueError(f"Expected a JSON object in {path}")
+    block = data.get("task_review", {})
+    if not isinstance(block, dict):
+        raise ValueError(f"Expected task_review object in {path}")
+    return block
+
+
+def _settings_digest(settings: dict) -> str:
+    return hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()
+
+
+def _config_digest(path: Path) -> str:
+    return _settings_digest(_review_settings(path))
 
 
 def _safe_path(root: Path, name: str) -> Path:
@@ -290,12 +303,19 @@ def build_packet(
     checks: CheckResult | None = None,
 ) -> dict:
     for path, digest in policy.configuration:
-        if _config_digest(path) != digest:
-            raise ValueError("Review configuration changed during this run")
+        try:
+            current = _config_digest(path)
+        except (ValueError, OSError) as exc:
+            raise ReviewConfigurationChanged(f"Cannot read review configuration: {path}") from exc
+        if current != digest:
+            raise ReviewConfigurationChanged(
+                f"Review configuration changed during this run: {path} (task_review). "
+                "Resume review with the intended settings; no code repair is needed."
+            )
     documents = dict(policy.documents)
     for name, text in documents.items():
         if _read_file(root, name) != text:
-            raise ValueError(f"Accepted design changed during this run: {name}")
+            raise ReviewConfigurationChanged(f"Accepted design changed during this run: {name}")
     evidence_text = _read_file(root, EVIDENCE_PATH)
     fenced = re.fullmatch(r"\s*```(?:json)?\s*\n(.*?)\n```\s*", evidence_text, re.DOTALL)
     evidence = json.loads(fenced.group(1) if fenced else evidence_text)
@@ -872,7 +892,11 @@ def review_task(
             record["provider"] = exc.accounting
         record["status"] = "blocked"
         record["failure_kind"] = (
-            "evidence" if phase == "evidence" and isinstance(exc, ValueError) else "review"
+            "configuration"
+            if isinstance(exc, ReviewConfigurationChanged)
+            else "evidence"
+            if phase == "evidence" and isinstance(exc, ValueError)
+            else "review"
         )
         # Exception messages from network clients can contain URLs or credentials.
         if isinstance(exc, (ValueError, FileNotFoundError)):

@@ -1093,3 +1093,123 @@ def test_review_rejects_mutated_log_even_when_supplied_tail_is_unchanged(project
     new_log = updated["changed_files"]["evidence/build.log"]
     assert old_log["output_tail"] == new_log["output_tail"]
     assert old_log["sha256"] != new_log["sha256"]
+
+
+@pytest.mark.parametrize("scope", ["global", "project"])
+def test_editor_configuration_changes_preserve_frozen_review_and_resume(
+    project, monkeypatch, scope
+):
+    from mcloop import review_resume
+    from mcloop.runner import RunResult
+
+    root, _, baseline = project
+    home = root.parent / (root.name + "-home")
+    monkeypatch.setattr(Path, "home", lambda: home)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    config = (home if scope == "global" else root) / ".mcloop/config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    review = {"enabled": True, "model": "review-model", "documents": ["DESIGN.md"]}
+    config.write_text(json.dumps({"task_review": review, "chain": [{"model": "fable"}]}))
+    policy = load_policy(root)
+    review_resume.save(
+        root, policy, "Task", baseline, "editor", RunResult(True, "done", 0, Path("editor.log"))
+    )
+    config.write_text(
+        json.dumps(
+            {"chain": [{"model": "claude-fable-5-1[1m]"}], "timeout": 7200, "task_review": review},
+            indent=4,
+        )
+    )
+    packet = build_packet(root, policy, "Task", baseline)
+    with patch("mcloop.task_review._request_review", return_value=verdict(packet)):
+        result = review_task(root, policy, "Task", baseline, "editor-model")
+    assert result.passed
+    assert review_resume.load(root, load_policy(root), "Task") is not None
+
+
+def test_real_review_change_is_not_sent_to_code_repair(project, monkeypatch):
+    from mcloop.recovery_policy import RECOVERY
+
+    root, _, baseline = project
+    monkeypatch.setattr(Path, "home", lambda: root / "home")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    config = root / ".mcloop/config.json"
+    block = {"enabled": True, "model": "review-model", "documents": ["DESIGN.md"]}
+    config.write_text(json.dumps({"task_review": block}))
+    policy = load_policy(root)
+    block["model"] = "other-reviewer"
+    config.write_text(json.dumps({"task_review": block}))
+    with patch("mcloop.task_review._request_review") as request:
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked and result.failure_kind == "configuration"
+    assert str(config) in result.output
+    assert not RECOVERY.can_repair(result, 0, True)
+    request.assert_not_called()
+
+
+def test_legacy_review_checkpoint_resumes_without_repeating_editor(project, monkeypatch):
+    import hashlib
+
+    from mcloop import review_resume
+    from mcloop.runner import RunResult
+
+    root, _, baseline = project
+    monkeypatch.setattr(Path, "home", lambda: root / "home")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-token")
+    config = root / ".mcloop/config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "task_review": {
+                    "enabled": True,
+                    "model": "review-model",
+                    "documents": ["DESIGN.md"],
+                },
+                "chain": [{"model": "fable"}],
+            }
+        )
+    )
+    policy = load_policy(root)
+    review_resume.save(
+        root, policy, "Task", baseline, "editor", RunResult(True, "done", 0, Path("editor.log"))
+    )
+    path = review_resume._path(root, "Task")
+    saved = json.loads(path.read_text())
+    saved["schema_version"] = 1
+    saved["policy"] = "legacy full-file hash"
+    configuration = [
+        (str(p), json.loads(p.read_text()) if p.exists() else None)
+        for p, _ in policy.configuration
+    ]
+    old_inputs = [
+        policy.enabled,
+        policy.model,
+        policy.base_url,
+        policy.api_key_env,
+        policy.documents,
+        configuration,
+    ]
+    saved["policy_without_budget"] = hashlib.sha256(
+        json.dumps(old_inputs, sort_keys=True).encode()
+    ).hexdigest()
+    path.write_text(json.dumps(saved))
+    assert review_resume.load(root, policy, "Task") is not None
+    data = json.loads(config.read_text())
+    data["task_review"]["model"] = "different-reviewer"
+    config.write_text(json.dumps(data))
+    assert review_resume.load(root, load_policy(root), "Task") is None
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_resume_configuration_race_reports_configuration_error(project, monkeypatch, legacy):
+    from dataclasses import replace
+
+    from mcloop import review_resume
+    from mcloop.task_review import ReviewConfigurationChanged
+
+    root, policy, _ = project
+    config = root / ".mcloop/config.json"
+    config.write_text("{broken")
+    policy = replace(policy, configuration=((config, "previous-settings"),))
+    with pytest.raises(ReviewConfigurationChanged, match="Cannot read review configuration"):
+        review_resume._policy_without_budget(policy, legacy=legacy)
