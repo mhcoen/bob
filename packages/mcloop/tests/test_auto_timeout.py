@@ -87,3 +87,24 @@ def test_auto_runs_relative_command_in_plan_directory(tmp_path):
     result = _dispatch_auto_action("run_cli", "./verify.sh", project_dir=tmp_path)
     assert "exit_code: 0" in result
     assert not _auto_response_failed(result)
+
+
+@pytest.mark.parametrize("code,status", [(1, "FAILED"), (2, "FAILED"), (-11, "CRASHED")])
+def test_nonzero_auto_exit_reports_check_reason_without_claiming_a_crash(code, status):
+    output = json.dumps(
+        {
+            "checks": [
+                {"id": "contracts", "status": "passed", "detail": "Passed"},
+                {"id": "malformed", "status": [], "detail": "Ignored"},
+                {"id": "application", "status": "inconclusive", "detail": "invalidPreparation"},
+            ]
+        }
+    )
+    with patch(
+        "mcloop.process_monitor.run_cli", return_value=CLIResult(code, output, False, None)
+    ):
+        result = _dispatch_auto_action("run_cli", "python3 acceptance.py")
+    assert f"STATUS: {status}" in result
+    assert "Check application (inconclusive): invalidPreparation" in result
+    assert result.index("invalidPreparation") < result.index("output:")
+    assert _auto_response_failed(result)

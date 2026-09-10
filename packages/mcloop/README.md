@@ -869,7 +869,10 @@ The `check_timeout` key sets the per-command timeout in seconds
 `[AUTO:run_cli]` commands use this same deadline and run in the plan's
 project directory. Silence does not trigger an early termination. They print
 elapsed time and output age every thirty seconds; expiry reports `TIMEOUT` and
-leaves the task pending. `--stop-after-one` also stops after a successful AUTO task.
+leaves the task pending. Ordinary nonzero exits report `FAILED`; negative signal
+exits report `CRASHED`. Structured JSON check failures appear before the full
+command output, including any reported reason for incomplete evidence.
+`--stop-after-one` also stops after a successful AUTO task.
 
 Check commands run sequentially in list order and stop at the first
 failure, so a broken lint never buries the test failure that matters

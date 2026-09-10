@@ -679,7 +679,7 @@ def _auto_response_failed(response: str) -> bool:
             return True
         if line.startswith("STATUS:"):
             status = line.removeprefix("STATUS:").strip().upper()
-            if status.startswith(("CRASHED", "HUNG", "TIMEOUT")):
+            if status.startswith(("CRASHED", "HUNG", "TIMEOUT", "FAILED")):
                 return True
         if line.startswith("exit_code:"):
             code = line.removeprefix("exit_code:").strip()

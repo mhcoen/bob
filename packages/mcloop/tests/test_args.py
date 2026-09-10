@@ -4560,9 +4560,9 @@ def test_dispatch_run_cli_non_sh_invoked_directly(tmp_path):
 
 
 def test_dispatch_run_cli_crash():
-    """run_cli reports CRASHED on non-zero exit."""
+    """run_cli reports CRASHED when the process exits on a signal."""
     mock_result = MagicMock()
-    mock_result.exit_code = 1
+    mock_result.exit_code = -11
     mock_result.hung = False
     mock_result.output = "segfault"
     mock_result.sample_output = None

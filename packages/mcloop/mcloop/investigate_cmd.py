@@ -545,10 +545,29 @@ def _dispatch_auto_action(action: str, args: str, *, project_dir: Path | None = 
             parts.append(f"STATUS: TIMEOUT (killed after {timeout}s)")
         elif cli_result.hung:
             parts.append("STATUS: HUNG (killed)")
-        elif cli_result.exit_code != 0:
+        elif cli_result.exit_code is not None and cli_result.exit_code < 0:
             parts.append("STATUS: CRASHED")
+        elif cli_result.exit_code != 0:
+            parts.append("STATUS: FAILED")
         else:
             parts.append("STATUS: OK")
+        if cli_result.exit_code != 0 and cli_result.output:
+            try:
+                report = _json.loads(cli_result.output)
+            except ValueError:
+                report = None
+            checks = report.get("checks", []) if isinstance(report, dict) else []
+            if isinstance(checks, list):
+                for check in checks:
+                    if (
+                        isinstance(check, dict)
+                        and check.get("status") in ("failed", "inconclusive")
+                        and isinstance(check.get("detail"), str)
+                    ):
+                        parts.append(
+                            f"Check {check.get('id', '?')} ({check['status']}): "
+                            + check["detail"][:2000]
+                        )
         if cli_result.output:
             parts.append(f"output:\n{cli_result.output}")
         if cli_result.sample_output:
