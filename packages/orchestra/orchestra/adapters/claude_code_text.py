@@ -24,6 +24,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from bob_tools.models import resolve_claude_model
+
 from orchestra.adapters._subprocess import (
     DEFAULT_TIMEOUT_S,
     build_session_env,
@@ -140,6 +142,8 @@ class ClaudeCodeTextAdapter:
         backing = request.backing_options or {}
 
         model = backing.get("model_override") or self._default_model or binding.get("model")
+        if self._provider_config is None:
+            model = resolve_claude_model(model)
         project_dir = Path(backing.get("project_dir") or ext.get("project_dir") or os.getcwd())
         log_dir = Path(
             backing.get("log_dir") or ext.get("log_dir") or project_dir / ".mcloop" / "logs"
@@ -312,6 +316,8 @@ class ClaudeCodeTextAdapter:
             "--verbose",
             "--include-partial-messages",
         ]
+        if self._provider_config is None:
+            model = resolve_claude_model(model)
         if model:
             cmd.extend(["--model", model])
         return cmd

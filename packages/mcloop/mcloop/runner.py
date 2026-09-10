@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from bob_tools.models import FABLE_MODEL, resolve_claude_model
 from bob_tools.timing import approval_waiting, observe_approvals
 
 from mcloop.progress import SessionProgress
@@ -139,6 +140,9 @@ _KNOWN_MODELS = {
     "claude": frozenset(
         {
             "fable",
+            "fable[1m]",
+            "claude-fable-5-1",
+            FABLE_MODEL,
             "claude-fable-5",
             "claude-mythos-5",
             "opus",
@@ -375,6 +379,8 @@ def ensure_subscription_preflight(
     auth surfaces.
     """
     global _SUBSCRIPTION_PREFLIGHT_OK
+    if cli == "claude":
+        model = resolve_claude_model(model)
     cache_key = (cli, model)
     if _SUBSCRIPTION_PREFLIGHT_OK and cli == "claude":
         return
@@ -958,6 +964,7 @@ def _build_command(
     allowed_tools: str = DEFAULT_ALLOWED_TOOLS,
 ) -> list[str]:
     if cli == "claude":
+        model = resolve_claude_model(model)
         cmd = ["claude", "-p"]
         if prompt:
             cmd.append(prompt)

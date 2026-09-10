@@ -672,17 +672,15 @@ per-role actors are policy.
 "role_bindings": {
   "design": {
     "pattern": "design_loop",
-    "judge_role": { "model": "opus" },
+    "judge_role": { "model": "fable" },
     "reviewer":   { "model": "codex" },
     "max_rounds": 4
   }
 }
 ```
 
-The shipped `design` binding wraps the `design_loop` workflow. The
-judge defaults to a strong model (`opus`) for judgement-shaped
-calls; the reviewer defaults to a different model (`codex`) so the
-critique is independent of the judge's training data. Workflow
+The shipped `design` binding wraps the `design_loop` workflow. Its
+judge uses Fable 5.1; its reviewer uses Codex. Workflow
 start refuses to run when both bindings resolve to the same actor,
 so the reviewer's independence is enforced rather than left to
 configuration discipline.
@@ -707,7 +705,7 @@ The identifiers shipped today are:
 
 | Identifier    | Adapter                        | Model            |
 | ------------- | ------------------------------ | ---------------- |
-| `fable`       | `claude_code_text`             | `fable`          |
+| `fable`       | `claude_code_text`             | `claude-fable-5-1[1m]` |
 | `opus`        | `claude_code_text`             | `opus`           |
 | `sonnet`      | `claude_code_text`             | `sonnet`         |
 | `haiku`       | `claude_code_text`             | `haiku`          |
@@ -811,3 +809,7 @@ MIT.
 **Michael H. Coen**  
 mhcoen@gmail.com | mhcoen@alum.mit.edu  
 [@mhcoen](https://github.com/mhcoen)
+
+Native Claude calls without a model, or with `fable` or `fable[1m]`,
+use `claude-fable-5-1[1m]`. Explicit Opus, Sonnet and provider model
+selections remain in effect. Saved role settings override defaults.

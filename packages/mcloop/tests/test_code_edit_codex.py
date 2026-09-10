@@ -59,9 +59,9 @@ def test_chain_selection_runs_configured_workflow(
     result = run_task("Create a file", cli, tmp_path, tmp_path / "logs", model=model)
     assert result.success, result.output
     assert [(c[0], c[c.index("--model") + 1]) for c in calls] == [
-        ("claude", "fable"),
+        ("claude", "claude-fable-5-1[1m]"),
         ("claude", "sonnet"),
-        (cli, model),
+        (cli, "claude-fable-5-1[1m]" if model == "fable" else model),
     ]
     assert preflight.call_args.kwargs["cli"] == cli
     assert preflight.call_args.kwargs["model"] == model

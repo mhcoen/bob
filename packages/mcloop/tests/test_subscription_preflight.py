@@ -284,3 +284,18 @@ def test_preflight_timeout_with_bytes_stdout_raises_preflight_error(
     assert "login" not in str(excinfo.value)
     assert "partial stdout" in excinfo.value.output
     assert "partial stderr" in excinfo.value.output
+
+
+@pytest.mark.parametrize("model", [None, "fable"])
+def test_claude_preflight_uses_same_pinned_model_as_execution(tmp_path, monkeypatch, model):
+    def run(command, **kwargs):
+        assert command[command.index("--model") + 1] == "claude-fable-5-1[1m]"
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"type":"result","subtype":"success","is_error":false}\n',
+            stderr="",
+        )
+
+    monkeypatch.setattr("mcloop.runner.subprocess.run", run)
+    runner.ensure_subscription_preflight(cli="claude", model=model, env={}, cwd=tmp_path)

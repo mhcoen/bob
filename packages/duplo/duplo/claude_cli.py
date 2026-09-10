@@ -12,6 +12,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypeVar
 
+from bob_tools.models import FABLE_MODEL, resolve_claude_model
+
 from duplo import call_log
 
 _DOT_INTERVAL_SECONDS = 5.0
@@ -154,7 +156,7 @@ def _classify_error(err: ClaudeCliError) -> str:
     return "timeout" if "timed out" in str(err) else "error"
 
 
-def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: str = "") -> str:
+def query(prompt: str, *, system: str = "", model: str = FABLE_MODEL, call_site: str = "") -> str:
     """Send a text prompt to ``claude -p`` and return the response text.
 
     Runs the CLI via ``subprocess.Popen`` and prints a dot to stderr every
@@ -167,7 +169,7 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: st
     Args:
         prompt: The user prompt to send.
         system: Optional system prompt.
-        model: Model alias or full name (default ``"sonnet"``).
+        model: Model alias or full name (default Fable 5.1).
         call_site: Label identifying the phase/feature/step that invoked
             this call; recorded in the ``call_log`` record.
 
@@ -177,6 +179,7 @@ def query(prompt: str, *, system: str = "", model: str = "sonnet", call_site: st
     Raises:
         ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
+    model = resolve_claude_model(model)
     start = time.perf_counter()
     try:
         (response, usage), attempt = _with_retry(_query_once, prompt, system=system, model=model)
@@ -274,7 +277,7 @@ def query_with_images(
     image_paths: list[Path],
     *,
     system: str = "",
-    model: str = "sonnet",
+    model: str = FABLE_MODEL,
     call_site: str = "",
 ) -> str:
     """Send a prompt with image file references to ``claude -p``.
@@ -289,7 +292,7 @@ def query_with_images(
         prompt: The analysis instructions.
         image_paths: Paths to image files for Claude to read.
         system: Optional system prompt.
-        model: Model alias or full name (default ``"sonnet"").
+        model: Model alias or full name (default Fable 5.1).
         call_site: Label identifying the phase/feature/step that invoked
             this call; recorded in the ``call_log`` record.
 
@@ -299,6 +302,7 @@ def query_with_images(
     Raises:
         ClaudeCliError: If every attempt exits with a non-zero code or times out.
     """
+    model = resolve_claude_model(model)
     start = time.perf_counter()
     try:
         (response, usage), attempt = _with_retry(

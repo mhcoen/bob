@@ -411,6 +411,7 @@ bob-tools/
   bob_tools/
     __init__.py
     bob_cli.py               the `bob` umbrella CLI (hook install)
+    models.py                shared native Claude model selection (Fable 5.1)
     tests/                   tests for the umbrella CLI
     planfile/
       __init__.py            public re-exports — the planfile API surface

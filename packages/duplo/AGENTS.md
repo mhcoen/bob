@@ -165,13 +165,11 @@ detects new files and appends tasks for anything missing.
   doc_structures, page_records, raw_pages)` tuple where `raw_pages`
   is a `dict[str, str]` mapping each URL to its raw HTML content.
 
-- `claude_cli.py`: Runs AI queries through the ``Codex -p`` CLI
-  instead of direct Anthropic API calls. `ClaudeCliError` exception
-  for non-zero exit codes. `query()` sends a text prompt with
-  optional system prompt and model selection. `query_with_images()`
-  sends a prompt with image file paths, enabling the Read tool so
-  Codex can view the images. All AI modules route through this
-  helper so the Max subscription is used instead of API credits.
+- `claude_cli.py`: Runs text and image queries through `claude -p`.
+  Uses the shared Fable 5.1 default and resolves the `fable` alias before
+  execution and call logging. Explicit model choices remain available;
+  `saver.py` selects Haiku for feature deduplication. `ClaudeCliError`
+  reports failed calls.
 
 - `extractor.py`: Calls ``Codex -p`` to extract a structured feature
   list from scraped text. `Feature` dataclass (name, description,

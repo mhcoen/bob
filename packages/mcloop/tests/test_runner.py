@@ -2132,7 +2132,7 @@ def test_arg_model_overrides_config(tmp_path):
 
 
 def test_default_chain_checks_default_model(tmp_path):
-    """No configured model defaults to the explicit claude/opus tier."""
+    """An unconfigured Claude chain selects the pinned Fable version."""
     from mcloop.main import run_loop
 
     plan = tmp_path / "PLAN.md"
@@ -2151,7 +2151,7 @@ def test_default_chain_checks_default_model(tmp_path):
         patch("mcloop.main.warn_unknown_model") as mock_warn,
     ):
         run_loop(plan, model=None)
-    mock_warn.assert_called_once_with("claude", "opus")
+    mock_warn.assert_called_once_with("claude", "claude-fable-5-1[1m]")
 
 
 # --- PID file writing ---
@@ -2305,3 +2305,26 @@ def test_both_edit_backends_allow_required_project_dependencies():
         assert "Do not install or upgrade system tools" in prompt
         assert "install global packages" in prompt
         assert "Do NOT install" not in prompt
+
+
+@pytest.mark.parametrize(
+    ("selected", "expected"),
+    [
+        (None, "claude-fable-5-1[1m]"),
+        ("fable", "claude-fable-5-1[1m]"),
+        ("fable[1m]", "claude-fable-5-1[1m]"),
+        ("sonnet", "sonnet"),
+        ("opus", "opus"),
+        ("z-ai/glm-5.3-flash", "z-ai/glm-5.3-flash"),
+    ],
+)
+def test_claude_command_resolves_default_and_preserves_explicit_models(selected, expected):
+    command = _build_command("claude", "task", model=selected)
+    assert command[command.index("--model") + 1] == expected
+
+
+def test_legacy_claude_chain_uses_fable_default():
+    from mcloop.main import _legacy_chain
+
+    chain = _legacy_chain(cli="claude", model=None, fallback_model="sonnet")
+    assert [entry.model for entry in chain] == ["claude-fable-5-1[1m]", "sonnet"]

@@ -114,9 +114,9 @@ def test_role_resolves_with_distinct_enough_bindings():
     reviewer = (resolved["reviewer"].adapter, resolved["reviewer"].model)
     judge = (resolved["judge_role"].adapter, resolved["judge_role"].model)
 
-    # proposer=opus, judge=opus, reviewer=codex.
-    assert proposer == ("claude_code_text", "opus")
-    assert judge == ("claude_code_text", "opus")
+    # Proposer and judge use pinned Fable; the reviewer uses Codex.
+    assert proposer == ("claude_code_text", "claude-fable-5-1[1m]")
+    assert judge == ("claude_code_text", "claude-fable-5-1[1m]")
     assert reviewer == ("codex_text", "gpt-5.6-sol")
 
     # The reviewer is a distinct actor from the judge (independence).

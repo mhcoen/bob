@@ -70,10 +70,10 @@ MAX_ROUNDS = 6
 
 # Leaf-binding model identifiers, resolved through Orchestra's
 # ProfileRegistry at workflow start. Reviewer is ``codex`` so its
-# critique is independent of the ``opus`` proposer/judge.
-PROPOSER_MODEL = "opus"
+# critique is independent of the Fable proposer/judge.
+PROPOSER_MODEL = "fable"
 REVIEWER_MODEL = "codex"
-JUDGE_MODEL = "opus"
+JUDGE_MODEL = "fable"
 
 PLAN_AUTHOR_CRITERIA: tuple[dict[str, Any], ...] = (
     {

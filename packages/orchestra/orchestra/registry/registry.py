@@ -19,6 +19,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
+from bob_tools.models import FABLE_MODEL
+
 from orchestra.errors import RegistryConflict
 from orchestra.spine import Envelope, StateDecl
 from orchestra.transforms import (
@@ -85,7 +87,7 @@ class ModelIdentifier:
 
 BUILTIN_MODEL_IDENTIFIERS: dict[str, ModelIdentifier] = {
     # Anthropic Claude family via Claude Code CLI (read-only, text role).
-    "fable": ModelIdentifier(name="fable", adapter="claude_code_text", model="fable"),
+    "fable": ModelIdentifier(name="fable", adapter="claude_code_text", model=FABLE_MODEL),
     "opus": ModelIdentifier(name="opus", adapter="claude_code_text", model="opus"),
     "sonnet": ModelIdentifier(name="sonnet", adapter="claude_code_text", model="sonnet"),
     "haiku": ModelIdentifier(name="haiku", adapter="claude_code_text", model="haiku"),

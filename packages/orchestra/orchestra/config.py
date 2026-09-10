@@ -489,9 +489,7 @@ def default_config() -> OrchestraConfig:
 
     A default ``design`` compound role binding is also included so
     ``orchestra.run_role("design", ...)`` works without explicit
-    configuration. Judge defaults to ``opus`` (a strong model for
-    judgement-shaped roles); reviewer defaults to ``codex`` so the
-    review is independent of the judge's training data. Both model
+    configuration. Judge defaults to Fable 5.1; reviewer defaults to Codex. Both model
     fields are short identifiers resolved through the
     ``ProfileRegistry`` at workflow start.
     """
@@ -512,7 +510,7 @@ def default_config() -> OrchestraConfig:
             "design": CompoundRoleBinding(
                 pattern="design_loop",
                 bindings={
-                    "judge_role": RoleBinding(adapter=None, model="opus"),
+                    "judge_role": RoleBinding(adapter=None, model="fable"),
                     "reviewer": RoleBinding(adapter=None, model="codex"),
                 },
             ),

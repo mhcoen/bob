@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 from bob_tools.json_state import StateError
+from bob_tools.models import FABLE_MODEL
 from bob_tools.planfile import (
     PlanPreflightError,
     preflight_runtime_plan,
@@ -229,7 +230,7 @@ def _legacy_chain(
     model: str | None,
     fallback_model: str | None,
 ) -> list[ChainEntry]:
-    primary_model = model or "opus"
+    primary_model = model or (FABLE_MODEL if cli == "claude" else "opus")
     chain = [ChainEntry(cli=cli, model=primary_model)]
     if fallback_model and fallback_model != primary_model:
         chain.append(ChainEntry(cli=cli, model=fallback_model))

@@ -126,9 +126,9 @@ def _configuration(root: Path) -> tuple[OrchestraConfig, int]:
         configured.bindings
         if configured
         else {
-            "author": RoleBinding(model="opus"),
+            "author": RoleBinding(model="fable"),
             "reviewer": RoleBinding(model="codex"),
-            "judge_role": RoleBinding(model="opus"),
+            "judge_role": RoleBinding(model="fable"),
         }
     )
     roles = _resolve_compound_model_identifiers("software_design", bindings)

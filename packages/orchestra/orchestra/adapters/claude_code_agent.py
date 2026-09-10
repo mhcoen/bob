@@ -23,6 +23,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from bob_tools.models import resolve_claude_model
+
 from orchestra.adapters._subprocess import (
     DEFAULT_TIMEOUT_S,
     build_session_env,
@@ -83,6 +85,7 @@ class ClaudeCodeAgentAdapter:
         backing = request.backing_options or {}
 
         model = backing.get("model_override") or self._default_model or binding.get("model")
+        model = resolve_claude_model(model)
         allowed_tools = str(backing.get("allowed_tools") or self._default_allowed_tools)
         project_dir = Path(backing.get("project_dir") or ext.get("project_dir") or os.getcwd())
         log_dir = Path(
@@ -207,6 +210,7 @@ class ClaudeCodeAgentAdapter:
             "--verbose",
             "--include-partial-messages",
         ]
+        model = resolve_claude_model(model)
         if model:
             cmd.extend(["--model", model])
         return cmd

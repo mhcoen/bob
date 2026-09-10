@@ -522,3 +522,26 @@ class TestStreamJsonUsage:
         assert rec["response"] == "done"
         assert rec["usage"]["input_tokens"] == 4
         assert rec["usage"]["output_tokens"] == 9
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"model": "fable"}, {"model": "fable[1m]"}])
+def test_query_pins_fable_in_command_and_call_log(monkeypatch, kwargs):
+    factory = _popen_factory(stdout_text="OK", poll_results=[0])
+    monkeypatch.setattr("duplo.claude_cli.subprocess.Popen", factory)
+    with patch("duplo.claude_cli.call_log.log_call") as log:
+        assert query("prompt", **kwargs) == "OK"
+    command = factory.last_instance.cmd
+    assert command[command.index("--model") + 1] == "claude-fable-5-1[1m]"
+    assert log.call_args.kwargs["model"] == "claude-fable-5-1[1m]"
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"model": "fable"}])
+def test_image_query_pins_fable_in_command_and_call_log(kwargs):
+    with (
+        patch("duplo.claude_cli.subprocess.run", return_value=_completed("OK")) as run,
+        patch("duplo.claude_cli.call_log.log_call") as log,
+    ):
+        assert query_with_images("prompt", [Path("/fixture.png")], **kwargs) == "OK"
+    command = run.call_args.args[0]
+    assert command[command.index("--model") + 1] == "claude-fable-5-1[1m]"
+    assert log.call_args.kwargs["model"] == "claude-fable-5-1[1m]"

@@ -2072,13 +2072,13 @@ Worked three-tier example:
 {
   "chain": [
     {
-      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "comment": "Primary Fable tier. Set enabled=false when you intentionally want to skip subscription Fable and start on another backend.",
       "enabled": true,
       "cli": "claude",
-      "model": "opus"
+      "model": "fable"
     },
     {
-      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "comment": "Codex fallover tier for Fable 5-hour or 7-day caps. Set enabled=false for Fable-only runs or when Codex should not touch this repo.",
       "enabled": true,
       "cli": "codex",
       "model": "gpt-5.6-sol"
@@ -2099,7 +2099,7 @@ Worked three-tier example:
       }
     },
     {
-      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Fable, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
       "enabled": true,
       "cli": "claude",
       "model": "deepseek-v4-pro"
@@ -2112,20 +2112,20 @@ The same worked example lives at `packages/mcloop/settings.example.json`
 and can be copied to `~/.mcloop/config.json`.
 
 Use `enabled` as the normal way to force a narrower run. For example,
-to force Opus-only work while keeping the fallover config ready for
+to force Fable-only work while keeping the fallover config ready for
 later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
 
 ```json
 {
   "chain": [
     {
-      "comment": "Primary Opus tier. Set enabled=false when you intentionally want to skip subscription Opus and start on another backend.",
+      "comment": "Primary Fable tier. Set enabled=false when you intentionally want to skip subscription Fable and start on another backend.",
       "enabled": true,
       "cli": "claude",
-      "model": "opus"
+      "model": "fable"
     },
     {
-      "comment": "Codex fallover tier for Opus 5-hour or 7-day caps. Set enabled=false for Opus-only runs or when Codex should not touch this repo.",
+      "comment": "Codex fallover tier for Fable 5-hour or 7-day caps. Set enabled=false for Fable-only runs or when Codex should not touch this repo.",
       "enabled": false,
       "cli": "codex",
       "model": "gpt-5.6-sol"
@@ -2146,7 +2146,7 @@ later, leave tier 1 enabled and set tiers 2 and 3 to `false`:
       }
     },
     {
-      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Opus, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
+      "comment": "DeepSeek direct-provider tier via OpenRouter. Final fallover after Fable, Codex, and Kimi are all unavailable. Set enabled=false when OPENROUTER_API_KEY is unavailable.",
       "enabled": false,
       "cli": "claude",
       "model": "deepseek-v4-pro"
@@ -2171,7 +2171,10 @@ configured chain to a one-off single-tier run using the selected CLI
 and model. With no `chain` key, existing `model` and `fallback_model`
 configs continue to work and are converted internally to a two-entry
 chain using the same CLI. With neither key present, McLoop defaults to
-one tier: `{"cli": "claude", "model": "opus"}`.
+one tier: `{"cli": "claude", "model": "claude-fable-5-1[1m]"}`.
+The `fable` and `fable[1m]` aliases resolve to that same version.
+Explicit model selections remain in effect, including Sonnet for the
+NOTES.md fallback after two failed DeepSeek attempts.
 
 ### Configuration reference
 
