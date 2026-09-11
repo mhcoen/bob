@@ -261,7 +261,10 @@ def _compact_uncited_logs(root: Path, changed: dict, ranges: dict) -> None:
             changed[name] = log
 
 
-def _reference(root: Path, reference: str, documents: dict[str, str], design: bool) -> dict:
+def _reference(
+    root: Path, reference: str, documents: dict[str, str], design: bool,
+    resolutions: dict | None = None,
+) -> dict:
     name = filename(reference)
     if design and name not in documents:
         raise ValueError(
@@ -270,6 +273,9 @@ def _reference(root: Path, reference: str, documents: dict[str, str], design: bo
             "accepted document in design. Accepted design files: " + ", ".join(documents)
         )
     text = documents[name] if design else _read_file(root, name)
+    key = (reference, hashlib.sha256(text.encode()).hexdigest())
+    if resolutions is not None and key in resolutions:
+        return dict(resolutions[key])
     warning = {}
     try:
         name, start, end = resolve(reference, text)
@@ -287,11 +293,14 @@ def _reference(root: Path, reference: str, documents: dict[str, str], design: bo
                 "Reject if the evidence is insufficient.",
             }
         }
-    return {
+    resolved = {
         **warning,
         "reference": f"{name}:{start}-{end}",
         "text": "\n".join(text.splitlines()[start - 1 : end]),
     }
+    if resolutions is not None:
+        resolutions[key] = resolved
+    return dict(resolved)
 
 
 @timed("evidence")
@@ -301,6 +310,8 @@ def build_packet(
     task: str,
     baseline: str,
     checks: CheckResult | None = None,
+    *,
+    resolutions: dict | None = None,
 ) -> dict:
     for path, digest in policy.configuration:
         try:
@@ -343,7 +354,9 @@ def build_packet(
                 or not all(isinstance(ref, str) for ref in refs)
             ):
                 raise ValueError(f"Each requirement needs 1 to 16 {field} references")
-            entry[field] = [_reference(root, ref, documents, field == "design") for ref in refs]
+            entry[field] = [
+                _reference(root, ref, documents, field == "design", resolutions) for ref in refs
+            ]
             for reference in entry[field]:
                 reference["evidence_id"] = reference_ids.setdefault(
                     reference["reference"], f"R{len(reference_ids) + 1}"
@@ -664,11 +677,27 @@ def _review_retry_delay(error: Exception) -> float | None:
     return None
 
 
-def _assembled_packet(root, policy, task, baseline, checks):
+def _assembled_packet(root, policy, task, baseline, checks, resolutions=None):
     try:
-        return build_packet(root, policy, task, baseline, checks)
+        return build_packet(root, policy, task, baseline, checks, resolutions=resolutions)
     except OversizedPacket as exc:
         return exc.packet
+
+
+def _input_changes(before: dict, after: dict) -> list[str]:
+    changes = []
+    for section in sorted(before.keys() | after.keys()):
+        old, new = before.get(section), after.get(section)
+        if old == new:
+            continue
+        if isinstance(old, dict) and isinstance(new, dict):
+            changes.extend(
+                f"{section}/{key}" for key in sorted(old.keys() | new.keys())
+                if old.get(key) != new.get(key)
+            )
+        else:
+            changes.append(section)
+    return changes
 
 
 def _review_part(root, policy, packet, record, unchanged, deadline):
@@ -805,7 +834,10 @@ def review_task(
             raise ValueError("McLoop checks did not pass; requirement review was not requested")
         if editor_model and editor_model.rsplit("/", 1)[-1] == policy.model.rsplit("/", 1)[-1]:
             raise ValueError("Task reviewer must use a different model from the editor")
-        packet = _assembled_packet(root, policy, task, baseline, checks)
+        # Compiler availability or a parser crash must not change an excerpt during
+        # review. Re-read files on every check; resolve again only for changed bytes.
+        resolutions: dict = {}
+        packet = _assembled_packet(root, policy, task, baseline, checks, resolutions)
         digest = hashlib.sha256(json.dumps(packet, sort_keys=True).encode()).hexdigest()
         record["input"] = packet
         record["input_sha256"] = digest
@@ -839,8 +871,14 @@ def review_task(
             )
 
         def unchanged(when):
-            if _assembled_packet(root, policy, task, baseline, checks) != packet:
-                raise ValueError(f"Task review input changed {when}")
+            current = _assembled_packet(root, policy, task, baseline, checks, resolutions)
+            if current != packet:
+                changes = _input_changes(packet, current)
+                record["input_changes"] = changes
+                record["changed_input_sha256"] = hashlib.sha256(
+                    json.dumps(current, sort_keys=True).encode()
+                ).hexdigest()
+                raise ValueError(f"Task review input changed {when}: " + ", ".join(changes[:8]))
 
         verdicts = []
         for part in parts:

@@ -1213,3 +1213,75 @@ def test_resume_configuration_race_reports_configuration_error(project, monkeypa
     policy = replace(policy, configuration=((config, "previous-settings"),))
     with pytest.raises(ReviewConfigurationChanged, match="Cannot read review configuration"):
         review_resume._policy_without_budget(policy, legacy=legacy)
+
+
+@pytest.mark.parametrize("initially_available", [True, False])
+def test_review_keeps_resolution_when_swift_parser_availability_changes(
+    project, initially_available,
+):
+    root, policy, baseline = project
+    source = "// Before\nstruct Worker {\nfunc load() {}\n}\n// After\n"
+    (root / "ports.swift").write_text(source)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["implementation"] = ["ports.swift#Worker.load"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+    available = initially_available
+
+    def declaration(*args):
+        return (2, 4) if available else None
+
+    def request(policy, packet):
+        nonlocal available
+        available = not available
+        response = json.loads(verdict(packet))
+        response["requirements"][0]["evidence"] = ["R1", "R2", "R3"]
+        return json.dumps(response)
+
+    with (
+        patch("mcloop.evidence_refs.declaration", side_effect=declaration) as parser,
+        patch("mcloop.task_review._request_review", side_effect=request),
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+        assert result.passed
+        assert parser.call_count == 1
+        # A later review gets its own resolutions, including recovery from a crash.
+        result = review_task(root, policy, "Task", baseline, "editor")
+        assert result.passed
+        assert parser.call_count == 2
+
+
+@pytest.mark.parametrize("change", ["cited", "uncited", "references"])
+def test_review_resolution_cache_does_not_hide_input_changes(project, change):
+    root, policy, baseline = project
+    source = "// Before\nstruct Worker {\nfunc load() {}\n}\n// After\n"
+    (root / "ports.swift").write_text(source)
+    evidence = json.loads((root / EVIDENCE_PATH).read_text())
+    evidence["requirements"][0]["implementation"] = ["ports.swift#Worker.load"]
+    (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+
+    def request(policy, packet):
+        if change == "references":
+            evidence["requirements"][0]["implementation"] = ["ports.swift"]
+            (root / EVIDENCE_PATH).write_text(json.dumps(evidence))
+        else:
+            old, new = ("load() {}", "load() { fatalError() }") if change == "cited" else (
+                "// After", "func outside() { fatalError() }"
+            )
+            (root / "ports.swift").write_text(source.replace(old, new))
+        response = json.loads(verdict(packet))
+        response["requirements"][0]["evidence"] = ["R1", "R2", "R3"]
+        return json.dumps(response)
+
+    with (
+        patch("mcloop.evidence_refs.declaration", return_value=(2, 4)) as parser,
+        patch("mcloop.task_review._request_review", side_effect=request),
+    ):
+        result = review_task(root, policy, "Task", baseline, "editor")
+    assert result.blocked
+    assert "Task review input changed during review" in result.output
+    receipt = json.loads(Path(result.receipt).read_text())
+    assert receipt["input_changes"]
+    assert receipt["changed_input_sha256"] != receipt["input_sha256"]
+    if change != "references":
+        assert "changed_files/ports.swift" in result.output
+        assert parser.call_count == 2
