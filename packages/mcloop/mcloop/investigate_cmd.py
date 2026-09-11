@@ -561,7 +561,9 @@ def _dispatch_auto_action(action: str, args: str, *, project_dir: Path | None = 
                 for check in checks:
                     if (
                         isinstance(check, dict)
-                        and check.get("status") in ("failed", "inconclusive")
+                        and check.get("status") in (
+                            "failed", "inconclusive", "missing-prerequisite", "skipped"
+                        )
                         and isinstance(check.get("detail"), str)
                     ):
                         parts.append(

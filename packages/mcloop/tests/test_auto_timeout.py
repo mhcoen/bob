@@ -90,13 +90,18 @@ def test_auto_runs_relative_command_in_plan_directory(tmp_path):
 
 
 @pytest.mark.parametrize("code,status", [(1, "FAILED"), (2, "FAILED"), (-11, "CRASHED")])
-def test_nonzero_auto_exit_reports_check_reason_without_claiming_a_crash(code, status):
+@pytest.mark.parametrize(
+    "check_status", ["failed", "inconclusive", "missing-prerequisite", "skipped"]
+)
+def test_nonzero_auto_exit_reports_check_reason_without_claiming_a_crash(
+    code, status, check_status,
+):
     output = json.dumps(
         {
             "checks": [
                 {"id": "contracts", "status": "passed", "detail": "Passed"},
                 {"id": "malformed", "status": [], "detail": "Ignored"},
-                {"id": "application", "status": "inconclusive", "detail": "invalidPreparation"},
+                {"id": "application", "status": check_status, "detail": "Required input missing"},
             ]
         }
     )
@@ -105,6 +110,6 @@ def test_nonzero_auto_exit_reports_check_reason_without_claiming_a_crash(code, s
     ):
         result = _dispatch_auto_action("run_cli", "python3 acceptance.py")
     assert f"STATUS: {status}" in result
-    assert "Check application (inconclusive): invalidPreparation" in result
-    assert result.index("invalidPreparation") < result.index("output:")
+    assert f"Check application ({check_status}): Required input missing" in result
+    assert result.index("Required input missing") < result.index("output:")
     assert _auto_response_failed(result)
